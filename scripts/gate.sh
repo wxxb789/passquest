@@ -46,6 +46,10 @@ if python3 scripts/check-docs-links.py ; then ok "docs links"; else bad "docs li
 step "secrets/sources"
 if bash scripts/check-secrets.sh ; then ok "secrets/sources"; else bad "secrets/sources"; fi
 
+# 8. Local-only runtime (no first-party network imports, no confidential markers)
+step "local-only CLI"
+if bash scripts/check-local-only.sh ; then ok "local-only CLI"; else bad "local-only CLI"; fi
+
 printf '\n'
 if [ "$fail" -ne 0 ]; then
   printf 'GATE: FAIL\n'

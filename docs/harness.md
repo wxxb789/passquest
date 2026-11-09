@@ -27,6 +27,7 @@ is broken.
 | 5 | Tidy | `go mod tidy -diff` | Empty diff; a dirty module file means a dependency was added or dropped silently. |
 | 6 | Docs links | `python3 scripts/check-docs-links.py` | Relative links in markdown must resolve to a real path. |
 | 7 | Secrets / sources | `bash scripts/check-secrets.sh` | Credentials, private keys, `.env` files and confidential source markers outside the allowlist fail the run. |
+| 8 | Local-only CLI | `bash scripts/check-local-only.sh` | Pass Quest's own packages must not import `net`, `net/http`, `net/rpc` or `net/smtp`; runtime files must not contain the internal-only source marker. `net` is linked transitively by the pure-Go SQLite chain (`modernc.org/sqlite` → `libc` → `google/uuid`) and is never called; runtime proof belongs in the evidence record. |
 
 Skipped gates print `SKIP` with a reason. A skip is only legitimate for a surface that does not exist
 yet (for example: no `go.mod` before the first increment); a skip that hides a real surface is a
@@ -48,6 +49,7 @@ Add a gate when, and only when, a real failure mode exists that the current set 
 | New surface | Gate it should bring |
 |---|---|
 | JSON/CLI protocol or persisted schema | golden-file or schema test, and a migration test from the previous version |
+| Local practice CLI | first-party import scan for network packages and confidential markers (`check-local-only.sh`) |
 | Import / OCR | fixture-based test with a deliberately damaged input, plus an explicit "unverified" state assertion |
 | Provider call | recorded-fixture test with the network disabled; a failure path that cannot corrupt attempts |
 | Anki integration | fake AnkiConnect server test (idempotency, conflict, offline queue) — never a real deck |

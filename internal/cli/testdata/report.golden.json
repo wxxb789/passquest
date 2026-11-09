@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "content": {
+    "id": "sample-0001",
+    "version": "1",
+    "title": "Westbridge Library notice",
+    "notice": "Self-authored practice sample. Not from any live exam; not an exam blueprint or a claim about exam content, difficulty or pass threshold.",
+    "provenance": {
+      "author": "Pass Quest contributors",
+      "source": "self-authored for this repository",
+      "rights": "original text; redistributable with this repository",
+      "exam_relation": "illustrative practice only; not drawn from a live examination"
+    }
+  },
+  "counts": {
+    "attempts": 4,
+    "correct": 2,
+    "incorrect": 1,
+    "skipped": 1,
+    "first_attempts": 3,
+    "first_correct": 1,
+    "first_incorrect": 1,
+    "first_skipped": 1,
+    "repeated_attempts": 1,
+    "repeated_correct": 1,
+    "repeated_incorrect": 0,
+    "repeated_skipped": 0
+  },
+  "questions": [
+    {
+      "id": "q1",
+      "attempts": 2,
+      "first_status": "correct",
+      "latest_status": "correct",
+      "repeated": 1
+    },
+    {
+      "id": "q2",
+      "attempts": 1,
+      "first_status": "incorrect",
+      "latest_status": "incorrect",
+      "repeated": 0
+    },
+    {
+      "id": "q3",
+      "attempts": 1,
+      "first_status": "skipped",
+      "latest_status": "skipped",
+      "repeated": 0
+    }
+  ],
+  "attempts": [
+    {
+      "id": 1,
+      "session_id": "sess-test",
+      "question_id": "q1",
+      "attempt_number": 1,
+      "prior_attempts": 0,
+      "repeat": false,
+      "status": "correct",
+      "selected_label": "B",
+      "selected_text": "At 4 p.m.",
+      "correct_label": "B",
+      "correct_text": "At 4 p.m.",
+      "started_at": "2026-11-10T09:00:01Z",
+      "answered_at": "2026-11-10T09:00:02Z",
+      "elapsed_ms": 1000,
+      "content_id": "sample-0001",
+      "content_version": "1"
+    },
+    {
+      "id": 2,
+      "session_id": "sess-test",
+      "question_id": "q2",
+      "attempt_number": 1,
+      "prior_attempts": 0,
+      "repeat": false,
+      "status": "incorrect",
+      "selected_label": "A",
+      "selected_text": "The library wants to open on Sundays instead.",
+      "correct_label": "B",
+      "correct_text": "Few people visited late on Saturdays and the library needs to save money.",
+      "started_at": "2026-11-10T09:00:03Z",
+      "answered_at": "2026-11-10T09:00:04Z",
+      "elapsed_ms": 1000,
+      "content_id": "sample-0001",
+      "content_version": "1"
+    },
+    {
+      "id": 3,
+      "session_id": "sess-test",
+      "question_id": "q3",
+      "attempt_number": 1,
+      "prior_attempts": 0,
+      "repeat": false,
+      "status": "skipped",
+      "selected_label": null,
+      "selected_text": null,
+      "correct_label": "B",
+      "correct_text": "By registering at the front desk.",
+      "started_at": "2026-11-10T09:00:05Z",
+      "answered_at": "2026-11-10T09:00:06Z",
+      "elapsed_ms": 1000,
+      "content_id": "sample-0001",
+      "content_version": "1"
+    },
+    {
+      "id": 4,
+      "session_id": "sess-test",
+      "question_id": "q1",
+      "attempt_number": 2,
+      "prior_attempts": 1,
+      "repeat": true,
+      "status": "correct",
+      "selected_label": "B",
+      "selected_text": "At 4 p.m.",
+      "correct_label": "B",
+      "correct_text": "At 4 p.m.",
+      "started_at": "2026-11-10T09:00:07Z",
+      "answered_at": "2026-11-10T09:00:08Z",
+      "elapsed_ms": 1000,
+      "content_id": "sample-0001",
+      "content_version": "1"
+    }
+  ],
+  "limitations": [
+    "Counts cover only this self-authored sample; they are not an exam score, pass estimate or readiness claim.",
+    "Repeated attempts come after the correct answer and evidence were shown and are not independent evidence.",
+    "The exam blueprint, time limit and pass threshold are unknown, so no pass probability is computed."
+  ]
+}

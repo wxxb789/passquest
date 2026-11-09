@@ -49,3 +49,18 @@ Entry format:
 - Default taken: (A) — `mise.toml` pins Go and Node for the dev host, `go.mod` is the authority for
   CI and for the language version.
 - Revisit when: a second machine or a contributor joins.
+
+### Q-0001-01 — May a learner repeat a question after seeing the key, and how is it counted?
+- Status: decided(default taken)
+- Context: goal 0001 requires correct, incorrect, skipped and repeated attempts to be represented
+  truthfully, but does not say whether repeats are allowed or how they relate to independent
+  evidence. Goal 0003 (tactics) and goal 0009 (readiness) will interpret the same records.
+- Options considered: (A) allow repeats, keep every attempt, label repeats and exclude them from
+  first-attempt counts; (B) block a question once its key has been shown; (C) allow repeats and count
+  every attempt equally.
+- Default taken: (A). The CLI stores the repeat with `attempt_number`, `prior_attempts` and
+  `repeat`, and `report` prints first and repeated counts separately. Reverse by changing the
+  selection/report policy only; stored attempts stay intact. The append-only table cannot be
+  rewritten, so a future policy can be recomputed from the same evidence.
+- Revisit when: goal 0004 selects practice from evidence, or goal 0009 defines independent
+  readiness and needs a stricter exposure rule.

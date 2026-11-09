@@ -4,7 +4,7 @@ Work through these **one at a time**, in numeric order, accepting an earlier out
 
 | Goal | State | Prerequisite | Intended value |
 |---|---|---|---|
-| [0001 — First independent exam attempt](./0001-first-independent-exam-attempt.md) | Ready | None | Make a real, inspectable, answer-verified exam-style practice interaction usable without a GUI, an LLM, Anki or the private PDF. |
+| [0001 — First independent exam attempt](./archive/0001-first-independent-exam-attempt.md) | Done | None | Make a real, inspectable, answer-verified exam-style practice interaction usable without a GUI, an LLM, Anki or the private PDF. |
 | [0002 — Usable private baseline from local source material](./0002-local-text-baseline.md) | Ready | 0001 — first independent exam attempt | Enable the original PDF and its normalized UTF-8 text to serve as **private local** working context. |
 | [0003 — A scoring tactic applied on independent questions](./0003-exam-tactic-practice.md) | Ready | 0002 — usable private baseline | Teach one real scoring tactic (such as NOT/EXCEPT polarity, locating textual evidence, or avoiding distractor paraphrases), oriented to getting correct answers with limited English and time, rather than teaching a whole grammar curriculum. |
 | [0004 — Choose practice based on learner evidence](./0004-adaptive-next-exercise.md) | Ready | 0003 — scoring tactic practice | Make adaptive selection real for one learner, with a small set of scoring and minimal language prerequisite skills. |
