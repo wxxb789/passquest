@@ -1,0 +1,1592 @@
+PASS QUEST — PRIVATE INCOMPLETE BASELINE (UNREVIEWED)
+Source: User-supplied internal-only 2025 CRSC senior-title English prep PDF
+Confidentiality: NOT FOR PUBLIC DISTRIBUTION OR PUBLIC GITHUB.
+Coverage: 22/165 pages yielded >100 characters from native text layer. Remaining pages need scanning/OCR, layout cleanup, answer mapping and verification.
+Caution: Column reading order and mathematical/option layout may be inaccurate even on extracted pages.
+
+=== PDF PAGE 1 / 165 | TEXT LAYER (UNREVIEWED) ===
+（仅限内部使用，严禁外传）
+
+
+
+
+
+工程系列高级职称外语考试
+
+    学习资料
+
+
+
+
+
+ 中国铁路通信信号股份有限公司202 3         年编
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          注：全真模拟题摘选自《
+
+=== PDF PAGE 2 / 165 | TEXT LAYER (UNREVIEWED) ===
+目录
+
+1、    中英文词汇--------------------------------------------------------1-14
+
+2、    中英文段落--------------------------------------------------------15-20
+
+3、    全真模拟题--------------------------------------------------------21-61
+
+4、    答案与解析--------------------------------------------------------62-104
+
+5、   新增部分一：完形填空-----------------------------------------105-133
+
+6、   新增部分二：阅读理解-----------------------------------------134-163
+
+=== PDF PAGE 3 / 165 | TEXT LAYER (UNREVIEWED) ===
+中国通号2023年度工程系列高级职称外语考试-中英文词汇
+
+                  分类及其对应词汇
+                    通信词汇
+1  access                         接入
+2  access channel                      接入信道
+3  Access Control System (ACS)               门禁系统
+4  adapter                         适配器
+5  amplifier                        放大器
+6  antenna                        天线
+7  Artificial Intelligence (AI)                 人工智能
+8  attenuator                       衰减器
+9  bandwidth                       带宽
+10 Base Station (BS)                    基站
+11 broadcast call                      广播呼叫
+12 bus                          总线
+13 cable                         电缆
+14 called party                       被叫用户
+15 calling party                      主叫用户
+16  carrier                         载波
+17  carrier frequency                     载频
+18 Code Division Multiple Access (CDMA)           码分多址
+19 communication                     通信
+20 communication automation                 通信自动化
+21 communication blind district                通信盲区
+22 communication satellite                  通信卫星
+23 connectivity                       连通性
+24 coupling loss                      耦合损耗
+25 data configuration                    数据配置
+26 Data Transmission Network (DTN)             数据传输网
+27 dialing                         拨号
+28  digital sensor                      数字传感器
+29  digital telephone network                 数字电话网
+30 error code                       误码
+31 Ethernet                        以太网
+32 exchange office                     交换局
+33 frequency                        频率
+34 Frequency Modulation (FM)                频率调制
+35 frequency shift                     频移
+36  full duplex                       全双工
+37 gain                          增益
+38 gateway                        网关
+
+
+
+
+                                                     1
+
+=== PDF PAGE 4 / 165 | TEXT LAYER (UNREVIEWED) ===
+39 general calling                      全呼
+40 Global Positioning System (GPS)              全球定位系统
+41 group calling                         群呼/组呼
+42 GSM-Railway (GSM-R)                  铁路数字移动通信系统
+43 hot standby                       热备份
+44 immunity                        抗扰度
+45 information processing                  信息处理
+46 Information Technology (IT)                信息技术
+47 interference source                    干扰源
+48 leaky coaxial cable                    漏泄同轴电缆
+49 link                          链路
+50 link control                       链路控制
+51 Local Area Network (LAN)                局域网
+52 logical circuit                      逻辑电路
+53 Man Machine Interface (MMI)               人机接口
+54 Network Management System (NMS)            网络管理系统
+55 network security; cyber security               网络安全
+56 noise                         噪声
+57 optical fiber                       光纤
+58 packet switching                     分组交换
+59 Passenger Information System (PIS)             乘客信息系统
+60 private network                     专用网
+61 Radio Frequency (RF)                   射频
+62 radio frequency power amplifier               射频功率放大器
+63 real-time data                      实时数据
+64 repeater                        直放站
+65 router                         路由器
+66 safety management system                 安全管理系统
+67 safety protocol                      安全协议
+68 session                         会话
+69 Signal to Noise Ratio (SNR)                信噪比
+70 signaling                        信令，信号系统
+71 switch                         交换机
+72 synchronization                     同步
+73 synchronous transmission                 同步传输
+74 terminal                        终端
+75  train radio dispatching communication            列车无线调度通信
+76 transmission delay                    传输时延
+77 video conference                     电视会议
+78 video monitoring; video surveillance             视频监控
+79 wave filter                       滤波器
+80 Wavelength Division Multiplexing (WDM)          波分复用
+
+
+
+                                                     2
+
+=== PDF PAGE 5 / 165 | TEXT LAYER (UNREVIEWED) ===
+81 white box testing                     白盒测试
+82 Wide Area Network (WAN)                广域网
+83 message routing                     报文路由选择
+84 Bit Error Rate (BER)                   比特误码率
+85 closed loop gain                     闭环增益
+86 coder; encoder                     编码器
+87 bearer service                      承载业务
+88 Transmission Control Protocol (TCP)            传输控制协议
+89 crosstalk suppression filter                 串音抑制滤波器
+90 in-band fluctuation                    带内波动
+91 simplex                        单工
+92 address resolution                    地址解析
+93 directional antenna                    定向天线
+94 dispatching communication                调度通信
+95 transmitter                       发射机
+96 delay                         时延
+97 master clock                      主时钟；母钟
+98 slave clock                       从时钟；子钟
+99 network node                      网络节点
+100 addressing                       寻址
+101 Network Element (NE)                  网元
+102 mobile communication                  移动通信
+103 pulse; impulse                      脉冲
+104 Audio Frequency (AF)                  音频
+105 frame                         帧
+106 jitter                          抖动
+107 fiber to the home                     光纤到户；光纤入户
+108 Long Term Evolution (LTE)                长期演进
+109 backbone network                    骨干网络
+110 convergence layer                    汇聚层
+111 Time Division Multiplex (TDM)              时分复用
+112 Optical Transport Network (OTN)              光传送网
+
+                    信号词汇
+113 alternative route                     迂回进路
+114 approach section                     接近区段
+115 arriving train                      到达列车
+116 automatic block                     自动闭塞
+117 Automatic Train Control (ATC)               列车自动控制
+118 Automatic Train Operation (ATO)              列车自动运行
+
+119 Automatic Train Protection (ATP)              列车超速防护/列车自动防护
+
+120 axle counter                       计轴器
+
+
+
+                                                     3
+
+=== PDF PAGE 6 / 165 | TEXT LAYER (UNREVIEWED) ===
+121 balise                         应答器
+122 ballast                         道砟
+123 block                         闭塞
+124 block post                       线路所
+125 block signal                       通过信号机
+126 cab signal                       机车信号
+127 cabinet                         机柜
+128 calling-on signal                     引导信号
+129 centralized interlocking                  集中联锁
+130 Centralized Traffic Control (CTC)              调度集中
+131 Chinese Train Control System (CTCS)            中国列车运行控制系统
+132 coding                         电码化
+133 conflicting route                     敌对进路
+134 coupling                        连挂
+135 departure yard                      出发场
+136 derailment                       脱轨
+137 dispatching command system                调度指挥系统
+138 double tracks                      双线
+139 earthing; grounding                    接地
+140 electric traction                     电力牵引
+141 EMU depot                       动车段
+142 existing line                       既有线
+143 fail-safe                           故障-安全
+144 frequency-shift modulated track circuit            移频轨道电路
+145 home signal                       进站信号机
+146 hump                         驼峰
+147 in advance of a signal                    信号机前方/信号机外方
+148 in rear of a signal                     信号机后方/信号机内方
+149 interlocking                       联锁
+150 intermediate station                    中间站
+151 level crossing                      平交道口
+152 lightning protection                    防雷保护
+153 Line-side Electronic Unit (LEU)              地面电子单元
+154 locking; blocking                    锁闭
+155 locomotive                       机车
+156 main line; main track                   正线
+157 manual release                      人工解锁
+158 non-ballast track; ballastless track              无砟轨道
+159 point machine; switch machine               转辙机
+160 points; switch; turnout                  道岔
+161 power supply                      电源
+162 power supply panel                    电源屏
+
+
+
+                                                     4
+
+=== PDF PAGE 7 / 165 | TEXT LAYER (UNREVIEWED) ===
+163 proceed signal                      进行信号
+164 rack                          机架
+165 Radio Block Center (RBC)                 无线闭塞中心
+166 radio blocking                      无线闭塞
+167 redundancy                       冗余
+168 relay                         继电器
+169 release                         解锁
+                             可靠性、可用性、可维护性和安
+170 reliability, availability, maintainability and safety (RAMS)
+                             全性
+171 rolling; humping                     溜放
+172 route                         进路
+173 section                         区段
+174 section block                      区间闭塞
+175 shunting                        调车
+176 signal                         信号机
+177 signal aspect and indication                信号显示
+178 signal at clear                      信号开放
+179 signal at stop                      信号关闭
+180 speed measurement                    测速
+181 switch locking                      道岔锁闭
+182 system integration                    系统集成
+183 Temporary Speed Restriction Server (TSRS)          临时限速服务器
+184 track circuit                       轨道电路
+185 trackside; lineside; wayside                轨旁
+186 Train Control Center (TCC)                列控中心
+187 train diagram; train graph                 列车运行图
+188 up line                         上行线
+189 vehicle                         车辆
+190 Full Supervision mode (FS)                完全监控模式
+191 Partial Supervision mode (PS)               部分监控模式
+192 On Sight mode (OS)                   目视行车模式
+193 Isolation mode (IS)                    隔离模式
+194 vital computer                      安全计算机
+195 intermittent inquiry balise                 点式查询应答器
+196 neutral zone                       分相区
+197 nominal direction                    正方向
+198 leading unit                       本务端设备
+199 relay energized                     继电器吸起
+200 catch up                        追钩
+201 braking curve                      制动曲线
+202 Specific Transmission Module (STM)            专用传输模块
+203 overtaking station                    越行站
+
+
+
+                                                     5
+
+=== PDF PAGE 8 / 165 | TEXT LAYER (UNREVIEWED) ===
+204 bad rail insulation                    钢轨绝缘不良
+205 wheel slip                       车轮空转
+206 forcing open of the point; trailing of a switch         挤岔
+207 release speed                       开口速度;缓解速度
+208 ATP with high priority                  设备制动优先
+209 wrong clearing of a signal                 错误开放信号
+210 safety-critical; safety criticality               安全苛求
+211 loss of indication of a switch                道岔失去表示
+212 track lead                        钢轨引接线
+213 to hold route for shunting                 非进路调车
+214 four-aspect automatic block                四显示自动闭塞
+215 end of movement authority (EOA)              行车许可终点
+216 limit of authority (LOA)                  限制性行车许可
+217 right side failure (RSF)                  安全侧失效
+218 wrong side failure (WSF)                 危险侧失效
+219 advance starting signal                  总出站信号机
+
+                    工程词汇
+220 As-Built Drawings                    竣工图纸
+221 backfilling                       回填
+222 bonding plan                      双线图
+223 brake distance                      制动距离
+224 Breakers                        断路器
+225 cable jointing                      电缆接头
+226 cable pits                        电缆井
+227 cable protection                     电缆防护
+228 cable route                       电缆径路
+229 commissioning                     调试
+230 crank handle                      手摇把
+231 delivery                        交付
+232 design drawings                     设计图纸
+233 detailed design                     详细设计
+234 diesel engine                      柴油发动机
+235 duct                          管道
+236 earth electrode                      接地电极
+237 earth resistance                     接地电阻
+238 electrical lighting                    电气照明
+239 electromagnetic environment                电磁环境
+240 equipment room                     机械室
+241 excavation or trenching                  开挖或挖沟
+242 external cabling                     外部布线
+243 fouling post                       警冲标
+244 guarantee for supply                   供货保证
+
+
+
+                                                     6
+
+=== PDF PAGE 9 / 165 | TEXT LAYER (UNREVIEWED) ===
+245 I.S.O. Metric Series                           I.S.O公制系列
+246 installation design                    安装设计
+247 insulated joint located within the clearance limit        侵入限界绝缘
+248 insulated rail joint                    钢轨绝缘节
+249 integration design                    集成设计
+250 interface                        接口
+251 Internal Wiring                     内部配线
+252 labelling/labeling                    标签
+253 liaison circuit with automatic blocks             自动闭塞联系电路
+254 loop line                        侧线
+255 manufacture                       制造
+256 marking                        标记
+257 methods of workmanship                 工艺方法
+258 name plates                       铭牌
+259 Operation and Maintenance Manuals             操作和维护手册
+260 overall design                      总体设计
+261 overall jacket                      外护套
+262 packing                        包装
+263 programme                       计划
+264 protection facilities                    防护设施
+265 provisional works                    临时工程
+266 quality control                      质量控制
+267 quality of workmanship                  工艺质量
+268 quality system                      质量体系
+269 rail gauge tie-bar                     轨距杆
+270 rail insulation                      钢轨绝缘
+271 relocation                       迁改
+272 resistor                         电阻器
+273 retaining wall                      挡土墙
+274 route indicator                      进路表示器
+275 Scope of Works (SoW)                  工程范围
+276 section without a switch                  无岔区段
+277 site office                        现场办公室
+278 site survey                       现场定测
+279 spare parts                       备件
+280 special tools                       特殊工具
+281 stagework                       阶段性工程
+282 steel tape armour                     钢带铠装
+283 stripping of wires                    剥线
+284 structure gauge                     建筑限界
+285 submission and review                  提交和审核
+286 supply                         供货
+
+
+
+                                                     7
+
+=== PDF PAGE 10 / 165 | TEXT LAYER (UNREVIEWED) ===
+287 surge protection                     浪涌保护
+288 Taking-Over Certificate                  接收证书，移交证书
+289 technical standard                    技术标准
+290 temperature and humidity                 温湿度
+291 testing                         测试
+292 training facilities                     培训设施
+293 training manual                     培训手册
+294 transient rush current                   瞬时冲击电流
+295 transport and storage                   运输和储存
+296 wiring and cabling                    配线和布线
+
+                   市政建筑词汇
+297 additive                        外加剂
+298 bar splice                        钢筋接头
+299 bearing capacity                     承载力
+300 braced force                       支撑力
+301 bridge                         桥梁
+302 building construction engineering              房屋建筑工程
+303 buildings                        房建
+304 cement paste                      水泥浆
+305 compaction                       夯实
+306 concrete                        混凝土
+307 cubes of earth; earthwork                 土石方
+308 culvert                         涵洞
+309 cutting                         路堑
+310 drilling                         钻孔
+311 durability                        耐久性
+312 embankment                      路堤
+313 embedded pipe                     预埋管
+314 fire protection; fire safety; fire fighting            消防
+315 fireproof valve                      防火阀
+316 foundation pit                      基坑
+317 hard soil                        硬土
+318 limestone soil                      石灰土
+319 longitudinal profile                    纵断面
+320 main structure                      主体结构
+321 natural disaster                     自然灾害
+322 net span                        净跨度
+323 permeation                       渗透
+324 pile                          桩
+325 pipeline                        管道
+326 plane                         平面
+327 precast unit                       预制构件
+
+
+
+                                                     8
+
+=== PDF PAGE 11 / 165 | TEXT LAYER (UNREVIEWED) ===
+328 prestress                        预应力
+329 Public Utility                      公共设施
+330 reinforced concrete                    钢筋混凝土
+331 retaining and protection of foundation pit           基坑支护
+332 Road Sign                       路标
+333 rock mass                       岩体
+334 room air conditioner                   房间空气调节器
+335 seismic joint                      抗震缝
+336 settlement                          下沉/沉降
+337 severe cold area                     严寒地区
+338 sewerage                        排水系统
+339 snow load                       雪荷载
+340 station and yard                     站场
+341 Subdivision                       住宅区开发
+342 subgrade                        路基
+343 superstructure                      上部结构
+344 tunnel                         隧道
+345 water proof                       防水
+346 water supply and drainage                 给排水
+347 water supply plant（station ）of railway           铁路给水厂（所）
+348 water supply station                   给水站
+349 wind load                        风荷载
+350 winter construction                    冬期施工
+
+                   生产制造词汇
+
+351 advanced manufacturing                 先进制造业
+352 anti-static floor                     防静电地板
+353 axle load                        轴重
+354 broken rail detection                   断轨检查
+355 cable laying                       布线
+356 communication protocol                  通信协议
+357 compatibility                      兼容性
+358 design document                     设计文件
+
+359 digital transformation                   数字化转型
+360 electric insulated joint                   电气绝缘节
+361 emergency brake                     紧急制动
+362 failure mode                      失效模式
+363 fire-resistant shielded cable                阻燃屏蔽电缆
+
+364 flexible assembly production line              柔性组装生产线
+365 install (v.); installation (n.)                 安装
+366 isolation switch; disconnector                隔离开关
+367 lightning protection earthing wire              防雷地线
+
+368 manufacturing execution system              制造执行系统
+
+
+
+                                                     9
+
+=== PDF PAGE 12 / 165 | TEXT LAYER (UNREVIEWED) ===
+369 manufacturing plan                    制造计划
+370 manufacturing supervision                 生产监造
+371 Non-Conformance Report (NCR)              不符合项报告
+372 onboard equipment                    车载设备
+373 operating manuals                    操作手册
+374 pre-series production                   预生产
+375 product drawings                     产品图纸
+376 product maintenance manual                产品维护手册
+377 protective spray coating                  保护喷涂层
+378 quality management                   质量管理
+379 risk analysis report                    风险分析报告
+380 Safety Integrity Level （SIL）               安全完整性等级
+381 safety-related application conditions             安全相关应用条件
+382 simulation test                      仿真测试
+383 software/hardware interface                  软/硬件接口
+384 special manufacturing process               特殊制造工艺
+
+385 surface mounting technology                表面贴装工艺
+386 system requirement specification              系统需求规范
+387 system traceability matrix                 系统追踪矩阵
+388 technical support                     技术支持
+389 temperature control                    温度控制
+390 test platform                      测试台
+391 transmission module                   传输模块
+
+                   牵引供电词汇
+392 bus bar                         母线
+393 cantilever                        腕臂
+394 drop tube                        吊柱
+395 dropper                        吊弦
+396 earthing mesh                      接地网
+397 live parts                        带电体
+398 load                          负荷
+399 messenger wire                     承力索
+400 Overhead Contact System (OCS)              接触网
+401 phase breaker                      分相绝缘器
+402 pole                          电杆
+403 power cable                       电力电缆
+404 power dispatching system                 供电调度系统
+405 protective circuit                     保护电路
+406 return current                      回流
+407 safe current                       安全电流
+408 surge arrester                      避雷器
+409 switch box                       配电箱
+
+
+
+                                                     10
+
+=== PDF PAGE 13 / 165 | TEXT LAYER (UNREVIEWED) ===
+410 switchgear                       开关柜
+411 traction power supply                   电力牵引供电
+412 traction substation                    牵引变电所
+413 transformer                       变压器
+
+414 uninterrupted power supply; uninterruptible power supply (UPS)  不间断电源
+
+415 voltage                         电压
+416 electro-magnetic current transformer             电磁式电流互感器
+417 lightning rod                      避雷针
+418 integrated automation                   综合自动化
+419 high voltage power distribution room             高压配电室
+420 self-impedance                     自阻抗
+421 mutual impedance                    互阻抗
+422 electrical clearance                    空气绝缘间隙
+
+                  车辆机械电子词汇
+423 Alternator                       发电机
+424 bogie                         转向架
+425 Camshaft                        凸轮轴
+426 capacitance (电容量), capacitor (电容器)           电容
+427 car body                        车体
+428 Connecting rod                     连杆
+429 contactor                        接触器
+430 Crankshaft                       曲轴
+431 current                         电流
+432 electric circuit                      电路
+433 Electric Multiple Unit (EMU)               动车组
+434 electromagnetic compatibility                电磁兼容
+435 Engine block                      发动机体
+436 heavy-haul railway                    重载铁路
+437 high-speed railway                    高速铁路
+438 inductance                       电感
+439 passenger-freight mixed line                客货共线铁路
+440 piston                         活塞
+441 resistance                        电阻
+442 turbocharger                      涡轮增压器
+443 urban rail transit                     城市轨道交通
+444 wheelset                        轮对
+
+                   项目管理词汇
+445 Bill of Quantities (BoQ)                  工程量清单
+446 centralized purchasing                  集中采购
+447 commencement date                   开工日期
+448 contract                        合同
+
+
+
+                                                     11
+
+=== PDF PAGE 14 / 165 | TEXT LAYER (UNREVIEWED) ===
+449 contractor                       承包商
+450 defects notification period                 缺陷通知期
+451 employer                        业主
+452 open tendering                      公开招标
+453 project manager                     项目经理
+454 subcontractor                      分包商
+455 supplier                        供应商
+456 time for completion                    竣工时间
+
+                    电力词汇
+457 capacitor                        电容器
+458 dispatching console                    调度台
+459 distribution substation                   配电所
+460 earth wire                       地线
+461 electric power                      电力
+462 Grid Intertie                       电网互联
+463 high voltage circuit breaker                高压断路器
+464 high-voltage insulator                   高压绝缘子
+465 inductor                        电感器
+466 initiator                        启动器
+467 insulation                        绝缘
+468 line voltage                       线电压
+469 overhead line                      架空线路
+470 parallel capacitor; shunt capacitor              并联电容器
+471 phase voltage                      相电压
+472 power distribution                    配电
+473 public grid                       公共电网
+474 railway power supply and distribution system         铁路供配电系统
+475 reactance compensation                  电抗补偿
+476 rectifier                        整流器
+477 run-through power line                  电力贯通线路
+478 three-phase four-wire system                三相四线制
+479 transformator                      变压器
+480 transformer substation, distribution substation         变、配电所
+481 Transmission Line                    输电线路
+482 voltage regulator                     调压器
+
+                   新技术词汇
+483 Automatic Fare Collection (AFC)              自动检票系统
+484 big data                        大数据
+485 block chain                       区块链
+486 Closed Circuit TeleVision (CCTV)             闭路电视
+487 Data Communication System (DCS)             数据传输系统
+488 Grade of Automation (GOA)                自动化等级
+
+
+
+                                                     12
+
+=== PDF PAGE 15 / 165 | TEXT LAYER (UNREVIEWED) ===
+489 intermodal transport                   多式联运
+490 Internet of Things (IOT)                  物联网
+491 interoperability                     互联互通
+492 Operation Control Centre/Operation Control Center (OCC)    运营控制中心
+493 robot                         机器人
+494 train integrity                      列车完整性
+495 virtual reality (VR)                    虚拟现实
+496 zero emission                      零排放
+497 Zone Controller (ZC)                   区域控制器
+
+                  国际工程管理词汇
+498 Cost, Insurance and Freight (CIF)              到岸价
+499 customs duty; duty; tariff; customs dues           关税
+500 free on board (FOB)                   离岸价
+501 income; revenue; proceeds                 收入
+502 profit                         利润
+
+                   公司常识词汇
+503 the Belt and Road                    一带一路
+504 Engineering, Procurement and Construction (EPC)       工程总承包
+505 infrastructure                      基础设施
+506 realism, innovation, endeavor and dedication         求实 创新 拼搏 奉献
+507 Research & Development (R&D)              研发
+508 Internationalization                    国际化
+509 Capital Operation                    资本运营
+510 Build-Operate-Transfer(BOT)                  建设-经营-转让
+511 Public-Private Partnership(PPP)               政府和社会资本合作
+512 wholly-owned subsidiaries; wholly-owned subsidiary      全资子公司
+513 Import and Export Trade; Import and Export Trading      进出口贸易
+514 Diversification; Diversity;Pluralism             多元化
+515 Reconstruction; Upgrading; Transformation          改造
+516 Opportunity                       机遇
+517 Leading; Take the lead; Lead                牵头
+
+                   出国常识词汇
+518 arrival                         到达
+519 departure                        离开
+520 passport                        护照
+521 visa                          签证
+
+                    通用词汇
+522 Active Optical Network (AON)               有源光网络
+523 align                          使成一线，校直
+524 Border Gateway Protocol (BGP)              边界网关协议
+525 calibrate                        使标准化
+526 corrective maintenance                  故障修
+
+
+
+                                                     13
+
+=== PDF PAGE 16 / 165 | TEXT LAYER (UNREVIEWED) ===
+527 dashboard                       仪表盘
+528 Electronic Payment System (EPS)              电子付款系统
+529 escalate                        逐步增强
+530 Fiber to the Home (FTTH)                 光纤到户
+531 gauge、measure                     测量，测定
+532 handbook                        手册，指南
+533 invoice                         发票
+534 light railway                      轻轨铁路
+535 magnetic levitation railway/maglev             磁浮铁路
+536 Mean Time Between Failures (MTBF)            平均无故障时间
+537 Mean Time To Repair (MTTR)               平均修复时间
+538 Mobile Switching Center (MSC)              移动交换中心
+539 overtime                        加班
+540 Packet Transport Network (PTN)              分组传送网
+541 passing station                      会让站
+542 Passive Optical Network (PON)               无源光网络
+543 patent                         专利
+544 Platforms Screen Door (PSD)                站台屏蔽门
+545 prospective                       预期的
+546 qualification                      资格
+547 Quality of Service (QoS)                 服务质量
+548 reservation                       保留、预定
+549 scrutiny                        周密的调查
+550 Soft Switch (SS)                     软交换
+551 suburban railway                      市郊/市域铁路
+552 supervise                        监督
+553 Supervisory Control And Data Acquisition (SCADA)      数据采集与控制系统
+554 symposium                       专题讨论会
+555 trainee                         受训者
+556 urgency                        紧急
+557 Virtual Private network (VPN)               虚拟专用网
+558 vocational                       职业的
+559 warehouse                       仓库
+560 workforce                       劳工
+
+
+
+
+
+                                                     14
+
+=== PDF PAGE 17 / 165 | TEXT LAYER (UNREVIEWED) ===
+中国通号2023年度工程系列高级职称外语考试-中英文段落
+
+序号             英文                   中文
+    The signaling system and circuit design concerning operation   涉及行车安全的铁路信号系统及
+ 1  safety must comply with the principle of "fail-safe" in railway   电路设计，必须符合铁路信号“
+     signaling.                        故障－安全”原则。
+     Starting signals shall be installed for the main track and receiving- 车站的正线和到发线设置出站信
+ 2
+     departure track.                     号机。
+   Home signal must be installed for stations with train receiving   有列车接车作业的车站必须设置
+ 3
+     operation.                       进站信号机；
+   CTCS level transition information should be provided by balise    CTCS 等级转换信息宜由应答器组
+ 4
+     groups.                         提供。
+                             复示信号机设置于主体信号机的
+    The repeating signal shall be installed within the sighting distance
+ 5                            显示距离范围内、距主体信号机
+     of main signal, at a place as far from the main signal as possible.
+                             尽可能远的处所。
+    Under lightning interference, signaling equipment related to safe  涉及行车安全的信号设备受雷电
+ 6
+     operation shall not generate unsafe output.          干扰时不得产生非安全输出。
+                                 LEU与有源应答器之间的电缆长度
+    The cable between LEU and switchable balise shall not be longer
+                                 不得大于2 500m，超过规定时宜
+ 7  than 2 500 m, otherwise LEU should be placed at trackside and
+                                 将LEU设置于轨旁，设置于轨旁的
+     redundantly configured.
+                                   LEU应冗余设置；
+     In the case no approach signal is installed in advance of the home 非自动闭塞区段的进站信号机、
+ 8  signal and block signal of a non-automatic block section, distant  通过信号机外方未设置接近信号
+     signal shall be installed.                  机时，设置预告信号机。
+    The route indicator shall be turned lighting-on when the main   进路表示器应在主体信号机开放
+ 9  signal is on, in compliance with the requirements to distinguish  时点亮，并符合区分发车方向的
+     departure directions.                   需要。
+     Signal signs shall be set at the left side in train operation direction, 信号标志应设置于线路的列车运
+ 10 and the tuning zone sign of track circuit of double-track section  行方向左侧，双线区段轨道电路
+     shall be set at the outer side of the track.           调谐区标志应设置于线路外侧。
+                             轨道占用检查宜采用轨道电路，
+    Track circuit should be used for track occupancy detection, and
+ 11                            也可采用计轴轨道占用检查装置
+     axle counting track occupancy detection device may also be used.
+                             。
+    Independent centralized interlocking equipment should be installed 线路所宜设置独立的集中联锁设
+     in the block station; for yards independent of each other in the   备；车站内作业相对独立的各个
+ 12
+     station, independent centralized interlocking equipment should be 车场宜设置独立的集中联锁设备
+     installed.                        。
+     Bi-directional operation should be supported in the design of   区间闭塞宜按双方向运行设计。
+     section blocking. For double-track and bi-directional automatic  双线双方向运行的自动闭塞区
+ 13 block section, when the train is running in reverse direction,   段，反方向运行时可采用自动站
+     interstation auto-block may be used, and automatic block may also 间闭塞，根据需要也可采用自动
+    be used as required.                    闭塞。
+    The design of railway communication shall comply with the   铁路通信工程设计应符合设备使
+ 14 requirements of reliability, availability, maintainability and safety 用和维护对可靠性、可用性、可
+     for the equipment operation and maintenance.         维护性和安全性的要求。
+    The number of optical fiber cores shall be determined according to 光纤芯数应根据路网规划、可靠
+     the network planning, reliability and service requirements and the 性、业务需求以及光缆结构确定
+ 15 structure of the optical cable. The number of reserved fiber should 。新建长途光缆中预留光纤数占
+     not be less than 50% of the total number of fiber in the new long- 该条光缆光纤总数的比例不宜低
+     distance optical cable.                           于50%。
+
+
+
+
+
+                                                     15
+
+=== PDF PAGE 18 / 165 | TEXT LAYER (UNREVIEWED) ===
+For the electric traction power supply railway section, when the  电力牵引供电铁路区段，长途通
+    long distance communication cable is led into the room, the indoor 信电缆引入室内时，电缆金属护
+16
+    part and the outdoor part of the metal sheath for the cable shall be 套的室内部分与室外部分应相互
+    insulated from each other.                 绝缘。
+   The transmission rate and system capacity of transmission system 传输系统的传输速率、系统容量
+    shall be selected and configured according to the traffic, network 应根据业务量、网络冗余和网络
+17
+   redundancy and network protection methods, and expand condition 保护方式进行选择和配置，并预
+    shall be reserved.                     留发展条件。
+   The access network design should choose optical access     接入网设计宜选择光纤接入技
+18 technology, and also may choose wireless access technology or  术，也可选用无线接入技术或混
+    hybrid access technology.                 合接入技术。
+   The new built telephone switching network should be based on IP
+                               新建电话交换网宜基于IP交换技
+19 exchange technology, and should be carried by data
+                             术，宜利用数据通信网承载。
+   communications network.
+   The data communication network shall provide IP bearer network
+                             数据通信网应为铁路运输组织、
+    of wide area network for information systems such as railway
+                             客货营销、经营管理等信息系
+20 transport organization, passenger and freight marketing, operation
+                                  统，以及GSM-R、视频等通信系统
+   and management, as well as communication systems such as GSM-
+                                提供广域网IP承载网络。
+  R and video-related systems.
+   The video conferencing system shall be set with multipoint control 会议电视系统应设置多点控制单
+    unit (MCU), video conference terminal, conference room     元（MCU）、会场设备、网络管理
+21 equipment and network management equipment, etc. When the   设备等。采用基于H.323协议的会
+    video conferencing system based on H.323 protocol is adopted,  议电视系统时，还应设置网守
+    gatekeeper (GK) and other equipment shall be set.          (GK)设备等。
+   According to the maintenance management system and the network
+                             根据维护管理体制以及网络规    dimension, the telegraph switching center can be set up by two or
+                             模，电报交换中心可按两级或单
+    single layer structure. When the two-layer structure is adopted, the
+                             级结构设置。采用两级结构时，
+22 telegraph switching center should be set up in the dispatching
+                             电报交换中心宜设置在调度中心
+    center and the dispatching office. When the single layer structure is
+                             、调度所；采用单级结构时，电
+    adopted, the telegraph switching center should be set up in the
+                             报交换中心宜设置在调度所。
+    dispatching office.
+   The design of video system shall comply with the video monitoring 视频系统设计应符合运输生产、
+    requirements of railway transportation production, equipment   设备监测、抢险救援和治安防范
+23
+    supervision, emergency rescue and security precaution to fulfill the 等视频监视需求，实现网络资源
+    sharing of network resource and video information.       和视频信息共享。
+                             专业应急通信设计应采用有线、   The private emergency communication design shall adopt the wired
+                             无线相结合的方式，并充分利用
+   and wireless combined method, and take full advantage of railway
+24                            铁路移动通信、公众移动通信、
+   mobile communication, public mobile communication, satellite
+                             卫星通信、互联网以及区间通话
+   communication, Internet and the sectional communication post, etc.
+                             柱等通信手段。
+   The clock synchronization network shall adopt hybrid synchronous 时钟同步网应采用分区、多基准
+   networking with regional control and multi reference clock control 钟控制的混合同步组网方式。每
+25 method. The master slave synchronization mode shall be adopted in 个同步区内应采用主从同步方
+   each synchronization region, and the quasi synchronization mode 式，同步区之间应采用准同步方
+    shall be adopted between regions.              式。
+   The equipment including video conferencing system, integrated  会议电视、综合视频监控、通信
+    video surveillance system, communication network management  网管、触摸屏终端等设备宜采用
+26
+   system and touch screen terminals should adopt AC power supply, 交流供电，其他设备宜采用直流
+    other equipment should adopt DC power supply.        供电。
+    External AC power supply shall be the primary power source for  通信电源应以电力外供交流电源
+27 communication system. When external power supply is not    为主用供电，条件不具备时，可
+    available, internal power supply should be prepared.       采用自备发电电源供电。
+
+
+
+
+
+                                                    16
+
+=== PDF PAGE 19 / 165 | TEXT LAYER (UNREVIEWED) ===
+The development of this Standard takes full consideration of the  本标准编制内容充分考虑新时代
+   needs of high-speed railway construction and development in the 高速铁路建设发展需要，聚焦“
+   new era, and focuses on the theme of “railway playing a leading  交通强国、铁路先行”，为中国
+28
+    role in building China into a transportation power”, trying to   铁路实现“四化”（机械化、工
+    transform China's railway practice of "Mechanization, Fabrication 厂化、专业化、信息化）的转型
+    in Plant, Specialization and Information".           。
+   This standard, by innovating the contents and form of compilation, 本标准通过创新标准内容，为实
+     tries to lay a solid foundation for the sound development of China's 现中国高速铁路建设高质量发展
+    high-speed railway, for the purpose of defining China High-speed 奠定基础，以打造中国高铁4.0、
+   Railway 4.0, creating high quality works of communication,    创建高速铁路“四电”(通信、信
+29
+    signalling, electric power system and traction power supply system, 号、电力、电力牵引供电)精品工
+   promoting the continuous upgrading of railway construction   程、促进铁路建造技术和设备不
+    technology and equipment, and establishing a world-leading   断升级、建立世界领先的铁路建
+    railway construction standard system.            设标准体系为目标。
+                             建设各方应健全质量保证体系，
+    All construction parties shall establish and improve quality
+                             对工程施工质量进行全过程控制
+30 assurance system,exercise wholeprocess control of construction
+                             管理，落实质量责任终身追究制
+    quality,and implement lifelong quality accountability system.
+                             度。
+                             高速铁路设计应遵循以人为本、
+   The design of high-speed railway shall follow the concept of
+                             系统优化的建设理念，注重先进
+31 people orientation and system optimization, comfort and economy,
+                             性与可靠性、舒适性与经济性、
+    high-speed and short headway.
+                             高速度与高密度的协调匹配。
+   The interconnection among correlated railway lines in the railway 高速铁路设计应考虑与铁路网中
+32
+   network shall be considered in the design of high-speed railway.  相关线路的互联互通。
+   Risk prevention measures against natural disasters,foreign objects 高速铁路设计应加强自然灾害、
+33 intrusion,and secondary disasters shall be enhanced in the design of 异物侵限等灾害及次生灾害的风
+    high-speed railway.                    险防范措施。
+                             加强室内机柜安装、线缆布放、
+   Enhance process control for critical procedures such as indoor
+                             室外光电缆敷设等关键工序的过
+34 cabinets and panels installation,cable laying,outdoor optical and
+                             程控制，提高实体工程的工艺质
+    electric cables laying,and improve the quality of works.
+                             量。
+    Specify workmanship requirements as well as the requirements for 实施性施工组织设计应包含工艺
+35 personnel, equipment and material allocation in executive    要求及人员、机具、材料、配置
+    construction plan.                    要求。
+    Specify workmanship requirements for self-purchased materials in 自购物资招标应明确出厂设备工
+36 the tender documents, and material allocation in executive    艺质量要求，强化设备材料的进
+    construction plan.                    厂验收。
+   Carry out self-inspection to each procedure and make sure it pass 上道工序自检合格方可进入下道
+37
+    the inspection before the subsequent procedure starts.      工序的实施。
+                             轨道板、防护墙、隧道壁、钢轨
+   The dedicated templates and tools shall be adopted for drilling on
+                             等钻孔作业及线缆布放、设备配
+38 the track slab, protection wall, tunnel wall and rail, as well as for
+                             线等应采用专用模具、工具施工
+    cable laying and equipment wiring.
+                             。
+    Coordinate equipment installation with such disciplines as    设备安装应与房建、电力、暖通
+    building, HVAC, electric power and fire protection to ensure that 、消防等专业协调，确保各种设
+39
+    the equipment and decoration are neat and consistent in color,   备、装饰装修等在颜色、高度、
+    height, and marking.                   标识等方面协调、美观统一。
+   Check the installation conditions reserved for the passenger    核查信息机房、信息配线及设备
+    transport service equipment in the computer room, network wiring 间、综合控制室等的客服设备安
+40
+   room, integrated control room, etc.; make sure the installation   装条件；安装条件应符合施工工
+    conditions comply with the workmanship requirements.     艺质量要求。
+    Prior to construction,the approved construction drawings shall be 施工单位应对批准的施工图进行
+41 checked on site by the contractor and it can only be used after   现场核对，核对无误后方可使用
+    being ascertained free of mistakes.              。
+
+
+                                                    17
+
+=== PDF PAGE 20 / 165 | TEXT LAYER (UNREVIEWED) ===
+The selected construction scheme shall be safe and       施工方案符合安全可靠、技术先
+42 reliable,advanced in technology,easy to operate and the most   进、易于操作、好中选优的原则
+    optimized.                       。
+   The project owner, the surveyor and designer institute, the    建设单位、勘察设计单位、施工
+    contractor and the supervisor shall establish their quality     单位、监理单位应按照有关规
+43
+   management systems, environmental management systems and  定，建立质量管理、环境管理、
+    occupational health and safety management systems according to 职业健康管理安全管理体系。
+   The Parties shall enter into a Contract Agreement within 28 days  除非双方另有协议，否则双方应
+44  after the Contractor receives the Letter of Acceptance, unless   在承包商收到中标函后的28 天内
+    they agree otherwise.                   签订合同协议书。
+                             承包商应对所有现场作业和施工
+   The Contractor shall be responsible for the adequacy, stability and
+45                            方法的完备性、稳定性和安全性
+    safety of all Site operations and of all methods of construction.
+                             负责。
+   The Contractor shall design (to the extent specified in the    承包商应按照合同的规定以及工
+    Contract), execute and complete the Works in accordance with the 程师的指示（在合同规定的范围
+46
+    Contract and with the Engineer's instructions, and shall remedy any 内）对工程进行设计、施工和竣
+    defects in the Works.                   工， 并修补其任何缺陷。
+                                 一般情况下，EPC/交钥匙合同是
+    Normally, an EPC/turkey contract is based on a lump sum price,
+47                            按总价支付的，很少或根本不计
+    with little or no measurement.
+                             量工程量。
+  CRSC is a core enterprise for safe operation of China's rail    中国通号是保障国家轨道交通安
+    transportation; a representative of its national industry of train   全运营的核心企业，是我国高铁
+48 control system technologies for high speed railways (HSRs); and a 列控系统技术民族产业的代表
+    leader of its core technologies for HSRs leading the global railway 者，是我国高铁最核心技术引领
+    industry.                        全球铁路行业进步的佼佼者。
+                                   中国通号牵头制定了CTCS-0级至
+  CRSC has led the establishment of technical standards for railway CTCS-4级铁路列车控制系统全控
+49  train control systems from CTCS-0 to CTCS-4; and laid the    制体系技术标准，奠定了中国通
+    foundation of its leadership in railway signaling & control.    号在铁路信号控制领域的领导地
+                             位。
+  CRSC has compiled over 620 signaling & communication codes  中国通号多年来累计编制《铁路
+   and standards, including Code for Design of Railway Digital    数字移动通信系统（GSM-R）设计
+   Mobile Communication System (GSM-R), Code for Design of   规范》《铁路信号设计规范》《
+50 Railway Signaling, Construction Quality Acceptance Standard for 高速铁路通信工程施工质量验收
+   High Speed Railway Communication Project, and Construction  标准》《高速铁路信号工程施工
+    Quality Acceptance Standard for High Speed Railway Signaling  质量验收标准》等620余项通信信
+    Project.                        号规范及标准。
+                                  依托40000多公里高速铁路控制系   With control system construction and operation experience of over
+                             统的建设和运营经验，中国通号   40,000 kilometers of HSRs, CRSC has accumulated a world-
+                                   积累了全球领先的60,000多个高
+    leading database of over 60,000 HSR dedicated test cases,
+51                            铁专属测试案例库，超过国外跨
+    surpassing the combined total of foreign multinational companies,
+                             国企业案例库总和，标志着我国
+   and indicating China's world-leading position in solving HSR
+                             解决高铁问题的能力达到世界领
+    related problems.
+                             先水平。
+   As an important member of China's high-speed railway "go global"
+                             作为中国高铁“走出去”联盟的    alliance, CRSC has actively participated in overseas railway
+                             重要一员，积极参与了印尼雅万
+    projects with wide influence such as Jakarta-Bandung High-Speed
+                             高铁、匈塞铁路、蒙内铁路、中
+52 Railway of Indonesia, Hungarian-Serbian Railway, Mombasa-
+                             泰铁路等具有广泛影响力的海外
+    Nairobi Standard Guage Railway, and China-Thailand Railway,
+                             铁路项目，向世界展示了“中国
+    introducing China to the world with a beautiful national business
+                             高铁”靓丽的国家名片。
+    card of "China High-speed Railway".
+
+
+
+
+
+                                                    18
+
+=== PDF PAGE 21 / 165 | TEXT LAYER (UNREVIEWED) ===
+Here`s your ticket, boarding pass, passport and luggage label.   这是你的机票、登机牌、护照和
+53 You`ll be boarding at Gate 5. The boarding time is 3 p.m. The   行李标签，请在5号登机口登机，
+    security inspection is over there.               登机时间是下午3点，安检在那边
+
+                             请通过安检门，把你的行李放到
+    Please go through the security gate, put your luggage on the    传送带上，请打开你的包，我们
+   conveyor belt, and open your bag. We`d like to have a look, it`s  要检查下。只是例行检查，确认
+54
+    just a routine check, just to make sure you do not have any liquid  没有携带液体，所有超过100毫升
+    with you. All liquid items of over 100ml are prohibited.     的液体物品都不允许携带上飞机
+                             。
+                             我们即将抵达纽约，这是一些需  We are about to land in New York, here are a couple of forms you
+                             要填写的表格，只是出入境表
+    are supposed to fill out, they are E/D cards. All passengers except
+55                            格，所有非美国公民乘客都必须
+   American citizens must complete these forms. Fill it out right now
+                             填写这些表格，现在填写会节省
+    will save your time when you clear customs.
+                             通关的时间
+   Excuse me, Would you please tell me the exchange rate for US  打扰下，你能告诉我今天美元的
+56 dollar today? I`d like to change 500 US dollars, and I want some  汇率是多少么？我想换500美元，
+    small change.                      我想要些小面额的钱
+                             我们有四种套餐，儿童套餐、单
+   There are four set meals here. There are kid`s meal, single meal,
+                             人套餐、商务套餐和家庭套餐，
+57 business meal and family set meal. The business meal include a big
+                             商务套餐包括一份大的鸡肉汉堡
+    chicken burger and a cup of coffee.
+                             和一杯咖啡
+   The test equipment box shall not be energized and tested until the 防雷器件及接地线连接安装完毕
+58 lightning protection devices and earthing wires are connected and 后，方可对测试设备箱加电调试
+    installed.                        。
+     It shall be confirmed before electric test that the manual transition 电动调试前，应确认各牵引点手
+    of each traction point is normal and the tested switch, the     动转换正常；确认调试道岔及相
+59
+    associated switches with follow up movement and protective   关联的带动道岔、防护道岔符合
+    switches can meet the transition conditions.          转换条件。
+                             高速铁路信号系统主要由信号室
+   The signalling/signaling system of an HSR is mainly composed of
+                             外基础设备、联锁系统、列车运
+60 basic outdoor signallingtching and commanding system (TDCS),
+                             行控制系统、列车调度指挥系统
+    centralized signalling monitoring system (CSM), etc.
+                             、信号集中监测系统等构成。
+                             外锁闭装置优点：尖轨与基本轨   Advantages of external locking device: when an external locking
+                             、心轨与翼轨锁闭后，转辙机处
+    device is used to lock the switch rail to stock rail, or point rail to
+61                            于不受力的卸荷状态，有利于延
+   wing rail, the switch machine is stress-free, lengthening its service
+                             长转辙机的使用寿命、减少维修
+     life and reducing maintenance.
+                             工作量。
+                             列车运行控制系统是结合列车有
+   The train control system, based on parameters concerning trains  关参数和线路条件，根据行车计
+   and railway line, train operation schedule and the status of routes, 划及进路状态，通过列车测速与
+62 controls train direction, headway and train speed through train   定位技术，控制列车的运行方向
+   speed measurement and train positioning. It can guarantee train  、间隔和速度的技术装备，可保
+    safety and increase carrying capacity of the line.        障列车运行安全，提高线路通过
+                             能力。
+
+
+
+
+
+                                                    19
+
+=== PDF PAGE 22 / 165 | TEXT LAYER (UNREVIEWED) ===
+In recent years, having firmly seized the good opportunity of the
+                             近年来，中国通号紧紧抓住国家    vigorous development of national railway and urban rail transit
+                             铁路和城市轨道交通建设蓬勃发     construction, and supported by its prominent pre-mover advantages
+                             展的良好机遇，依托显著的先发    and leading position in the industry, CRSC’s four major
+                             优势和行业领导地位，旗下四大
+    engineering construction groups have successively undertaken
+                             工程建设集团先后承建了众多”
+    numerous “China’s first” national key projects and are actively
+ 63                            中国第一“的国家重点工程，并
+    engaging in the field of operation maintenance and technical
+                             积极涉足铁路、城市轨道交通运
+     service of railway and urban rail transit. CRSC has successively
+                             营维护和技术服务领域。中国通
+    completed a number of high-quality projects such as Beijing-
+                             号先后打造的京沈、京张、杭黄
+    Shenyang Passenger Dedicated Line, Beijing-Zhangjiakou
+                               等中国精品工程，覆盖中国18家
+    Railway, and Hangzhou -Huangshan High-Speed Railway, etc.,                             铁路局，口碑享誉全国。
+    covering 18 railway bureaus in the China, enjoying a good
+                             中国通号是轨道交通领域“一站   CRSC is the leader of providing “one-stop” service in the field of
+                             式”服务的领航者。依托强大的      rail transit. With its strong independent innovation ability, world-
+                             自主创新能力、世界领先的控制
+    leading control system technology, advanced product
+ 64                            系统技术、先进的产品转化能力
+    transformation ability, and excellent engineering implementation
+                             和优秀的工程实施能力，能够为
+     capabilities, the company is capable of providing one-stop control
+                             全球轨道交通客户提供一站式控
+    system turn-key service for global rail transit customers.
+                             制系统交钥匙服务。
+                                列车编组调整: 在站台线路、侧    Couple and split a train: this basic function is intended to couple
+                             线上依照运营需求调整列车编
+    and split trains for operational reasons in platform tracks or in
+ 65                            组，或为修复列车在站间线路上
+     sidings, or for recovering trains on tracks between stations in
+                             调整列车编组。本功能可由人工
+    automatic or manual modes.
+                             实现，也可由系统实现。
+                                 列车调配: 应避免列车过于集
+    Regulate trains: this basic function is intended to avoid bunching of
+ 66                            中，减少紧急情况对于列车运行
+     trains and to reduce delays to trains in the case of disturbances.
+                             造成的延误。
+                                牵引供电控制: 在运营的特定区
+    Control traction power: this basic function is intended to switch on
+                             间或所有区间，由系统自动或者
+ 67 and off traction power in the operation area by the operator or
+                              工作人员对牵引供电进行开/关操
+    automatically on given sections or on all sections.
+                             作。
+    The signaling equipment and signaling equipment house lightning 信号设备及信号设备房屋防雷及
+ 68 protection shall be designed in accordance with the provisions of 接地设计应符合现行有关技术标
+     current related technical standards.              准的规定。
+    High-speed railway communications shall provide stable, reliable 高速铁路通信应为运输生产和经
+ 69 and smooth voice, data and image communication services for   营管理提供稳定可靠畅通的语音
+    railway transportation and operation management.       、数据和图像通信业务。
+
+
+注释：美式英语和英式英语在拼写上存在一些差异，比如对于以元音+l结尾的动词，做动名词变化
+时，美式英语不双写l，英式英语需双写l（例如以上资料的标签一词，美式为labeling，英式为
+labelling；信号一词，美式为signaling，英式为signalling）。
+考试中两者拼写均为正确。
+
+
+
+
+
+                                                     20
+
+=== PDF PAGE 23 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 24 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 25 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 26 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 27 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 28 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 29 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 30 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 31 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 32 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 33 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 34 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 35 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 36 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 37 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 38 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 39 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 40 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 41 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 42 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 43 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 44 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 45 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 46 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 47 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 48 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 49 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 50 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 51 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 52 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 53 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 54 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 55 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 56 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 57 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 58 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 59 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 60 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 61 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 62 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 63 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 64 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 65 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 66 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 67 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 68 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 69 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 70 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 71 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 72 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 73 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 74 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 75 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 76 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 77 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 78 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 79 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 80 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 81 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 82 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 83 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 84 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 85 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 86 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 87 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 88 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 89 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 90 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 91 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 92 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 93 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 94 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 95 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 96 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 97 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 98 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 99 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 100 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 101 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 102 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 103 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 104 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 105 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 106 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 107 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 108 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 109 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 110 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 111 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 112 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 113 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 114 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 115 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 116 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 117 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 118 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 119 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 120 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 121 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 122 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 123 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 124 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 125 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 126 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 127 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 128 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 129 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 130 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 131 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 132 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 133 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 134 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 135 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 136 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 137 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 138 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 139 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 140 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 141 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 142 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 143 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 144 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 145 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 146 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 147 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 148 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 149 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 150 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 151 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 152 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 153 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 154 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 155 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 156 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 157 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 158 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 159 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 160 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 161 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 162 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 163 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 164 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]
+
+=== PDF PAGE 165 / 165 | SCANNED: TEXT EXTRACTION UNAVAILABLE ===
+[Needs local OCR/visual transcription and answer-key verification.]

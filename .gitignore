@@ -1,0 +1,20 @@
+# User-private exam sources, OCR outputs, answers and derived datasets
+/data/private/
+/data/local/
+/local-data/
+.passquest/
+*.local.sqlite
+*.local.sqlite-wal
+*.local.sqlite-shm
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Node, Go, generated build output
+node_modules/
+dist/
+build/
+*.exe
+*.app/
