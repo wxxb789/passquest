@@ -34,8 +34,9 @@ while IFS= read -r f; do
   esac
 done <<< "$tracked"
 
-# 4. Generic key assignment with a literal value (long enough to be real)
-if hits="$(git grep -InE '(api[_-]?key|secret|password|token)[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9_/+-]{24,}["'"'"']' -- '*.go' '*.ts' '*.js' '*.json' '*.yaml' '*.yml' '*.toml' 2>/dev/null)"; then
+# 4. Generic key assignment with a literal value (long enough to be real).
+# Both YAML/TOML style (key: "value") and JSON style ("key": "value") must match.
+if hits="$(git grep -InE '"?(api[_-]?key|secret|password|token|client[_-]?secret)"?[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9_/+-]{24,}["'"'"']' -- '*.go' '*.ts' '*.js' '*.json' '*.yaml' '*.yml' '*.toml' 2>/dev/null)"; then
   bad "literal secret assignment in tracked source"
   printf '%s\n' "$hits" | head -20
 fi
