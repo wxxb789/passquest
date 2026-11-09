@@ -12,6 +12,18 @@ Binding project conventions (stack, truth ownership, layout, uncertainty protoco
 bash scripts/gate.sh
 ```
 
+### Harness platform (binding, 2026-11-10)
+
+The harness is a **Bun + TypeScript program** — one module per gate under `harness/gates/`, shared
+code under `harness/lib/` — because the owner runs this repository from Linux, macOS and Windows and
+a bash/Python gate chain needs Git Bash plus a system Python on Windows. Decision and migration plan:
+[`decisions/D-0001-bun-typescript-harness.md`](decisions/D-0001-bun-typescript-harness.md).
+
+Until the migration lands (it ships with the increment that adds import/OCR gates), `scripts/gate.sh`
+stays the honest entry point. **New checks are written directly as TypeScript gate modules** — never
+as another `scripts/*.sh` or `scripts/*.py` one-off. `bun run gate` becomes the single entry point at
+that point, and CI then runs the same command on ubuntu, macos and windows (`oven-sh/setup-bun`).
+
 CI (`.github/workflows/ci.yml`) runs exactly this on every pull request and on `main`. There is no
 second gate definition — if CI and a local run disagree, the script is the authority and the workflow
 is broken.

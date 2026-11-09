@@ -21,6 +21,11 @@ Binding project conventions. Read this before writing code for any goal.
   CLI and every verified local practice path must work with Node absent.
 - **MyGo + WebView** desktop shell arrives at goal 0011. Until then the access surface is a real,
   scriptable CLI plus a test harness — screenshots and mock UIs are not evidence.
+- **Bun + TypeScript** is the harness runtime (`harness/`, gate modules under `harness/gates/`), not
+  a product runtime. Chosen for one reason: the owner develops on Linux, macOS and Windows and the
+  harness must run on all three without Git Bash or a system Python. See
+  [`decisions/D-0001-bun-typescript-harness.md`](decisions/D-0001-bun-typescript-harness.md).
+  Bun does not replace Go for product behaviour and does not enter `cmd/` or `internal/`.
 - Dependency policy: standard library first; a new module needs a sentence in the plan about why the
   standard library is insufficient. No cgo, no embedded browser engine, no vector database, no cloud
   service.
