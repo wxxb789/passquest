@@ -1,0 +1,45 @@
+369 manufacturing plan                               制造计划
+370 manufacturing supervision                        生产监造
+371 Non-Conformance Report (NCR)                     不符合项报告
+372 onboard equipment                                车载设备
+373 operating manuals                                操作手册
+374 pre-series production                            预生产
+375 product drawings                                 产品图纸
+376 product maintenance manual                       产品维护手册
+377 protective spray coating                         保护喷涂层
+378 quality management                               质量管理
+379 risk analysis report                             风险分析报告
+380 Safety Integrity Level （SIL）                     安全完整性等级
+381 safety-related application conditions            安全相关应用条件
+382 simulation test                                  仿真测试
+383 software/hardware interface                      软/硬件接口
+384 special manufacturing process                    特殊制造工艺
+385 surface mounting technology                      表面贴装工艺
+386 system requirement specification                 系统需求规范
+387 system traceability matrix                       系统追踪矩阵
+388 technical support                                技术支持
+389 temperature control                              温度控制
+390 test platform                                    测试台
+391 transmission module                              传输模块
+                                            牵引供电词汇
+392 bus bar                                          母线
+393 cantilever                                       腕臂
+394 drop tube                                        吊柱
+395 dropper                                          吊弦
+396 earthing mesh                                    接地网
+397 live parts                                       带电体
+398 load                                             负荷
+399 messenger wire                                   承力索
+400 Overhead Contact System (OCS)                    接触网
+401 phase breaker                                    分相绝缘器
+402 pole                                             电杆
+403 power cable                                      电力电缆
+404 power dispatching system                         供电调度系统
+405 protective circuit                               保护电路
+406 return current                                   回流
+407 safe current                                     安全电流
+408 surge arrester                                   避雷器
+409 switch box                                       配电箱
+
+                                              １０
+

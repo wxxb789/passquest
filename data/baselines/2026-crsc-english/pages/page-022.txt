@@ -1,0 +1,67 @@
+   In recent years, having firmly seized the good opportunity of the
+   vigorous development of national railway and urban rail transit       近年来，中国通号紧紧抓住国家
+   construction, and supported by its prominent pre-mover advantages 铁路和城市轨道交通建设蓬勃发
+   and leading position in the industry, CRSC’s four major               展的良好机遇，依托显著的先发
+   engineering construction groups have successively undertaken          优势和行业领导地位，旗下四大
+                                                                         工程建设集团先后承建了众多”
+   numerous “China’s first” national key projects and are actively
+63                                                                       中国第一“的国家重点工程，并
+   engaging in the field of operation maintenance and technical
+                                                                         积极涉足铁路、城市轨道交通运
+   service of railway and urban rail transit. CRSC has successively
+                                                                         营维护和技术服务领域。中国通
+   completed a number of high-quality projects such as Beijing-
+                                                                         号先后打造的京沈、京张、杭黄
+   Shenyang Passenger Dedicated Line, Beijing-Zhangjiakou
+                                                                         等中国精品工程，覆盖中国18家
+   Railway, and Hangzhou -Huangshan High-Speed Railway, etc.,
+                                                                         铁路局，口碑享誉全国。
+   covering 18 railway bureaus in the China, enjoying a good
+   CRSC is the leader of providing “one-stop” service in the field of 中国通号是轨道交通领域“一站
+   rail transit. With its strong independent innovation ability, world- 式”服务的领航者。依托强大的
+                                                                         自主创新能力、世界领先的控制
+   leading control system technology, advanced product
+64                                                                       系统技术、先进的产品转化能力
+   transformation ability, and excellent engineering implementation
+                                                                         和优秀的工程实施能力，能够为
+   capabilities, the company is capable of providing one-stop control
+                                                                         全球轨道交通客户提供一站式控
+   system turn-key service for global rail transit customers.
+                                                                         制系统交钥匙服务。
+   Couple and split a train: this basic function is intended to couple   列车编组调整: 在站台线路、侧
+                                                                         线上依照运营需求调整列车编
+   and split trains for operational reasons in platform tracks or in
+65                                                                       组，或为修复列车在站间线路上
+   sidings, or for recovering trains on tracks between stations in
+                                                                         调整列车编组。本功能可由人工
+   automatic or manual modes.
+                                                                         实现，也可由系统实现。
+                                                                         列车调配: 应避免列车过于集
+   Regulate trains: this basic function is intended to avoid bunching of
+66                                                                       中，减少紧急情况对于列车运行
+   trains and to reduce delays to trains in the case of disturbances.
+                                                                         造成的延误。
+   Control traction power: this basic function is intended to switch on 牵引供电控制: 在运营的特定区
+                                                                         间或所有区间，由系统自动或者
+67 and off traction power in the operation area by the operator or
+                                                                         工作人员对牵引供电进行开/关操
+   automatically on given sections or on all sections.
+                                                                         作。
+   The signaling equipment and signaling equipment house lightning 信号设备及信号设备房屋防雷及
+68 protection shall be designed in accordance with the provisions of 接地设计应符合现行有关技术标
+   current related technical standards.                                  准的规定。
+   High-speed railway communications shall provide stable, reliable 高速铁路通信应为运输生产和经
+69 and smooth voice, data and image communication services for           营管理提供稳定可靠畅通的语音
+   railway transportation and operation management.                      、数据和图像通信业务。
+
+
+注释：美式英语和英式英语在拼写上存在一些差异，比如对于以元音+l结尾的动词，做动名词变化
+时，美式英语不双写l，英式英语需双写l（例如以上资料的标签一词，美式为labeling，英式为
+labelling；信号一词，美式为signaling，英式为signalling）。
+考试中两者拼写均为正确。
+
+
+
+
+                                          ２０
+

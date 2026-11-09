@@ -21,7 +21,9 @@ Work through these **one at a time**, in numeric order, accepting an earlier out
 ## Constraints
 
 - Core design: [`../core-design.md`](../core-design.md)
-- **Source visibility exception:** the owner requested committing the unreviewed partial native-text extraction to this currently public repo at `data/baselines/2025-crsc-english-partial.txt`. Its original internal-only notice remains and publication rights have not been verified. Goal 0002 still requires local private import, honest scan review and verified answer mapping; do not automatically publish the PDF or further OCR, questions or private learner data.
+- **Source visibility exception:** the owner requested committing the unreviewed partial native-text extraction to this currently public repo at `data/baselines/2025-crsc-english-partial.txt`. Its original internal-only notice remains and publication rights have not been verified. Goal 0002 still requires local private import, honest scan review and verified answer mapping; do not automatically publish the PDF, questions or private learner data.
+- **Parsed-text visibility exception (2026-11-10):** the owner authorised committing the full page-linked parsed text of the same document — 165 pages, `data/baselines/2026-crsc-english/` — after being shown that this repository is public. Scope is that parsed text only: the original PDF stays out of the repository (`data/private/`, gitignored), nothing is uploaded to an external provider, no further source material is published automatically, and no redistribution right is implied by either exception.
+
 - The Exam Profile is updated when better exam evidence appears; learner-specific adaptive study priorities change with actual practice. Neither change rewrites historical attempts or verified facts.
 - The functional engine and agent experience precede polished MyGo UI. Goal 0012 is reserved for an Opus-led high-fidelity design pass; earlier goals must not require beautiful mock screens as their evidence.
 - The durable Pi runtime may manage long tasks; SQLite remains the local store of structured application truth. No independent cloud service or massive content library is assumed.

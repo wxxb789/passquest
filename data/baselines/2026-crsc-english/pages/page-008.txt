@@ -1,0 +1,45 @@
+204 bad rail insulation                                      钢轨绝缘不良
+205 wheel slip                                               车轮空转
+206 forcing open of the point; trailing of a switch          挤岔
+207 release speed                                            开口速度;缓解速度
+208 ATP with high priority                                   设备制动优先
+209 wrong clearing of a signal                               错误开放信号
+210 safety-critical; safety criticality                      安全苛求
+211 loss of indication of a switch                           道岔失去表示
+212 track lead                                               钢轨引接线
+213 to hold route for shunting                               非进路调车
+214 four-aspect automatic block                              四显示自动闭塞
+215 end of movement authority (EOA)                          行车许可终点
+216 limit of authority (LOA)                                 限制性行车许可
+217 right side failure (RSF)                                 安全侧失效
+218 wrong side failure (WSF)                                 危险侧失效
+219 advance starting signal                                  总出站信号机
+                                                      工程词汇
+220 As-Built Drawings                                        竣工图纸
+221 backfilling                                              回填
+222 bonding plan                                             双线图
+223 brake distance                                           制动距离
+224 Breakers                                                 断路器
+225 cable jointing                                           电缆接头
+226 cable pits                                               电缆井
+227 cable protection                                         电缆防护
+228 cable route                                              电缆径路
+229 commissioning                                            调试
+230 crank handle                                             手摇把
+231 delivery                                                 交付
+232 design drawings                                          设计图纸
+233 detailed design                                          详细设计
+234 diesel engine                                            柴油发动机
+235 duct                                                     管道
+236 earth electrode                                          接地电极
+237 earth resistance                                         接地电阻
+238 electrical lighting                                      电气照明
+239 electromagnetic environment                              电磁环境
+240 equipment room                                           机械室
+241 excavation or trenching                                  开挖或挖沟
+242 external cabling                                         外部布线
+243 fouling post                                             警冲标
+244 guarantee for supply                                     供货保证
+
+                                                       ６
+

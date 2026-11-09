@@ -1,0 +1,57 @@
+insecure, working out just how insecure has been difficult. Many studies have only small samples to
+work on.
+
+However, with the co-operation of Yahoo! , Joseph Bonneau of Cambridge University obtained
+the biggest sample to date—70 million passwords that came with useful data about their owners.
+
+Mr Bonneau found some interesting variations. Older users had better passwords than young ones.
+People whose preferred language was Korean or German chose the most secure passwords; those who
+spoke Indonesian the least. Passwords designed to hide sensitive information such as credit-card
+numbers were only slightly more secure than ‘those protecting less important things, like access to
+games. “Nag screens” that told users they had chosen a weak password made virtually no difference.
+And users whose accounts had been hacked in the past did not make more secure choices than those
+who had never been hacked.
+
+But it is the broader analysis of the sample that is of most interest to security researchers. Despite
+their differences, the 70 million users were still predictable enough that a generic password dictionary
+was effective against both the entire sample and any slice of it. Mr Bonneau is blunt: “An attacker
+who can manage ten guesses per account will compromise around 1% of accounts.” And that is a
+worthwhile outcome for a hacker.
+
+One obvious solution would be for sites to limit the number of guesses that can be made before
+access is blocked. Yet whereas the biggest sites, such as Google and Microsoft, do take such mea-
+sures, many do not. The reasons of their not doing so are various. So it’s time for users to consider the
+alternatives to traditional passwords.
+
+26. People tend to use passwords that are .
+
+[A] easy to remember [B] hard to figure out
+
+[C] random numbers [D] popular names
+
+27. Researchers find it difficult to know how unsafe passwords are due to .
+
+[A] lack of research tools [B] lack of research funds
+
+[C] limited time of studies [D] limited size of samples
+
+28. It is indicated in the text that :
+
+[A] Indonesians are sensitive to password security
+
+[B] young people tend to have secure passwords
+
+[C] nag screens help little in password security
+
+[D] passwords for credit cards are usually safe
+
+29. The underlined word“compromise”in Para. 5 most probably means /
+
+[A] comprise [B] compensate
+
+[C] endanger [D] encounter
+
+30. The last paragraph of the text suggests that .
+
+ax 50) ee
+50

@@ -1,0 +1,45 @@
+449 contractor                                             承包商
+450 defects notification period                            缺陷通知期
+451 employer                                               业主
+452 open tendering                                         公开招标
+453 project manager                                        项目经理
+454 subcontractor                                          分包商
+455 supplier                                               供应商
+456 time for completion                                    竣工时间
+                                                   电力词汇
+457 capacitor                                              电容器
+458 dispatching console                                    调度台
+459 distribution substation                                配电所
+460 earth wire                                             地线
+461 electric power                                         电力
+462 Grid Intertie                                          电网互联
+463 high voltage circuit breaker                           高压断路器
+464 high-voltage insulator                                 高压绝缘子
+465 inductor                                               电感器
+466 initiator                                              启动器
+467 insulation                                             绝缘
+468 line voltage                                           线电压
+469 overhead line                                          架空线路
+470 parallel capacitor; shunt capacitor                    并联电容器
+471 phase voltage                                          相电压
+472 power distribution                                     配电
+473 public grid                                            公共电网
+474 railway power supply and distribution system           铁路供配电系统
+475 reactance compensation                                 电抗补偿
+476 rectifier                                              整流器
+477 run-through power line                                 电力贯通线路
+478 three-phase four-wire system                           三相四线制
+479 transformator                                          变压器
+480 transformer substation, distribution substation        变、配电所
+481 Transmission Line                                      输电线路
+482 voltage regulator                                      调压器
+                                                 新技术词汇
+483 Automatic Fare Collection (AFC)                        自动检票系统
+484 big data                                               大数据
+485 block chain                                            区块链
+486 Closed Circuit TeleVision (CCTV)                       闭路电视
+487 Data Communication System (DCS)                        数据传输系统
+488 Grade of Automation (GOA)                              自动化等级
+
+                                                      １２
+

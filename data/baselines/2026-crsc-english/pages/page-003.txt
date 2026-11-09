@@ -1,0 +1,45 @@
+              中国通号2023年度工程系列高级职称外语考试-中英文词汇
+                                      分类及其对应词汇
+                                        通信词汇
+1 access                                         接入
+2 access channel                                 接入信道
+3 Access Control System (ACS)                    门禁系统
+4 adapter                                        适配器
+5 amplifier                                      放大器
+6 antenna                                        天线
+7 Artificial Intelligence (AI)                   人工智能
+8 attenuator                                     衰减器
+ 9 bandwidth                                     带宽
+10 Base Station (BS)                             基站
+11 broadcast call                                广播呼叫
+12 bus                                           总线
+13 cable                                         电缆
+14 called party                                  被叫用户
+15 calling party                                 主叫用户
+16 carrier                                       载波
+17 carrier frequency                             载频
+18 Code Division Multiple Access (CDMA)          码分多址
+19 communication                                 通信
+20 communication automation                      通信自动化
+21 communication blind district                  通信盲区
+22 communication satellite                       通信卫星
+23 connectivity                                  连通性
+24 coupling loss                                 耦合损耗
+25 data configuration                            数据配置
+26 Data Transmission Network (DTN)               数据传输网
+27 dialing                                       拨号
+28 digital sensor                                数字传感器
+29 digital telephone network                     数字电话网
+30 error code                                    误码
+31 Ethernet                                      以太网
+32 exchange office                               交换局
+33 frequency                                     频率
+34 Frequency Modulation (FM)                     频率调制
+35 frequency shift                               频移
+36 full duplex                                   全双工
+37 gain                                          增益
+38 gateway                                       网关
+
+
+                                          １
+

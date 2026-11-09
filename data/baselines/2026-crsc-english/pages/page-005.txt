@@ -1,0 +1,47 @@
+81 white box testing                            白盒测试
+82 Wide Area Network (WAN)                      广域网
+83 message routing                              报文路由选择
+84 Bit Error Rate (BER)                         比特误码率
+85 closed loop gain                             闭环增益
+86 coder; encoder                               编码器
+87 bearer service                               承载业务
+88 Transmission Control Protocol (TCP)          传输控制协议
+89 crosstalk suppression filter                 串音抑制滤波器
+90 in-band fluctuation                          带内波动
+91 simplex                                      单工
+92 address resolution                           地址解析
+93 directional antenna                          定向天线
+94 dispatching communication                    调度通信
+95 transmitter                                  发射机
+96 delay                                        时延
+97 master clock                                 主时钟；母钟
+98 slave clock                                  从时钟；子钟
+ 99 network node                                网络节点
+100 addressing                                  寻址
+101 Network Element (NE)                        网元
+102 mobile communication                        移动通信
+103 pulse; impulse                              脉冲
+104 Audio Frequency (AF)                        音频
+105 frame                                       帧
+106 jitter                                      抖动
+107 fiber to the home                           光纤到户；光纤入户
+108 Long Term Evolution (LTE)                   长期演进
+109 backbone network                            骨干网络
+110 convergence layer                           汇聚层
+111 Time Division Multiplex (TDM)               时分复用
+112 Optical Transport Network (OTN)             光传送网
+                                         信号词汇
+113 alternative route                           迂回进路
+114 approach section                            接近区段
+115 arriving train                              到达列车
+116 automatic block                             自动闭塞
+117 Automatic Train Control (ATC)               列车自动控制
+118 Automatic Train Operation (ATO)             列车自动运行
+
+119 Automatic Train Protection (ATP)            列车超速防护/列车自动防护
+
+120 axle counter                                计轴器
+
+
+                                          ３
+

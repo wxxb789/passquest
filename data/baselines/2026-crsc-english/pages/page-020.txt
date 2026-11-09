@@ -1,0 +1,72 @@
+   The selected construction scheme shall be safe and                  施工方案符合安全可靠、技术先
+42 reliable,advanced in technology,easy to operate and the most        进、易于操作、好中选优的原则
+   optimized.                                                          。
+   The project owner, the surveyor and designer institute, the         建设单位、勘察设计单位、施工
+   contractor and the supervisor shall establish their quality         单位、监理单位应按照有关规
+43
+   management systems, environmental management systems and            定，建立质量管理、环境管理、
+   occupational health and safety management systems according to      职业健康管理安全管理体系。
+   The Parties shall enter into a Contract Agreement within 28 days    除非双方另有协议，否则双方应
+44 after the Contractor receives the Letter of Acceptance, unless      在承包商收到中标函后的28 天内
+   they agree otherwise.                                               签订合同协议书。
+                                                                       承包商应对所有现场作业和施工
+   The Contractor shall be responsible for the adequacy, stability and
+45                                                                     方法的完备性、稳定性和安全性
+   safety of all Site operations and of all methods of construction.
+                                                                       负责。
+   The Contractor shall design (to the extent specified in the         承包商应按照合同的规定以及工
+   Contract), execute and complete the Works in accordance with the 程师的指示（在合同规定的范围
+46
+   Contract and with the Engineer's instructions, and shall remedy any 内）对工程进行设计、施工和竣
+   defects in the Works.                                               工， 并修补其任何缺陷。
+                                                                       一般情况下，EPC/交钥匙合同是
+   Normally, an EPC/turkey contract is based on a lump sum price,
+47                                                                     按总价支付的，很少或根本不计
+   with little or no measurement.
+                                                                       量工程量。
+   CRSC is a core enterprise for safe operation of China's rail        中国通号是保障国家轨道交通安
+   transportation; a representative of its national industry of train  全运营的核心企业，是我国高铁
+48 control system technologies for high speed railways (HSRs); and a 列控系统技术民族产业的代表
+   leader of its core technologies for HSRs leading the global railway 者，是我国高铁最核心技术引领
+   industry.                                                           全球铁路行业进步的佼佼者。
+                                                                       中国通号牵头制定了CTCS-0级至
+   CRSC has led the establishment of technical standards for railway CTCS-4级铁路列车控制系统全控
+49 train control systems from CTCS-0 to CTCS-4; and laid the           制体系技术标准，奠定了中国通
+   foundation of its leadership in railway signaling & control.        号在铁路信号控制领域的领导地
+                                                                       位。
+   CRSC has compiled over 620 signaling & communication codes          中国通号多年来累计编制《铁路
+   and standards, including Code for Design of Railway Digital         数字移动通信系统（GSM-R）设计
+   Mobile Communication System (GSM-R), Code for Design of             规范》《铁路信号设计规范》《
+50 Railway Signaling, Construction Quality Acceptance Standard for 高速铁路通信工程施工质量验收
+   High Speed Railway Communication Project, and Construction          标准》《高速铁路信号工程施工
+   Quality Acceptance Standard for High Speed Railway Signaling        质量验收标准》等620余项通信信
+   Project.                                                            号规范及标准。
+   With control system construction and operation experience of over 依托40000多公里高速铁路控制系
+   40,000 kilometers of HSRs, CRSC has accumulated a world-            统的建设和运营经验，中国通号
+                                                                       积累了全球领先的60,000多个高
+   leading database of over 60,000 HSR dedicated test cases,
+51                                                                     铁专属测试案例库，超过国外跨
+   surpassing the combined total of foreign multinational companies,
+                                                                       国企业案例库总和，标志着我国
+   and indicating China's world-leading position in solving HSR
+                                                                       解决高铁问题的能力达到世界领
+   related problems.
+                                                                       先水平。
+   As an important member of China's high-speed railway "go global"
+   alliance, CRSC has actively participated in overseas railway        作为中国高铁“走出去”联盟的
+                                                                       重要一员，积极参与了印尼雅万
+   projects with wide influence such as Jakarta-Bandung High-Speed
+                                                                       高铁、匈塞铁路、蒙内铁路、中
+52 Railway of Indonesia, Hungarian-Serbian Railway, Mombasa-
+                                                                       泰铁路等具有广泛影响力的海外
+   Nairobi Standard Guage Railway, and China-Thailand Railway,
+                                                                       铁路项目，向世界展示了“中国
+   introducing China to the world with a beautiful national business
+                                                                       高铁”靓丽的国家名片。
+   card of "China High-speed Railway".
+
+
+
+
+                                                   １８
+

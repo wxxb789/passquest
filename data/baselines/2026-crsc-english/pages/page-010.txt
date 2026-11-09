@@ -1,0 +1,45 @@
+287 surge protection                                       浪涌保护
+288 Taking-Over Certificate                                接收证书，移交证书
+289 technical standard                                     技术标准
+290 temperature and humidity                               温湿度
+291 testing                                                测试
+292 training facilities                                    培训设施
+293 training manual                                        培训手册
+294 transient rush current                                 瞬时冲击电流
+295 transport and storage                                  运输和储存
+296 wiring and cabling                                     配线和布线
+                                                  市政建筑词汇
+297 additive                                               外加剂
+298 bar splice                                             钢筋接头
+299 bearing capacity                                       承载力
+300 braced force                                           支撑力
+301 bridge                                                 桥梁
+302 building construction engineering                      房屋建筑工程
+303 buildings                                              房建
+304 cement paste                                           水泥浆
+305 compaction                                             夯实
+306 concrete                                               混凝土
+307 cubes of earth; earthwork                              土石方
+308 culvert                                                涵洞
+309 cutting                                                路堑
+310 drilling                                               钻孔
+311 durability                                             耐久性
+312 embankment                                             路堤
+313 embedded pipe                                          预埋管
+314 fire protection; fire safety; fire fighting            消防
+315 fireproof valve                                        防火阀
+316 foundation pit                                         基坑
+317 hard soil                                              硬土
+318 limestone soil                                         石灰土
+319 longitudinal profile                                   纵断面
+320 main structure                                         主体结构
+321 natural disaster                                       自然灾害
+322 net span                                               净跨度
+323 permeation                                             渗透
+324 pile                                                   桩
+325 pipeline                                               管道
+326 plane                                                  平面
+327 precast unit                                           预制构件
+
+                                                    ８
+
