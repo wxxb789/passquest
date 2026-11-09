@@ -15,7 +15,7 @@ Enable the original PDF and its normalized UTF-8 text to serve as **private loca
 - A user can import a locally held UTF-8 TXT baseline or source PDF and inspect page-linked content without sending it to an external service; normal text pages and a representative scanned page both have an honest usable/reviewable path.
 - Unextracted scans, doubtful OCR, wrong column order and uncertain answer mappings are visibly marked rather than silently treated as authoritative; users can correct material and keep provenance.
 - At least one user-reviewed question/passage from a private local source can be practiced through goal 0001's real scoring experience, and the app preserves that source privately across restart.
-- The public repo and distributed sample contain only freely redistributable fixtures; no text transcription or answer key of the restricted PDF is published. Complete 165-page reviewed conversion remains an open-ended content operation unless evidence shows it can be safely finished within this run.
+- The public repo's owner-directed partial TXT extraction is explicitly **unreviewed** and is never treated as an authoritative key or test fixture; separately authored redistributable exercises are used for automated tests. The source PDF, further OCR, unverified answer keys and private user data are not automatically published or bundled. Complete 165-page reviewed conversion remains an open-ended content operation unless evidence shows it can be safely finished within this run.
 
 ## Execution boundary
 

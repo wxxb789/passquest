@@ -11,6 +11,6 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 
 ## Confidential baseline material
 
-The original 165-page CRSC preparation PDF provided during project design states *仅限内部使用，严禁外传*. Its text transcription, original questions and answer keys are **not** included in this public repository. Pass Quest should support importing a locally held, page-linked UTF-8 TXT baseline or PDF, including human review of scanned pages; private source files belong under a gitignored user-data directory. Publication requires confirmed redistribution rights. The sample exercises committed for automated tests must be independently authored or otherwise redistributable.
+The original 165-page CRSC preparation PDF states *仅限内部使用，严禁外传*. At the project owner's explicit direction, an **unreviewed partial text-layer transcription** is present at [`data/baselines/2025-crsc-english-partial.txt`](data/baselines/2025-crsc-english-partial.txt). This repository is **public**, regardless of the app's intended internal use; the file therefore is publicly accessible. It only covers 22 pages with meaningful native text; the remaining scanned pages are placeholders, and extracted text/answers have not been verified. This commit is not evidence of redistribution rights or permission for agents to upload additional source material. The complete source PDF and future OCR outputs stay local by default, and tests must use independently authored or otherwise redistributable exercises.
 
 No API keys or personal study history belong in this repository.
