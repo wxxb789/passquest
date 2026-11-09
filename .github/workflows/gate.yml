@@ -1,0 +1,42 @@
+name: gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect toolchains
+        id: detect
+        run: |
+          if [ -f go.mod ]; then echo "go=1" >> "$GITHUB_OUTPUT"; else echo "go=" >> "$GITHUB_OUTPUT"; fi
+          if [ -f agent/package.json ]; then echo "node=1" >> "$GITHUB_OUTPUT"; else echo "node=" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-go@v5
+        if: steps.detect.outputs.go
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        if: steps.detect.outputs.node
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Gate
+        run: bash scripts/gate.sh
