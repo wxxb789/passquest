@@ -1,8 +1,9 @@
 # 0005 — Helpful AI tutor with user-supplied text model: evidence
 
 - Tree: base commit `67e68e7aaca30bdd7975970bf792091cbe43296f` (`refactor(0005): apply accepted
-  simplifications`) on top of `4b68b80373410072b14b16125cf98b21888b5632`, plus the round-1 review
-  fixes in the working tree. Every command below ran on that tree; the operator owns the commit.
+  simplifications`) on top of `4b68b80373410072b14b16125cf98b21888b5632`, plus the round-1 and
+  round-2 review fixes in the working tree. Every command below ran on that tree; the operator owns
+  the commit.
 - Date: 2026-11-10. Host: Linux 7.0.0-1017-azure x64.
 - Toolchain: Go 1.27.3 via mise; Node v24.16.0; Bun 1.4.4; `modernc.org/sqlite` v1.62.0 (pure Go).
   No real provider, API key or external network call was used.
@@ -20,7 +21,7 @@ recommendation or export is detectable.
 | Package / area | Truth it owns |
 |---|---|
 | `internal/tutor` | Config validation (https/loopback, no userinfo/query/fragment, bounds), the `tutor-v1` system/user prompt, privacy classification, field clipping, the exact serialized request body with its SHA-256 and byte size, the versioned host request/response and the stdin/stdout Node transport. It imports no network package and writes no database. |
-| `internal/store` | Schema v7: mutable non-secret `tutor_config`, append-only `tutor_consent_events`, append-only `tutor_calls`. Effective consent is the latest event; the daily count includes failures. Update/delete triggers reject rewriting either trail. |
+| `internal/store` | Schema v8: mutable non-secret `tutor_config`, append-only `tutor_consent_events`, append-only `tutor_calls`, and the transient `tutor_call_reservations` budget ledger. Effective consent is the latest event; the daily count includes failures and in-flight reservations. Update/delete triggers reject rewriting either evidence trail. |
 | `internal/cli` | `tutor config/preview/ask/history/show/consent/revoke/consents`, attempt/content resolution, per-source consent gating, credential and budget checks, advisory rendering, a content summary derived from what the prompt carries, failure rows and the new exit-3 path. A call records shared private text only when the host confirms the request was sent. |
 | `agent/tutor-host.mjs` | The single network egress: endpoint validation, bearer auth from `PASSQUEST_TUTOR_API_KEY`, no redirects, timeout and 1 MiB body bound, response/usage validation and structured errors with the credential redacted. It checks the request body against the typed chat, posts those exact bytes, counts prompt/response bounds in code points and reports `request_sent`. No database or tool access. |
 | `harness` | `tutor-smoke` (156 assertions) against a loopback stub; a 21st self-test case over 14/14 gates. File-based gates now read tracked plus untracked non-ignored working-tree files so a pre-commit run scans new deliverables and survives a pending archive move. |
@@ -46,11 +47,34 @@ The model response is stored only in `tutor_calls` as advisory text. It is never
 - **Coverage.** Human writers have table tests, the v6 migration test reads back a `tactic_exposures`
   row, and the smoke adds human output, verbatim-body and astral-bound assertions.
 
+## Round-2 review fixes
+
+- **Budget reservation.** The daily check used to read a count and append the call only after the
+  provider replied, so two concurrent `tutor ask` processes with `--daily-calls 1` could both pass.
+  Schema v8 adds `tutor_call_reservations`: `ask` claims a slot with an immediate transaction before
+  spawning the host, and `FinalizeTutorCall` inserts the call and deletes the claim in one
+  transaction. A path that fails before the host is invoked releases the claim; a crash or storage
+  failure after that leaves it spent. `TestTutorAskReservesTheBudgetBeforeContactingTheProvider`
+  holds one transport call open, runs a second `ask` against the same database and requires exit 2
+  with zero second-transport requests, then requires the finalized call to free its claim.
+  `TestTutorReservationsAreAtomicAcrossHandles` starts eight store handles against one file with
+  budget 1 and requires exactly one claim.
+- **Recorded option clipping.** `Build` clipped the options section to 500 characters but appended the
+  stored selected and verified option texts unclipped in both the included-content and the
+  changed/unavailable branches, so a long imported option could push the prompt past 20 000
+  characters and make `preview`/`ask` refuse. Both branches now use `clipField` with the same 500
+  bound and disclose `selected_option_text` / `correct_option_text` in `truncated_fields`.
+  `TestBuildClipsRecordedOptionTextsInEveryBranch` covers included, changed and unavailable content
+  with 24 000-character snapshots.
+- **Crashed reservation.** A process that dies after claiming but before recording leaves the claim
+  spent for the UTC day; the budget can under-spend but not over-spend. Disclosed in
+  [`../tutor.md`](../tutor.md) and Q-0005-06.
+
 ## Tier 1 — automated checks
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1` | exit 0; 10 packages, 420 test runs, 420 passes, 0 skips, 0 failures (`go test -json` count) |
+| `go test ./... -count=1` | exit 0; 10 packages, 427 test runs, 427 passes, 0 skips, 0 failures (`go test -json` count) |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
 | `gofmt -l` (working-tree `*.go`) | empty output, exit 0 |
@@ -67,17 +91,17 @@ The tests that pin this increment's contract clauses:
 | `TestBuildFirstPartyIsGrounded`, `TestBuildModesChangeOnlyTheTask` | The prompt carries the attempted question, verified key, evidence, authored reasoning, skill lesson and observed elapsed/assistance; explain/probe/micro-lesson have distinct bounded tasks. |
 | `TestBuildPrivateWithoutConsentWithholdsEveryPrivateString`, `TestBuildPrivateWithConsentIncludesSourceText`, `TestBuildPrivateStoredTextWithoutConsentIsWithheld` | Imported page, stem, options, evidence, reasoning and stored option texts are absent without consent and present after a grant. |
 | `TestBuildChangedContentUsesStoredTextOnly`, `TestBuildUnavailableContentDisclosesAndKeepsStoredLabels` | A changed or missing question is disclosed; stale current passage/evidence is not sent. |
-| `TestBuildClipsLongPassageAndFields`, `TestBuildOmitsExtraLessonsWithinThePromptBound` | Passage is a bounded window around the evidence; long fields are marked truncated; extra multi-skill lessons are omitted with a local disclosure. |
+| `TestBuildClipsLongPassageAndFields`, `TestBuildClipsRecordedOptionTextsInEveryBranch`, `TestBuildOmitsExtraLessonsWithinThePromptBound` | Passage is a bounded window around the evidence; long fields and the recorded selected/verified option texts are marked truncated in every content branch; extra multi-skill lessons are omitted with a local disclosure. |
 | `TestBuildRequestHashIsStable`, `TestBuildHashesTheExactProviderBody`, `TestPreviewJSONShapeIsStable` | The exact serialized request body has a stable SHA-256 and byte size, including content Go escapes (`&`, `<`, `>`) that `JSON.stringify` would not; the host request carries that body and is versioned. `tutor-smoke` hashes the raw body its stub received and requires equality with `preview.request_sha256` and the recorded call. |
 | `TestDecodeResponse`, `TestContainsUnsafeControl`, `TestHostTransportRejectsBadRequestBeforeSpawn`, `TestHostTransportRejectsBodyThatIsNotTheChat` | Host responses are strictly decoded; unknown fields, wrong protocol, empty/oversized text, negative usage, trailing data, a success without `request_sent` and terminal-control text are rejected; a request whose `body` is not the serialized chat, or is otherwise invalid, never spawns the host. |
-| `TestMigrationFromVersionSixAddsTutorTables`, `TestTutorConfigRoundTripAndUpdate` | A v6 database keeps its attempt and its `tactic_exposures` row (both read back through `List`/`ListExposures` after migration) and gains the three tutor tables; config is mutable, validated and credential-free. |
+| `TestMigrationFromVersionSixAddsTutorTables`, `TestTutorConfigRoundTripAndUpdate` | A v6 database keeps its attempt and its `tactic_exposures` row (both read back through `List`/`ListExposures` after migration) and gains the four tutor tables; config is mutable, validated and credential-free. |
 | `TestTutorConsentLatestWinsAndIsAppendOnly` | Grant/revoke is append-only; the latest event wins; reviewer/source are required; UPDATE/DELETE are rejected. |
-| `TestTutorCallRoundTripAndAppendOnly`, `TestTutorCallCountSinceUsesTheDayBoundary`, `TestAppendTutorCallRejectsMalformedRecords` | Call records round-trip with usage, filter by attempt, count at the UTC boundary and reject malformed rows; UPDATE/DELETE are rejected. |
+| `TestTutorCallRoundTripAndAppendOnly`, `TestTutorCallCountSinceUsesTheDayBoundary`, `TestFinalizeTutorCallRejectsMalformedRecords`, `TestTutorReservationCountsInFlightCallsAndFinalizeReplacesIt`, `TestTutorReservationsAreAtomicAcrossHandles` | Call records round-trip with usage, filter by attempt, count at the UTC boundary and reject malformed rows; UPDATE/DELETE are rejected. In-flight reservations consume the budget, finalizing replaces the claim atomically, a released claim is reusable, and eight handles claim at most one slot under budget 1. |
 | `TestTutorConfigInspectSaveAndPartialUpdate` | Configuration inspects, saves, partially updates, reports credential presence and refuses invalid values without changing stored config. |
 | `TestTutorPreviewFirstParty`, `TestTutorAskSuccessPreservesAttemptsAndNeverStoresKey` | Preview is send-free and key-free; ask labels the text advisory, records usage and leaves the attempt report byte-identical. |
 | `TestTutorPrivateSourceConsentRoundTrip`, `TestTutorConsentValidation` | Withheld → preview → consent → shared → ask → revoke → withheld; unknown source and missing reviewer exit 2. |
 | `TestTutorProviderFailureIsRecordedAndPracticeStillWorks`, `TestTutorTransportFailureIsAgentUnavailable`, `TestTutorInvalidResponseIsRecorded` | Provider/auth/transport/invalid-response failures exit 3, record an error row, do not change the report and do not block practice. |
-| `TestTutorAskRequiresCredentialAndBudget`, `TestTutorDailyCountCountsFailures` | Missing credential and exhausted budget make no provider call; failed calls consume the budget. |
+| `TestTutorAskRequiresCredentialAndBudget`, `TestTutorAskReservesTheBudgetBeforeContactingTheProvider`, `TestTutorDailyCountCountsFailures` | Missing credential and exhausted budget make no provider call; failed calls consume the budget; an in-flight claim blocks a second `ask` under the same bound and is released when the call is recorded. |
 | `TestTutorMissingNodeLeavesPracticeWorking`, `TestTutorMissingNodeRecordsNoSharedPrivateText` | A missing Node binary is `agent_unavailable` exit 3; local practice still records and grades; an authorized private preview that never reaches the host is recorded with `source_text_shared: false`. |
 | `TestTutorCredentialIsRedactedFromProviderText`, `TestTutorCredentialIsRedactedFromProviderError`, `TestTutorTerminalControlResponseIsRecorded`, `tutor-smoke` host-stderr and provider-error modes, database byte scans | A credential echoed by provider text, a provider error or the host's stderr is redacted before storage/output; terminal escape sequences are refused; the SQLite bytes contain no key. |
 | `TestTutorShowFailedCallHasNoSuggestion`, `TestTutorHistoryLabelsWithheldPrivateSource`, `TestTutorHistoryEmptyState` | Failures store no model text; history distinguishes first-party, shared-private and withheld-private calls; empty history is `[]`. |
@@ -329,9 +353,10 @@ scans with a runtime-generated `sk-` value.
 - **Private material**: imported page/stem/options/evidence/reasoning/option texts are absent from
   the prompt without a consent event, present after a grant, absent after revoke. The provider
   payload never includes source title/path, database path, endpoint path, consent reviewer or history.
-- **Persistence**: the v6→v7 migration keeps the attempt and the `tactic_exposures` row the test
+- **Persistence**: the v6→v8 migration keeps the attempt and the `tactic_exposures` row the test
   inserts before upgrading; both are read back afterwards. Config/consent/call tables are validated
-  and consent/call rows reject UPDATE/DELETE.
+  and consent/call rows reject UPDATE/DELETE; the reservation ledger is transient bookkeeping with no
+  learner evidence.
 - **Real-provider limit**: no external provider was contacted; `tutor-smoke` uses a local stub with
   the OpenAI-compatible response shape. A live endpoint's TLS, quota, latency and content remain
   unverified until the operator configures one.
@@ -380,13 +405,13 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (10 packages, 420 tests, 0 skipped)
+PASS  go test (10 packages, 427 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
 
 == docs links
-PASS  docs links (89 checked, 0 broken)
+PASS  docs links (90 checked, 0 broken)
 
 == secrets/sources
 PASS  secrets/sources (328 files, 0 findings)
@@ -418,7 +443,7 @@ GATE: PASS
 
 Residual risks, with numbers:
 
-- 420 Go test runs and 156 gate assertions cover the local behaviour; 0 external provider calls were
+- 427 Go test runs and 156 gate assertions cover the local behaviour; 0 external provider calls were
   made, so live-provider compatibility is unverified.
 - The prompt contains one attempt, up to 20 000 characters and at most 350 requested output tokens;
   the stub returned fixed text, so real model usefulness and latency are unmeasured.

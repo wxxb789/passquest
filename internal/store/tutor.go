@@ -69,6 +69,19 @@ var schemaV7 = []string{
 		BEGIN SELECT RAISE(ABORT, 'tutor calls are append-only'); END`,
 }
 
+// schemaV8 adds the daily-call reservation ledger. A `tutor ask` claims a slot
+// before contacting the provider and appends the call when the host returns, so
+// two processes cannot both pass the same budget check. The ledger is transient
+// bookkeeping, not learner evidence: a finalized call replaces its reservation,
+// and an unfinalized one keeps its slot for the rest of the UTC day.
+var schemaV8 = []string{
+	`CREATE TABLE IF NOT EXISTS tutor_call_reservations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		created_at TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS tutor_call_reservations_created ON tutor_call_reservations(created_at)`,
+}
+
 // TutorConsentEvent records one grant or revoke decision for an imported
 // source. The effective consent is the latest event; history is retained so a
 // later decision cannot silently erase an earlier authorization.
@@ -240,14 +253,90 @@ func scanTutorConsent(row rowScanner) (TutorConsentEvent, error) {
 	return event, nil
 }
 
-// AppendTutorCall stores one advisory call attempt and returns it with its id.
-// A failed call is recorded too: usage and failure visibility is part of the
-// contract, while the attempt table remains untouched.
-func (s *Store) AppendTutorCall(call TutorCall) (TutorCall, error) {
+// ReserveTutorCall claims one slot in the daily call budget and returns its
+// reservation id. Recorded calls and in-flight reservations are counted inside
+// one immediate transaction, so two processes cannot both pass the same check.
+// A refused reservation returns id 0 and the number of slots already consumed.
+// A reservation that is never finalized keeps its slot for the rest of the UTC
+// day: the provider may already have been contacted, so under-spending is the
+// safe accounting error.
+func (s *Store) ReserveTutorCall(since, at time.Time, limit int) (int64, int, error) {
+	if limit <= 0 {
+		return 0, 0, errors.New("store: tutor daily call limit must be positive")
+	}
+	boundary := since.UTC().Format(time.RFC3339Nano)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: begin tutor reservation: %w", err)
+	}
+	defer tx.Rollback()
+	var used int
+	err = tx.QueryRow(`SELECT
+			(SELECT COUNT(*) FROM tutor_calls WHERE julianday(created_at) >= julianday(?)) +
+			(SELECT COUNT(*) FROM tutor_call_reservations WHERE julianday(created_at) >= julianday(?))`,
+		boundary, boundary).Scan(&used)
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: count tutor budget: %w", err)
+	}
+	if used >= limit {
+		return 0, used, nil
+	}
+	res, err := tx.Exec(`INSERT INTO tutor_call_reservations (created_at) VALUES (?)`,
+		at.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: reserve tutor call: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: read tutor reservation id: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("store: commit tutor reservation: %w", err)
+	}
+	return id, used + 1, nil
+}
+
+// ReleaseTutorCallReservation returns an unfinalized slot to the budget, for a request
+// that was prepared but never handed to the host.
+func (s *Store) ReleaseTutorCallReservation(id int64) error {
+	if id == 0 {
+		return nil
+	}
+	if _, err := s.db.Exec(`DELETE FROM tutor_call_reservations WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("store: release tutor reservation: %w", err)
+	}
+	return nil
+}
+
+// FinalizeTutorCall stores one advisory call attempt and releases its budget
+// reservation in the same transaction, so the slot passes from the reservation
+// to the recorded call without a window in which it is counted twice or not at
+// all. A failed call is recorded too: usage and failure visibility is part of
+// the contract, while the attempt table remains untouched.
+func (s *Store) FinalizeTutorCall(call TutorCall, reservationID int64) (TutorCall, error) {
 	if err := validateTutorCall(call); err != nil {
 		return TutorCall{}, err
 	}
-	res, err := s.db.Exec(`INSERT INTO tutor_calls (
+	if reservationID <= 0 {
+		return TutorCall{}, errors.New("store: tutor call requires a budget reservation")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return TutorCall{}, fmt.Errorf("store: begin tutor call: %w", err)
+	}
+	defer tx.Rollback()
+	released, err := tx.Exec(`DELETE FROM tutor_call_reservations WHERE id = ?`, reservationID)
+	if err != nil {
+		return TutorCall{}, fmt.Errorf("store: release tutor reservation: %w", err)
+	}
+	held, err := released.RowsAffected()
+	if err != nil {
+		return TutorCall{}, fmt.Errorf("store: read tutor reservation release: %w", err)
+	}
+	if held != 1 {
+		return TutorCall{}, fmt.Errorf("store: tutor reservation %d is not held", reservationID)
+	}
+	res, err := tx.Exec(`INSERT INTO tutor_calls (
 			created_at, attempt_id, mode, status, error_code, error_message,
 			provider_host, model, prompt_version, source_id, content_id, question_id,
 			source_text_shared, request_sha256, request_bytes, output_text, output_chars,
@@ -264,6 +353,9 @@ func (s *Store) AppendTutorCall(call TutorCall) (TutorCall, error) {
 	id, err := res.LastInsertId()
 	if err != nil {
 		return TutorCall{}, fmt.Errorf("store: read tutor call id: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return TutorCall{}, fmt.Errorf("store: commit tutor call: %w", err)
 	}
 	call.ID = id
 	call.CreatedAt = call.CreatedAt.UTC()

@@ -450,9 +450,11 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 		if strings.TrimSpace(target.Reasoning) != "" {
 			sections = append(sections, "Authored reasoning: "+clipField("reasoning", target.Reasoning, maxReasoningRunes))
 		}
-		sections = append(sections, fmt.Sprintf("Verified key: %s — %s", target.CorrectLabel, target.CorrectText))
+		sections = append(sections, fmt.Sprintf("Verified key: %s — %s", target.CorrectLabel,
+			clipField("correct_option_text", target.CorrectText, maxOptionRunes)))
 		if target.SelectedLabel != "" {
-			sections = append(sections, fmt.Sprintf("Learner selected: %s — %s", target.SelectedLabel, target.SelectedText))
+			sections = append(sections, fmt.Sprintf("Learner selected: %s — %s", target.SelectedLabel,
+				clipField("selected_option_text", target.SelectedText, maxOptionRunes)))
 		} else {
 			sections = append(sections, "Learner selected: none (the attempt was skipped)")
 		}
@@ -470,11 +472,13 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 			withheld = append(withheld, "selected_option_text", "correct_option_text")
 		} else if includeStored {
 			if target.SelectedLabel != "" {
-				sections = append(sections, fmt.Sprintf("Recorded selection: %s — %s", target.SelectedLabel, target.SelectedText))
+				sections = append(sections, fmt.Sprintf("Recorded selection: %s — %s", target.SelectedLabel,
+					clipField("selected_option_text", target.SelectedText, maxOptionRunes)))
 				storedTextIncluded = true
 			}
 			if strings.TrimSpace(target.CorrectLabel) != "" {
-				sections = append(sections, fmt.Sprintf("Recorded verified key: %s — %s", target.CorrectLabel, target.CorrectText))
+				sections = append(sections, fmt.Sprintf("Recorded verified key: %s — %s", target.CorrectLabel,
+					clipField("correct_option_text", target.CorrectText, maxOptionRunes)))
 				storedTextIncluded = true
 			}
 		}

@@ -404,3 +404,18 @@ Entry format:
   over 20,000 units, and a 12,000-code-point response could be refused. `agent/tutor-host.mjs` now
   counts `Array.from(text).length` for the message total and the response text; `tutor-smoke` sends a
   15,000-code-point astral prompt and a 12,000-code-point astral response. Bound values are unchanged.
+
+### Q-0005-06 — What happens to a daily-call reservation left by a crashed `tutor ask`?
+- Status: decided(default taken)
+- Context: round-2 review found that two concurrent `tutor ask` processes could both pass the daily
+  budget check, because neither appended a call until after the provider responded. `ask` now claims
+  a slot in `tutor_call_reservations` inside an immediate transaction before spawning the host, and
+  the recorded call replaces that claim in the same transaction. A process that dies between the
+  claim and the record, or a storage failure while recording it, leaves the row behind.
+- Options considered: (A) leave the claim spent until the next UTC day; (B) reclaim claims older
+  than the provider timeout plus a margin; (C) keep the race and document the budget as best-effort.
+- Default taken: (A). The crashed process may already have posted a billable request, so the claim
+  is kept and the budget can only under-spend. Reverse by deleting rows from
+  `tutor_call_reservations`; no call or attempt record changes.
+- Revisit when: goal 0006 gives the host a durable call lifecycle that can report a call as finished
+  or abandoned, or an operator needs the slot back before midnight.

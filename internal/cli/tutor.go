@@ -324,15 +324,25 @@ func runTutorAsk(args []string, opt Options) int {
 			fmt.Sprintf("%s is not set; export it in this environment (it is never stored)", tutor.CredentialEnv))
 	}
 	now := opt.Now()
-	used, err := st.TutorCallCountSince(tutorDayStart(now))
+	reservation, used, err := st.ReserveTutorCall(tutorDayStart(now), now, cfg.DailyCalls)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	if used >= cfg.DailyCalls {
+	if reservation == 0 {
 		return usageError(opt, *jsonFlag, "budget_exhausted",
 			fmt.Sprintf("%d of %d tutor calls are used today (UTC); raise the budget with passquest tutor config --daily-calls N",
 				used, cfg.DailyCalls))
 	}
+	// The slot stays claimed until the call record replaces it. A path that
+	// fails before the host is invoked releases it; a crash or storage failure
+	// after that leaves it spent for the UTC day, which can under-spend but
+	// never over-spend the budget.
+	sendStarted := false
+	defer func() {
+		if !sendStarted {
+			_ = st.ReleaseTutorCallReservation(reservation)
+		}
+	}()
 	record, err := tutorAttemptRecord(st, *attemptFlag)
 	if err != nil {
 		return tutorCommandError(opt, *jsonFlag, err)
@@ -360,6 +370,7 @@ func runTutorAsk(args []string, opt Options) int {
 		RequestBytes:  preview.RequestBytes,
 	}
 
+	sendStarted = true
 	callStarted := opt.Now()
 	response, transportErr := opt.TutorTransport.Call(context.Background(), preview.Request)
 	if transportErr != nil {
@@ -367,7 +378,7 @@ func runTutorAsk(args []string, opt Options) int {
 		call.ErrorCode = "agent_unavailable"
 		call.ErrorMessage = tutorMessage(transportErr.Error(), key)
 		call.LatencyMS = opt.Now().Sub(callStarted).Milliseconds()
-		return recordTutorFailure(opt, *jsonFlag, st, call)
+		return recordTutorFailure(opt, *jsonFlag, st, call, reservation)
 	}
 	// Private text is shared only when the host actually posted the request. A
 	// host that failed before its fetch left the prompt on this machine.
@@ -388,7 +399,7 @@ func runTutorAsk(args []string, opt Options) int {
 		call.ErrorMessage = tutorMessage(message, key)
 		call.HTTPStatus = response.HTTPStatus
 		call.LatencyMS = response.LatencyMS
-		return recordTutorFailure(opt, *jsonFlag, st, call)
+		return recordTutorFailure(opt, *jsonFlag, st, call, reservation)
 	}
 
 	text := strings.TrimSpace(response.Text)
@@ -399,7 +410,7 @@ func runTutorAsk(args []string, opt Options) int {
 		call.ErrorMessage = "the provider text was empty, invalid or larger than the local bound"
 		call.HTTPStatus = response.HTTPStatus
 		call.LatencyMS = response.LatencyMS
-		return recordTutorFailure(opt, *jsonFlag, st, call)
+		return recordTutorFailure(opt, *jsonFlag, st, call, reservation)
 	}
 	text = strings.ReplaceAll(text, key, "[redacted]")
 	call.Status = "ok"
@@ -413,7 +424,7 @@ func runTutorAsk(args []string, opt Options) int {
 		call.PromptTokens = &prompt
 		call.CompletionTokens = &completion
 	}
-	saved, err := st.AppendTutorCall(call)
+	saved, err := st.FinalizeTutorCall(call, reservation)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -432,8 +443,8 @@ func runTutorAsk(args []string, opt Options) int {
 	return 0
 }
 
-func recordTutorFailure(opt Options, jsonMode bool, st *store.Store, call store.TutorCall) int {
-	saved, err := st.AppendTutorCall(call)
+func recordTutorFailure(opt Options, jsonMode bool, st *store.Store, call store.TutorCall, reservation int64) int {
+	saved, err := st.FinalizeTutorCall(call, reservation)
 	if err != nil {
 		return internalError(opt, jsonMode, err)
 	}

@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,6 +43,18 @@ func sampleTutorCall() TutorCall {
 		HTTPStatus:       200,
 		LatencyMS:        50,
 	}
+}
+
+// appendTutorCall reserves a slot and finalizes one call, matching the
+// production pairing.
+func appendTutorCall(t *testing.T, st *Store, call TutorCall) (TutorCall, error) {
+	t.Helper()
+	reservation, _, err := st.ReserveTutorCall(
+		time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC), call.CreatedAt, 200)
+	if err != nil {
+		return TutorCall{}, err
+	}
+	return st.FinalizeTutorCall(call, reservation)
 }
 
 func TestMigrationFromVersionSixAddsTutorTables(t *testing.T) {
@@ -119,8 +132,8 @@ func TestMigrationFromVersionSixAddsTutorTables(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendTutorConsent after migration: %v", err)
 	}
-	if _, err := st.AppendTutorCall(sampleTutorCall()); err != nil {
-		t.Fatalf("AppendTutorCall after migration: %v", err)
+	if _, err := appendTutorCall(t, st, sampleTutorCall()); err != nil {
+		t.Fatalf("tutor call after migration: %v", err)
 	}
 }
 
@@ -207,9 +220,9 @@ func TestTutorConsentLatestWinsAndIsAppendOnly(t *testing.T) {
 
 func TestTutorCallRoundTripAndAppendOnly(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "calls.sqlite"))
-	first, err := st.AppendTutorCall(sampleTutorCall())
+	first, err := appendTutorCall(t, st, sampleTutorCall())
 	if err != nil {
-		t.Fatalf("AppendTutorCall: %v", err)
+		t.Fatalf("append tutor call: %v", err)
 	}
 	if first.ID == 0 || first.OutputText != "short advice" {
 		t.Fatalf("first call = %+v", first)
@@ -226,7 +239,7 @@ func TestTutorCallRoundTripAndAppendOnly(t *testing.T) {
 	errorCall.CompletionTokens = nil
 	errorCall.HTTPStatus = 500
 	errorCall.CreatedAt = errorCall.CreatedAt.Add(time.Minute)
-	if _, err := st.AppendTutorCall(errorCall); err != nil {
+	if _, err := appendTutorCall(t, st, errorCall); err != nil {
 		t.Fatalf("append error call: %v", err)
 	}
 
@@ -264,17 +277,17 @@ func TestTutorCallCountSinceUsesTheDayBoundary(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "budget.sqlite"))
 	early := sampleTutorCall()
 	early.CreatedAt = time.Date(2026, 11, 9, 23, 59, 59, 0, time.UTC)
-	if _, err := st.AppendTutorCall(early); err != nil {
+	if _, err := appendTutorCall(t, st, early); err != nil {
 		t.Fatal(err)
 	}
 	boundary := sampleTutorCall()
 	boundary.CreatedAt = time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
-	if _, err := st.AppendTutorCall(boundary); err != nil {
+	if _, err := appendTutorCall(t, st, boundary); err != nil {
 		t.Fatal(err)
 	}
 	late := sampleTutorCall()
 	late.CreatedAt = time.Date(2026, 11, 10, 15, 12, 0, 0, time.UTC)
-	if _, err := st.AppendTutorCall(late); err != nil {
+	if _, err := appendTutorCall(t, st, late); err != nil {
 		t.Fatal(err)
 	}
 	count, err := st.TutorCallCountSince(time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC))
@@ -283,8 +296,104 @@ func TestTutorCallCountSinceUsesTheDayBoundary(t *testing.T) {
 	}
 }
 
-func TestAppendTutorCallRejectsMalformedRecords(t *testing.T) {
+func TestTutorReservationCountsInFlightCallsAndFinalizeReplacesIt(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "reserve.sqlite"))
+	day := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
+	at := day.Add(9 * time.Hour)
+
+	first, used, err := st.ReserveTutorCall(day, at, 2)
+	if err != nil || first == 0 || used != 1 {
+		t.Fatalf("first reservation = %d, %d, %v; want a slot and count 1", first, used, err)
+	}
+	second, used, err := st.ReserveTutorCall(day, at, 2)
+	if err != nil || second == 0 || used != 2 {
+		t.Fatalf("second reservation = %d, %d, %v; want a slot and count 2", second, used, err)
+	}
+	if refused, used, err := st.ReserveTutorCall(day, at, 2); err != nil || refused != 0 || used != 2 {
+		t.Fatalf("in-flight reservations did not consume the budget: %d, %d, %v", refused, used, err)
+	}
+
+	call := sampleTutorCall()
+	call.CreatedAt = at
+	if _, err := st.FinalizeTutorCall(call, first); err != nil {
+		t.Fatalf("FinalizeTutorCall: %v", err)
+	}
+	if count, err := st.TutorCallCountSince(day); err != nil || count != 1 {
+		t.Fatalf("recorded calls = %d, %v; want 1", count, err)
+	}
+	// The recorded call replaces its reservation rather than adding to it.
+	if refused, used, err := st.ReserveTutorCall(day, at, 2); err != nil || refused != 0 || used != 2 {
+		t.Fatalf("finalize left the budget inconsistent: %d, %d, %v", refused, used, err)
+	}
+	if err := st.ReleaseTutorCallReservation(second); err != nil {
+		t.Fatalf("ReleaseTutorCallReservation: %v", err)
+	}
+	third, used, err := st.ReserveTutorCall(day, at, 2)
+	if err != nil || third == 0 || used != 2 {
+		t.Fatalf("released slot was not reusable: %d, %d, %v", third, used, err)
+	}
+	if _, err := st.FinalizeTutorCall(call, first); err == nil || !strings.Contains(err.Error(), "not held") {
+		t.Fatalf("finalizing a released reservation error = %v, want a missing reservation", err)
+	}
+}
+
+func TestTutorReservationsAreAtomicAcrossHandles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "atomic.sqlite")
+	day := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
+	at := day.Add(9 * time.Hour)
+	const workers = 8
+	stores := make([]*Store, workers)
+	for i := range stores {
+		stores[i] = mustOpen(t, path)
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	ids := make([]int64, workers)
+	errs := make([]error, workers)
+	for i, st := range stores {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			ids[i], _, errs[i] = st.ReserveTutorCall(day, at, 1)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	claimed := 0
+	holder := 0
+	for i := range ids {
+		if errs[i] != nil {
+			t.Fatalf("reservation %d: %v", i, errs[i])
+		}
+		if ids[i] == 0 {
+			continue
+		}
+		claimed++
+		holder = i
+	}
+	if claimed != 1 {
+		t.Fatalf("%d reservations were claimed with a budget of 1", claimed)
+	}
+	call := sampleTutorCall()
+	call.CreatedAt = at
+	if _, err := stores[holder].FinalizeTutorCall(call, ids[holder]); err != nil {
+		t.Fatalf("FinalizeTutorCall: %v", err)
+	}
+	if count, err := stores[0].TutorCallCountSince(day); err != nil || count != 1 {
+		t.Fatalf("recorded calls = %d, %v; want 1", count, err)
+	}
+}
+
+func TestFinalizeTutorCallRejectsMalformedRecords(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "invalid.sqlite"))
+	reservation, _, err := st.ReserveTutorCall(
+		time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC), sampleTutorCall().CreatedAt, 200)
+	if err != nil {
+		t.Fatalf("ReserveTutorCall: %v", err)
+	}
 	tests := []struct {
 		name    string
 		mutate  func(*TutorCall)
@@ -335,12 +444,17 @@ func TestAppendTutorCallRejectsMalformedRecords(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			call := sampleTutorCall()
 			test.mutate(&call)
-			if _, err := st.AppendTutorCall(call); err == nil || !strings.Contains(err.Error(), test.wantErr) {
-				t.Fatalf("AppendTutorCall error = %v, want %q", err, test.wantErr)
+			if _, err := st.FinalizeTutorCall(call, reservation); err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("FinalizeTutorCall error = %v, want %q", err, test.wantErr)
 			}
 		})
 	}
 	if calls, err := st.TutorCalls(0); err != nil || len(calls) != 0 {
 		t.Fatalf("invalid calls were stored: %+v, %v", calls, err)
+	}
+	// A rejected record never releases the slot: the caller still decides
+	// whether to send, retry or release it.
+	if _, err := st.FinalizeTutorCall(sampleTutorCall(), reservation); err != nil {
+		t.Fatalf("reservation was released by a rejected record: %v", err)
 	}
 }

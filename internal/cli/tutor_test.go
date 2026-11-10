@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -53,6 +55,20 @@ func fixedTutorError(code, message string) tutor.HostResponse {
 	}
 }
 
+// blockingTutorTransport holds one call in flight until the test releases it,
+// so a second invocation can be observed against the same daily budget.
+type blockingTutorTransport struct {
+	started  chan struct{}
+	release  chan struct{}
+	response tutor.HostResponse
+}
+
+func (b *blockingTutorTransport) Call(_ context.Context, _ tutor.HostRequest) (tutor.HostResponse, error) {
+	close(b.started)
+	<-b.release
+	return b.response, nil
+}
+
 func tutorEnv(present bool) func(string) string {
 	return func(key string) string {
 		if key == tutor.CredentialEnv && present {
@@ -62,7 +78,7 @@ func tutorEnv(present bool) func(string) string {
 	}
 }
 
-func newTutorOptions(stdout, stderr *bytes.Buffer, clock *stepClock, transport *fakeTutorTransport, keyPresent bool) Options {
+func newTutorOptions(stdout, stderr *bytes.Buffer, clock *stepClock, transport tutor.Transport, keyPresent bool) Options {
 	return Options{
 		Stdin:          strings.NewReader(""),
 		Stdout:         stdout,
@@ -74,14 +90,14 @@ func newTutorOptions(stdout, stderr *bytes.Buffer, clock *stepClock, transport *
 	}
 }
 
-func runTutorCLI(t *testing.T, db string, clock *stepClock, transport *fakeTutorTransport, keyPresent bool, args ...string) (int, string, string) {
+func runTutorCLI(t *testing.T, db string, clock *stepClock, transport tutor.Transport, keyPresent bool, args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	code := Run(append(args, "--db", db), newTutorOptions(&stdout, &stderr, clock, transport, keyPresent))
 	return code, stdout.String(), stderr.String()
 }
 
-func mustTutorRun(t *testing.T, db string, clock *stepClock, transport *fakeTutorTransport, keyPresent bool, args ...string) string {
+func mustTutorRun(t *testing.T, db string, clock *stepClock, transport tutor.Transport, keyPresent bool, args ...string) string {
 	t.Helper()
 	code, out, errOut := runTutorCLI(t, db, clock, transport, keyPresent, args...)
 	if code != 0 {
@@ -90,7 +106,7 @@ func mustTutorRun(t *testing.T, db string, clock *stepClock, transport *fakeTuto
 	return out
 }
 
-func configureTutor(t *testing.T, db string, clock *stepClock, transport *fakeTutorTransport, keyPresent bool, extra ...string) string {
+func configureTutor(t *testing.T, db string, clock *stepClock, transport tutor.Transport, keyPresent bool, extra ...string) string {
 	t.Helper()
 	args := append([]string{
 		"tutor", "config", "--endpoint", "https://api.example.com/v1/chat/completions", "--model", "example-model", "--json",
@@ -660,6 +676,60 @@ func TestTutorAskRequiresCredentialAndBudget(t *testing.T) {
 	history = decodeTutorHistory(t, mustTutorRun(t, db, clock, transport, true, "tutor", "history", "--json"))
 	if history.Summary.Calls != 1 || history.Summary.DailyLimit == nil || *history.Summary.DailyLimit != 1 {
 		t.Fatalf("budget history = %+v", history.Summary)
+	}
+}
+
+func TestTutorAskReservesTheBudgetBeforeContactingTheProvider(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	blocking := &blockingTutorTransport{
+		started:  make(chan struct{}),
+		release:  make(chan struct{}),
+		response: fixedTutorResponse("Short advice."),
+	}
+	second := &fakeTutorTransport{response: fixedTutorResponse("Second advice.")}
+	practiceSample(t, db, clock)
+	configureTutor(t, db, clock, blocking, true, "--daily-calls", "1")
+
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(blocking.release) }) }
+	defer release()
+
+	type result struct {
+		code   int
+		stderr string
+	}
+	done := make(chan result, 1)
+	go func() {
+		code, _, stderr := runTutorCLI(t, db, &stepClock{base: goldenBase}, blocking, true, "tutor", "ask", "--json")
+		done <- result{code: code, stderr: stderr}
+	}()
+	select {
+	case <-blocking.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first ask never reached the transport")
+	}
+
+	code, _, stderr := runTutorCLI(t, db, clock, second, true, "tutor", "ask", "--json")
+	if code != 2 || !strings.Contains(stderr, "budget_exhausted") {
+		t.Fatalf("second ask while the first is in flight = %d %s", code, stderr)
+	}
+	if len(second.requests) != 0 {
+		t.Fatal("a second provider request was made while the first held the only slot")
+	}
+
+	release()
+	first := <-done
+	if first.code != 0 {
+		t.Fatalf("first ask = %d %s", first.code, first.stderr)
+	}
+
+	// The finalized call replaced its reservation: one of two slots is free.
+	configureTutor(t, db, clock, second, true, "--daily-calls", "2")
+	mustTutorRun(t, db, clock, second, true, "tutor", "ask", "--json")
+	history := decodeTutorHistory(t, mustTutorRun(t, db, clock, second, true, "tutor", "history", "--json"))
+	if history.Summary.Calls != 2 || history.Summary.DailyCalls != 2 {
+		t.Fatalf("history after two asks = %+v", history.Summary)
 	}
 }
 

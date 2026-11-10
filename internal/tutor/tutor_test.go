@@ -350,6 +350,41 @@ func TestBuildClipsLongPassageAndFields(t *testing.T) {
 	}
 }
 
+func TestBuildClipsRecordedOptionTextsInEveryBranch(t *testing.T) {
+	longOption := strings.Repeat("recorded option ", 1_500)
+	longSelection := strings.Repeat("selected answer ", 1_500)
+	tests := []struct {
+		name   string
+		mutate func(*Target)
+	}{
+		{"current content", func(*Target) {}},
+		{"changed content", func(target *Target) { target.ContentChanged = true }},
+		{"unavailable content", func(target *Target) { target.ContentMatched = false }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := firstPartyTarget()
+			target.Options[1].Text = longOption
+			target.CorrectText = longOption
+			target.SelectedText = longSelection
+			test.mutate(&target)
+			preview, err := Build(validConfig(), ModeExplain, target)
+			if err != nil {
+				t.Fatalf("Build rejected a prompt with long recorded option text: %v", err)
+			}
+			user := preview.Request.Chat.Messages[1].Content
+			if strings.Contains(user, longOption) || strings.Contains(user, longSelection) {
+				t.Fatal("recorded option text was sent unclipped")
+			}
+			for _, field := range []string{"selected_option_text", "correct_option_text"} {
+				if !contains(preview.Context.TruncatedFields, field) {
+					t.Errorf("truncated fields = %v, want %s", preview.Context.TruncatedFields, field)
+				}
+			}
+		})
+	}
+}
+
 func TestBuildRejectsPromptOverTheTotalBound(t *testing.T) {
 	target := firstPartyTarget()
 	target.Options = nil

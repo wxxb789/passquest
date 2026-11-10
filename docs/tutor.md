@@ -97,13 +97,14 @@ Bounds: timeout 1–120 s (default 30), `max_tokens` 64–2048 (default 350), pr
 model text ≤ 12 000 characters, prompt ≤ 20 000 characters, daily budget 1–200 (default 20).
 Character means Unicode code point; the host counts the same units as the Go client, so astral text is
 not rejected early. Passage 3 000 characters (a window around the evidence), stem 1 000, each option
-500, evidence 800, reasoning 1 000, lesson fields 900 each. Extra skill lessons are omitted locally
-with an explicit line when the combined lesson budget is reached. `preview` names every clipped or
-omitted field.
+500, evidence 800, reasoning 1 000, lesson fields 900 each. The recorded selected and verified option
+texts are clipped to the same 500 characters whether the current content is sent or only the stored
+snapshot is. Extra skill lessons are omitted locally with an explicit line when the combined lesson
+budget is reached. `preview` names every clipped or omitted field.
 
 ## What is stored
 
-Schema version 7 adds three tables:
+Schema version 8 adds four tables:
 
 - `tutor_config` — endpoint, model, timeout, output bound and daily budget. Mutable settings, no
   credential.
@@ -111,6 +112,9 @@ Schema version 7 adds three tables:
 - `tutor_calls` — append-only advisory records: attempt/content/question ids, mode, status, error
   code/message, provider host, model, prompt version, whether private text was shared, request
   SHA-256/bytes, output text/characters, token usage, HTTP status and latency.
+- `tutor_call_reservations` — the transient daily-budget ledger. `ask` inserts a row before it
+  contacts the host, and the call record's insert deletes it in the same transaction. The row is not
+  learner evidence and carries only its creation time.
 
 Raw prompt text is not stored; the SHA-256 and byte size describe the exact serialized request body,
 which the host posts without re-encoding, and `tutor preview` shows the same chat content before
@@ -119,8 +123,13 @@ stored advisory text. A call records `source_text_shared` only when the host act
 that carried private source text; a failure before the request was sent records `false`. `report`,
 `next`, `practice` and any export path do not read these tables.
 
-The call budget counts failed calls and resets at 00:00 UTC. There is no automatic retry: a retry can
-double provider spend and hide a failure. Run `tutor ask` again after fixing the cause.
+The call budget counts failed calls and resets at 00:00 UTC. `ask` claims a slot with an immediate
+database transaction before it spawns the host, so two concurrent invocations cannot both pass the
+same check with, say, `--daily-calls 1`; the recorded call replaces its claim atomically. A path that
+fails before the host is invoked releases its claim. A crash or a storage failure after that cannot,
+so the slot stays spent until the next UTC day: the accounting can under-spend, never over-spend.
+There is no automatic retry: a retry can double provider spend and hide a failure. Run `tutor ask`
+again after fixing the cause.
 
 ## Runtime boundary
 
