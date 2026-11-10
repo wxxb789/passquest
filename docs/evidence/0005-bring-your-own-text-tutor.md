@@ -2,8 +2,8 @@
 
 - Tree: base commit `67e68e7aaca30bdd7975970bf792091cbe43296f` (`refactor(0005): apply accepted
   simplifications`) on top of `4b68b80373410072b14b16125cf98b21888b5632`, plus the round-1 and
-  round-2 review fixes in the working tree. Every command below ran on that tree; the operator owns
-  the commit.
+  round-2 review fixes and the outcome-specific task fix in the working tree. Every command below ran
+  on that tree; the operator owns the commit.
 - Date: 2026-11-10. Host: Linux 7.0.0-1017-azure x64.
 - Toolchain: Go 1.27.3 via mise; Node v24.16.0; Bun 1.4.4; `modernc.org/sqlite` v1.62.0 (pure Go).
   No real provider, API key or external network call was used.
@@ -20,7 +20,7 @@ recommendation or export is detectable.
 
 | Package / area | Truth it owns |
 |---|---|
-| `internal/tutor` | Config validation (https/loopback, no userinfo/query/fragment, bounds), the `tutor-v1` system/user prompt, privacy classification, field clipping, the exact serialized request body with its SHA-256 and byte size, the versioned host request/response and the stdin/stdout Node transport. It imports no network package and writes no database. |
+| `internal/tutor` | Config validation (https/loopback, no userinfo/query/fragment, bounds), the `tutor-v2` system/user prompt, privacy classification, field clipping, the exact serialized request body with its SHA-256 and byte size, the versioned host request/response and the stdin/stdout Node transport. It imports no network package and writes no database. |
 | `internal/store` | Schema v8: mutable non-secret `tutor_config`, append-only `tutor_consent_events`, append-only `tutor_calls`, and the transient `tutor_call_reservations` budget ledger. Effective consent is the latest event; the daily count includes failures and in-flight reservations. Update/delete triggers reject rewriting either evidence trail. |
 | `internal/cli` | `tutor config/preview/ask/history/show/consent/revoke/consents`, attempt/content resolution, per-source consent gating, credential and budget checks, advisory rendering, a content summary derived from what the prompt carries, failure rows and the new exit-3 path. A call records shared private text only when the host confirms the request was sent. |
 | `agent/tutor-host.mjs` | The single network egress: endpoint validation, bearer auth from `PASSQUEST_TUTOR_API_KEY`, no redirects, timeout and 1 MiB body bound, response/usage validation and structured errors with the credential redacted. It checks the request body against the typed chat, posts those exact bytes, counts prompt/response bounds in code points and reports `request_sent`. No database or tool access. |
@@ -70,11 +70,25 @@ The model response is stored only in `tutor_calls` as advisory text. It is never
   spent for the UTC day; the budget can under-spend but not over-spend. Disclosed in
   [`../tutor.md`](../tutor.md) and Q-0005-06.
 
+## Outcome-specific task review fix
+
+- **Outcome-specific task.** The task sentence asked about "the learner's selected option" for every
+  attempt. A correct selection is the verified key, and a skipped attempt has no selection, so those
+  instructions demanded a critique or misconception probe that the record contradicts. `taskFor` now
+  takes the recorded status: an incorrect selection is compared with the key, a correct one with the
+  other options, and a skipped attempt with the evidence location; `probe` asks about the reasoning
+  behind a correct choice and what blocked a skip. When question content is withheld the task drops
+  selection and option wording. `TestBuildTaskMatchesRecordedOutcome` pins eight status/mode/content
+  combinations. The prompt version is `tutor-v2`, so calls made with the old task wording remain
+  distinguishable in `tutor history`. The request body changed, so the preview/advisory/history
+  goldens and the Tier 2 byte counts and SHA-256 values above were re-measured on the final tree; no
+  task text is stored.
+
 ## Tier 1 — automated checks
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1` | exit 0; 10 packages, 427 test runs, 427 passes, 0 skips, 0 failures (`go test -json` count) |
+| `go test ./... -count=1` | exit 0; 10 packages, 436 test runs, 436 passes, 0 skips, 0 failures (`go test -json` count) |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
 | `gofmt -l` (working-tree `*.go`) | empty output, exit 0 |
@@ -88,7 +102,7 @@ The tests that pin this increment's contract clauses:
 | Test area | Clause it pins |
 |---|---|
 | `TestConfigValidation`, `TestTutorConfigRejectsCredentialInEndpoint`, `TestProviderHostOmitsPathAndQuery` | One endpoint shape; https off-loopback; loopback http; userinfo/query/fragment/relative/ftp rejected; model/timeout/token/budget bounds; only host:port is recorded in a call. |
-| `TestBuildFirstPartyIsGrounded`, `TestBuildModesChangeOnlyTheTask` | The prompt carries the attempted question, verified key, evidence, authored reasoning, skill lesson and observed elapsed/assistance; explain/probe/micro-lesson have distinct bounded tasks. |
+| `TestBuildFirstPartyIsGrounded`, `TestBuildModesChangeOnlyTheTask`, `TestBuildTaskMatchesRecordedOutcome` | The prompt carries the attempted question, verified key, evidence, authored reasoning, skill lesson and observed elapsed/assistance; explain/probe/micro-lesson have distinct bounded tasks, and the task follows the recorded outcome so a correct selection and a skip are not coached as a wrong choice, including when content is withheld. |
 | `TestBuildPrivateWithoutConsentWithholdsEveryPrivateString`, `TestBuildPrivateWithConsentIncludesSourceText`, `TestBuildPrivateStoredTextWithoutConsentIsWithheld` | Imported page, stem, options, evidence, reasoning and stored option texts are absent without consent and present after a grant. |
 | `TestBuildChangedContentUsesStoredTextOnly`, `TestBuildUnavailableContentDisclosesAndKeepsStoredLabels` | A changed or missing question is disclosed; stale current passage/evidence is not sent. |
 | `TestBuildClipsLongPassageAndFields`, `TestBuildClipsRecordedOptionTextsInEveryBranch`, `TestBuildOmitsExtraLessonsWithinThePromptBound` | Passage is a bounded window around the evidence; long fields and the recorded selected/verified option texts are marked truncated in every content branch; extra multi-skill lessons are omitted with a local disclosure. |
@@ -175,7 +189,7 @@ Provider: stub-model @ http://127.0.0.1:38271/v1/chat/completions
 Credential: PASSQUEST_TUTOR_API_KEY is set (value never printed)
 Privacy: first-party material only; no private source text is involved
 Content: the current passage, question, options, verified key and evidence are included.
-Provider request: 2506 bytes, sha256 1c106909d616215f76544367efd9032ff87a3ff2766c72bb6d743ab0ff5610ca
+Provider request: 2537 bytes, sha256 a2f8d2bac4db0dd8026c7e5d1774a0f11785d6d9d657a74c9ba0f576c37b2ce8
 ```
 
 The stub's request log had 0 lines after `preview` and 1 after `ask`. `ask` produced:
@@ -195,12 +209,12 @@ Advisory marker 0005: locate the sentence that gives the Saturday closing time, 
 --- end AI suggestion ---
 
 This is model output. It is not a verified answer, grade or exam fact. The recorded attempt and answer key are unchanged.
-Advisory call #1 recorded; request sha256 1c106909d616215f76544367efd9032ff87a3ff2766c72bb6d743ab0ff5610ca.
+Advisory call #1 recorded; request sha256 a2f8d2bac4db0dd8026c7e5d1774a0f11785d6d9d657a74c9ba0f576c37b2ce8.
 ```
 
 The stub received one request at `/v1/chat/completions` with `Authorization: Bearer demo-not-real-key`,
 `model: stub-model`, `max_tokens: 350`, two messages, and no credential in the JSON body. SHA-256 of
-the raw body the stub received was `1c106909…10ca`, equal to the preview's `request_sha256` and the
+the raw body the stub received was `a2f8d2ba…2ce8`, equal to the preview's `request_sha256` and the
 recorded call's; the gate asserts this for every run. The `report --json` document was byte-identical
 before and after the call; `report` and `next` did not contain the advisory marker.
 
@@ -238,7 +252,7 @@ Withheld: passage, question_stem, options, evidence, reasoning, selected_option_
 Content: the current passage and question are withheld because this private source is not authorized.
 Withheld as well: the recorded selection and verified key option texts.
 Skills: not-except-polarity
-Provider request: 3778 bytes, sha256 c279b6b2d2fa6e58baa68ae3c9aad55c20290870bf5fa972d553586298e7c9e2
+Provider request: 3782 bytes, sha256 9f6cc2c3c216813c9157624e973778c84fa4e5b7177d99efcb4321457bf2c674
 
 page sentence present in prompt: false
 question stem present in prompt: false
@@ -254,12 +268,12 @@ The event is append-only; earlier decisions remain in the local audit trail.
 $ passquest tutor preview --db demo.sqlite
 Privacy: private source src-bb4d9a5479518365 is authorized; source text shared: yes
 Content: the current passage, question, options, verified key and evidence are included.
-Provider request: 4258 bytes, sha256 8f4f7a07681047be2461320ec9d53bd7cb48c03b07a6ab4155976ba0120d592c
+Provider request: 4289 bytes, sha256 3dda27058e89876243ce5b92de314a09aae804b28d7d0189d819c4286f87b325
 
 page sentence present in prompt: true
 ```
 
-A subsequent `ask` sent 4258 bytes with the page sentence and question; its call record carried
+A subsequent `ask` sent 4289 bytes with the page sentence and question; its call record carried
 `source_text_shared: true`, and the stub's request log reached 2 lines. After `revoke --reviewer
 demo-owner`, the same preview contained no page sentence and reported `consent_granted: false`;
 `tutor consents` printed the source as `withheld` with the latest reviewer/time.
@@ -320,7 +334,7 @@ Advisory marker 0005: locate the sentence that gives the Saturday closing time, 
 --- end AI suggestion ---
 
 This is model output. It is not a verified answer, grade or exam fact. The recorded attempt and answer key are unchanged.
-Advisory call #1 recorded; request sha256 1c106909d616215f76544367efd9032ff87a3ff2766c72bb6d743ab0ff5610ca.
+Advisory call #1 recorded; request sha256 a2f8d2bac4db0dd8026c7e5d1774a0f11785d6d9d657a74c9ba0f576c37b2ce8.
 Database: /tmp/passquest-0005-review/budget.sqlite
 
 $ passquest tutor ask --db budget.sqlite
@@ -405,7 +419,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (10 packages, 427 tests, 0 skipped)
+PASS  go test (10 packages, 436 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -443,7 +457,7 @@ GATE: PASS
 
 Residual risks, with numbers:
 
-- 427 Go test runs and 156 gate assertions cover the local behaviour; 0 external provider calls were
+- 436 Go test runs and 156 gate assertions cover the local behaviour; 0 external provider calls were
   made, so live-provider compatibility is unverified.
 - The prompt contains one attempt, up to 20 000 characters and at most 350 requested output tokens;
   the stub returned fixed text, so real model usefulness and latency are unmeasured.

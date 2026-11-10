@@ -312,6 +312,83 @@ func TestBuildModesChangeOnlyTheTask(t *testing.T) {
 	}
 }
 
+// TestBuildTaskMatchesRecordedOutcome pins that a correct selection is not
+// criticized as a misconception and a skipped attempt is not asked about a
+// selected option, whether or not the question content is shared.
+func TestBuildTaskMatchesRecordedOutcome(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  string
+		mode    Mode
+		private bool
+		want    []string
+		notWant []string
+	}{
+		{
+			name: "incorrect explain", status: "incorrect", mode: ModeExplain,
+			want: []string{"recorded selection is incorrect", "Explain why the verified key fits the evidence and why that selection does not"},
+		},
+		{
+			name: "correct explain", status: "correct", mode: ModeExplain,
+			want:    []string{"recorded selection is correct", "why the other options do not"},
+			notWant: []string{"selected option does not", "misconception"},
+		},
+		{
+			name: "skipped explain", status: "skipped", mode: ModeExplain,
+			want:    []string{"no selected option", "where that evidence is"},
+			notWant: []string{"selected option does not", "misconception"},
+		},
+		{
+			name: "incorrect probe", status: "incorrect", mode: ModeProbe,
+			want: []string{"misconception behind that selection"},
+		},
+		{
+			name: "correct probe", status: "correct", mode: ModeProbe,
+			want:    []string{"reasoning that produced it"},
+			notWant: []string{"misconception"},
+		},
+		{
+			name: "skipped probe", status: "skipped", mode: ModeProbe,
+			want:    []string{"no selected option to probe", "what blocked them"},
+			notWant: []string{"misconception"},
+		},
+		{
+			name: "correct explain withheld", status: "correct", mode: ModeExplain, private: true,
+			want:    []string{"recorded outcome is correct", "tactic that makes the verified key a reliable choice"},
+			notWant: []string{"selected option does not", "other options"},
+		},
+		{
+			name: "skipped probe withheld", status: "skipped", mode: ModeProbe, private: true,
+			want:    []string{"no selected option to probe", "what blocked them"},
+			notWant: []string{"misconception"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := firstPartyTarget()
+			if test.private {
+				target = privateTarget()
+			}
+			target.Status = test.status
+			preview, err := Build(validConfig(), test.mode, target)
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			user := preview.Request.Chat.Messages[1].Content
+			for _, want := range test.want {
+				if !strings.Contains(user, want) {
+					t.Errorf("task is missing %q:\n%s", want, user)
+				}
+			}
+			for _, notWant := range test.notWant {
+				if strings.Contains(user, notWant) {
+					t.Errorf("task unexpectedly contains %q:\n%s", notWant, user)
+				}
+			}
+		})
+	}
+}
+
 func TestBuildRejectsUnknownModeAndMissingAttempt(t *testing.T) {
 	if _, err := Build(validConfig(), Mode("chat"), firstPartyTarget()); err == nil {
 		t.Fatal("unknown mode was accepted")

@@ -11,10 +11,10 @@
     "status": "ok",
     "provider_host": "api.example.com",
     "model": "example-model",
-    "prompt_version": "tutor-v1",
+    "prompt_version": "tutor-v2",
     "source_text_shared": false,
-    "request_sha256": "561b48d310e200e987413a4cf1c7fe1bd60dff1bb5847a45b1a4b1538c75f21c",
-    "request_bytes": 2512,
+    "request_sha256": "f93b3a81d9041a1230d05a971574022cdb80d3959bbd1979cde019f3132ca35c",
+    "request_bytes": 2543,
     "output_chars": 82,
     "prompt_tokens": 120,
     "completion_tokens": 30,
@@ -40,7 +40,7 @@
     "skills": [],
     "skills_mapped_from_current_tags": false,
     "truncated_fields": [],
-    "prompt_version": "tutor-v1"
+    "prompt_version": "tutor-v2"
   },
   "limits": [
     "Model output is advisory study guidance; it is not a verified answer, grade, exam fact or readiness claim.",

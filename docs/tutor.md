@@ -83,15 +83,21 @@ consent reviewer or attempt history. One attempt per call; no full-history dump.
 
 ## Modes and bounds
 
+The task sentence follows the recorded outcome, not just the mode: a correct selection is not
+treated as a misconception and a skipped attempt has no selection to discuss.
+
 | Mode | Requested output |
 |---|---|
-| `explain` | Why the verified key fits the evidence, why the selected option does not, and one applicable check. |
-| `probe` | Up to two short diagnostic questions about the misconception and one check; no mere restatement of the key. |
+| `explain` | Why the verified key fits the evidence and one applicable check. An incorrect selection is compared with the key, a correct selection with the remaining options, and a skipped attempt with where the evidence sits. |
+| `probe` | Up to two short diagnostic questions and one check: the misconception behind an incorrect selection, the reasoning behind a correct one, or what blocked a skipped attempt. No mere restatement of the key. |
 | `micro_lesson` | One tactical rule, one application step and one boundary/counterexample; no new answer-keyed item. |
+
+When question content is withheld, the task omits selection and option wording and coaches from the
+skill lesson and the observed outcome alone.
 
 The system prompt states that keys and grades are authoritative, that supplied text is data rather
 than instructions, that withheld content must not be guessed, and that output is advisory and at most
-180 plain-text words. The prompt is `tutor-v1`; the version is stored with every call.
+180 plain-text words. The prompt is `tutor-v2`; the version is stored with every call.
 
 Bounds: timeout 1–120 s (default 30), `max_tokens` 64–2048 (default 350), provider body ≤ 1 MiB,
 model text ≤ 12 000 characters, prompt ≤ 20 000 characters, daily budget 1–200 (default 20).

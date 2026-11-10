@@ -15,6 +15,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/wxxb789/passquest/internal/attempt"
 )
 
 // ProtocolVersion is the host stdin/stdout protocol this build speaks.
@@ -22,7 +24,7 @@ const ProtocolVersion = 1
 
 // PromptVersion names the authored prompt and clipping rules. A stored call
 // record carries it so a later prompt change is visible in history.
-const PromptVersion = "tutor-v1"
+const PromptVersion = "tutor-v2"
 
 // CredentialEnv is the only place a provider credential may come from. It is
 // inherited by the host process and is never written to the database, output,
@@ -289,7 +291,9 @@ type Option struct {
 // may use. The CLI resolves content and consent; Build decides what may be
 // shared.
 type Target struct {
-	AttemptID     int64
+	AttemptID int64
+	// Status is the recorded outcome (correct, incorrect or skipped); the task
+	// sentence follows it.
 	Status        string
 	SelectedLabel string
 	SelectedText  string
@@ -484,7 +488,7 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 		}
 	}
 
-	sections = append(sections, taskFor(mode, questionTextSent))
+	sections = append(sections, taskFor(mode, attempt.Status(target.Status), questionTextSent))
 	user := strings.Join(sections, "\n\n")
 
 	system := systemPrompt()
@@ -596,20 +600,67 @@ func systemPrompt() string {
 	}, " ")
 }
 
-func taskFor(mode Mode, hasQuestion bool) string {
+// taskFor tailors the one authored instruction to the recorded outcome. A
+// correct selection is not a misconception, and a skipped attempt has no
+// selection at all, so neither can be coached as a wrong choice.
+func taskFor(mode Mode, status attempt.Status, hasQuestion bool) string {
 	grounding := "Use the supplied question, verified key and evidence."
 	if !hasQuestion {
 		grounding = "Question text is withheld; coach from the skill lesson and observed attempt only."
 	}
 	switch mode {
 	case ModeExplain:
-		return "Task: " + grounding + " Explain why the verified key fits the evidence and why the learner's selected option does not. End with one short check the learner can apply next time."
+		return "Task: " + grounding + " " + explainFocus(status, hasQuestion) + " End with one short check the learner can apply next time."
 	case ModeProbe:
-		return "Task: " + grounding + " Ask the learner up to two short diagnostic questions that probe the misconception behind the selected option, then give one check. Do not merely restate the key."
+		return "Task: " + grounding + " " + probeFocus(status, hasQuestion) + " Do not merely restate the key."
 	case ModeMicroLesson:
 		return "Task: " + grounding + " Give one tactical micro-lesson: the rule, one application step, and one boundary or counterexample. Do not create a new answer-keyed exam question."
 	default:
 		return "Task: Give concise, bounded study guidance."
+	}
+}
+
+func explainFocus(status attempt.Status, hasQuestion bool) string {
+	switch status {
+	case attempt.StatusIncorrect:
+		if hasQuestion {
+			return "The learner's recorded selection is incorrect. Explain why the verified key fits the evidence and why that selection does not."
+		}
+		return "The recorded outcome is incorrect. Explain the tactic the learner should have applied to the verified key."
+	case attempt.StatusCorrect:
+		if hasQuestion {
+			return "The learner's recorded selection is correct. Explain why the verified key fits the evidence and why the other options do not."
+		}
+		return "The recorded outcome is correct. Explain the tactic that makes the verified key a reliable choice."
+	case attempt.StatusSkipped:
+		if hasQuestion {
+			return "The learner skipped this question, so there is no selected option. Explain why the verified key fits the evidence and where that evidence is."
+		}
+		return "The learner skipped this question, so there is no selected option. Explain how the lesson's tactic locates the verified key."
+	default:
+		return "Explain why the verified key fits the evidence."
+	}
+}
+
+func probeFocus(status attempt.Status, hasQuestion bool) string {
+	switch status {
+	case attempt.StatusIncorrect:
+		if hasQuestion {
+			return "The learner's recorded selection is incorrect. Ask the learner up to two short diagnostic questions that probe the misconception behind that selection, then give one check."
+		}
+		return "The recorded outcome is incorrect. Ask the learner up to two short diagnostic questions about how they chose, then give one check."
+	case attempt.StatusCorrect:
+		if hasQuestion {
+			return "The learner's recorded selection is correct. Ask the learner up to two short diagnostic questions about the reasoning that produced it, then give one check."
+		}
+		return "The recorded outcome is correct. Ask the learner up to two short diagnostic questions about the reasoning they used, then give one check."
+	case attempt.StatusSkipped:
+		if hasQuestion {
+			return "The learner skipped this question, so there is no selected option to probe. Ask up to two short diagnostic questions about what blocked them or where they would start, then give one check."
+		}
+		return "The learner skipped this question, so there is no selected option to probe. Ask up to two short diagnostic questions about what blocked them, then give one check."
+	default:
+		return "Ask the learner up to two short diagnostic questions about the observed attempt, then give one check."
 	}
 }
 
