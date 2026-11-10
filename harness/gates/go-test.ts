@@ -10,6 +10,22 @@ interface TestEvent {
   Output?: string;
 }
 
+// The failure line alone ("pkg/Test: failed") forces a second CI round-trip to
+// learn why. Keep each failing test's own output tail; package-level output and
+// the raw stream remain the fallback when no test-level failure was reported.
+const TEST_OUTPUT_TAIL = 12;
+
+function failureOutput(events: TestEvent[], pkg: string, test: string): string[] {
+  const lines: string[] = [];
+  for (const event of events) {
+    if (event.Action !== "output" || event.Package !== pkg || event.Test !== test) continue;
+    for (const line of (event.Output ?? "").split(/\r?\n/)) {
+      if (line.trim() !== "") lines.push(line.replace(/\s+$/, ""));
+    }
+  }
+  return lines.slice(-TEST_OUTPUT_TAIL).map((line) => `  ${line}`);
+}
+
 function parseEvents(stdout: string): TestEvent[] {
   const events: TestEvent[] = [];
   for (const line of stdout.split(/\r?\n/)) {
@@ -43,8 +59,20 @@ export const goTest: Gate = {
       if (event.Action === "skip" && event.Test) skipped.push(`${event.Package}/${event.Test}`);
     }
     if (result.code !== 0) {
-      const failed = [...new Set(events.filter((event) => event.Action === "fail" && event.Test).map((event) => `${event.Package}/${event.Test}`))];
-      if (failed.length > 0) return fail(failed.map((name) => `${name}: failed`));
+      const failed = new Map<string, { pkg: string; test: string }>();
+      for (const event of events) {
+        if (event.Action === "fail" && event.Package && event.Test) {
+          failed.set(`${event.Package}/${event.Test}`, { pkg: event.Package, test: event.Test });
+        }
+      }
+      if (failed.size > 0) {
+        const failures: string[] = [];
+        for (const [name, { pkg, test }] of failed) {
+          failures.push(`${name}: failed`);
+          failures.push(...failureOutput(events, pkg, test));
+        }
+        return fail(failures);
+      }
       const output = events.map((event) => event.Output ?? "").join("").trim();
       return fail(output ? output.split(/\r?\n/).filter((line) => line.trim() !== "") : outputLines(result));
     }

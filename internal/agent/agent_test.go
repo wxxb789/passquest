@@ -454,17 +454,18 @@ func TestHostControlRoundTrip(t *testing.T) {
 }
 
 func TestHostRequestValidation(t *testing.T) {
+	dir := t.TempDir()
 	valid := HostRequest{
 		ProtocolVersion: ProtocolVersion,
 		Mode:            ModeStart,
 		RunID:           "run-20261110T100000Z-aaaaaaaa",
 		TaskKind:        TaskStudyBrief,
 		PromptVersion:   PromptVersion,
-		StorePath:       "/tmp/agent.sqlite",
-		HeartbeatPath:   "/tmp/agent.host",
+		StorePath:       filepath.Join(dir, "agent.sqlite"),
+		HeartbeatPath:   filepath.Join(dir, "agent.host"),
 		HostToken:       strings.Repeat("a", 32),
-		BinaryPath:      "/usr/local/bin/passquest",
-		DBPath:          "/tmp/app.sqlite",
+		BinaryPath:      filepath.Join(dir, "passquest"),
+		DBPath:          filepath.Join(dir, "app.sqlite"),
 		CredentialEnv:   CredentialEnv,
 		Model: &ModelConfig{
 			Endpoint: "https://api.example.com/v1/chat/completions", Model: "m",
@@ -545,16 +546,17 @@ func TestHeartbeatFreshnessAndStorePath(t *testing.T) {
 	if _, live := HeartbeatLive(path, "run-20261110T100000Z-aaaaaaaa", now.Add(10*time.Second), 5*time.Second); live {
 		t.Fatal("stale heartbeat reported live")
 	}
-	if got := DefaultStorePath("/tmp/demo/app.sqlite"); got != "/tmp/demo/app-agent.sqlite" {
-		t.Fatalf("DefaultStorePath = %q", got)
+	if got, want := DefaultStorePath(filepath.Join(dir, "demo", "app.sqlite")), filepath.Join(dir, "demo", "app-agent.sqlite"); got != want {
+		t.Fatalf("DefaultStorePath = %q, want %q", got, want)
 	}
-	if _, err := StorePath("/tmp/app.sqlite", "/tmp/app.sqlite", nil); err == nil {
+	dbPath := filepath.Join(dir, "app.sqlite")
+	if _, err := StorePath(dbPath, dbPath, nil); err == nil {
 		t.Fatal("store equal to the application database accepted")
 	}
-	if _, err := ResolveStorePath("/tmp/app.sqlite", "/tmp/app.sqlite"); err == nil {
+	if _, err := ResolveStorePath(dbPath, dbPath); err == nil {
 		t.Fatal("explicit store equal to the application database accepted")
 	}
-	if got, err := ResolveStorePath("relative-agent.sqlite", "/tmp/app.sqlite"); err != nil || !filepath.IsAbs(got) {
+	if got, err := ResolveStorePath("relative-agent.sqlite", dbPath); err != nil || !filepath.IsAbs(got) {
 		t.Fatalf("ResolveStorePath = %q err=%v", got, err)
 	}
 }

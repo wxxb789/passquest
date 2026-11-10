@@ -33,7 +33,7 @@ ubuntu, macos and windows. A green Linux job is not evidence for Windows; the ma
 | 2 | Format | `harness/gates/gofmt.ts` | Any listed working-tree `*.go` file is a failure; fix formatting, do not add an ignore list. |
 | 3 | Vet | `harness/gates/go-vet.ts` | A vet diagnostic is a defect, not noise. |
 | 4 | Build | `harness/gates/go-build.ts` | Must succeed with an empty module cache too (CI proves it). |
-| 5 | Test | `harness/gates/go-test.ts` | No skipped tests: `go test -json` test-level `skip` actions fail the gate and are named. A test that only asserts a count is not verification. |
+| 5 | Test | `harness/gates/go-test.ts` | No skipped tests: `go test -json` test-level `skip` actions fail the gate and are named. A failing test is named with the last 12 output lines it produced, so the reason is in the gate log. A test that only asserts a count is not verification. |
 | 6 | Tidy | `harness/gates/go-tidy.ts` | Empty diff; a dirty module file means a dependency was added or dropped silently. |
 | 7 | Docs links | `harness/gates/docs-links.ts` | Relative links in working-tree markdown must resolve to a real path. |
 | 8 | Secrets / sources | `harness/gates/secrets.ts` | Credentials, private keys, `.env` files and confidential source files outside the allowlist fail the run. Finding locations are printed, never the matched secret. Every working-tree text file is scanned; there is no size cap. |

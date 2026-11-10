@@ -165,16 +165,52 @@ func statusAgentRunner(snapshot *agent.Snapshot) *agentFakeRunner {
 
 func normalizedAgentJSON(t *testing.T, raw, temp string) []byte {
 	t.Helper()
-	text := strings.ReplaceAll(raw, temp, "<tmp>")
 	var value any
-	if err := json.Unmarshal([]byte(text), &value); err != nil {
-		t.Fatalf("decode JSON %q: %v", text, err)
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		t.Fatalf("decode JSON %q: %v", raw, err)
 	}
-	encoded, err := json.MarshalIndent(value, "", "  ")
+	encoded, err := json.MarshalIndent(normalizeAgentTemp(value, temp), "", "  ")
 	if err != nil {
 		t.Fatalf("encode JSON: %v", err)
 	}
 	return append(encoded, '\n')
+}
+
+// normalizeAgentTemp replaces the temp directory after JSON decoding: the raw
+// document escapes a Windows path (C:\\Temp\\...), so a text replacement misses
+// it, and the surviving separators must match the golden's "/".
+func normalizeAgentTemp(value any, temp string) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			typed[key] = normalizeAgentTemp(child, temp)
+		}
+		return typed
+	case []any:
+		for i, child := range typed {
+			typed[i] = normalizeAgentTemp(child, temp)
+		}
+		return typed
+	case string:
+		if !strings.Contains(typed, temp) {
+			return typed
+		}
+		return strings.ReplaceAll(strings.ReplaceAll(typed, temp, "<tmp>"), `\`, "/")
+	default:
+		return value
+	}
+}
+
+// TestNormalizedAgentJSONHandlesWindowsTemp pins the golden normaliser to the
+// Windows document shape on every OS: the temp path arrives JSON-escaped and
+// uses backslashes, but the golden stores <tmp>/agent.sqlite.
+func TestNormalizedAgentJSONHandlesWindowsTemp(t *testing.T) {
+	temp := `C:\Users\runneradmin\AppData\Local\Temp\TestAgent\001`
+	raw := `{"run":{"store":"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\TestAgent\\001\\agent.sqlite"}}`
+	got := string(normalizedAgentJSON(t, raw, temp))
+	if !strings.Contains(got, `"\u003ctmp\u003e/agent.sqlite"`) {
+		t.Fatalf("normalized JSON = %s", got)
+	}
 }
 
 func TestAgentStartRequiresProvider(t *testing.T) {

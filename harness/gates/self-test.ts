@@ -251,6 +251,15 @@ function brokenCases(): BrokenCase[] {
         "go.mod": GO_MOD,
         "x_test.go": 'package x\n\nimport "testing"\n\nfunc TestFail(t *testing.T) { t.Fatal("boom") }\n',
       },
+      postFail: (failures) => {
+        if (!failures.some((line) => line.includes("TestFail: failed"))) {
+          return `go-test: did not report the failing test, saw: ${failures.join("; ")}`;
+        }
+        if (!failures.some((line) => line.includes("boom"))) {
+          return "go-test: dropped the test's failure message";
+        }
+        return null;
+      },
     },
     {
       gate: goTest,
