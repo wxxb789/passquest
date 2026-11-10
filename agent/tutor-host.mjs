@@ -85,8 +85,8 @@ function validateRequest(request) {
     if (typeof message.content !== "string" || message.content.trim() === "") return "every chat message needs content";
     total += message.content.length;
   }
-  if (total > 24000) return "chat messages exceed the local size bound";
-  if (!Number.isInteger(chat.max_tokens) || chat.max_tokens < 1 || chat.max_tokens > 4096) return "chat.max_tokens is invalid";
+  if (total > 20000) return "chat messages exceed the local size bound";
+  if (!Number.isInteger(chat.max_tokens) || chat.max_tokens < 64 || chat.max_tokens > 2048) return "chat.max_tokens is invalid";
   if (chat.temperature !== 0) return "chat.temperature must be 0";
   if (chat.stream !== false) return "chat.stream must be false";
   return null;

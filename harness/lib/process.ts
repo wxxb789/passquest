@@ -1,6 +1,7 @@
 export interface RunOptions {
   cwd?: string;
   env?: Record<string, string>;
+  stdin?: string;
 }
 
 export interface RunResult {
@@ -23,6 +24,7 @@ export async function run(cmd: string, args: string[], options: RunOptions = {})
     proc = Bun.spawn({
       cmd: [cmd, ...args],
       cwd: options.cwd,
+      stdin: options.stdin === undefined ? "ignore" : new TextEncoder().encode(options.stdin),
       stdout: "pipe",
       stderr: "pipe",
       env: options.env ? { ...process.env, ...options.env } : process.env,

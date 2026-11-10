@@ -281,10 +281,22 @@ func TestAppendTutorCallRejectsMalformedRecords(t *testing.T) {
 		{"empty output", func(c *TutorCall) { c.OutputText = ""; c.OutputChars = 0 }, "no output text"},
 		{"wrong output chars", func(c *TutorCall) { c.OutputChars = 3 }, "output_chars"},
 		{"bad mode", func(c *TutorCall) { c.Mode = "chat" }, "mode"},
+		{"bad status", func(c *TutorCall) { c.Status = "pending" }, "status"},
 		{"bad sha", func(c *TutorCall) { c.RequestSHA256 = "short" }, "request_sha256"},
 		{"uppercase sha", func(c *TutorCall) { c.RequestSHA256 = strings.Repeat("A", 64) }, "lowercase hex"},
 		{"no content", func(c *TutorCall) { c.ContentID = "" }, "content_id"},
+		{"no question", func(c *TutorCall) { c.QuestionID = "" }, "question_id"},
+		{"no provider host", func(c *TutorCall) { c.ProviderHost = "" }, "provider_host"},
+		{"no model", func(c *TutorCall) { c.Model = "" }, "model"},
+		{"no prompt version", func(c *TutorCall) { c.PromptVersion = "" }, "prompt_version"},
+		{"no request bytes", func(c *TutorCall) { c.RequestBytes = 0 }, "request_bytes"},
+		{"oversized output", func(c *TutorCall) {
+			c.OutputText = strings.Repeat("x", tutor.MaxResponseChars+1)
+			c.OutputChars = tutor.MaxResponseChars + 1
+		}, "exceeds"},
 		{"negative tokens", func(c *TutorCall) { value := -1; c.PromptTokens = &value }, "prompt_tokens"},
+		{"negative completion tokens", func(c *TutorCall) { value := -1; c.CompletionTokens = &value }, "completion_tokens"},
+		{"negative latency", func(c *TutorCall) { c.LatencyMS = -1 }, "latency_ms"},
 		{"bad http", func(c *TutorCall) { c.HTTPStatus = 600 }, "http_status"},
 		{"error without code", func(c *TutorCall) {
 			c.Status = "error"
@@ -293,6 +305,13 @@ func TestAppendTutorCallRejectsMalformedRecords(t *testing.T) {
 			c.OutputText = ""
 			c.OutputChars = 0
 		}, "error code"},
+		{"error without message", func(c *TutorCall) {
+			c.Status = "error"
+			c.ErrorCode = "provider_error"
+			c.ErrorMessage = ""
+			c.OutputText = ""
+			c.OutputChars = 0
+		}, "no message"},
 		{"error with output", func(c *TutorCall) {
 			c.Status = "error"
 			c.ErrorCode = "provider_error"

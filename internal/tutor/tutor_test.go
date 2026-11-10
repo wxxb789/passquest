@@ -3,6 +3,7 @@ package tutor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -334,6 +335,21 @@ func TestBuildClipsLongPassageAndFields(t *testing.T) {
 		if !contains(preview.Context.TruncatedFields, field) {
 			t.Errorf("truncated fields = %v, want %s", preview.Context.TruncatedFields, field)
 		}
+	}
+}
+
+func TestBuildRejectsPromptOverTheTotalBound(t *testing.T) {
+	target := firstPartyTarget()
+	target.Options = nil
+	for i := range 40 {
+		target.Options = append(target.Options, Option{
+			Label: fmt.Sprintf("o%02d", i),
+			Text:  strings.Repeat("x", maxOptionRunes),
+		})
+	}
+	_, err := Build(validConfig(), ModeExplain, target)
+	if err == nil || !strings.Contains(err.Error(), "limit is 20000") {
+		t.Fatalf("Build error = %v, want the total prompt bound", err)
 	}
 }
 

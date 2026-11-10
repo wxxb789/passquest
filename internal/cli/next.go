@@ -151,17 +151,12 @@ func buildNextCatalog(st *store.Store, sourceID string) (nextCatalog, error) {
 	}
 
 	embedded := func() error {
-		sample, err := exam.Sample()
+		contents, err := embeddedContents()
 		if err != nil {
 			return err
 		}
 		// The sample is untagged, but cataloguing it distinguishes an untagged
 		// attempt from an attempt on unavailable content.
-		addContent(sample, "")
-		contents, err := skill.PracticeContent()
-		if err != nil {
-			return err
-		}
 		for _, content := range contents {
 			addContent(content, "")
 		}
@@ -205,6 +200,9 @@ func buildNextCatalog(st *store.Store, sourceID string) (nextCatalog, error) {
 // still passed to the policy with no skills so its content still counts as a
 // seen passage.
 func nextRecord(record attempt.Attempt, tagsByKey map[attempt.QuestionKey][]string) (adaptive.Record, string) {
+	key := attempt.QuestionKey{ContentID: record.ContentID, QuestionID: record.QuestionID}
+	current, currentKnown := tagsByKey[key]
+	ids, fromCurrent, unregistered := effectiveSkills(record, current, currentKnown)
 	adapted := adaptive.Record{
 		AttemptID:       record.ID,
 		ContentID:       record.ContentID,
@@ -213,30 +211,23 @@ func nextRecord(record attempt.Attempt, tagsByKey map[attempt.QuestionKey][]stri
 		Assistance:      record.Assistance,
 		Status:          record.Status,
 		ElapsedMS:       record.ElapsedMS,
-		Skills:          append([]string(nil), record.Skills...),
-		FromCurrentTags: false,
+		Skills:          ids,
+		FromCurrentTags: fromCurrent,
 		TacticID:        record.TacticID,
 	}
-	reason := ""
 	if record.SkillsRecorded {
-		if len(adapted.Skills) == 0 {
+		if len(record.Skills) == 0 {
 			return adapted, "question had no registered skill tag when the attempt was recorded"
 		}
-		for _, id := range adapted.Skills {
-			if !skill.IsRegistered(id) {
-				reason = fmt.Sprintf("recorded skill tags include %q, which is not registered in this build", id)
-				adapted.Skills = nil
-				break
-			}
+		if unregistered != "" {
+			return adapted, fmt.Sprintf("recorded skill tags include %q, which is not registered in this build", unregistered)
 		}
-		return adapted, reason
-	}
-	if current := tagsByKey[attempt.QuestionKey{ContentID: record.ContentID, QuestionID: record.QuestionID}]; len(current) > 0 {
-		adapted.Skills = append([]string(nil), current...)
-		adapted.FromCurrentTags = true
 		return adapted, ""
 	}
-	if _, known := tagsByKey[attempt.QuestionKey{ContentID: record.ContentID, QuestionID: record.QuestionID}]; known {
+	if len(ids) > 0 {
+		return adapted, ""
+	}
+	if currentKnown {
 		return adapted, "pre-v6 attempt on a question with no registered skill tag"
 	}
 	return adapted, "content or question is unavailable in the current material"

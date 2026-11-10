@@ -382,3 +382,20 @@ Entry format:
   adapter under the same host protocol in goal 0010.
 - Revisit when: goal 0010 starts provider choice, or the owner's authorized endpoint is not
   chat-completions compatible.
+
+### Q-0005-05 — Should the Node host enforce the same request bounds as the Go client?
+- Status: decided(default taken)
+- Context: the simplify stage found `agent/tutor-host.mjs` accepted `max_tokens` 1–4096 and 24,000
+  message characters while `internal/tutor` and [`../tutor.md`](../tutor.md) state 64–2048 and
+  20,000. The CLI revalidates every request, so the looser host bound was not reachable through a
+  supported command, but the host is the product's only network egress and should not accept a
+  wider shape.
+- Options considered: (A) align the host to the documented Go bounds; (B) document the host's
+  looser second line as intentional; (C) remove validation from one side and keep a single check.
+- Default taken: (A). The host now rejects `max_tokens` outside 64–2048 and message content above
+  20,000 characters with `config_error`, and `tutor-smoke` probes both values directly. The Go
+  client, the record and the docs were already the authority; the change makes the second line
+  match them. Reverse by editing the two constants in `agent/tutor-host.mjs`; no stored data or
+  protocol shape changes.
+- Revisit when: a supported provider needs a larger bound than the documented one, or the host
+  protocol publishes an intentional host-only allowance.

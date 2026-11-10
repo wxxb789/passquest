@@ -17,7 +17,6 @@ import (
 	"github.com/wxxb789/passquest/internal/skill"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
-	"github.com/wxxb789/passquest/internal/tactic"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -38,9 +37,9 @@ func runTutor(args []string, opt Options) int {
 	case "show":
 		return runTutorShow(args[1:], opt)
 	case "consent":
-		return runTutorConsentCommand(args[1:], opt, true)
+		return runTutorConsentCommand(args[1:], opt, "consent", true)
 	case "revoke":
-		return runTutorConsentCommand(args[1:], opt, false)
+		return runTutorConsentCommand(args[1:], opt, "revoke", false)
 	case "consents":
 		return runTutorConsents(args[1:], opt)
 	default:
@@ -651,14 +650,14 @@ func writeTutorShow(w io.Writer, doc tutorShowDoc) {
 	fmt.Fprintln(w, "\nThis stored text is model output, not a verified answer, grade or exam fact.")
 }
 
-func runTutorConsentCommand(args []string, opt Options, granted bool) int {
+func runTutorConsentCommand(args []string, opt Options, command string, granted bool) int {
 	wantJSON := jsonFlagRequested(args)
 	args = reorderArgs(args, map[string]bool{"reviewer": true, "db": true})
-	fs := newFlagSet("tutor consent", opt, wantJSON)
+	fs := newFlagSet("tutor "+command, opt, wantJSON)
 	reviewerFlag := fs.String("reviewer", "", "local attribution label for this consent decision")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if code := parseArgs(fs, args, opt, wantJSON, 1, "tutor consent requires exactly one source id"); code != 0 {
+	if code := parseArgs(fs, args, opt, wantJSON, 1, "tutor "+command+" requires exactly one source id"); code != 0 {
 		return code
 	}
 	reviewer := strings.TrimSpace(*reviewerFlag)
@@ -815,29 +814,45 @@ type tutorLoadedContent struct {
 	SourceID string
 }
 
+// embeddedContents lists every content authored in this build: the sample and
+// the skill practice passages, which already include the tactic exercise.
+// Returned values are shared and must not be mutated.
+func embeddedContents() ([]exam.Exam, error) {
+	sample, err := exam.Sample()
+	if err != nil {
+		return nil, err
+	}
+	contents, err := skill.PracticeContent()
+	if err != nil {
+		return nil, err
+	}
+	return append([]exam.Exam{sample}, contents...), nil
+}
+
+// embeddedContent resolves an authored content id. found is false for a parsed
+// source page id, which the caller resolves from the store.
+func embeddedContent(id string) (exam.Exam, bool, error) {
+	contents, err := embeddedContents()
+	if err != nil {
+		return exam.Exam{}, false, err
+	}
+	for _, content := range contents {
+		if content.ID == id {
+			return content, true, nil
+		}
+	}
+	return exam.Exam{}, false, nil
+}
+
 // loadTutorContent resolves the stored attempt's question from embedded
 // material or a reviewed page of an imported source. A missing or no-longer-
 // practiceable question is a state, not an error: the prompt builder discloses
 // that current content is unavailable.
 func loadTutorContent(st *store.Store, contentID, questionID string) (tutorLoadedContent, error) {
-	if sample, err := exam.Sample(); err != nil {
+	if content, found, err := embeddedContent(contentID); err != nil {
 		return tutorLoadedContent{}, err
-	} else if sample.ID == contentID {
-		return tutorEmbedded(sample, questionID), nil
-	}
-	if exercise, err := tactic.Exercise(); err != nil {
-		return tutorLoadedContent{}, err
-	} else if exercise.ID == contentID {
-		return tutorEmbedded(exercise, questionID), nil
-	}
-	contents, err := skill.PracticeContent()
-	if err != nil {
-		return tutorLoadedContent{}, err
-	}
-	for _, content := range contents {
-		if content.ID == contentID {
-			return tutorEmbedded(content, questionID), nil
-		}
+	} else if found {
+		return tutorEmbedded(content, questionID), nil
 	}
 
 	sourceID, pageNumber, ok := source.ParseContentID(contentID)
@@ -923,23 +938,43 @@ func loadTutorTarget(st *store.Store, record attempt.Attempt) (tutor.Target, err
 	return target, nil
 }
 
-func tutorSkills(record attempt.Attempt, loaded tutorLoadedContent) ([]string, []tutor.SkillLesson, bool) {
+// effectiveSkills resolves the skill ids an attempt is classified under. A
+// recorded snapshot is authoritative, even when it is empty: it records the
+// tags the question had when the answer was stored. Only a pre-v6 row falls
+// back to the question's current tags, and that fallback is marked so callers
+// can disclose it. An unregistered id in a recorded snapshot invalidates the
+// whole snapshot, so evidence is never silently regrouped under the remaining
+// tags.
+func effectiveSkills(record attempt.Attempt, current []string, currentKnown bool) (ids []string, fromCurrent bool, unregistered string) {
 	raw := record.Skills
-	mapped := false
-	if !record.SkillsRecorded && loaded.Found {
-		raw = loaded.Question.Tactics
+	if !record.SkillsRecorded {
+		if !currentKnown {
+			return nil, false, ""
+		}
+		raw = current
+		fromCurrent = len(current) > 0
 	}
-	var (
-		ids     []string
-		lessons []tutor.SkillLesson
-		seen    = make(map[string]bool)
-	)
+	seen := make(map[string]bool)
 	for _, id := range raw {
-		if !skill.IsRegistered(id) || seen[id] {
+		if !skill.IsRegistered(id) {
+			if record.SkillsRecorded {
+				return nil, false, id
+			}
+			continue
+		}
+		if seen[id] {
 			continue
 		}
 		seen[id] = true
 		ids = append(ids, id)
+	}
+	return ids, fromCurrent, ""
+}
+
+func tutorSkills(record attempt.Attempt, loaded tutorLoadedContent) ([]string, []tutor.SkillLesson, bool) {
+	ids, fromCurrent, _ := effectiveSkills(record, loaded.Question.Tactics, loaded.Found)
+	var lessons []tutor.SkillLesson
+	for _, id := range ids {
 		candidate, _ := skill.Get(id)
 		lessons = append(lessons, tutor.SkillLesson{
 			ID:          candidate.ID,
@@ -953,10 +988,7 @@ func tutorSkills(record attempt.Attempt, loaded tutorLoadedContent) ([]string, [
 			WatchOut:    candidate.WatchOut,
 		})
 	}
-	if !record.SkillsRecorded && len(ids) > 0 {
-		mapped = true
-	}
-	return ids, lessons, mapped
+	return ids, lessons, fromCurrent && len(ids) > 0
 }
 
 func tutorDayStart(now time.Time) time.Time {

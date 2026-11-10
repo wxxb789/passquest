@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"time"
 
 	"github.com/wxxb789/passquest/internal/attempt"
@@ -43,29 +44,21 @@ func tutorAttemptViewOf(record attempt.Attempt) tutorAttemptView {
 }
 
 type tutorProviderView struct {
-	Endpoint          string `json:"endpoint"`
-	Model             string `json:"model"`
-	TimeoutMS         int64  `json:"timeout_ms"`
-	MaxOutputTokens   int    `json:"max_output_tokens"`
-	DailyCalls        int    `json:"daily_calls"`
+	tutorConfigView
 	CredentialEnv     string `json:"credential_env"`
 	CredentialPresent bool   `json:"credential_present"`
 }
 
 func tutorProviderViewOf(cfg tutor.Config, opt Options) tutorProviderView {
 	return tutorProviderView{
-		Endpoint:          cfg.Endpoint,
-		Model:             cfg.Model,
-		TimeoutMS:         cfg.TimeoutMS,
-		MaxOutputTokens:   cfg.MaxOutputTokens,
-		DailyCalls:        cfg.DailyCalls,
+		tutorConfigView:   tutorConfigViewOf(cfg),
 		CredentialEnv:     tutor.CredentialEnv,
 		CredentialPresent: credentialPresent(opt),
 	}
 }
 
 func credentialPresent(opt Options) bool {
-	return opt.Getenv(tutor.CredentialEnv) != ""
+	return strings.TrimSpace(opt.Getenv(tutor.CredentialEnv)) != ""
 }
 
 type tutorContextView struct {

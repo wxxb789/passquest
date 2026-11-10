@@ -122,7 +122,8 @@ The Go core never imports a network package. `tutor ask` spawns the Node host
 `agent/tutor-host.mjs` (override `PASSQUEST_TUTOR_HOST`; node binary override `PASSQUEST_NODE`) and
 exchanges one versioned JSON document over stdin/stdout. The host validates the endpoint, adds the
 bearer header, enforces the timeout and size bounds, and returns a structured result. If Node or the
-host is missing, tutor commands exit 3 with `agent_unavailable`; ordinary practice, review, `next`
+host is missing, `tutor ask` exits 3 with `agent_unavailable`; `tutor config`, `preview`, `history`,
+`show`, `consent`, `revoke` and `consents` never spawn the host, and ordinary practice, review, `next`
 and `report` keep working with Go alone. Goal 0006 can replace the per-call process with Pi Durable
 behind the same protocol.
 

@@ -267,12 +267,15 @@ func (s *Store) AppendTutorCall(call TutorCall) (TutorCall, error) {
 	return call, nil
 }
 
-// TutorCalls lists advisory calls in insertion order. attemptID 0 lists all.
-func (s *Store) TutorCalls(attemptID int64) ([]TutorCall, error) {
-	query := `SELECT id, created_at, attempt_id, mode, status, error_code, error_message,
+// tutorCallColumns is the one column order both call queries scan.
+const tutorCallColumns = `id, created_at, attempt_id, mode, status, error_code, error_message,
 			provider_host, model, prompt_version, source_id, content_id, question_id,
 			source_text_shared, request_sha256, request_bytes, output_text, output_chars,
-			prompt_tokens, completion_tokens, http_status, latency_ms
+			prompt_tokens, completion_tokens, http_status, latency_ms`
+
+// TutorCalls lists advisory calls in insertion order. attemptID 0 lists all.
+func (s *Store) TutorCalls(attemptID int64) ([]TutorCall, error) {
+	query := `SELECT ` + tutorCallColumns + `
 		FROM tutor_calls`
 	args := []any{}
 	if attemptID != 0 {
@@ -301,10 +304,7 @@ func (s *Store) TutorCalls(attemptID int64) ([]TutorCall, error) {
 
 // TutorCall returns one advisory call by id.
 func (s *Store) TutorCall(id int64) (TutorCall, error) {
-	row := s.db.QueryRow(`SELECT id, created_at, attempt_id, mode, status, error_code, error_message,
-			provider_host, model, prompt_version, source_id, content_id, question_id,
-			source_text_shared, request_sha256, request_bytes, output_text, output_chars,
-			prompt_tokens, completion_tokens, http_status, latency_ms
+	row := s.db.QueryRow(`SELECT `+tutorCallColumns+`
 		FROM tutor_calls WHERE id = ?`, id)
 	call, err := scanTutorCall(row)
 	if errors.Is(err, sql.ErrNoRows) {

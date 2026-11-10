@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,7 +8,7 @@ import { executable, run } from "../lib/process.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
-type StubMode = "ok" | "error" | "auth" | "malformed";
+type StubMode = "ok" | "error" | "error_with_key" | "auth" | "malformed" | "rate_limited" | "timeout";
 
 interface ReceivedRequest {
   authorization: string;
@@ -62,11 +62,24 @@ export const tutorSmoke: Gate = {
           body = { malformed: true };
         }
         received.push({ authorization: request.headers.get("authorization") ?? "", path: url.pathname, body });
+        if (mode === "timeout") {
+          await Bun.sleep(3000);
+          return Response.json(
+            { choices: [{ message: { content: "late response" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+            { status: 200 },
+          );
+        }
         if (mode === "error") {
           return Response.json({ error: { message: "stub provider failure" } }, { status: 500 });
         }
+        if (mode === "error_with_key") {
+          return Response.json({ error: { message: `provider echoed ${key}` } }, { status: 500 });
+        }
         if (mode === "auth") {
           return Response.json({ error: { message: "invalid token" } }, { status: 401 });
+        }
+        if (mode === "rate_limited") {
+          return Response.json({ error: { message: "rate limit reached" } }, { status: 429 });
         }
         if (mode === "malformed") {
           return Response.json({ choices: [] }, { status: 200 });
@@ -89,10 +102,41 @@ export const tutorSmoke: Gate = {
     const callDB = (args: string[], database: string, env: Record<string, string> = {}) =>
       call([...args, "--db", database], env);
 
+    const hostPath = path.join(ctx.root, "agent", "tutor-host.mjs");
+
     try {
       const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
       if (build.code !== 0) {
         return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
+      }
+
+      for (const [label, maxTokens, contentChars] of [
+        ["max_tokens 4096", 4096, 10],
+        ["21001 message characters", 350, 21001],
+      ] as const) {
+        const result = await run(executable("node"), [hostPath], {
+          cwd: ctx.root,
+          env: baseEnv,
+          stdin: JSON.stringify({
+            protocol_version: 1,
+            endpoint: "https://api.example.com/v1/chat/completions",
+            timeout_ms: 30000,
+            max_response_chars: 12000,
+            chat: {
+              model: "smoke-model",
+              messages: [
+                { role: "system", content: "system" },
+                { role: "user", content: "x".repeat(contentChars) },
+              ],
+              max_tokens: maxTokens,
+              temperature: 0,
+              stream: false,
+            },
+          }),
+        });
+        const doc = parse(result.stdout);
+        check(stringField(doc, "status") === "error", `host accepted ${label}`);
+        check(stringField(field(doc, "error"), "code") === "config_error", `host ${label} error code`);
       }
 
       const db = path.join(temp, "tutor.sqlite");
@@ -263,6 +307,78 @@ export const tutorSmoke: Gate = {
       check(numberField(field(mainHistory, "summary"), "completion_tokens") === 10, "tutor history completion tokens");
       check(arrayField(mainHistory, "calls").length === 6, "tutor history rows");
       check(!seenOutputs.some((output) => output.includes(key)), "credential appeared in command output");
+
+      const failureDB = path.join(temp, "failure.sqlite");
+      await callDB(
+        ["tutor", "config", "--endpoint", endpoint, "--model", "smoke-model", "--timeout-seconds", "1", "--json"],
+        failureDB,
+      );
+      await callDB(["practice", "--question", "q1", "--answer", "B", "--json"], failureDB);
+      const failureReport = await callDB(["report", "--json"], failureDB);
+
+      mode = "rate_limited";
+      const rateBefore = received.length;
+      const rateLimited = await callDB(["tutor", "ask", "--json"], failureDB);
+      check(rateLimited.code === 3, `rate limited exit = ${rateLimited.code}`);
+      check(stringField(field(parse(rateLimited.stderr), "error"), "code") === "rate_limited", "rate limited code");
+      check(received.length === rateBefore + 1, "rate limited request did not reach the provider");
+      check(
+        (await callDB(["report", "--json"], failureDB)).stdout === failureReport.stdout,
+        "rate limited call changed the attempt report",
+      );
+
+      mode = "timeout";
+      const timeout = await callDB(["tutor", "ask", "--json"], failureDB);
+      check(timeout.code === 3, `timeout exit = ${timeout.code}`);
+      check(stringField(field(parse(timeout.stderr), "error"), "code") === "timeout", "timeout code");
+      check(
+        (await callDB(["report", "--json"], failureDB)).stdout === failureReport.stdout,
+        "timed out call changed the attempt report",
+      );
+
+      const closed = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() { return new Response(""); } });
+      const closedPort = closed.port;
+      closed.stop(true);
+      await callDB(
+        ["tutor", "config", "--endpoint", `http://127.0.0.1:${closedPort}/v1/chat/completions`, "--json"],
+        failureDB,
+      );
+      mode = "ok";
+      const networkFailure = await callDB(["tutor", "ask", "--json"], failureDB);
+      check(networkFailure.code === 3, `network failure exit = ${networkFailure.code}`);
+      check(stringField(field(parse(networkFailure.stderr), "error"), "code") === "network_error", "network failure code");
+      check(
+        (await callDB(["report", "--json"], failureDB)).stdout === failureReport.stdout,
+        "network failure changed the attempt report",
+      );
+      const failureHistory = parse((await callDB(["tutor", "history", "--json"], failureDB)).stdout);
+      check(numberField(field(failureHistory, "summary"), "calls") === 3, "failure history call count");
+      check(numberField(field(failureHistory, "summary"), "failed") === 3, "failure history failure count");
+
+      const credentialDB = path.join(temp, "credential.sqlite");
+      await callDB(["tutor", "config", "--endpoint", endpoint, "--model", "smoke-model", "--json"], credentialDB);
+      await callDB(["practice", "--question", "q1", "--answer", "B", "--json"], credentialDB);
+
+      mode = "error_with_key";
+      const echoedError = await callDB(["tutor", "ask", "--json"], credentialDB);
+      check(echoedError.code === 3, `credential error exit = ${echoedError.code}`);
+      check(stringField(field(parse(echoedError.stderr), "error"), "code") === "provider_error", "credential error code");
+      check(!echoedError.stdout.includes(key) && !echoedError.stderr.includes(key), "provider error echoed the credential");
+      check(echoedError.stderr.includes("[redacted]"), "provider error was not redacted");
+
+      mode = "ok";
+      const fakeHost = path.join(temp, "fake-host.mjs");
+      writeFileSync(
+        fakeHost,
+        'process.stderr.write("host failed with " + (process.env.PASSQUEST_TUTOR_API_KEY || ""));\nprocess.exit(1);\n',
+      );
+      const hostFailure = await callDB(["tutor", "ask", "--json"], credentialDB, { PASSQUEST_TUTOR_HOST: fakeHost });
+      check(hostFailure.code === 3, `host stderr failure exit = ${hostFailure.code}`);
+      check(stringField(field(parse(hostFailure.stderr), "error"), "code") === "agent_unavailable", "host stderr failure code");
+      check(!hostFailure.stdout.includes(key) && !hostFailure.stderr.includes(key), "host stderr echoed the credential");
+      check(hostFailure.stderr.includes("[redacted]"), "host stderr credential was not redacted");
+      const credentialBytes = readFileSync(credentialDB);
+      check(!credentialBytes.includes(Buffer.from(key)), "credential database bytes contain the credential");
 
       const budgetDB = path.join(temp, "budget.sqlite");
       await callDB(

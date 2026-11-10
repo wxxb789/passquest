@@ -3,12 +3,15 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/tutor"
@@ -202,6 +205,42 @@ func TestTutorConfigInspectSaveAndPartialUpdate(t *testing.T) {
 	}
 }
 
+func TestTutorConfigWhitespaceCredentialIsAbsent(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	transport := &fakeTutorTransport{}
+	var stdout, stderr bytes.Buffer
+	options := newTutorOptions(&stdout, &stderr, clock, transport, false)
+	options.Getenv = func(key string) string {
+		if key == tutor.CredentialEnv {
+			return " \t"
+		}
+		return ""
+	}
+
+	code := Run([]string{
+		"tutor", "config", "--endpoint", "https://api.example.com/v1/chat/completions",
+		"--model", "example-model", "--json", "--db", db,
+	}, options)
+	if code != 0 {
+		t.Fatalf("config exit = %d\n%s", code, stderr.String())
+	}
+	doc := decodeTutorConfig(t, stdout.String())
+	if doc.Credential.Present {
+		t.Fatal("whitespace-only credential is reported present")
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"tutor", "ask", "--json", "--db", db}, options)
+	if code != 2 || !strings.Contains(stderr.String(), "missing_credential") {
+		t.Fatalf("whitespace credential ask = %d %s", code, stderr.String())
+	}
+	if len(transport.requests) != 0 {
+		t.Fatal("whitespace credential made a provider request")
+	}
+}
+
 func TestTutorConfigRejectsCredentialInEndpoint(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
@@ -336,6 +375,70 @@ func TestTutorCredentialIsRedactedFromProviderText(t *testing.T) {
 	}
 }
 
+func TestTutorCredentialIsRedactedFromProviderError(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	transport := &fakeTutorTransport{response: fixedTutorError("provider_error", "The provider echoed "+fakeTutorKey+" in its error.")}
+	practiceSample(t, db, clock)
+	configureTutor(t, db, clock, transport, true)
+
+	code, stdout, stderr := runTutorCLI(t, db, clock, transport, true, "tutor", "ask", "--json")
+	if code != 3 {
+		t.Fatalf("provider error exit = %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	failure := decodeTutorFailure(t, stderr)
+	if strings.Contains(failure.Error.Message, fakeTutorKey) {
+		t.Fatal("provider error kept the credential")
+	}
+	if !strings.Contains(failure.Error.Message, "[redacted]") {
+		t.Fatalf("provider error was not redacted: %s", failure.Error.Message)
+	}
+	dbBytes, err := os.ReadFile(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(dbBytes, []byte(fakeTutorKey)) {
+		t.Fatal("database bytes contain the credential")
+	}
+}
+
+func TestTutorPreV6AttemptFallsBackToCurrentTags(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	transport := &fakeTutorTransport{}
+	configureTutor(t, db, clock, transport, true)
+
+	handle, err := sql.Open("sqlite", db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handle.Exec(`INSERT INTO attempts (
+			session_id, question_id, content_id, content_version, status,
+			selected_label, selected_text, correct_label, correct_text,
+			started_at, answered_at, elapsed_ms, assistance, tactic_id, skills_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+		"sess-test", "v1", "skill-first-party-vocab-notice", "1", "correct",
+		"A", "moved to a later time", "A", "moved to a later time",
+		"2026-11-10T09:00:00Z", "2026-11-10T09:00:01Z", 1000, "independent", ""); err != nil {
+		handle.Close()
+		t.Fatal(err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	preview := decodeTutorPreview(t, mustTutorRun(t, db, clock, transport, true, "tutor", "preview", "--json"))
+	if !preview.Context.SkillsMappedFromCurrentTags {
+		t.Fatal("pre-v6 fallback is not disclosed")
+	}
+	if got := strings.Join(preview.Context.Skills, ","); got != "vocabulary-in-context" {
+		t.Fatalf("pre-v6 skills = %q, want vocabulary-in-context", got)
+	}
+	if !strings.Contains(preview.Chat.Messages[1].Content, "Vocabulary in context") {
+		t.Fatal("pre-v6 fallback did not include the current lesson")
+	}
+}
+
 func TestTutorPrivateSourceConsentRoundTrip(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
@@ -426,6 +529,10 @@ func TestTutorConsentValidation(t *testing.T) {
 	code, _, stderr = runTutorCLI(t, db, clock, transport, true, "tutor", "consent", sourceID, "--json")
 	if code != 2 || !strings.Contains(stderr, "reviewer") {
 		t.Fatalf("missing reviewer = %d %s", code, stderr)
+	}
+	code, _, stderr = runTutorCLI(t, db, clock, transport, true, "tutor", "revoke", "--json")
+	if code != 2 || !strings.Contains(stderr, "tutor revoke requires exactly one source id") {
+		t.Fatalf("revoke usage = %d %s", code, stderr)
 	}
 }
 

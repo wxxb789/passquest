@@ -22,7 +22,7 @@ export function readBytes(root: string, relative: string): Buffer {
  * deliverables are scanned before they are staged, and a pending move does not
  * make the old path an unreadable failure.
  */
-export async function gitTrackedFiles(root: string): Promise<string[]> {
+export async function workingTreeFiles(root: string): Promise<string[]> {
   const result = await run(executable("git"), ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
     cwd: root,
   });
@@ -39,10 +39,10 @@ export async function gitTrackedFiles(root: string): Promise<string[]> {
   return files;
 }
 
-/** A normal context walks git; tests can supply their own tracked list. */
-export function context(root: string, tracked?: string[]): GateContext {
-  if (tracked) {
-    return { root, trackedFiles: async () => tracked };
+/** A normal context walks git; tests can supply their own working-tree list. */
+export function context(root: string, files?: string[]): GateContext {
+  if (files) {
+    return { root, workingTreeFiles: async () => files };
   }
-  return { root, trackedFiles: () => gitTrackedFiles(root) };
+  return { root, workingTreeFiles: () => workingTreeFiles(root) };
 }

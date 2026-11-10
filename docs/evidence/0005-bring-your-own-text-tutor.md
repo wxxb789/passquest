@@ -1,7 +1,8 @@
 # 0005 — Helpful AI tutor with user-supplied text model: evidence
 
-- Tree: working tree on top of `4b68b80373410072b14b16125cf98b21888b5632`; the goal-0005 source,
-  tests, docs, gate and this record are uncommitted. The operator owns the commit.
+- Tree: goal-0005 increment committed as `120812d50a258644850e2ee00ee984e01bfe8c26` on top of
+  `4b68b80373410072b14b16125cf98b21888b5632`; the accepted simplify findings are applied uncommitted
+  on top of it. The operator owns the commit.
 - Date: 2026-11-10. Host: Linux 7.0.0-1017-azure x64.
 - Toolchain: Go 1.27.3 via mise; Node v24.16.0; Bun 1.4.4; `modernc.org/sqlite` v1.62.0 (pure Go).
   No real provider, API key or external network call was used.
@@ -21,7 +22,7 @@ is marked `Advisory marker 0005` so any leak into a report, recommendation or ex
 | `internal/store` | Schema v7: mutable non-secret `tutor_config`, append-only `tutor_consent_events`, append-only `tutor_calls`. Effective consent is the latest event; the daily count includes failures. Update/delete triggers reject rewriting either trail. |
 | `internal/cli` | `tutor config/preview/ask/history/show/consent/revoke/consents`, attempt/content resolution, per-source consent gating, credential and budget checks, advisory rendering, failure rows and the new exit-3 path. |
 | `agent/tutor-host.mjs` | The single network egress: endpoint validation, bearer auth from `PASSQUEST_TUTOR_API_KEY`, no redirects, timeout and 1 MiB body bound, response/usage validation and structured errors with the credential redacted. No database or tool access. |
-| `harness` | `tutor-smoke` (101 assertions) against a loopback stub; a 21st self-test case over 14/14 gates. File-based gates now read tracked plus untracked non-ignored working-tree files so a pre-commit run scans new deliverables and survives a pending archive move. |
+| `harness` | `tutor-smoke` (126 assertions) against a loopback stub; a 21st self-test case over 14/14 gates. File-based gates now read tracked plus untracked non-ignored working-tree files so a pre-commit run scans new deliverables and survives a pending archive move. |
 
 The model response is stored only in `tutor_calls` as advisory text. It is never read by `report`,
 `next`, `practice`, an answer key or a question file. A call cannot append or update an attempt.
@@ -30,12 +31,12 @@ The model response is stored only in `tutor_calls` as advisory text. It is never
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1` | exit 0; 10 packages, 395 test runs, 395 passes, 0 skips, 0 failures (`go test -json` count) |
+| `go test ./... -count=1` | exit 0; 10 packages, 409 test runs, 409 passes, 0 skips, 0 failures (`go test -json` count) |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
-| `gofmt -l` (tracked `*.go`) | empty output, exit 0 |
+| `gofmt -l` (working-tree `*.go`) | empty output, exit 0 |
 | `tsc --noEmit -p tsconfig.json` | exit 0, 0 type errors |
-| `tutor-smoke` alone | pass, 101 assertions |
+| `tutor-smoke` alone | pass, 126 assertions |
 | `harness self-test` alone | pass, 21 cases, 14/14 gates |
 | `bash scripts/gate.sh` | exit 0; final output below |
 
@@ -59,7 +60,7 @@ The tests that pin this increment's contract clauses:
 | `TestTutorProviderFailureIsRecordedAndPracticeStillWorks`, `TestTutorTransportFailureIsAgentUnavailable`, `TestTutorInvalidResponseIsRecorded` | Provider/auth/transport/invalid-response failures exit 3, record an error row, do not change the report and do not block practice. |
 | `TestTutorAskRequiresCredentialAndBudget`, `TestTutorDailyCountCountsFailures` | Missing credential and exhausted budget make no provider call; failed calls consume the budget. |
 | `TestTutorMissingNodeLeavesPracticeWorking` | A missing Node binary is `agent_unavailable` exit 3; local practice still records and grades. |
-| `TestTutorCredentialIsRedactedFromProviderText`, `TestTutorTerminalControlResponseIsRecorded`, database byte scans | A credential echoed by provider text or an error is redacted before storage/output; terminal escape sequences are refused; the SQLite bytes contain no key. |
+| `TestTutorCredentialIsRedactedFromProviderText`, `TestTutorCredentialIsRedactedFromProviderError`, `TestTutorTerminalControlResponseIsRecorded`, `tutor-smoke` host-stderr and provider-error modes, database byte scans | A credential echoed by provider text, a provider error or the host's stderr is redacted before storage/output; terminal escape sequences are refused; the SQLite bytes contain no key. |
 | `TestTutorShowFailedCallHasNoSuggestion`, `TestTutorHistoryLabelsWithheldPrivateSource`, `TestTutorHistoryEmptyState` | Failures store no model text; history distinguishes first-party, shared-private and withheld-private calls; empty history is `[]`. |
 | `TestTutorGolden*` | Raw config, first-party preview, withheld private preview, advisory answer, history and consent documents. |
 
@@ -75,22 +76,52 @@ non-secret string `demo-not-real-key`, supplied only through `PASSQUEST_TUTOR_AP
 ### Configure and inspect
 
 ```text
-$ passquest tutor config --endpoint http://127.0.0.1:38271/v1/chat/completions --model stub-model --json
-state: config
-configured: true
-endpoint: http://127.0.0.1:38271/v1/chat/completions
-model: stub-model
-timeout_ms: 30000, max_output_tokens: 350, daily_calls: 20
-credential: {env: PASSQUEST_TUTOR_API_KEY, present: true}
+$ passquest tutor config --endpoint http://127.0.0.1:38271/v1/chat/completions --model stub-model --db demo.sqlite
+Pass Quest — tutor configuration
+Provider endpoint: http://127.0.0.1:38271/v1/chat/completions
+Model: stub-model
+Timeout: 30000 ms
+Max output tokens: 350
+Daily call budget: 20 (UTC day, failed calls included)
+Credential: PASSQUEST_TUTOR_API_KEY is set (value never shown or stored)
+
+The agent host is the only component that contacts the provider; ordinary practice works without it.
 ```
 
 ### First-party attempt: preview is send-free, ask is advisory
 
 ```text
-$ passquest practice --question q1 --answer B --json
-attempt: {id: 1, content: sample-0001, question: q1, status: correct, assistance: independent}
+$ passquest practice --question q1 --answer B --db demo.sqlite
+Pass Quest — practice (sample-0001 v1)
+Westbridge Library notice
 
-$ passquest tutor preview --attempt 1
+Notice: Self-authored practice sample. Not from any live exam; not an exam blueprint or a claim about exam content, difficulty or pass threshold.
+
+Passage: Westbridge Community Library — opening hours
+The Westbridge Community Library will change its opening hours next month. From 3 March, the library will open at 9 a.m. and close at 7 p.m. from Monday to Friday. On Saturdays it will close at 4 p.m., two hours earlier than before. The library will stay closed on Sundays.
+
+The change follows a six-month survey of visitors. Most people who answered the survey said they wanted longer weekday hours after work. The library director, Ms. Chen, said the Saturday change was necessary because few people visited late on Saturdays and the library needs to save money for new computers.
+
+During the first week of March, the library will offer a free class on using the online catalogue. The class is limited to twelve people, and visitors should register at the front desk. Anyone who cannot attend on a weekday may join the same class on Saturday morning.
+
+Question 1 of 3 (q1)
+What time will the library close on Saturdays from 3 March?
+
+  A. At 7 p.m.
+  B. At 4 p.m.
+  C. At 8 p.m.
+  D. At 9 a.m.
+
+Result: CORRECT
+Your answer: B — At 4 p.m.
+Correct answer: B — At 4 p.m.
+Evidence: "On Saturdays it will close at 4 p.m., two hours earlier than before."
+Why: The notice gives the new Saturday closing time directly: 4 p.m., two hours earlier than the old time.
+First attempt on this question; no earlier answer or evidence was shown.
+Recorded attempt #1 (question q1, attempt 1 on this question, 0 ms, assistance independent).
+Database: /tmp/passquest-0005-demo/demo.sqlite
+
+$ passquest tutor preview --attempt 1 --db demo.sqlite
 Pass Quest — tutor preview (not sent)
 Attempt #1: sample-0001 / q1 — correct, 0 ms, independent
 Mode: explain
@@ -103,7 +134,7 @@ Provider request: 2506 bytes, sha256 1c106909d616215f76544367efd9032ff87a3ff2766
 The provider request count was 0 after `preview`. `ask` then produced:
 
 ```text
-$ passquest tutor ask --attempt 1
+$ passquest tutor ask --attempt 1 --db demo.sqlite
 Pass Quest — advisory AI suggestion (not a verified answer)
 Attempt #1: sample-0001 / q1 — correct, 0 ms, independent
 Mode: explain
@@ -163,8 +194,11 @@ question stem present in prompt: false
 ```
 
 ```text
-$ passquest tutor consent src-bb4d9a5479518365 --reviewer demo-owner --json
-state: consent, granted: true, reviewer: demo-owner
+$ passquest tutor consent src-bb4d9a5479518365 --reviewer demo-owner --db demo.sqlite
+Tutor consent for src-bb4d9a5479518365 (import): authorized
+Recorded by demo-owner at 2026-11-10T08:19:17.634831566Z.
+`passquest tutor preview` now includes this source's page and question text in the provider payload.
+The event is append-only; earlier decisions remain in the local audit trail.
 
 $ passquest tutor preview --db demo.sqlite
 Privacy: private source src-bb4d9a5479518365 is authorized; source text shared: yes
@@ -218,10 +252,24 @@ A second database configured with `--daily-calls 1` accepted one call and refuse
 contacting the stub:
 
 ```text
-$ passquest tutor ask --json --db budget.sqlite
-state: advisory, call #1, status: ok
-$ passquest tutor ask --json --db budget.sqlite
-error: {code: budget_exhausted, message: "1 of 1 tutor calls are used today (UTC); ..."}
+$ passquest tutor ask --db budget.sqlite
+Pass Quest — advisory AI suggestion (not a verified answer)
+Attempt #1: sample-0001 / q1 — correct, 0 ms, independent
+Mode: explain
+Model: stub-model @ 127.0.0.1:38271
+Privacy: first-party material only; no private source text is involved
+Usage: 812 prompt tokens, 96 completion tokens, 64 ms
+
+--- AI suggestion (advisory) ---
+Advisory marker 0005: locate the sentence that gives the Saturday closing time, then check the day word.
+--- end AI suggestion ---
+
+This is model output. It is not a verified answer, grade or exam fact. The recorded attempt and answer key are unchanged.
+Advisory call #1 recorded; request sha256 1c106909d616215f76544367efd9032ff87a3ff2766c72bb6d743ab0ff5610ca.
+Database: /tmp/passquest-0005-demo/budget.sqlite
+
+$ passquest tutor ask --db budget.sqlite
+passquest: 1 of 1 tutor calls are used today (UTC); raise the budget with passquest tutor config --daily-calls N
 exit: 2
 ```
 
@@ -264,7 +312,7 @@ scans with a runtime-generated `sk-` value.
 
 ## Harness growth and reconciliation
 
-- New `harness/gates/tutor-smoke.ts` (101 assertions) registers before `self-test`; the self-test
+- New `harness/gates/tutor-smoke.ts` (126 assertions) registers before `self-test`; the self-test
   gains a 21st case and reports 21 cases over 14/14 gates.
 - `harness/lib/repo.ts` now lists tracked plus untracked non-ignored files that exist, so a
   pre-commit gate run scans new deliverables and does not fail on the pending goal move. `secrets`
@@ -294,13 +342,13 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (10 packages, 395 tests, 0 skipped)
+PASS  go test (10 packages, 409 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
 
 == docs links
-PASS  docs links (88 checked, 0 broken)
+PASS  docs links (89 checked, 0 broken)
 
 == secrets/sources
 PASS  secrets/sources (328 files, 0 findings)
@@ -321,7 +369,7 @@ PASS  tactic smoke (70 assertions)
 PASS  adaptive smoke (120 assertions)
 
 == tutor smoke
-PASS  tutor smoke (101 assertions)
+PASS  tutor smoke (126 assertions)
 
 == harness self-test
 PASS  harness self-test (21 cases, 14/14 gates)
@@ -332,7 +380,7 @@ GATE: PASS
 
 Residual risks, with numbers:
 
-- 395 Go test runs and 101 gate assertions cover the local behaviour; 0 external provider calls were
+- 409 Go test runs and 126 gate assertions cover the local behaviour; 0 external provider calls were
   made, so live-provider compatibility is unverified.
 - The prompt contains one attempt, up to 20 000 characters and at most 350 requested output tokens;
   the stub returned fixed text, so real model usefulness and latency are unmeasured.
