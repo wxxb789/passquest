@@ -49,6 +49,9 @@ type Question struct {
 	Evidence        string            `json:"evidence"`
 	Reasoning       string            `json:"reasoning"`
 	OptionReasoning map[string]string `json:"option_reasoning"`
+	// Tactics names the scoring tactics this question exercises. Tags are
+	// lowercase slugs; the tactic registry decides which ids are usable.
+	Tactics []string `json:"tactics,omitempty"`
 }
 
 // Option is one selectable answer.
@@ -135,6 +138,16 @@ func (e Exam) Validate() error {
 		for _, problem := range OptionProblems(q.Options, q.OptionReasoning) {
 			add("%s %s", where, problem)
 		}
+		tags := make(map[string]bool, len(q.Tactics))
+		for _, tag := range q.Tactics {
+			if !ValidSkillTag(tag) {
+				add("%s tactic tag %q is not a lowercase slug", where, tag)
+			}
+			if tags[tag] {
+				add("%s repeats tactic tag %q", where, tag)
+			}
+			tags[tag] = true
+		}
 		if _, ok := q.Option(q.Answer); !ok {
 			add("%s answer %q is not one of its options", where, q.Answer)
 		}
@@ -144,6 +157,24 @@ func (e Exam) Validate() error {
 		return fmt.Errorf("invalid exam: %s", strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+// ValidSkillTag reports whether tag is a lowercase slug: a letter first, then
+// letters, digits and hyphens. The tactic registry uses the same grammar for
+// its ids, so a question tag cannot be a near-miss spelling of a registered id.
+func ValidSkillTag(tag string) bool {
+	if tag == "" || len(tag) > 64 || tag[len(tag)-1] == '-' {
+		return false
+	}
+	for i, r := range tag {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case i > 0 && ((r >= '0' && r <= '9') || r == '-'):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // OptionProblems reports structural problems in options and their per-label

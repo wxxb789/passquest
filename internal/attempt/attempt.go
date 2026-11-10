@@ -39,6 +39,32 @@ type QuestionKey struct {
 	QuestionID string
 }
 
+// Assistance is the condition under which an attempt was made. It is separate
+// from first/repeat exposure: a learner can be helped on a new question, or
+// answer a repeated question without help.
+type Assistance string
+
+const (
+	// AssistanceIndependent means no hint or tactic walkthrough was shown with
+	// the attempt. Repeat exposure is recorded separately.
+	AssistanceIndependent Assistance = "independent"
+	// AssistanceAssisted means a tactic walkthrough or other help accompanied
+	// the attempt: the guided response carries it in the pre-answer document
+	// and in the answered document, so a one-shot client still receives it. It
+	// is never independent evidence.
+	AssistanceAssisted Assistance = "assisted"
+)
+
+// Valid reports whether a is a recorded assistance condition.
+func (a Assistance) Valid() bool {
+	return a == AssistanceIndependent || a == AssistanceAssisted
+}
+
+// ValidTacticID reports whether id is a lowercase slug usable as a tactic id.
+func ValidTacticID(id string) bool {
+	return exam.ValidSkillTag(id)
+}
+
 // Attempt is one immutable answer record. AttemptNumber and PriorAttempts are
 // assigned by Append inside the insert transaction and recomputed by List from
 // row order.
@@ -58,6 +84,12 @@ type Attempt struct {
 	ElapsedMS      int64
 	AttemptNumber  int
 	PriorAttempts  int
+	// Assistance and TacticID record whether help was visible and which tactic
+	// the help belonged to. TacticID is empty for ordinary practice, which can
+	// still be assisted when a tactic walkthrough for the question was already
+	// delivered.
+	Assistance Assistance
+	TacticID   string
 }
 
 // Key returns the content-scoped identity used for numbering and repeats.
@@ -128,6 +160,7 @@ func BuildRecord(contentID, contentVersion string, q exam.Question, sel Selectio
 		StartedAt:      started.UTC(),
 		AnsweredAt:     answered.UTC(),
 		ElapsedMS:      answered.Sub(started).Milliseconds(),
+		Assistance:     AssistanceIndependent,
 	}
 
 	switch {
@@ -147,6 +180,41 @@ func BuildRecord(contentID, contentVersion string, q exam.Question, sel Selectio
 	return rec, nil
 }
 
+// WithAssistance annotates a graded record with the condition under which it
+// was made, without attributing it to a tactic. Ordinary practice uses it when
+// the guided walkthrough for that question was already delivered: the help is
+// real even though the ordinary command did not show it. Tactic practice uses
+// WithTactic instead.
+func (a Attempt) WithAssistance(assistance Assistance) (Attempt, error) {
+	if !assistance.Valid() {
+		return Attempt{}, fmt.Errorf("attempt: invalid assistance %q", assistance)
+	}
+	if a.QuestionID == "" || a.ContentID == "" {
+		return Attempt{}, errors.New("attempt: annotate a graded record")
+	}
+	a.Assistance = assistance
+	return a, nil
+}
+
+// WithTactic annotates a graded record with the tactic exercise and the
+// assistance condition. A guided attempt is Assisted; an unguided attempt is
+// Independent. Ordinary practice never calls this.
+func (a Attempt) WithTactic(tacticID string, assistance Assistance) (Attempt, error) {
+	id := strings.TrimSpace(tacticID)
+	if id == "" {
+		return Attempt{}, errors.New("attempt: empty tactic id")
+	}
+	if !ValidTacticID(id) {
+		return Attempt{}, fmt.Errorf("attempt: tactic id %q is not a lowercase slug", id)
+	}
+	a, err := a.WithAssistance(assistance)
+	if err != nil {
+		return Attempt{}, err
+	}
+	a.TacticID = id
+	return a, nil
+}
+
 // Feedback is the deterministic explanation shown after an attempt.
 type Feedback struct {
 	Verdict           Status
@@ -156,6 +224,7 @@ type Feedback struct {
 	Reasoning         string
 	SelectedReasoning string
 	Exposure          string
+	Assistance        Assistance
 }
 
 // Exposure values are part of the JSON protocol.
@@ -173,6 +242,7 @@ func Explain(q exam.Question, a Attempt) Feedback {
 		Evidence:     q.Evidence,
 		Reasoning:    q.Reasoning,
 		Exposure:     ExposureFirstAttempt,
+		Assistance:   a.Assistance,
 	}
 	if a.Repeat() {
 		fb.Exposure = ExposureAnswerAlreadyShown

@@ -470,6 +470,58 @@ func TestParseQuestionJSONStaysUnreviewed(t *testing.T) {
 	}
 }
 
+func TestParseQuestionJSONKeepsRegisteredTags(t *testing.T) {
+	raw := strings.Replace(validQuestionJSON("B"), `"reasoning"`, `"tactics": ["not-except-polarity"], "reasoning"`, 1)
+	q, err := ParseQuestionJSON([]byte(raw), "src-test", 2, testNow, "")
+	if err != nil {
+		t.Fatalf("ParseQuestionJSON: %v", err)
+	}
+	if len(q.Tactics) != 1 || q.Tactics[0] != "not-except-polarity" {
+		t.Fatalf("tactics = %v", q.Tactics)
+	}
+	if q.AnswerStatus != AnswerUnmapped || q.Review != Unreviewed {
+		t.Fatalf("tagged question state = %s/%s, want unreviewed/unmapped", q.Review, q.AnswerStatus)
+	}
+}
+
+func TestBuildPracticeExamCarriesTacticTagsAndVersion(t *testing.T) {
+	page := Page{Number: 2, Origin: PageNative, Review: Reviewed, ReviewedBy: "owner", ReviewedAt: testNow, Text: "it will close at 4 p.m."}
+	taggedJSON := strings.Replace(validQuestionJSON("B"), `"reasoning"`, `"tactics": ["not-except-polarity"], "reasoning"`, 1)
+	tagged, err := ParseQuestionJSON([]byte(taggedJSON), "src-test", 2, testNow, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tagged, err = tagged.ReviewAnswer(page, "B", "owner", testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	untagged, err := ParseQuestionJSON([]byte(validQuestionJSON("B")), "src-test", 2, testNow, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	untagged, err = untagged.ReviewAnswer(page, "B", "owner", testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := Source{ID: "src-test", Title: "Test source", Import: ImportTXTFile, Path: "/tmp/x.txt", SHA256: "abc", Rights: DefaultRights, ExamRelation: DefaultExamRelation}
+
+	taggedContent, _, err := BuildPracticeExam(src, page, []Question{tagged})
+	if err != nil {
+		t.Fatalf("BuildPracticeExam tagged: %v", err)
+	}
+	if len(taggedContent.Questions) != 1 || len(taggedContent.Questions[0].Tactics) != 1 ||
+		taggedContent.Questions[0].Tactics[0] != "not-except-polarity" {
+		t.Fatalf("tagged practice question = %+v", taggedContent.Questions)
+	}
+	untaggedContent, _, err := BuildPracticeExam(src, page, []Question{untagged})
+	if err != nil {
+		t.Fatalf("BuildPracticeExam untagged: %v", err)
+	}
+	if taggedContent.Version == untaggedContent.Version {
+		t.Fatalf("content version %q does not change when a question gains a tactic tag", taggedContent.Version)
+	}
+}
+
 func TestParseQuestionJSONRejectsBadInput(t *testing.T) {
 	base := validQuestionJSON("B")
 	cases := []struct {
@@ -484,6 +536,9 @@ func TestParseQuestionJSONRejectsBadInput(t *testing.T) {
 		{"duplicate label", strings.Replace(base, `{"label": "B", "text": "At 4 p.m."}`, `{"label": "A", "text": "At 4 p.m."}`, 1), `option label "A" is duplicated`},
 		{"missing explanation", strings.Replace(base, `"A": "That is the weekday closing time.",`, "", 1), "option A has no explanation"},
 		{"unknown explanation", strings.Replace(base, `"B": "The notice gives 4 p.m. for Saturdays."`, `"B": "The notice gives 4 p.m. for Saturdays.", "C": "x"`, 1), `explains unknown option "C"`},
+		{"unregistered tactic", strings.Replace(base, `"reasoning"`, `"tactics": ["evidence-location"], "reasoning"`, 1), "not registered"},
+		{"malformed tactic", strings.Replace(base, `"reasoning"`, `"tactics": ["Not Except"], "reasoning"`, 1), "lowercase slug"},
+		{"duplicate tactic", strings.Replace(base, `"reasoning"`, `"tactics": ["not-except-polarity", "not-except-polarity"], "reasoning"`, 1), "is repeated"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

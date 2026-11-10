@@ -338,6 +338,109 @@ func TestQuestionAddReviewEditKeepsAudit(t *testing.T) {
 	}
 }
 
+func TestQuestionTagsRoundTrip(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "tags.sqlite"))
+	src := testSource(t)
+	if _, err := st.ImportSource(src); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`{
+		"id": "q1",
+		"stem": "When does the library close on Saturdays?",
+		"options": [{"label":"A","text":"At 7 p.m."},{"label":"B","text":"At 4 p.m."}],
+		"answer": "B",
+		"evidence": "close at 4 p.m.",
+		"reasoning": "The page states the Saturday time.",
+		"option_reasoning": {"A":"That is the weekday time.","B":"The page states 4 p.m."},
+		"tactics": ["not-except-polarity"]
+	}`)
+	q, err := source.ParseQuestionJSON(data, src.ID, 2, sourceNow, "")
+	if err != nil {
+		t.Fatalf("ParseQuestionJSON: %v", err)
+	}
+	if err := st.AddQuestion(q); err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	loaded, err := st.Question(src.ID, "q1")
+	if err != nil {
+		t.Fatalf("Question: %v", err)
+	}
+	if len(loaded.Tactics) != 1 || loaded.Tactics[0] != "not-except-polarity" {
+		t.Fatalf("loaded tags = %v", loaded.Tactics)
+	}
+
+	page, err := st.ReviewPage(src.ID, 2, "owner", "", sourceNow.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewed, err := loaded.ReviewAnswer(page, "B", "owner", sourceNow.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveQuestion(reviewed, EventQuestionReviewed); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = st.Question(src.ID, "q1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Tactics) != 1 || loaded.Tactics[0] != "not-except-polarity" {
+		t.Fatalf("reviewed tags = %v", loaded.Tactics)
+	}
+
+	events, err := st.Events(src.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var addedDetail string
+	for _, event := range events {
+		if event.Kind == EventQuestionAdded {
+			addedDetail = event.Detail
+		}
+	}
+	if !strings.Contains(addedDetail, "not-except-polarity") {
+		t.Fatalf("question_added audit detail lacks the tactic tag: %s", addedDetail)
+	}
+}
+
+func TestMigrationFromVersionThreeDefaultsQuestionTags(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v3-tags.sqlite")
+	db := openSQLite(t, path)
+	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3} {
+		for _, stmt := range statements {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("create v3 schema: %v", err)
+			}
+		}
+	}
+	at := source.FormatTime(sourceNow)
+	if _, err := db.Exec(`INSERT INTO source_questions (
+			source_id, id, page, stem, options_json, answer, evidence, reasoning,
+			option_reasoning_json, answer_status, review_status, created_at, updated_at
+		) VALUES ('src-legacy', 'q1', 1, 'legacy stem', '[]', '', 'legacy evidence', 'legacy reasoning',
+			'{}', 'unmapped', 'unreviewed', ?, ?)`, at, at); err != nil {
+		t.Fatalf("insert v3 question: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 3`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := mustOpen(t, path)
+	questions, err := st.Questions("src-legacy")
+	if err != nil {
+		t.Fatalf("Questions: %v", err)
+	}
+	if len(questions) != 1 {
+		t.Fatalf("questions = %d, want 1", len(questions))
+	}
+	if len(questions[0].Tactics) != 0 {
+		t.Fatalf("pre-v4 question tags = %v, want empty", questions[0].Tactics)
+	}
+}
+
 func TestMigrationFromVersionTwoKeepsAttemptsAndAddsSources(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v2.sqlite")
 	db := openSQLite(t, path)

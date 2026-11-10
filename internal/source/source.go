@@ -145,6 +145,7 @@ type Question struct {
 	Evidence        string
 	Reasoning       string
 	OptionReasoning map[string]string
+	Tactics         []string
 	AnswerStatus    AnswerStatus
 	Review          ReviewStatus
 	ReviewedBy      string

@@ -3,43 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { runGo } from "../lib/go.ts";
+import { arrayField, checkKeyHiding, field, numberField, stringField } from "../lib/json.ts";
 import { run } from "../lib/process.ts";
 import { resolve } from "../lib/repo.ts";
 import { fail, pass, skip } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
-
-function field(value: unknown, key: string): unknown {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
-  return Reflect.get(value, key);
-}
-
-function stringField(value: unknown, key: string): string | undefined {
-  const child = field(value, key);
-  return typeof child === "string" ? child : undefined;
-}
-
-function numberField(value: unknown, key: string): number | undefined {
-  const child = field(value, key);
-  return typeof child === "number" ? child : undefined;
-}
-
-function arrayField(value: unknown, key: string): unknown[] {
-  const child = field(value, key);
-  return Array.isArray(child) ? child : [];
-}
-
-function collectKeys(value: unknown, keys: Set<string>): void {
-  if (Array.isArray(value)) {
-    for (const child of value) collectKeys(child, keys);
-    return;
-  }
-  if (value !== null && typeof value === "object") {
-    for (const [key, child] of Object.entries(value)) {
-      keys.add(key);
-      collectKeys(child, keys);
-    }
-  }
-}
 
 export const importSmoke: Gate = {
   id: "import-smoke",
@@ -119,11 +87,7 @@ export const importSmoke: Gate = {
       const review = field(field(awaiting, "question"), "review");
       check(stringField(review, "page_status") === "reviewed", "awaiting page review is not visible");
       check(stringField(review, "question_status") === "reviewed", "awaiting question review is not visible");
-      const keys = new Set<string>();
-      collectKeys(awaiting, keys);
-      for (const forbidden of ["answer", "correct_label", "correct_text", "evidence", "reasoning", "status", "feedback"]) {
-        check(!keys.has(forbidden), `awaiting JSON exposes ${forbidden}`);
-      }
+      checkKeyHiding(check, awaiting, "awaiting JSON");
 
       const answeredResult = await call([
         "practice", "--json", "--source", sourceID, "--question", "q1", "--answer", "B",

@@ -1,0 +1,68 @@
+{
+  "content": {
+    "id": "tactic-first-party-not-except",
+    "notice": "First-party authored tactic exercise. Not from the private source PDF, not a live exam and not an exam blueprint; the answer mapping is verified by construction for practice.",
+    "provenance": {
+      "author": "Pass Quest contributors",
+      "exam_relation": "tactic demonstration only; not drawn from a live examination",
+      "rights": "original text; redistributable with this repository",
+      "source": "self-authored for this repository"
+    },
+    "title": "Tactic practice — NOT/EXCEPT polarity",
+    "version": "1"
+  },
+  "guidance": {
+    "boundary": {
+      "example": "A NOT item says: 'The reading room is closed on Mondays. Which of the following is NOT true?' Option A says 'The reading room is closed on Mondays'; option B says 'The reading room is open on Mondays.' Option A repeats the passage exactly, but under a NOT stem it is the supported statement and therefore wrong. Option B reverses the fact and is the key. The longer option is not more likely to be right; it is often a wordy paraphrase that copies vocabulary.",
+      "folklore": "Choose the option that repeats the most words from the passage, and prefer the longest option.",
+      "why_it_fails": "Word overlap measures vocabulary reuse, not truth. The stem decides which truth relation the key needs, and a small negation word changes that relation without changing the repeated nouns."
+    },
+    "principle": "In a NOT/EXCEPT item, three options are supported by the passage and one is not (or is false). The key is the odd statement, not the option that reuses the most passage vocabulary.",
+    "steps": [
+      "Find the negative word in the stem: NOT, EXCEPT, INCORRECT, or 'all of the following ... except'.",
+      "For each option, locate the passage sentence it depends on, or record that the statement is absent.",
+      "Mark each option as supported or contradicted by the passage.",
+      "Choose the option whose support disagrees with the stem's polarity.",
+      "Check the other options against the same rule; exactly one statement should be the odd one.",
+      "If two options fit or the passage is ambiguous, do not guess from keyword overlap; mark the item for review."
+    ],
+    "when_it_works": "Use it on multiple-choice questions whose stem asks for what is NOT stated, NOT true, NOT included, or contains EXCEPT. It needs an answer mapping that has been reviewed. It does not decide a 'best title' or an inference question, and it cannot rescue a question whose key is disputed.",
+    "why_it_works": "The item author gives the key a different truth relation from the other three options. Negation is carried by the stem and by small words such as 'not', 'except', 'free' or 'after', so an option can repeat passage nouns and still be false. A deterministic key can be checked by locating evidence for each option, not by guessing from word overlap or length."
+  },
+  "question": {
+    "id": "t1",
+    "number": 1,
+    "options": [
+      {
+        "label": "A",
+        "text": "The coach leaves the centre at 8:30 a.m."
+      },
+      {
+        "label": "B",
+        "text": "The trip returns at about 6 p.m."
+      },
+      {
+        "label": "C",
+        "text": "The museum café sells hot drinks."
+      },
+      {
+        "label": "D",
+        "text": "Children under twelve travel free."
+      }
+    ],
+    "passage": {
+      "text": "The Northfield Community Centre will run a day trip to the county museum on Saturday 14 June. The coach will leave the centre at 8:30 a.m. and return at about 6 p.m. The trip costs £12 for adults and £7 for children under twelve. Members may bring one guest at the member price. Lunch is not included, but the museum café sells sandwiches and hot drinks. Visitors should bring a waterproof jacket because part of the museum tour is outdoors. The centre cannot accept cancellations after Wednesday 11 June. To reserve a place, sign the list at the front desk and pay by Friday 6 June.",
+      "title": "Northfield Community Centre — museum trip"
+    },
+    "stem": "Which of the following is NOT stated in the trip notice?",
+    "total": 3
+  },
+  "schema_version": 1,
+  "state": "awaiting_answer",
+  "tactic": {
+    "assistance": "assisted",
+    "id": "not-except-polarity",
+    "stage": "guided",
+    "title": "NOT/EXCEPT polarity"
+  }
+}

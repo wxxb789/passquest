@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "tactic": {
+    "boundary": {
+      "example": "A NOT item says: 'The reading room is closed on Mondays. Which of the following is NOT true?' Option A says 'The reading room is closed on Mondays'; option B says 'The reading room is open on Mondays.' Option A repeats the passage exactly, but under a NOT stem it is the supported statement and therefore wrong. Option B reverses the fact and is the key. The longer option is not more likely to be right; it is often a wordy paraphrase that copies vocabulary.",
+      "folklore": "Choose the option that repeats the most words from the passage, and prefer the longest option.",
+      "why_it_fails": "Word overlap measures vocabulary reuse, not truth. The stem decides which truth relation the key needs, and a small negation word changes that relation without changing the repeated nouns."
+    },
+    "id": "not-except-polarity",
+    "principle": "In a NOT/EXCEPT item, three options are supported by the passage and one is not (or is false). The key is the odd statement, not the option that reuses the most passage vocabulary.",
+    "steps": [
+      "Find the negative word in the stem: NOT, EXCEPT, INCORRECT, or 'all of the following ... except'.",
+      "For each option, locate the passage sentence it depends on, or record that the statement is absent.",
+      "Mark each option as supported or contradicted by the passage.",
+      "Choose the option whose support disagrees with the stem's polarity.",
+      "Check the other options against the same rule; exactly one statement should be the odd one.",
+      "If two options fit or the passage is ambiguous, do not guess from keyword overlap; mark the item for review."
+    ],
+    "summary": "Read the stem's negative word first, then match statements to the passage instead of matching words.",
+    "title": "NOT/EXCEPT polarity",
+    "when_it_works": "Use it on multiple-choice questions whose stem asks for what is NOT stated, NOT true, NOT included, or contains EXCEPT. It needs an answer mapping that has been reviewed. It does not decide a 'best title' or an inference question, and it cannot rescue a question whose key is disputed.",
+    "why_it_works": "The item author gives the key a different truth relation from the other three options. Negation is carried by the stem and by small words such as 'not', 'except', 'free' or 'after', so an option can repeat passage nouns and still be false. A deterministic key can be checked by locating evidence for each option, not by guessing from word overlap or length."
+  }
+}

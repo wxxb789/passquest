@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "tactics": [
+    {
+      "id": "not-except-polarity",
+      "summary": "Read the stem's negative word first, then match statements to the passage instead of matching words.",
+      "title": "NOT/EXCEPT polarity"
+    }
+  ]
+}

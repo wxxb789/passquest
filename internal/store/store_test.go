@@ -312,6 +312,67 @@ func TestAppendRejectsInconsistentRecords(t *testing.T) {
 	}
 }
 
+func TestAppendPersistsAssistanceAndTactic(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "assistance.sqlite"))
+
+	assisted := sampleAttempt("q1")
+	assisted, err := assisted.WithTactic("not-except-polarity", attempt.AssistanceAssisted)
+	if err != nil {
+		t.Fatalf("WithTactic assisted: %v", err)
+	}
+	got := mustAppend(t, st, assisted)
+	if got.Assistance != attempt.AssistanceAssisted || got.TacticID != "not-except-polarity" {
+		t.Fatalf("assisted record = %+v", got)
+	}
+
+	independent := sampleAttempt("q2")
+	independent, err = independent.WithTactic("not-except-polarity", attempt.AssistanceIndependent)
+	if err != nil {
+		t.Fatalf("WithTactic independent: %v", err)
+	}
+	if _, err := st.Append(independent); err != nil {
+		t.Fatalf("Append independent tactic: %v", err)
+	}
+
+	ordinary := sampleAttempt("q3")
+	ordinary.Assistance = ""
+	if _, err := st.Append(ordinary); err != nil {
+		t.Fatalf("Append ordinary: %v", err)
+	}
+
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("attempts = %d, want 3", len(list))
+	}
+	if list[0].Assistance != attempt.AssistanceAssisted || list[0].TacticID != "not-except-polarity" {
+		t.Fatalf("stored assisted = %+v", list[0])
+	}
+	if list[1].Assistance != attempt.AssistanceIndependent || list[1].TacticID != "not-except-polarity" {
+		t.Fatalf("stored independent = %+v", list[1])
+	}
+	if list[2].Assistance != attempt.AssistanceIndependent || list[2].TacticID != "" {
+		t.Fatalf("stored ordinary = %+v", list[2])
+	}
+
+	assistedNoTactic := sampleAttempt("q4")
+	assistedNoTactic, err = assistedNoTactic.WithAssistance(attempt.AssistanceAssisted)
+	if err != nil {
+		t.Fatalf("WithAssistance assisted: %v", err)
+	}
+	got = mustAppend(t, st, assistedNoTactic)
+	if got.Assistance != attempt.AssistanceAssisted || got.TacticID != "" {
+		t.Fatalf("assisted ordinary record = %+v", got)
+	}
+	badAssistance := sampleAttempt("q5")
+	badAssistance.Assistance = "guessed"
+	if _, err := st.Append(badAssistance); err == nil || !strings.Contains(err.Error(), "assistance") {
+		t.Fatalf("invalid assistance error = %v", err)
+	}
+}
+
 func TestMigrationKeepsOlderDatabaseAndIsIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.sqlite")
 	db := openSQLite(t, path)
@@ -403,6 +464,179 @@ func TestMigrationAddsInsertGuardToVersionOne(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].Status != attempt.StatusCorrect {
 		t.Fatalf("attempt after rejected replace = %+v", list)
+	}
+}
+
+func TestMigrationFromVersionThreeAddsAssistanceColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v3.sqlite")
+	db := openSQLite(t, path)
+	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3} {
+		for _, stmt := range statements {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("create v3 schema: %v", err)
+			}
+		}
+	}
+	started := "2026-11-10T09:00:00Z"
+	if _, err := db.Exec(`INSERT INTO attempts (
+			session_id, question_id, content_id, content_version, status,
+			selected_label, selected_text, correct_label, correct_text,
+			started_at, answered_at, elapsed_ms
+		) VALUES ('sess', 'q1', 'sample-0001', '1', 'correct', 'B', 'At 4 p.m.', 'B', 'At 4 p.m.', ?, ?, 5)`,
+		started, started); err != nil {
+		t.Fatalf("insert v3 attempt: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 3`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := mustOpen(t, path)
+	var version int
+	if err := st.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, SchemaVersion)
+	}
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(list))
+	}
+	if list[0].Assistance != attempt.AssistanceIndependent || list[0].TacticID != "" {
+		t.Fatalf("pre-v4 attempt = %+v, want independent with no tactic", list[0])
+	}
+
+	// The database enforces the assistance vocabulary even for direct writes.
+	if _, err := st.db.Exec(`INSERT INTO attempts (
+			session_id, question_id, content_id, content_version, status,
+			selected_label, selected_text, correct_label, correct_text,
+			started_at, answered_at, elapsed_ms, assistance
+		) VALUES ('sess', 'q2', 'sample-0001', '1', 'correct', 'B', 'At 4 p.m.', 'B', 'At 4 p.m.', ?, ?, 5, 'guessed')`,
+		started, started); err == nil || !strings.Contains(err.Error(), "CHECK") {
+		t.Fatalf("invalid assistance insert error = %v, want CHECK failure", err)
+	}
+}
+
+func TestRecordExposureIsIdempotentAndAppendOnly(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "exposure.sqlite"))
+	at := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	exposure := Exposure{
+		TacticID:   "not-except-polarity",
+		ContentID:  "tactic-first-party-not-except",
+		QuestionID: "t2",
+		ExposedAt:  at,
+	}
+	if err := st.RecordExposure(exposure); err != nil {
+		t.Fatalf("RecordExposure: %v", err)
+	}
+	if err := st.RecordExposure(exposure); err != nil {
+		t.Fatalf("repeated RecordExposure: %v", err)
+	}
+	list, err := st.ListExposures()
+	if err != nil {
+		t.Fatalf("ListExposures: %v", err)
+	}
+	if len(list) != 1 || list[0].Key() != exposure.Key() || !list[0].ExposedAt.Equal(at) {
+		t.Fatalf("exposures = %+v, want one observation of %+v", list, exposure)
+	}
+	exposed, err := st.Exposed(exposure.Key())
+	if err != nil {
+		t.Fatalf("Exposed: %v", err)
+	}
+	if !exposed {
+		t.Fatal("Exposed reports a recorded question as unexposed")
+	}
+	other, err := st.Exposed(attempt.QuestionKey{ContentID: exposure.ContentID, QuestionID: "t3"})
+	if err != nil {
+		t.Fatalf("Exposed other question: %v", err)
+	}
+	if other {
+		t.Fatal("Exposed reports another question as exposed")
+	}
+
+	if _, err := st.db.Exec(`UPDATE tactic_exposures SET question_id = 't1'`); err == nil || !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("UPDATE exposure error = %v, want append-only rejection", err)
+	}
+	if _, err := st.db.Exec(`DELETE FROM tactic_exposures`); err == nil || !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("DELETE exposure error = %v, want append-only rejection", err)
+	}
+
+	badTactic := exposure
+	badTactic.TacticID = "Not A Slug"
+	if err := st.RecordExposure(badTactic); err == nil || !strings.Contains(err.Error(), "tactic_id") {
+		t.Fatalf("invalid tactic error = %v", err)
+	}
+	badContent := exposure
+	badContent.ContentID = " "
+	if err := st.RecordExposure(badContent); err == nil || !strings.Contains(err.Error(), "content_id") {
+		t.Fatalf("empty content error = %v", err)
+	}
+}
+
+func TestMigrationFromVersionFourAddsGuidedExposures(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v4.sqlite")
+	db := openSQLite(t, path)
+	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3, schemaV4} {
+		for _, stmt := range statements {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("create v4 schema: %v", err)
+			}
+		}
+	}
+	at := "2026-11-10T09:00:00Z"
+	if _, err := db.Exec(`INSERT INTO attempts (
+			session_id, question_id, content_id, content_version, status,
+			selected_label, selected_text, correct_label, correct_text,
+			started_at, answered_at, elapsed_ms, assistance, tactic_id
+		) VALUES ('sess', 't1', 'tactic-first-party-not-except', '1', 'correct',
+			'D', 'option d', 'D', 'option d', ?, ?, 5, 'assisted', 'not-except-polarity')`,
+		at, at); err != nil {
+		t.Fatalf("insert v4 attempt: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 4`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := mustOpen(t, path)
+	var version int
+	if err := st.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, SchemaVersion)
+	}
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 || list[0].Assistance != attempt.AssistanceAssisted || list[0].TacticID != "not-except-polarity" {
+		t.Fatalf("v4 attempt after migration = %+v", list)
+	}
+
+	exposure := Exposure{
+		TacticID:   "not-except-polarity",
+		ContentID:  "tactic-first-party-not-except",
+		QuestionID: "t2",
+		ExposedAt:  time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC),
+	}
+	if err := st.RecordExposure(exposure); err != nil {
+		t.Fatalf("RecordExposure after migration: %v", err)
+	}
+	exposures, err := st.ListExposures()
+	if err != nil {
+		t.Fatalf("ListExposures: %v", err)
+	}
+	if len(exposures) != 1 || exposures[0].QuestionID != "t2" {
+		t.Fatalf("exposures after migration = %+v", exposures)
 	}
 }
 

@@ -1,0 +1,157 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { runGo } from "../lib/go.ts";
+import { arrayField, checkKeyHiding, field, numberField, stringField } from "../lib/json.ts";
+import { run } from "../lib/process.ts";
+import { fail, pass } from "../lib/types.ts";
+import type { Gate, GateContext } from "../lib/types.ts";
+
+export const tacticSmoke: Gate = {
+  id: "tactic-smoke",
+  title: "tactic smoke",
+  async run(ctx: GateContext) {
+    const binaryName = process.platform === "win32" ? "passquest.exe" : "passquest";
+
+    const temp = mkdtempSync(path.join(tmpdir(), "passquest-tactic-smoke-"));
+    const binary = path.join(temp, binaryName);
+    const db = path.join(temp, "smoke.sqlite");
+    const checks: string[] = [];
+    let assertions = 0;
+    const check = (condition: boolean, message: string): boolean => {
+      assertions++;
+      if (!condition) checks.push(message);
+      return condition;
+    };
+    const call = (args: string[]) => run(binary, args, { cwd: ctx.root });
+    const callDB = (args: string[]) => run(binary, [...args, "--db", db], { cwd: ctx.root });
+    const parse = (raw: string): unknown => JSON.parse(raw);
+
+    try {
+      const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
+      if (build.code !== 0) {
+        return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
+      }
+
+      const listResult = await call(["tactic", "list", "--json"]);
+      if (!check(listResult.code === 0, `tactic list exit = ${listResult.code}`)) return fail(checks);
+      const tactics = arrayField(parse(listResult.stdout), "tactics");
+      const lessonID = "not-except-polarity";
+      check(tactics.some((item) => stringField(item, "id") === lessonID), `tactic list does not contain ${lessonID}`);
+
+      const showResult = await call(["tactic", "show", lessonID, "--json"]);
+      if (!check(showResult.code === 0, `tactic show exit = ${showResult.code}`)) return fail(checks);
+      const lesson = field(parse(showResult.stdout), "tactic");
+      for (const key of ["principle", "why_it_works", "when_it_works"]) {
+        check((stringField(lesson, key) ?? "").length > 0, `tactic show has no ${key}`);
+      }
+      check(arrayField(lesson, "steps").length >= 3, "tactic show has fewer than 3 steps");
+      for (const key of ["folklore", "example", "why_it_fails"]) {
+        check((stringField(field(lesson, "boundary"), key) ?? "").length > 0, `tactic boundary has no ${key}`);
+      }
+
+      const guidedResult = await callDB(["tactic", "practice", lessonID, "--json"]);
+      if (!check(guidedResult.code === 0, `guided awaiting exit = ${guidedResult.code}`)) return fail(checks);
+      const guided = parse(guidedResult.stdout);
+      check(stringField(guided, "state") === "awaiting_answer", `guided state = ${String(stringField(guided, "state"))}`);
+      check(stringField(field(guided, "tactic"), "stage") === "guided", "guided stage is not guided");
+      check(stringField(field(guided, "tactic"), "assistance") === "assisted", "guided assistance is not assisted");
+      check(field(guided, "guidance") !== undefined, "guided awaiting has no guidance");
+      check(stringField(field(guided, "content"), "id") === "tactic-first-party-not-except", "content is not the tactic exercise");
+      const guidedQuestion = stringField(field(guided, "question"), "id") ?? "";
+      check(guidedQuestion !== "", "guided awaiting has no question id");
+      checkKeyHiding(check, guided, "guided awaiting JSON");
+
+      const guidedAnswer = await callDB(["tactic", "practice", lessonID, "--json", "--answer", "D"]);
+      if (!check(guidedAnswer.code === 0, `guided answer exit = ${guidedAnswer.code}`)) return fail(checks);
+      const guidedAnswered = parse(guidedAnswer.stdout);
+      const guidedAttempt = field(guidedAnswered, "attempt");
+      check(field(guidedAnswered, "guidance") !== undefined, "guided answered document has no guidance");
+      check(stringField(guidedAttempt, "assistance") === "assisted", "guided attempt assistance is not assisted");
+      check(stringField(guidedAttempt, "tactic_id") === lessonID, "guided attempt has no tactic id");
+      check(stringField(guidedAttempt, "question_id") === guidedQuestion, "guided attempt question differs from the awaiting question");
+      check(stringField(guidedAttempt, "status") === "correct", `guided attempt status = ${String(stringField(guidedAttempt, "status"))}`);
+
+      const independentResult = await callDB(["tactic", "practice", lessonID, "--json"]);
+      if (!check(independentResult.code === 0, `independent awaiting exit = ${independentResult.code}`)) return fail(checks);
+      const independent = parse(independentResult.stdout);
+      check(stringField(field(independent, "tactic"), "stage") === "independent", "independent stage is not independent");
+      check(stringField(field(independent, "tactic"), "assistance") === "independent", "independent assistance is not independent");
+      check(field(independent, "guidance") === undefined, "independent awaiting still carries guidance");
+      const independentQuestion = stringField(field(independent, "question"), "id") ?? "";
+      check(independentQuestion !== "" && independentQuestion !== guidedQuestion, "independent question is not distinct from the guided question");
+      checkKeyHiding(check, independent, "independent awaiting JSON");
+
+      const independentAnswer = await callDB(["tactic", "practice", lessonID, "--json", "--answer", "C"]);
+      if (!check(independentAnswer.code === 0, `independent answer exit = ${independentAnswer.code}`)) return fail(checks);
+      const independentAnswered = parse(independentAnswer.stdout);
+      const independentAttempt = field(independentAnswered, "attempt");
+      check(field(independentAnswered, "guidance") === undefined, "independent answered document still carries guidance");
+      check(stringField(independentAttempt, "assistance") === "independent", "independent attempt assistance is not independent");
+      check(stringField(independentAttempt, "question_id") === independentQuestion, "independent attempt question differs from the awaiting question");
+      check(
+        stringField(independentAttempt, "status") === "correct",
+        `independent attempt status = ${String(stringField(independentAttempt, "status"))}`,
+      );
+
+      const report = parse((await callDB(["report", "--json"])).stdout);
+      const counts = field(report, "counts");
+      check(numberField(counts, "attempts") === 2, `report attempts = ${String(numberField(counts, "attempts"))}`);
+      check(numberField(counts, "correct") === 2, `report correct = ${String(numberField(counts, "correct"))}`);
+      check(numberField(counts, "assisted_attempts") === 1, `report assisted_attempts = ${String(numberField(counts, "assisted_attempts"))}`);
+      check(numberField(counts, "assisted_correct") === 1, `report assisted_correct = ${String(numberField(counts, "assisted_correct"))}`);
+      check(numberField(counts, "independent_attempts") === 1, `report independent_attempts = ${String(numberField(counts, "independent_attempts"))}`);
+      check(
+        numberField(counts, "independent_correct") === 1,
+        `report independent_correct = ${String(numberField(counts, "independent_correct"))}`,
+      );
+      const attempts = arrayField(report, "attempts");
+      check(stringField(attempts[0], "assistance") === "assisted", "report first attempt is not assisted");
+      check(stringField(attempts[1], "assistance") === "independent", "report second attempt is not independent");
+
+      const exhausted = await callDB(["tactic", "practice", lessonID, "--json", "--stage", "independent"]);
+      check(exhausted.code === 2, `exhausted independent exit = ${exhausted.code}`);
+      check(stringField(field(parse(exhausted.stderr), "error"), "code") === "not_practiceable", "exhausted independent error code");
+
+      // A guided pre-answer document is help shown even without an answer, so
+      // that question cannot become independent evidence afterwards.
+      const exposureDB = path.join(temp, "exposure.sqlite");
+      const callExposure = (args: string[]) => run(binary, [...args, "--db", exposureDB], { cwd: ctx.root });
+
+      const exposureSeed = await callExposure(["tactic", "practice", lessonID, "--json", "--answer", "D"]);
+      check(exposureSeed.code === 0, `exposure seed exit = ${exposureSeed.code}`);
+
+      const exposureAwait = await callExposure(["tactic", "practice", lessonID, "--stage", "guided", "--question", "t2", "--json"]);
+      if (!check(exposureAwait.code === 0, `exposure awaiting exit = ${exposureAwait.code}`)) return fail(checks);
+      const exposureAwaitDoc = parse(exposureAwait.stdout);
+      check(stringField(field(exposureAwaitDoc, "question"), "id") === "t2", "exposure awaiting question is not t2");
+      check(field(exposureAwaitDoc, "guidance") !== undefined, "exposure awaiting has no guidance");
+
+      const exposedIndependent = await callExposure(["tactic", "practice", lessonID, "--stage", "independent", "--question", "t2", "--json"]);
+      check(exposedIndependent.code === 2, `exposed independent exit = ${exposedIndependent.code}`);
+      const exposedError = field(parse(exposedIndependent.stderr), "error");
+      check(stringField(exposedError, "code") === "invalid_input", "exposed independent error code");
+      check((stringField(exposedError, "message") ?? "").includes("walkthrough"), "exposed independent message");
+
+      const exposureReport = await callExposure(["report", "--json"]);
+      check(exposureReport.code === 0, `exposure report exit = ${exposureReport.code}`);
+      check(numberField(field(parse(exposureReport.stdout), "counts"), "attempts") === 1, "exposure awaiting recorded an attempt");
+
+      const exposureResume = await callExposure(["tactic", "practice", lessonID, "--stage", "guided", "--json"]);
+      if (!check(exposureResume.code === 0, `exposure resume exit = ${exposureResume.code}`)) return fail(checks);
+      check(stringField(field(parse(exposureResume.stdout), "question"), "id") === "t2", "guided resume did not keep the exposed question");
+
+      const exposureExhausted = await callExposure(["tactic", "practice", lessonID, "--stage", "independent", "--json"]);
+      check(exposureExhausted.code === 2, `exposure exhausted exit = ${exposureExhausted.code}`);
+      check(stringField(field(parse(exposureExhausted.stderr), "error"), "code") === "not_practiceable", "exposure exhausted error code");
+    } catch (error) {
+      checks.push(error instanceof Error ? error.message : String(error));
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+
+    if (checks.length > 0) return fail(checks);
+    return pass(`${assertions} assertions`);
+  },
+};

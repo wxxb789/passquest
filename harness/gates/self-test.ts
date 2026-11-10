@@ -17,6 +17,7 @@ import { gofmt } from "./gofmt.ts";
 import { importSmoke } from "./import-smoke.ts";
 import { localOnly } from "./local-only.ts";
 import { secrets } from "./secrets.ts";
+import { tacticSmoke } from "./tactic-smoke.ts";
 import { typecheck } from "./typecheck.ts";
 
 const GO_MOD = "module example.com/selftest\n\ngo 1.27.3\n";
@@ -267,6 +268,14 @@ function brokenCases(): BrokenCase[] {
         "go.mod": GO_MOD,
         "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
         "internal/cli/testdata/import/placeholder.txt": "fixture placeholder\n",
+      },
+    },
+    {
+      gate: tacticSmoke,
+      label: "CLI whose tactic output is not the protocol",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
       },
     },
   ];
