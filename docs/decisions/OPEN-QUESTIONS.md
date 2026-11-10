@@ -514,3 +514,57 @@ Entry format:
   mistaken for cross-platform correctness. [cross-platform.md](../cross-platform.md) states the same.
 - Revisit when: a learner copies a command on Windows, or goal 0007/0012 introduces a copyable command
   whose paths leave the ASCII-safe set.
+
+### Q-0007-01 — Can the AnkiConnect path be proven without Anki Desktop on this machine?
+- Status: decided(default taken)
+- Context: goal 0007 lists Anki Desktop/AnkiConnect as the primary local path, but the environment has
+  no Anki binary and nothing answers `127.0.0.1:8765`; CI cannot reach a learner's desktop on any OS.
+- Options considered: (A) prove the adapter against a loopback AnkiConnect stub and keep the real desktop
+  as owner evidence; (B) block the goal until Anki is installed here; (C) ship export only and drop the
+  adapter.
+- Default taken: (A). The stub speaks the documented AnkiConnect shape (`version`, `createDeck`,
+  `createModel`/`modelNames`, `addNote`, `updateNoteFields`, `duplicate`), and every report states that a
+  real deck write is unverified until the owner runs it. Export remains the offline fallback.
+- Revisit when: the owner runs the app beside a real Anki Desktop, or Anki changes its protocol.
+
+### Q-0007-02 — Which deck and note model does a note land in?
+- Status: decided(default taken)
+- Context: a deck name is visible to the learner and a model name pins the field schema; both are cheap to
+  change but expensive to migrate after cards exist.
+- Options considered: (A) deck `Pass Quest`, model `PassQuest Note`, fields `Front`, `Back`, `Tactic`,
+  `Source`; (B) reuse Anki's built-in `Basic` model; (C) one model per content type.
+- Default taken: (A). `Basic` cannot carry tactic and source context without stuffing them into one field,
+  and per-type models would multiply migration cost before the content shape is known. The deck name is a
+  flag, not a constant.
+
+### Q-0007-03 — How much visual design belongs to this goal?
+- Status: decided(default taken)
+- Context: "beautiful, concise" is in the outcome, but goal 0012 owns the visual system.
+- Options considered: (A) tidy minimal CSS that survives Anki mobile; (B) a designed template now;
+  (C) unstyled text.
+- Default taken: (A): system font stack, no external asset, no fixed height, readable at phone width.
+
+### Q-0007-04 — May a note carry text from the internal-only source?
+- Status: decided(default taken)
+- Context: the 165-page source is internal-only; an Anki note can leave the machine through AnkiWeb.
+- Options considered: (A) restricted text is written only after the goal-0005 consent is recorded, and the
+  app says AnkiWeb sync is the learner's own action; (B) always include the source sentence; (C) never
+  include it.
+- Default taken: (A). Without it a note cannot teach the pattern it came from, and the consent ledger
+  already exists; the app never claims to push anything to a phone.
+
+### Q-0007-05 — What makes a word or pattern worth a note?
+- Status: decided(default taken)
+- Context: "high-value" is the goal's qualifier and has no definition.
+- Options considered: (A) an incorrect or skipped attempt, or an explicit learner mark; (B) every question
+  seen; (C) only wrong answers.
+- Default taken: (A). Every question floods the deck, wrong-only misses the patterns a learner notices
+  themselves; the mark is one flag.
+
+### Q-0007-06 — Does a revision update the existing card or add a new one?
+- Status: decided(default taken)
+- Context: Anki review history lives on the note; re-adding on edit would reset it.
+- Options considered: (A) keep the note id locally and use `updateNoteFields`; (B) delete and re-add;
+  (C) create a new note and leave the old one.
+- Default taken: (A); a local revision that disagrees with what Anki holds is surfaced as a conflict, not
+  silently overwritten.
