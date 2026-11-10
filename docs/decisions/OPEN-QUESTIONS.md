@@ -578,9 +578,9 @@ Entry format:
   `net/http` in an `internal/anki` package; (C) export only, with no adapter.
 - Default taken: (A). `agent/anki-host.mjs` is a 1–50 action allow-listed loopback transport; Go owns
   endpoint validation, duplicate/missing-note/conflict classification and all queue state. Only
-  `note push` needs Node; drafting, previewing, accepting, skipping, showing, exporting and the model
-  view work with Go alone. Reverse by replacing `anki.HostTransport` behind the same
-  `anki.Transport` interface.
+  `note push` needs the Anki host; drafting (without `--refine`), previewing, accepting, skipping,
+  showing, exporting and the model view work with Go alone, while `propose --refine` uses the existing
+  tutor host. Reverse by replacing `anki.HostTransport` behind the same `anki.Transport` interface.
 - Revisit when: goal 0013 packages the desktop app with its own runtime lifecycle, or Node is absent
   on a target platform.
 
@@ -606,10 +606,10 @@ Entry format:
   treated as unanswered and an incorrect attempt allowed to include the key; (B) one note per
   attempt; (C) one note per question always.
 - Default taken: (A). `note-<sha256(target_key)[:16]>` is stable across processes; an edited accept
-  appends a revision. A skipped or unattempted draft reads no correct label, keyed option text,
-  keyed option reasoning or question reasoning, and replaces a key-revealing passage sentence with
-  the visible stem. Reverse by changing `note.Target.Key` and the unanswered branch; stored
-  revisions remain.
+  appends a revision. A skipped or unattempted draft never writes or returns the correct label, keyed
+  option text, keyed option reasoning or question reasoning; it reads those fields only to replace a
+  key-revealing passage sentence with the visible stem. Reverse by changing `note.Target.Key` and the
+  unanswered branch; stored revisions remain.
 - Revisit when: a learner needs two unmarked notes per question, or goal 0009 defines a different
   passage-exposure rule for notes.
 

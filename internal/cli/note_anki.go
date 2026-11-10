@@ -73,6 +73,7 @@ type notePushWork struct {
 	Fields     note.Fields
 	Action     string
 	Outcome    string
+	Code       string
 	Detail     string
 	AnkiNoteID int64
 	State      string
@@ -174,7 +175,8 @@ func runNotePush(args []string, opt Options) int {
 			}
 			view := notePushItemView{
 				NoteID: item.Entry.NoteID, Revision: item.Entry.Revision,
-				AnkiNoteID: item.AnkiNoteID, State: item.State, Outcome: item.Outcome, Detail: item.Detail,
+				AnkiNoteID: item.AnkiNoteID, State: item.State, Outcome: item.Outcome,
+				Code: item.Code, Detail: item.Detail,
 			}
 			if view.AnkiNoteID == 0 && item.Note.AnkiNoteID != 0 {
 				view.AnkiNoteID = item.Note.AnkiNoteID
@@ -187,7 +189,11 @@ func runNotePush(args []string, opt Options) int {
 		doc.Counts.Conflicts = counts.Conflicts
 		doc.Counts.Failed = counts.Failed
 		doc.Counts.Queued = counts.Queued
-		doc.Counts.Pending = len(entries)
+		remaining, err := st.PendingNoteOutbox()
+		if err != nil {
+			return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+		}
+		doc.Counts.Pending = len(remaining)
 		switch {
 		case counts.Conflicts > 0:
 			doc.State = "conflict"
@@ -206,6 +212,16 @@ func runNotePush(args []string, opt Options) int {
 		}
 		if exit == 0 && (doc.State == "conflict" || doc.State == "failed") {
 			exit = 3
+		}
+		if exit != 0 {
+			switch doc.State {
+			case "conflict":
+				doc.Error = &errorBody{Code: "anki_conflict", Message: fmt.Sprintf(
+					"%d note(s) remain queued in conflict; nothing was overwritten", counts.Conflicts)}
+			default:
+				doc.Error = &errorBody{Code: "anki_failed", Message: fmt.Sprintf(
+					"%d note(s) failed and remain queued", counts.Failed)}
+			}
 		}
 		if *jsonFlag {
 			if exit != 0 {
@@ -310,12 +326,22 @@ func runNotePush(args []string, opt Options) int {
 				}
 				info, ok := byID[item.Note.AnkiNoteID]
 				if !ok {
+					// The card is gone. Record the miss before the readd so the
+					// ledger shows why a new id was written.
+					if err := st.RecordAnkiAttempt(store.AnkiAttempt{
+						NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: "check", Outcome: "not_found",
+						Detail: "note was missing in Anki", At: opt.Now(),
+						AnkiNoteID: item.Note.AnkiNoteID, AnkiState: store.AnkiStateQueued,
+					}); err != nil {
+						return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+					}
 					item.Action = "readd"
 					continue
 				}
 				if info.ModelName != "" && info.ModelName != note.ModelName {
 					item.State = store.AnkiStateConflict
 					item.Outcome = "conflict"
+					item.Code = "model_mismatch"
 					item.Detail = "Anki note uses model " + info.ModelName
 					continue
 				}
@@ -323,12 +349,14 @@ func runNotePush(args []string, opt Options) int {
 				if err != nil {
 					item.State = store.AnkiStateConflict
 					item.Outcome = "conflict"
+					item.Code = "revision_unavailable"
 					item.Detail = "recorded pushed revision is unavailable"
 					continue
 				}
 				if !noteFieldsMatch(info, expected) {
 					item.State = store.AnkiStateConflict
 					item.Outcome = "conflict"
+					item.Code = "fields_changed"
 					item.Detail = "Anki fields changed since the last push; use --force to overwrite"
 					continue
 				}
@@ -376,21 +404,30 @@ func runNotePush(args []string, opt Options) int {
 		}
 	}
 	if len(actions) > 0 {
-		response, err := call(actions)
-		if err != nil {
-			return noteAnkiFailure(opt, *jsonFlag, "anki_unavailable", err.Error())
-		}
 		var readdIndexes []int
-		for position, ref := range writes {
-			item := &work[ref.index]
-			if position >= len(response.Results) {
-				item.State = store.AnkiStateFailed
-				item.Outcome = "failed"
-				item.Detail = "AnkiConnect returned fewer results than actions"
-				continue
+		for start := 0; start < len(writes); start += anki.MaxActionsPerCall {
+			end := min(start+anki.MaxActionsPerCall, len(writes))
+			response, err := call(actions[start:end])
+			if err != nil {
+				return noteAnkiFailure(opt, *jsonFlag, "anki_unavailable", err.Error())
 			}
-			if classifyWriteResult(item, response.Results[position], ref.action, false) {
-				readdIndexes = append(readdIndexes, ref.index)
+			for position, ref := range writes[start:end] {
+				item := &work[ref.index]
+				if position >= len(response.Results) {
+					item.State = store.AnkiStateFailed
+					item.Outcome = "failed"
+					item.Detail = "AnkiConnect returned fewer results than actions"
+					continue
+				}
+				if classifyWriteResult(item, response.Results[position], ref.action, false) {
+					if err := st.RecordAnkiAttempt(store.AnkiAttempt{
+						NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: "update", Outcome: "not_found",
+						Detail: "note was missing in Anki", At: opt.Now(), AnkiState: store.AnkiStateQueued,
+					}); err != nil {
+						return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+					}
+					readdIndexes = append(readdIndexes, ref.index)
+				}
 			}
 		}
 		// A card deleted after the read-back is re-added once; there is no
@@ -403,20 +440,23 @@ func runNotePush(args []string, opt Options) int {
 				readdActions = append(readdActions, anki.Action{Action: "addNote", Params: anki.AddNoteParams(
 					note.Deck, note.ModelName, work[index].Fields.Map(), []string{note.Tag})})
 			}
-			readd, err := call(readdActions)
-			if err != nil {
-				return noteAnkiFailure(opt, *jsonFlag, "anki_unavailable", err.Error())
-			}
-			for position, index := range readdRefs {
-				item := &work[index]
-				item.Action = "readd"
-				if position >= len(readd.Results) {
-					item.State = store.AnkiStateFailed
-					item.Outcome = "failed"
-					item.Detail = "AnkiConnect returned fewer results than actions"
-					continue
+			for start := 0; start < len(readdActions); start += anki.MaxActionsPerCall {
+				end := min(start+anki.MaxActionsPerCall, len(readdActions))
+				readd, err := call(readdActions[start:end])
+				if err != nil {
+					return noteAnkiFailure(opt, *jsonFlag, "anki_unavailable", err.Error())
 				}
-				classifyWriteResult(item, readd.Results[position], "readd", true)
+				for position := start; position < end; position++ {
+					item := &work[readdRefs[position]]
+					item.Action = "readd"
+					if position-start >= len(readd.Results) {
+						item.State = store.AnkiStateFailed
+						item.Outcome = "failed"
+						item.Detail = "AnkiConnect returned fewer results than actions"
+						continue
+					}
+					classifyWriteResult(item, readd.Results[position-start], "readd", true)
+				}
 			}
 		}
 	}
@@ -477,7 +517,8 @@ func classifyWriteResult(item *notePushWork, result anki.ActionResult, action st
 		case readded && anki.IsDuplicateError(message):
 			item.State = store.AnkiStateConflict
 			item.Outcome = "conflict"
-			item.Detail = "Anki already holds a note with this front"
+			item.Code = "note_id_unknown"
+			item.Detail = "Anki already holds a note with this front and reports no note id; remove that card in Anki or align the local content, then push again"
 		case anki.IsDuplicateError(message) && item.Note.AnkiPushedRevision == 0 && item.Entry.Revision == 1:
 			item.State = store.AnkiStateAlreadyExists
 			item.Outcome = "duplicate"
@@ -487,7 +528,8 @@ func classifyWriteResult(item *notePushWork, result anki.ActionResult, action st
 		case anki.IsDuplicateError(message):
 			item.State = store.AnkiStateConflict
 			item.Outcome = "conflict"
-			item.Detail = "Anki already holds a note with this front; its note id is unknown"
+			item.Code = "note_id_unknown"
+			item.Detail = "Anki already holds a note with this front and reports no note id; remove that card in Anki or align the local content, then push again"
 		default:
 			item.State = store.AnkiStateFailed
 			item.Outcome = "failed"

@@ -19,8 +19,9 @@ const PromptVersion = "note-refine-v1"
 const MaxBackRunes = 640
 
 // RefineMaterial is the optional context a refinement request may carry. The
-// caller decides what is permitted; this package never adds a key for an
-// unanswered target and never adds imported text without consent.
+// caller decides what is permitted: for an unanswered target it passes only the
+// draft's pre-answer-visible example, and this package never adds a key or
+// imported text without consent.
 type RefineMaterial struct {
 	PassageText  string
 	QuestionStem string

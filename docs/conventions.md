@@ -20,7 +20,8 @@ Binding project conventions. Read this before writing code for any goal.
 - **Node/TypeScript** exists only for the narrow hosts under `agent/`: the single-call BYOK tutor
   (goal 0005), the Pi Durable study brief (goal 0006) and the loopback AnkiConnect transport
   (goal 0007). The core CLI, note drafting/preview/accept/export and every verified local practice
-  path must work with Node absent; only `tutor ask`, `agent` work and `note push` need it.
+  path must work with Node absent; only `tutor ask`, `agent` work, `note propose --refine` and
+  `note push` when it has pending work need it.
 - **MyGo + WebView** desktop shell arrives at goal 0011. Until then the access surface is a real,
   scriptable CLI plus a test harness — screenshots and mock UIs are not evidence.
 - **Bun + TypeScript** is the harness runtime (`harness/`, gate modules under `harness/gates/`), not

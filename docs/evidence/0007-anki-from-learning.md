@@ -1,8 +1,8 @@
 # 0007 — Useful Anki notes created during study: evidence
 
-- Tree: working tree on top of `0d81987029ad7a0135aebdacc6aa20c8e5ff9018` (`docs(0007): activate the
-  Anki note contract with disclosed defaults`). The operator owns the commit; this run did not
-  commit, push or open a pull request.
+- Tree: working tree on top of `3219a0b914bb63d8f2e419b3119ea9f3c37671e7` (`refactor(0007): apply
+  accepted simplifications`), including the round-1 review fixes. The operator owns the commit; this
+  run did not commit, push or open a pull request.
 - Date: 2026-11-11. Host: Linux 7.0.0-1017-azure x64.
 - Toolchain: Go 1.27.3; Node v24.16.0; Bun 1.4.4.
 - Contract: [`../goals/archive/0007-anki-from-learning.md`](../goals/archive/0007-anki-from-learning.md).
@@ -23,9 +23,9 @@ the databases, stub logs and exports stayed under `/tmp`.
 | `internal/note` | Target identity, deterministic key-safe draft, consent withholding, exact field HTML, the note model/CSS/card template, atomic HTML/TSV export, refinement prompt parsing. No database, no network. |
 | `internal/anki` | AnkiConnect action allowlist, loopback endpoint validation, host request/response validation, duplicate/not-found classifiers, payload builders, Node transport. |
 | `agent/anki-host.mjs` | The only Anki egress: one versioned document, 1–50 allow-listed actions, loopback-only, redirects refused, 1 MiB response cap, no database or tool access. |
-| `internal/store` | Schema v10: `note_drafts`, `notes`, append-only `note_revisions`, one-row `note_outbox`, append-only `anki_push_attempts`, append-only `note_refinements`. No table can update an attempt, source, question or answer key. |
+| `internal/store` | Schema v10: `note_drafts`, `notes`, append-only `note_revisions`, one-row `note_outbox`, append-only `anki_push_attempts`, append-only `note_refinements`; schema v11 adds `notes.mark` so `note show` reports the identity mark. No table can update an attempt, source, question or answer key. |
 | `internal/cli` | `note propose/preview/accept/skip/show/model/export/push`, JSON/human documents, consent checks, revision equality, outbox orchestration and conflict/queue handling. |
-| `harness/gates/note-smoke.ts` | Real binary + real Anki host + loopback stub; 802 assertions across draft, consent, idempotency, revisions, export, model, add, update, duplicate, conflict, queue/drain, revoked consent, missing Node and host validation. |
+| `harness/gates/note-smoke.ts` | Real binary + real Anki host + loopback stub; 805 assertions across draft, consent, idempotency, revisions, export, model, add, update, duplicate, conflict, queue/drain, revoked consent, missing Node, pending counts, error envelope and host validation. |
 
 ## Draft and consent
 
@@ -80,7 +80,10 @@ A reviewed but unattempted q1 was proposed with `--mark "closes"`:
 | Key in the preview JSON | `At 4 p.m.` absent, `at 4 p.m.` absent, `opens at 8 a.m. on Sundays` absent, `No Sunday opening time` absent |
 
 The key is read only to reject a passage sentence that would reproduce the keyed option or the
-evidence sentence; the note falls back to the visible stem.
+evidence sentence; the note falls back to the visible stem. `note propose --refine` sends only that
+same pre-answer-visible example and rejects a provider response that reproduces key material as
+`invalid_response` (exit 3); the deterministic draft stays open. `TestNoteRefineRejectsAnAnswerRevealingResponse`
+and `TestNotePreviewIgnoresAStoredAnswerRevealingRefinement` pin both layers.
 
 ## Export
 
@@ -97,6 +100,10 @@ passquest note export --db demo.sqlite --json
 | Failure path (`--out outdir`, an existing directory) | exit 1, `internal_error`; the message names the failed rename; no `.outdir.tmp-*` remained |
 | Repeat export to the same path | replaced atomically; content changed |
 
+The row encoder writes a front beginning with `#` as `&#35;…`, so Anki's importer cannot read it as
+an option or comment line; `TestExportEncodesALeadingHashInFront` pins both a normal and a
+directive-shaped front.
+
 ## AnkiConnect push
 
 ### Create, add and no-op
@@ -107,11 +114,14 @@ First push (`--endpoint http://127.0.0.1:18765`):
 |---|---|
 | Exit / state | 0 / `pushed` |
 | Model created | `true` |
-| Counts | pending 1, pushed 1, already present 0, conflicts 0, failed 0, queued 0 |
+| Counts | pending 0 (nothing left), pushed 1, already present 0, conflicts 0, failed 0, queued 0 |
 | Note | revision 2 → Anki note 101 |
 | Actions | `version, createDeck, modelNames, createModel, addNote` |
 | `createModel` | model `PassQuest Note`; fields `Front, Back, Tactic, Source`; CSS has the system font stack and no `overflow: hidden`/external URL; card template carries all four field placeholders |
 | `addNote` | four fields only; `options.allowDuplicate:false` |
+
+`counts.pending` in a push document is the number of outbox rows still pending after that push; the
+first push drained its row, so it reports 0. A conflict or failed row stays pending and is counted.
 
 An immediate second push: `idle`, 0 endpoint actions.
 
@@ -133,7 +143,8 @@ accepted.
 
 | Observation | Value |
 |---|---|
-| Plain push | exit 3; state `conflict`; conflicts 1; detail `Anki fields changed since the last push; use --force to overwrite` |
+| Plain push | exit 3; state `conflict`; conflicts 1; pending 1; detail `Anki fields changed since the last push; use --force to overwrite` |
+| stderr | the push document carries `error.code: anki_conflict` beside the counts and note list |
 | Actions | `version, createDeck, modelNames, notesInfo`; **no** `updateNoteFields` |
 | Outbox | the revision stayed pending (SQLite: status `pending`) |
 | `note push --force` | exit 0; state `pushed`; actions `version, createDeck, modelNames, updateNoteFields`; Anki note 101 overwritten |
@@ -147,7 +158,8 @@ With the stub returning `cannot create note because it is a duplicate` for `addN
 |---|---|
 | First add of a new note | exit 0; state `already_present`; already present 1; pushed 0; detail `already present in Anki` |
 | Actions | `version, createDeck, modelNames, addNote` |
-| Later revision of that duplicate-only note | exit 3; state `conflict`; detail `Anki already holds a note with this front; its note id is unknown`; no update |
+| Later revision of that duplicate-only note | exit 3; state `conflict`; code `note_id_unknown`; detail `Anki already holds a note with this front and reports no note id; remove that card in Anki or align the local content, then push again`; no update |
+| `--force` on that revision | exit 3, still `conflict`; `--force` cannot update an id-less note |
 | Ledger | note `note-68ce01a37fcd19d7`: revision 1 `add/duplicate`, revision 2 `add/conflict` |
 
 ### Queue and single drain
@@ -172,8 +184,10 @@ A local revision was accepted, then pushed to `http://127.0.0.1:1` (nothing list
 
 ### Host validation
 
-The real host was invoked directly with a remote endpoint and with an unknown action. Both returned
-`state:"failed"`; the remote message names loopback; neither contacted a remote host.
+The real host was invoked directly with a remote endpoint, with an unknown action, and with an
+IPv4-mapped loopback (`http://[::ffff:127.0.0.1]:1`). The first two returned `state:"failed"` and the
+remote message names loopback; the mapped endpoint passed validation and returned `unreachable`
+because nothing listens on port 1. No case contacted a remote host.
 
 ## Provider refinement
 
@@ -218,7 +232,8 @@ outbox              pending rows only for undelivered revisions; delivered revis
 ```
 
 The v9→v10 migration test opens a v9 fixture, keeps its attempt, accepts a note, and verifies the
-append-only triggers still reject an attempt update.
+append-only triggers still reject an attempt update. `TestMigrationFromVersionTenAddsNoteMark` opens
+a v10 fixture and proves the v11 `notes.mark` column accepts and returns the identity mark.
 
 ## Gates
 
@@ -240,7 +255,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (14 packages, 558 tests, 0 skipped)
+PASS  go test (14 packages, 565 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -273,7 +288,7 @@ PASS  tutor smoke (156 assertions)
 PASS  agent smoke (120 assertions, 11 scenarios, 25 provider requests, 2 permission checks)
 
 == note smoke
-PASS  note smoke (802 assertions)
+PASS  note smoke (805 assertions)
 
 == portable paths
 PASS  portable paths (69 Go files, no platform-bound path literal)
@@ -285,7 +300,7 @@ PASS  harness self-test (29 cases, 17/17 gates)
 GATE: PASS
 ```
 
-The gate runs 18 modules. `note-smoke` reports `802 assertions`; `harness self-test` reports
+The gate runs 18 modules. `note-smoke` reports `805 assertions`; `harness self-test` reports
 `29 cases, 17/17 gates`.
 
 ## Limitations
@@ -295,12 +310,13 @@ The gate runs 18 modules. `note-smoke` reports `802 assertions`; `harness self-t
   loopback AnkiConnect stub. A real deck write, a real duplicate, a real read-back and AnkiWeb sync
   remain owner-supplied evidence.
 - **3-OS CI not run here.** Only Linux was executed locally. The gate uses no POSIX-only assertion in
-  its note path; the export failure test in Go skips on Windows because POSIX directory modes do not
-  exist there. The repository workflow remains the 3-OS proof.
+  its note path; the export failure test triggers a portable rename failure with a directory target,
+  so no Go test skips on any OS. The repository workflow remains the 3-OS proof.
 - **Export is not a revision channel.** Anki's text importer has no note id; re-importing an edited
   export can create a duplicate card. `push` is the revision path.
 - **Duplicate without an id cannot be updated.** AnkiConnect reports no note id with a duplicate
-  error, so a later revision of a duplicate-only note is a conflict, not an update.
+  error, so a later revision of a duplicate-only note is a conflict, not an update, and `--force`
+  cannot resolve it; the card must be removed in Anki or the local content aligned.
 - **The provider refinement shares the tutor daily budget.** `tutor history` shows the shared count
   but lists coaching calls only; the refinement row and its usage live in `note_refinements`.
 - **Private text stays local until consent.** A note accepted after consent is not deleted by a later
@@ -313,9 +329,9 @@ The gate runs 18 modules. `note-smoke` reports `802 assertions`; `harness self-t
 | Clause | Evidence |
 |---|---|
 | 1. Draft from a stored attempt with front/back/tactic/source/restricted | `note propose --attempt 1` table; draft target, fields and `restricted:true`; JSON above |
-| 2. Preview is the exact payload; unanswered key hidden; restricted text waits for consent | before/after consent table and field values; `accept` exit 2 `consent_required`; unanswered preview key-absence checks |
-| 3. Repeated accept is a no-op; an edit bumps revision and keeps history | accept table: revisions 1, 1, 2; `note show` history `[1,2]` |
-| 4. Export is importable text, written atomically | export header/row/bytes/sha256; directory-target failure exit 1 with no temp file; repeat replacement |
-| 5. AnkiConnect create model/deck, add, duplicate, update-not-re-add, queue-and-drain | action sequences and counts above; `note-smoke` 802 assertions |
+| 2. Preview is the exact payload; unanswered key hidden; restricted text waits for consent | before/after consent table and field values; `accept` exit 2 `consent_required`; unanswered preview key-absence checks; `TestNoteRefineRejectsAnAnswerRevealingResponse` and `TestNotePreviewIgnoresAStoredAnswerRevealingRefinement` |
+| 3. Repeated accept is a no-op; an edit bumps revision and keeps history | accept table: revisions 1, 1, 2; `note show` history `[1,2]`; `note show` reports `target.mark` |
+| 4. Export is importable text, written atomically | export header/row/bytes/sha256; directory-target failure exit 1 with no temp file; repeat replacement; `TestExportEncodesALeadingHashInFront` |
+| 5. AnkiConnect create model/deck, add, duplicate, update-not-re-add, queue-and-drain | action sequences and counts above; `note-smoke` 805 assertions; `TestNotePushChunksMoreThanFiftyActions` |
 | 6. Model template is mobile-safe and self-contained | `note model` table; CSS/template checks; `createModel` payload |
 | 7. No output claims a phone push | `note-smoke` scans every captured output for 8 forbidden phrases and asserts the manual-sync statement; human preview assertion |

@@ -133,6 +133,13 @@ var schemaV10 = []string{
 		BEGIN SELECT RAISE(ABORT, 'note refinements are append-only'); END`,
 }
 
+// schemaV11 records the learner's marked wording on the note row, so
+// `note show` can report the third identity component without re-parsing
+// target_key. Older rows keep an empty mark.
+var schemaV11 = []string{
+	`ALTER TABLE notes ADD COLUMN mark TEXT NOT NULL DEFAULT ''`,
+}
+
 // Note draft states. A draft is a proposal, not evidence; only notes/revisions
 // are canonical local content.
 const (
@@ -183,6 +190,7 @@ type Note struct {
 	QuestionID         string
 	SourceID           string
 	Page               int
+	Mark               string
 	Restricted         bool
 	Revision           int
 	Front              string
@@ -225,6 +233,7 @@ type NoteTarget struct {
 	QuestionID     string
 	SourceID       string
 	Page           int
+	Mark           string
 	Restricted     bool
 }
 
@@ -296,7 +305,9 @@ type NoteRefinement struct {
 }
 
 // SaveNoteDraft stores the open proposal for a target. Re-proposing identical
-// inputs returns the existing draft; a different mark supersedes it.
+// inputs returns the existing draft; a changed input for the same target
+// supersedes the previous open draft. A different mark produces a different
+// target key, so it leaves the previous draft open.
 func (s *Store) SaveNoteDraft(d NoteDraft, at time.Time) (NoteDraft, error) {
 	if strings.TrimSpace(d.TargetKey) == "" || strings.TrimSpace(d.ContentID) == "" || strings.TrimSpace(d.QuestionID) == "" {
 		return NoteDraft{}, errors.New("store: note draft requires target, content and question")
@@ -489,11 +500,11 @@ func (s *Store) AcceptNote(target NoteTarget, content NoteContent, at time.Time)
 
 	if _, err := tx.Exec(`INSERT INTO notes (
 			note_id, target_key, attempt_id, content_id, content_version, question_id, source_id, page_number,
-			restricted, revision, front, back, tactic, source_label, content_hash, origin, model,
+			mark, restricted, revision, front, back, tactic, source_label, content_hash, origin, model,
 			anki_state, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 'local', ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 'local', ?, ?)`,
 		target.NoteID, target.TargetKey, target.AttemptID, target.ContentID, target.ContentVersion,
-		target.QuestionID, target.SourceID, target.Page, boolInt(target.Restricted),
+		target.QuestionID, target.SourceID, target.Page, target.Mark, boolInt(target.Restricted),
 		content.Front, content.Back, content.Tactic, content.SourceLabel, content.ContentHash,
 		content.Origin, content.Model, stamp, stamp); err != nil {
 		return AcceptResult{}, fmt.Errorf("store: insert note: %w", err)
@@ -534,7 +545,7 @@ func upsertNoteOutbox(tx *sql.Tx, noteID string, revision int, stamp string) err
 }
 
 const noteColumns = `note_id, target_key, attempt_id, content_id, content_version, question_id, source_id,
-	page_number, restricted, revision, front, back, tactic, source_label, content_hash, origin, model,
+	page_number, mark, restricted, revision, front, back, tactic, source_label, content_hash, origin, model,
 	anki_note_id, anki_pushed_revision, anki_state, created_at, updated_at`
 
 func scanNote(row rowScanner) (Note, bool, error) {
@@ -545,7 +556,7 @@ func scanNote(row rowScanner) (Note, bool, error) {
 		updated    string
 	)
 	err := row.Scan(&n.NoteID, &n.TargetKey, &n.AttemptID, &n.ContentID, &n.ContentVersion, &n.QuestionID,
-		&n.SourceID, &n.Page, &restricted, &n.Revision, &n.Front, &n.Back, &n.Tactic, &n.SourceLabel,
+		&n.SourceID, &n.Page, &n.Mark, &restricted, &n.Revision, &n.Front, &n.Back, &n.Tactic, &n.SourceLabel,
 		&n.ContentHash, &n.Origin, &n.Model, &n.AnkiNoteID, &n.AnkiPushedRevision, &n.AnkiState,
 		&created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {

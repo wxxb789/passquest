@@ -161,9 +161,16 @@ func noteEffectiveOf(draft store.NoteDraft, input note.Input, built note.Draft) 
 		Back:   built.Back,
 		Origin: note.OriginDeterministic,
 	}
-	if draft.Origin == string(note.OriginRefined) &&
+	refined := draft.Origin == string(note.OriginRefined) &&
 		strings.TrimSpace(draft.RefinedFront) != "" && strings.TrimSpace(draft.RefinedBack) != "" &&
-		len(built.Withheld) == 0 {
+		len(built.Withheld) == 0
+	if refined && built.Unanswered && input.Question != nil &&
+		note.RevealsAnswer(*input.Question, draft.RefinedFront+"\n"+draft.RefinedBack) {
+		// A stale or hostile refinement must not put an unanswered key into
+		// preview or accept; the deterministic draft is key-safe.
+		refined = false
+	}
+	if refined {
 		effective.Front = draft.RefinedFront
 		effective.Back = draft.RefinedBack
 		effective.Origin = note.OriginRefined
@@ -455,6 +462,7 @@ func runNoteAccept(args []string, opt Options) int {
 		QuestionID:     draft.QuestionID,
 		SourceID:       draft.SourceID,
 		Page:           draft.Page,
+		Mark:           draft.Mark,
 		Restricted:     effective.Built.Restricted,
 	}
 	content := store.NoteContent{
@@ -649,10 +657,17 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 		}
 	}()
 
-	material := note.RefineMaterial{PassageText: input.PassageText}
+	material := note.RefineMaterial{}
 	if input.Question != nil {
 		material.QuestionStem = input.Question.Stem
-		if !deterministic.Unanswered {
+	}
+	if deterministic.Unanswered {
+		// The raw passage can contain the keyed option; send only the example
+		// the deterministic draft already deemed pre-answer-visible.
+		material.PassageText = deterministic.Example
+	} else {
+		material.PassageText = input.PassageText
+		if input.Question != nil {
 			material.Evidence = input.Question.Evidence
 		}
 	}
@@ -707,6 +722,13 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 		record.Status = "error"
 		record.ErrorCode = "invalid_response"
 		record.ErrorMessage = tutorMessage(err.Error(), key)
+		return noteRefineFailure(st, draft, record, reservation, opt, jsonMode)
+	}
+	if deterministic.Unanswered && input.Question != nil &&
+		note.RevealsAnswer(*input.Question, front+"\n"+back) {
+		record.Status = "error"
+		record.ErrorCode = "invalid_response"
+		record.ErrorMessage = "the refinement would reveal the answer of an unanswered question; the deterministic draft is unchanged"
 		return noteRefineFailure(st, draft, record, reservation, opt, jsonMode)
 	}
 	record.Status = "ok"

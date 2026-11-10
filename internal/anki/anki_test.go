@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,7 @@ func TestNormalizeEndpoint(t *testing.T) {
 		{"http://127.0.0.1:8765", "http://127.0.0.1:8765", true},
 		{"http://localhost:8765/", "http://localhost:8765", true},
 		{"http://[::1]:8765", "http://[::1]:8765", true},
+		{"http://[::ffff:127.0.0.1]:8765", "http://[::ffff:127.0.0.1]:8765", true},
 		{"https://127.0.0.1:8765", "https://127.0.0.1:8765", true},
 		{"http://127.0.0.2:8765", "http://127.0.0.2:8765", true},
 		{"http://example.com:8765", "", false},
@@ -73,8 +75,10 @@ func TestValidateRequestAndResponse(t *testing.T) {
 	}
 	badResp := resp
 	badResp.Results = resp.Results[:1]
-	if err := ValidateResponse(req, badResp); err == nil {
-		t.Fatal("ValidateResponse accepted a result-count mismatch")
+	badResp.Error = "endpoint must be loopback"
+	err := ValidateResponse(req, badResp)
+	if err == nil || !strings.Contains(err.Error(), "endpoint must be loopback") {
+		t.Fatalf("ValidateResponse count mismatch error = %v, want the host diagnostic", err)
 	}
 	badResp = resp
 	badResp.Results[1].Action = "version"

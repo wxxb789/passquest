@@ -54,8 +54,10 @@ turns red.
   other.
 - A child process on Windows is killed with `taskkill`-level semantics, not with a signal.
 - The Anki host validates its endpoint in Go and again in `agent/anki-host.mjs`; `new URL(...).hostname`
-  returns a bracketed IPv6 address, so the host strips brackets before the loopback check. Only a
-  loopback endpoint is accepted on either side.
+  returns a bracketed IPv6 address, so the host strips brackets before the loopback check. An
+  IPv4-mapped loopback is accepted on both sides: Go's `netip.IsLoopback` accepts it, and the host
+  decodes the URL form `::ffff:7f00:1` back to an IPv4 loopback. Only a loopback endpoint is accepted
+  on either side.
 - A note export is written to a temporary file in the destination directory and renamed over the
   target. The file is `0600` on POSIX; a parent directory the export creates is `0700`, while an
   existing directory keeps its mode. Windows has no POSIX mode, so only the content and replacement

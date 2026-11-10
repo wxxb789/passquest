@@ -305,6 +305,10 @@ export const noteSmoke: Gate = {
       check(field(push.doc, "state") === "pushed", `first push state = ${String(field(push.doc, "state"))}`);
       check(field(push.doc, "model_created") === true, "first push did not create the model");
       check(numberField(field(push.doc, "counts"), "pushed") === 1, "first push count");
+      check(
+        numberField(field(push.doc, "counts"), "pending") === 0,
+        "first push pending count is not the remaining queue",
+      );
       check(numberField(arrayField(push.doc, "notes")[0], "anki_note_id") === 101, "first push note id");
       check(
         actionNames(beforePush).join(",") === "version,createDeck,modelNames,createModel,addNote",
@@ -364,6 +368,10 @@ export const noteSmoke: Gate = {
       check(conflict.code === 3, `conflict push exit = ${conflict.code}`);
       check(field(conflict.failure, "state") === "conflict", "conflict push state");
       check(numberField(field(conflict.failure, "counts"), "conflicts") === 1, "conflict count");
+      check(
+        stringField(field(conflict.failure, "error"), "code") === "anki_conflict",
+        "conflict push has no error envelope",
+      );
       check(!actionNames(beforeConflict).includes("updateNoteFields"), "conflict overwrote the Anki note");
       const forced = await callJSON(["note", "push", "--endpoint", endpoint, "--force"]);
       check(forced.code === 0, `forced push exit = ${forced.code}: ${forced.stderr}`);
@@ -471,6 +479,20 @@ export const noteSmoke: Gate = {
         }),
       });
       check(stringField(parse(remote.stdout), "state") === "failed", "host accepted a remote endpoint");
+      const mapped = await run(executable("node"), [hostPath], {
+        cwd: ctx.root,
+        stdin: JSON.stringify({
+          protocol_version: 1,
+          endpoint: "http://[::ffff:127.0.0.1]:1",
+          timeout_ms: 1000,
+          actions: [{ action: "version" }],
+        }),
+      });
+      const mappedDoc = parse(mapped.stdout);
+      check(
+        stringField(mappedDoc, "state") === "unreachable",
+        `host rejected an IPv4-mapped loopback endpoint: ${mapped.stdout}`,
+      );
       const unknown = await run(executable("node"), [hostPath], {
         cwd: ctx.root,
         stdin: JSON.stringify({
