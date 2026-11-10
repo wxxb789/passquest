@@ -125,7 +125,7 @@ func runImport(args []string, opt Options) int {
 	if err != nil {
 		return sourceError(opt, *jsonFlag, err)
 	}
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -179,7 +179,7 @@ func runSources(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -221,7 +221,7 @@ func runShow(args []string, opt Options) int {
 		return code
 	}
 	sourceID := fs.Arg(0)
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -310,7 +310,7 @@ func runQuestions(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 1, "questions requires exactly one source id"); code != 0 {
 		return code
 	}
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -396,7 +396,7 @@ func runPageEdit(args []string, opt Options) int {
 		return usageError(opt, *jsonFlag, "invalid_input", "corrected page text is not valid UTF-8")
 	}
 
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -436,7 +436,7 @@ func runPageReview(args []string, opt Options) int {
 	if code := requireReviewer(*reviewer, opt, *jsonFlag); code != 0 {
 		return code
 	}
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -500,7 +500,7 @@ func runQuestionAdd(args []string, opt Options) int {
 		return sourceError(opt, *jsonFlag, err)
 	}
 
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -547,7 +547,7 @@ func runQuestionEdit(args []string, opt Options) int {
 	if err != nil {
 		return sourceError(opt, *jsonFlag, err)
 	}
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -598,7 +598,7 @@ func runQuestionReview(args []string, opt Options) int {
 		return code
 	}
 	sourceID, questionID := fs.Arg(0), fs.Arg(1)
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}

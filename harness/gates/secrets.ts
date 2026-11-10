@@ -38,7 +38,6 @@ function envFile(file: string): boolean {
 }
 
 function isText(bytes: Buffer): boolean {
-  if (bytes.length > 5 * 1024 * 1024) return false;
   return !bytes.includes(0);
 }
 

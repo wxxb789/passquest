@@ -61,10 +61,16 @@ func TestImportTXTDirReadsManifestAndPages(t *testing.T) {
 	if first.Origin != PageNative || first.Review != Unreviewed {
 		t.Fatalf("page 1 origin/review = %s/%s", first.Origin, first.Review)
 	}
+	if first.Section != "front-matter" {
+		t.Fatalf("page 1 section = %q, want front-matter", first.Section)
+	}
 	if !first.HasFlag(FlagReadingOrderUnverified) {
 		t.Fatalf("native page flags = %v, want reading_order_unverified", first.Flags)
 	}
 	second := src.Pages[1]
+	if second.Section != "mock-exam" {
+		t.Fatalf("page 2 section = %q, want mock-exam", second.Section)
+	}
 	for _, flag := range []Flag{FlagOCRUnverified, FlagColumnOrderUnverified} {
 		if !second.HasFlag(flag) {
 			t.Fatalf("OCR flags = %v, missing %s", second.Flags, flag)
@@ -188,6 +194,62 @@ func TestImportTXTFileSplitsOnFormFeeds(t *testing.T) {
 	}
 }
 
+func TestSplitFormFeedPagesTreatsLineBreakAfterFormFeedAsTerminator(t *testing.T) {
+	cases := []struct {
+		name  string
+		text  string
+		pages []string
+	}{
+		{"bare terminator", "page text\f", []string{"page text"}},
+		{"LF after terminator", "page text\f\n", []string{"page text"}},
+		{"CRLF after terminator", "page text\f\r\n", []string{"page text"}},
+		{"empty last page before terminator", "page one\f\f\n", []string{"page one", ""}},
+		{"page separator", "page one\f\npage two", []string{"page one", "page two"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitFormFeedPages(tc.text)
+			if len(got) != len(tc.pages) {
+				t.Fatalf("chunks = %q, want %q", got, tc.pages)
+			}
+			for i := range tc.pages {
+				if got[i] != tc.pages[i] {
+					t.Fatalf("chunks = %q, want %q", got, tc.pages)
+				}
+			}
+		})
+	}
+}
+
+func TestImportTXTFileTrailingFormFeedNewlineIsNotAPage(t *testing.T) {
+	cases := []struct {
+		name   string
+		ending string
+	}{
+		{"form feed", "\f"},
+		{"form feed LF", "\f\n"},
+		{"form feed CRLF", "\f\r\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "trailing.txt")
+			if err := os.WriteFile(path, []byte("page text with words"+tc.ending), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			src, err := ImportPath(path, ImportOptions{Now: testNow})
+			if err != nil {
+				t.Fatalf("ImportPath: %v", err)
+			}
+			if len(src.Pages) != 1 {
+				t.Fatalf("pages = %d, want 1", len(src.Pages))
+			}
+			if src.Pages[0].Text != "page text with words" {
+				t.Fatalf("page text = %q", src.Pages[0].Text)
+			}
+		})
+	}
+}
+
 func TestImportTXTFileSplitsPageMarkersAndPreservesGaps(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "partial.txt")
 	text := "PASS QUEST — PRIVATE INCOMPLETE BASELINE\n\n" +
@@ -242,6 +304,27 @@ func TestImportPDFMarksPagesWithoutTextLayer(t *testing.T) {
 	}
 	if scan.Text != "" {
 		t.Fatalf("page 2 text = %q", scan.Text)
+	}
+}
+
+func TestImportPDFAcceptsFormFeedNewlinePageSeparators(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.pdf")
+	if err := os.WriteFile(path, []byte("%PDF-1.7 placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	src, err := ImportPath(path, ImportOptions{
+		Now:          testNow,
+		PDFPageCount: func(string) (int, error) { return 2, nil },
+		PDFText:      func(string) (string, error) { return "first page words\f\nsecond page words", nil },
+	})
+	if err != nil {
+		t.Fatalf("ImportPath: %v", err)
+	}
+	if len(src.Pages) != 2 {
+		t.Fatalf("pages = %d, want 2", len(src.Pages))
+	}
+	if src.Pages[0].Text != "first page words" || src.Pages[1].Text != "second page words" {
+		t.Fatalf("page texts = %q/%q", src.Pages[0].Text, src.Pages[1].Text)
 	}
 }
 
@@ -521,6 +604,30 @@ func TestBuildPracticeExamOnlyServesReviewedQuestions(t *testing.T) {
 	_, staleIDs, err = BuildPracticeExam(src, page, []Question{stale})
 	if !errors.Is(err, ErrNotPracticeable) || len(staleIDs) != 1 {
 		t.Fatalf("all-stale error = %v, stale = %v", err, staleIDs)
+	}
+}
+
+func TestQuestionFlagsMarkEvidenceMissing(t *testing.T) {
+	page := Page{Number: 2, Origin: PageNative, Review: Reviewed, Text: "it will close at 4 p.m."}
+	q, err := ParseQuestionJSON([]byte(validQuestionJSON("B")), "src-test", 2, testNow, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewed, err := q.ReviewAnswer(page, "B", "owner", testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags := reviewed.Flags(page); containsFlag(flags, FlagEvidenceMissing) {
+		t.Fatalf("flags = %v, want no evidence_missing while the evidence is present", flags)
+	}
+	corrected := page
+	corrected.Text = "the page now says something else entirely"
+	flags := reviewed.Flags(corrected)
+	if !containsFlag(flags, FlagEvidenceMissing) {
+		t.Fatalf("flags = %v, want evidence_missing after the page text changed", flags)
+	}
+	if PracticeReady(corrected, reviewed) {
+		t.Fatal("PracticeReady accepted a reviewed question whose evidence is gone")
 	}
 }
 

@@ -88,6 +88,9 @@ func TestImportSourceIsIdempotentAndLoadsPages(t *testing.T) {
 	if loaded.Pages[1].Text != "it will close at 4 p.m." || loaded.Pages[1].Origin != source.PageOCR {
 		t.Fatalf("page 2 = %q/%s", loaded.Pages[1].Text, loaded.Pages[1].Origin)
 	}
+	if loaded.Pages[0].Section != "vocabulary" || loaded.Pages[1].Section != "mock-exam" {
+		t.Fatalf("sections = %q/%q, want vocabulary/mock-exam", loaded.Pages[0].Section, loaded.Pages[1].Section)
+	}
 	if !loaded.Pages[2].HasFlag(source.FlagPageMissing) {
 		t.Fatalf("page 3 flags = %v", loaded.Pages[2].Flags)
 	}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -248,6 +249,38 @@ func TestReimportAfterReviewKeepsStoredCounts(t *testing.T) {
 	listed := decodeSources(t, mustRun(t, db, clock, "", "sources", "--json"))
 	if len(listed.Sources) != 1 || listed.Sources[0].ReviewedPages != 1 || listed.Sources[0].ReviewedQuestions != 1 {
 		t.Fatalf("sources after review = %+v", listed.Sources)
+	}
+}
+
+func TestQuestionFlagsMarkMissingEvidenceAfterCorrection(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	imported := importFixture(t, db, clock)
+	sourceID := imported.Source.ID
+	reviewedFixtureQuestion(t, db, clock, sourceID)
+
+	noEvidence := filepath.Join(t.TempDir(), "page-001-no-evidence.txt")
+	if err := os.WriteFile(noEvidence, []byte("Westbridge Library — Saturday hours\nThe library is closed on Saturdays.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, db, clock, "", "page", "edit", sourceID, "1", "--text-file", noEvidence, "--reviewer", "fixture-reviewer", "--json")
+	mustRun(t, db, clock, "", "page", "review", sourceID, "1", "--reviewer", "fixture-reviewer", "--json")
+
+	questions := decodeQuestions(t, mustRun(t, db, clock, "", "questions", sourceID, "--json"))
+	if len(questions.Questions) != 1 {
+		t.Fatalf("questions = %+v", questions.Questions)
+	}
+	flags := questions.Questions[0].Flags
+	if !hasString(flags, "evidence_missing") {
+		t.Fatalf("flags = %v, want evidence_missing after the page correction removed the evidence", flags)
+	}
+	if hasString(flags, "page_unreviewed") {
+		t.Fatalf("flags = %v, want the re-reviewed page to clear page_unreviewed", flags)
+	}
+
+	code, _, errOut := runCLI(t, db, clock, "", "practice", "--json", "--source", sourceID, "--question", "q1")
+	if code != 2 || !strings.Contains(errOut, "not_practiceable") {
+		t.Fatalf("practice with missing evidence = %d, %s", code, errOut)
 	}
 }
 
@@ -524,6 +557,115 @@ func TestReportShowsMixedContentsTruthfully(t *testing.T) {
 		if !strings.Contains(human, want) {
 			t.Errorf("human report lacks %q:\n%s", want, human)
 		}
+	}
+}
+
+func TestDefaultDatabaseDirectoryIsTightened(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.MkdirAll(".passquest", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(".passquest", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"sources", "--json"}, Options{
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Now:    (&stepClock{base: goldenBase}).Now,
+		Getenv: func(string) string { return "" },
+	})
+	if code != 0 {
+		t.Fatalf("sources = %d, stderr %s", code, stderr.String())
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+	info, err := os.Stat(".passquest")
+	if err != nil {
+		t.Fatalf("stat default directory: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("default directory mode = %04o, want 0700", perm)
+	}
+}
+
+func TestSourceProtocolGoldens(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	fixture := fixtureDir(t)
+	replacements := map[string]string{fixture: "<fixture>"}
+	check := func(name, raw string) {
+		t.Helper()
+		checkGolden(t, filepath.Join("testdata", name), normalizedGolden(t, raw, replacements))
+	}
+
+	importedRaw := mustRun(t, db, clock, "", "import", "--path", fixture, "--json")
+	check("source-import.golden.json", importedRaw)
+	sourceID := decodeImport(t, importedRaw).Source.ID
+
+	check("source-sources.golden.json", mustRun(t, db, clock, "", "sources", "--json"))
+	check("source-show.golden.json", mustRun(t, db, clock, "", "show", sourceID, "--json"))
+	check("source-show-page.golden.json", mustRun(t, db, clock, "", "show", sourceID, "--page", "1", "--json"))
+	check("source-questions.golden.json", mustRun(t, db, clock, "", "questions", sourceID, "--json"))
+
+	check("source-question-add.golden.json", mustRun(t, db, clock, "", "question", "add", sourceID, "1", "--file", fixtureFile(t, "question-q1.json"), "--json"))
+	check("source-questions-unmapped.golden.json", mustRun(t, db, clock, "", "questions", sourceID, "--json"))
+	check("source-page-review.golden.json", mustRun(t, db, clock, "", "page", "review", sourceID, "1", "--reviewer", "fixture-reviewer", "--json"))
+	check("source-question-review.golden.json", mustRun(t, db, clock, "", "question", "review", sourceID, "q1", "--answer", "B", "--reviewer", "fixture-reviewer", "--json"))
+	check("source-questions-reviewed.golden.json", mustRun(t, db, clock, "", "questions", sourceID, "--json"))
+
+	original, err := os.ReadFile(fixtureFile(t, "question-q1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	editedPath := filepath.Join(t.TempDir(), "question-q1-edited.json")
+	if err := os.WriteFile(editedPath, []byte(strings.Replace(string(original), "library close", "library shut", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check("source-question-edit.golden.json", mustRun(t, db, clock, "", "question", "edit", sourceID, "q1", "--file", editedPath, "--json"))
+	check("source-page-edit.golden.json", mustRun(t, db, clock, "", "page", "edit", sourceID, "1", "--text-file", fixtureFile(t, "page-001-corrected.txt"), "--reviewer", "fixture-reviewer", "--note", "fixed line wrap", "--json"))
+}
+
+// normalizedGolden pins the protocol's keys and values; the fixture path is the
+// only machine-specific value, so it is replaced before comparison.
+func normalizedGolden(t *testing.T, raw string, replacements map[string]string) []byte {
+	t.Helper()
+	var doc any
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatalf("decode protocol document: %v\n%s", err, raw)
+	}
+	var out bytes.Buffer
+	encoder := json.NewEncoder(&out)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(replaceGoldenStrings(doc, replacements)); err != nil {
+		t.Fatalf("encode protocol document: %v", err)
+	}
+	return out.Bytes()
+}
+
+func replaceGoldenStrings(value any, replacements map[string]string) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			typed[key] = replaceGoldenStrings(child, replacements)
+		}
+		return typed
+	case []any:
+		for i, child := range typed {
+			typed[i] = replaceGoldenStrings(child, replacements)
+		}
+		return typed
+	case string:
+		if replacement, ok := replacements[typed]; ok {
+			return replacement
+		}
+		return typed
+	default:
+		return value
 	}
 }
 

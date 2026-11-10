@@ -5,15 +5,17 @@ local** working context. Nothing is uploaded, no OCR is run automatically, and i
 never treated as an answer key until a user reviews it.
 
 The private boundary is the SQLite database: sources, page revisions and question reviews
-are stored under `$PASSQUEST_DB` (default `.passquest/passquest.sqlite`, `0600` in a `0700`
-directory). No source text is copied into the repository or `testdata/`.
+are stored under `$PASSQUEST_DB` (default `.passquest/passquest.sqlite`). On POSIX the default
+`.passquest/` directory is tightened to `0700` and the database file is `0600`. A directory chosen
+with `--db` or `$PASSQUEST_DB` is left to the user, and Windows has no POSIX mode (see Known limits).
+No source text is copied into the repository or `testdata/`.
 
 ## Accepted inputs
 
 | Input | How it is read |
 |---|---|
 | A directory containing `pages/page-NNN.txt` and optionally `manifest.tsv` | Page numbers, `section`, `native`/`ocr` provenance and the manifest's byte/non-space-character counts. Gaps and manifest-only pages become `page_missing` placeholders. |
-| A single UTF-8 `.txt` split by form feeds | One page per segment; provenance `unknown` until reviewed. |
+| A single UTF-8 `.txt` split by form feeds | One page per segment; import provenance is `unknown` unless the import declared it, and the flag stays after review. |
 | A single UTF-8 `.txt` split by `=== PDF PAGE N / TOTAL ... ===` markers | The earlier partial extraction's shape. Missing page numbers are preserved as `page_missing`. |
 | A `.pdf` | Text layer only, through a local `pdftotext -layout -enc UTF-8` call; page count comes from local `pdfinfo`. Pages under 20 non-space code points become `scan_unextracted`. No OCR, no download. |
 
@@ -79,7 +81,7 @@ reasoning or status.
 
 | Flag | Meaning |
 |---|---|
-| `ocr_unverified` | The text came from OCR and has not been reviewed. |
+| `ocr_unverified` | The imported text came from OCR; an import fact that survives review and correction. |
 | `column_order_unverified` | OCR reading order was not repaired by the import. |
 | `reading_order_unverified` | A native text extraction preserved layout but not guaranteed reading order. |
 | `scan_unextracted` | The PDF page had no usable text layer; supply text via `page edit` or a TXT import. |
@@ -88,6 +90,11 @@ reasoning or status.
 | `page_missing` | The import's declared page range includes a page that was not present. |
 | `corrected` | A user supplied a newer text revision. |
 | `page_unreviewed`, `answer_unmapped`, `evidence_missing` | Computed question warnings; `practice` refuses these. |
+
+Review changes `review_status`, not the import facts. Reviewing an OCR page does not make its text
+native: `ocr_unverified` (and `provenance_unknown` for an undeclared single TXT) stay visible after
+review, and a corrected page keeps them with `origin: manual`. The review status is the separate
+current-state signal.
 
 `passquest show` prints origin, review status, flags, revision and non-space character count next to
 the text. `passquest questions` prints each question's answer status, review status and computed
@@ -103,5 +110,9 @@ flags.
   this increment.
 - One local learner, no encryption at rest beyond the `0600` database, no accounts, no sync. Those
   belong to later goals.
+- POSIX modes only: Windows has no `0600`/`0700` equivalent, and `os.Chmod(0o600)` does not create a
+  restrictive ACL there. The import smoke reports its database-mode assertion as skipped on Windows
+  rather than counting it. The directory mode is enforced only for the app-owned default path; a
+  directory chosen with `--db` or `$PASSQUEST_DB` is not modified.
 
 Measured behaviour and limitations: [`evidence/0002-local-text-baseline.md`](evidence/0002-local-text-baseline.md).

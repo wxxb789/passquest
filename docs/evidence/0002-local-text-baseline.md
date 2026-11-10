@@ -31,7 +31,7 @@ is set, every option is explained, and the evidence is a verbatim substring of t
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1 -v` | exit 0; 75 top-level tests, 59 subtests, 0 failures, 0 skips |
+| `go test ./... -count=1 -v` | exit 0; 83 top-level tests, 67 subtests, 0 failures, 0 skips |
 | `bun run gate` | exit 0; 12 gates passed (typecheck, gofmt, vet, build, test, tidy, docs links, secrets/sources, local-only, baseline integrity, import smoke, harness self-test), 0 failed, 0 skipped |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
@@ -46,14 +46,18 @@ The tests that pin this increment's contract clauses:
 | `TestImportTXTDirFlagsManifestMismatchAndMissingPages` | A manifest count disagreement is a visible flag; missing declared pages become `page_missing` instead of shrinking the document. |
 | `TestImportTXTDirRejectsInvalidInput` | No pages, invalid UTF-8 and a malformed manifest are hard errors. |
 | `TestImportTXTFileSplitsOnFormFeeds`, `TestImportTXTFileSplitsPageMarkersAndPreservesGaps` | Single-file TXT import paths, provenance unknown, empty pages, and the partial extraction's page markers with gaps. |
+| `TestSplitFormFeedPagesTreatsLineBreakAfterFormFeedAsTerminator`, `TestImportTXTFileTrailingFormFeedNewlineIsNotAPage`, `TestImportPDFAcceptsFormFeedNewlinePageSeparators` | A trailing `\f`, `\f\n` or `\f\r\n` is a terminator, not a phantom page; an empty page before the terminator survives; PDF chunks with `\f\n` separators match the declared page count. |
 | `TestImportPDFMarksPagesWithoutTextLayer` | A PDF page under 20 non-space code points is `none` + `scan_unextracted`; a native page is `native` + `reading_order_unverified`. |
 | `TestImportPDFRejectsMismatchedPageCounts`, `TestImportPDFReportsMissingTool` | Ambiguous page linkage fails; a missing local converter is an actionable error. |
 | `TestParseQuestionJSONStaysUnreviewed`, `TestParseQuestionJSONRejectsBadInput` | A proposed answer is stored `unmapped`/`unreviewed`; structural question errors are rejected. |
 | `TestQuestionEditResetsReviewAndAnswerMapping` | Editing content resets review and answer mapping while keeping `created_at`. |
 | `TestReviewAnswerRequiresReviewedPageAndMatchingEvidence` | Answer review requires a reviewed page, a reviewer, and evidence still present in the page. |
 | `TestBuildPracticeExamOnlyServesReviewedQuestions` | Unreviewed questions are excluded; stale reviewed questions are reported and refused; content id/version/notice are built. |
+| `TestQuestionFlagsMarkEvidenceMissing`, `TestQuestionFlagsMarkMissingEvidenceAfterCorrection` | `evidence_missing` is computed from the current page text, appears in `questions --json` after a correction removes the evidence, and `practice` refuses that question. |
+| `TestSourceProtocolGoldens` | Raw keys and values of the `import`, `sources`, `show` (summary and page), `questions`, `page edit/review` and `question add/edit/review` documents, including the pre-answer question shape. |
 | `TestPracticeContentIDRoundTrip` | `<source-id>-p<NNN>` is the stable content identity. |
-| `TestImportSourceIsIdempotentAndLoadsPages` | A second import returns `created=false`, writes no second revision, and preserves pages/events. |
+| `TestImportSourceIsIdempotentAndLoadsPages` | A second import returns `created=false`, writes no second revision, and preserves pages, sections and events. |
+| `TestOpenPrivateTightensExistingDirectory`, `TestDefaultDatabaseDirectoryIsTightened` | An existing app-owned state directory is tightened to `0700` on POSIX; the CLI's default database path uses that rule. |
 | `TestPageRevisionsAndEventsAreAppendOnly` | Both histories reject update/delete/id-reusing replace. |
 | `TestCorrectPageAppendsRevisionAndResetsReview` | Correction keeps the old revision, moves origin to `manual`, preserves import flags, adds `corrected`, and resets review. |
 | `TestQuestionAddReviewEditKeepsAudit` | Add, page review, answer review and edit produce the expected append-only event order. |
@@ -259,7 +263,7 @@ page content.
 | Tests use authored fixtures | `internal/cli/testdata/import/` and `internal/cli/testdata/import/question-q1.json` | Independently authored native page, deliberately damaged OCR page, matching manifest and a two-option question; no baseline text |
 | No new OCR committed | repository tree | only the owner's existing baseline; no new OCR output, no PDF, no database |
 | Quotation boundary | this record | short lines quoted here already exist in the owner-authorised `data/baselines/2026-crsc-english/` text; no new source text, OCR or PDF bytes were added |
-| Database protection | `stat` after the demo | `0600`; the default directory is created `0700` (pinned by `TestOpenCreatesSchemaAndProtectsFiles`) |
+| Database protection | `stat` after the demo | `0600`; the default directory is created `0700` and an existing app-owned directory is tightened (pinned by `TestOpenCreatesSchemaAndProtectsFiles`, `TestOpenPrivateTightensExistingDirectory` and `TestDefaultDatabaseDirectoryIsTightened`). Windows has no POSIX mode; see Known limits. |
 
 `net` remains linked transitively by the pure-Go SQLite chain (`modernc.org/sqlite` → `libc` →
 `google/uuid`); no Pass Quest package imports or calls it. The strace runs are the runtime proof for
@@ -273,12 +277,14 @@ The bash/Python gate chain was migrated because goal 0002 adds import/OCR gates,
 - `bun run gate` runs `harness/gate.ts`; 12 gates in order. `bash scripts/gate.sh` is a shim that
   execs it. `scripts/check-docs-links.py`, `scripts/check-secrets.sh` and
   `scripts/check-local-only.sh` were deleted.
-- `harness/gates/self-test.ts` feeds each other gate a deliberately broken input and passed 14 cases
+- `harness/gates/self-test.ts` feeds each other gate a deliberately broken input and passed 18 cases
   over 11/11 gates. It includes a real `tsc` type error, an unformatted Go file, a broken markdown
-  link, a fake credential (whose value must not be echoed), three isolating `local-only` cases
-  (first-party import, transitive linked client, confidential marker), two `baseline` cases (a
-  complete 165-page tree with one wrong count, and a fixture that references the baseline),
-  failing/vet/build/tidy Go projects, and a fake CLI whose import output is not the protocol.
+  link, fake credentials (whose values must not be echoed, including one in a 5 MiB text file),
+  three isolating `local-only` cases (first-party import, transitive linked client, confidential
+  marker), four `baseline` cases (a complete 165-page tree with one wrong count, a U+FEFF page that
+  exposes JavaScript `\s` versus Go `White_Space`, a page set with a gap, and a fixture that
+  references the baseline), failing and skipped Go tests, vet/build/tidy Go projects, and a fake CLI
+  whose import output is not the protocol.
 - `bun.lock` is committed; the only dependencies are `typescript` and `@types/bun`, used by the
   typecheck gate. CI installs with `bun install --frozen-lockfile` and runs the same gate on ubuntu,
   macos and windows; `.gitattributes` pins LF.
@@ -308,9 +314,11 @@ The bash/Python gate chain was migrated because goal 0002 adds import/OCR gates,
 4. **PDF import requires poppler.** `pdftotext` and `pdfinfo` must be on `PATH` (overridable with
    `PASSQUEST_PDFTOTEXT` / `PASSQUEST_PDFINFO`). A missing tool is exit 2 and points at the TXT path;
    the TXT import has no external tool.
-5. **One local learner, no encryption or accounts.** The database is `0600` in a `0700` directory
-   under the gitignored state path. At-rest encryption and multiple identities belong to later goals
-   (Q-0002-02).
+5. **One local learner, no encryption or accounts.** On POSIX the database is `0600` and the
+   app-owned default `.passquest/` directory is `0700`; an existing directory is tightened. A
+   directory chosen with `--db` or `PASSQUEST_DB` is left to the user. Windows has no POSIX mode and
+   `os.Chmod(0o600)` does not create an ACL, so the import smoke reports its database-mode assertion
+   as skipped there. At-rest encryption and multiple identities belong to later goals (Q-0002-02).
 6. **Page-scoped content.** A source page is the practice content unit; a 165-page PDF is not one
    coherent exercise. Multi-page passages or whole-set holdout scoping are deferred to goals 0003 and
    0009 (Q-0002-03).
@@ -342,7 +350,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (6 packages, 0 failures)
+PASS  go test (6 packages, 150 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -351,7 +359,7 @@ PASS  go mod tidy
 PASS  docs links (58 checked, 0 broken)
 
 == secrets/sources
-PASS  secrets/sources (252 tracked files, 0 findings)
+PASS  secrets/sources (253 tracked files, 0 findings)
 
 == local-only CLI
 PASS  local-only CLI (6 first-party packages, 0 network imports, 0 confidential markers)
@@ -363,8 +371,12 @@ PASS  baseline integrity (165 pages (22 native, 143 OCR), 0 fixture references)
 PASS  import smoke (35 assertions)
 
 == harness self-test
-PASS  harness self-test (14 cases, 11/11 gates)
+PASS  harness self-test (18 cases, 11/11 gates)
 
 12 passed, 0 failed, 0 skipped
 GATE: PASS
 ```
+
+The 12 new `internal/cli/testdata/source-*.golden.json` files are untracked in this run; a committed
+tree reports 265 tracked files, and the goldens are covered by the secrets/sources and local-only
+scans once tracked.

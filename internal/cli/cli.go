@@ -136,6 +136,17 @@ func databasePath(flagValue string, getenv func(string) string) string {
 	return filepath.Join(".passquest", "passquest.sqlite")
 }
 
+// openDatabase opens the resolved database path. The app-owned default state
+// directory is tightened to 0700; a directory chosen with --db or PASSQUEST_DB
+// is left to the user.
+func openDatabase(flagValue string, opt Options) (*store.Store, error) {
+	path := databasePath(flagValue, opt.Getenv)
+	if strings.TrimSpace(flagValue) == "" && strings.TrimSpace(opt.Getenv("PASSQUEST_DB")) == "" {
+		return store.OpenPrivate(path)
+	}
+	return store.Open(path)
+}
+
 // jsonFlagRequested reports whether args ask for JSON before flag.Parse runs, so
 // a parse failure still produces the documented JSON error document. A
 // successful parse is authoritative for values such as --json=false.
@@ -180,7 +191,7 @@ func runPractice(args []string, opt Options) int {
 		return usageError(opt, *jsonFlag, "invalid_input", "--page requires --source")
 	}
 
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -375,7 +386,7 @@ func runReport(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}

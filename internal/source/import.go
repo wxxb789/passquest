@@ -321,9 +321,13 @@ func textDoubtFlags(text string) []Flag {
 	}
 }
 
-// splitFormFeedPages splits extractor or TXT output into page chunks. A single
-// trailing form feed is a per-page terminator, not an extra page.
+// splitFormFeedPages splits extractor or TXT output into page chunks. A form feed
+// normally ends a page, so an immediately following line break belongs to that
+// terminator; only a single trailing empty chunk is dropped. An empty chunk
+// before the terminator is a legitimate empty page.
 func splitFormFeedPages(text string) []string {
+	text = strings.ReplaceAll(text, "\f\r\n", "\f")
+	text = strings.ReplaceAll(text, "\f\n", "\f")
 	chunks := strings.Split(text, "\f")
 	if n := len(chunks); n > 1 && chunks[n-1] == "" {
 		return chunks[:n-1]

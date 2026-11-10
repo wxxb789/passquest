@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { BASELINE, EXPECTED_NATIVE, EXPECTED_PAGES, nonSpaceChars } from "../lib/baseline.ts";
 import { context, resolve } from "../lib/repo.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
@@ -19,9 +20,6 @@ import { secrets } from "./secrets.ts";
 import { typecheck } from "./typecheck.ts";
 
 const GO_MOD = "module example.com/selftest\n\ngo 1.27.3\n";
-const BASELINE = "data/baselines/2026-crsc-english";
-const BASELINE_PAGES = 165;
-const BASELINE_NATIVE = 22;
 
 interface BrokenCase {
   gate: Gate;
@@ -31,28 +29,30 @@ interface BrokenCase {
   postFail?: (failures: string[]) => string | null;
 }
 
-function nonSpaceChars(text: string): number {
-  let count = 0;
-  for (const char of text) {
-    if (char === "\f" || /\s/u.test(char)) continue;
-    count++;
-  }
-  return count;
+interface BaselineFixtureOptions {
+  wrongCharsPage?: number;
+  /** Writes U+FEFF into this page; the manifest uses the pre-fix \s count. */
+  bomPage?: number;
+  /** Renames one page file and manifest row, leaving a gap at `from`. */
+  renumber?: { from: number; to: number };
 }
 
-/** A complete baseline tree; `wrongCharsPage` breaks exactly that page's char count. */
-function baselineFixture(wrongCharsPage?: number): { files: Record<string, string>; tracked: string[] } {
+/** A complete baseline tree; options break exactly one documented property. */
+function baselineFixture(options: BaselineFixtureOptions = {}): { files: Record<string, string>; tracked: string[] } {
   const files: Record<string, string> = {};
   const tracked: string[] = [];
   const rows = ["page\tsection\tsource\tbytes\tchars_no_ws"];
-  for (let page = 1; page <= BASELINE_PAGES; page++) {
-    const text = `page ${page} text\n`;
-    const relative = `${BASELINE}/pages/page-${String(page).padStart(3, "0")}.txt`;
+  for (let page = 1; page <= EXPECTED_PAGES; page++) {
+    const text = page === options.bomPage ? `page ${page} text\uFEFF\n` : `page ${page} text\n`;
+    const number = options.renumber && page === options.renumber.from ? options.renumber.to : page;
+    const relative = `${BASELINE}/pages/page-${String(number).padStart(3, "0")}.txt`;
     files[relative] = text;
     tracked.push(relative);
-    const source = page <= BASELINE_NATIVE ? "native" : "ocr";
-    const chars = nonSpaceChars(text) + (page === wrongCharsPage ? 1 : 0);
-    rows.push([page, `section-${page}`, source, Buffer.byteLength(text), chars].join("\t"));
+    const source = page <= EXPECTED_NATIVE ? "native" : "ocr";
+    let chars = nonSpaceChars(text);
+    if (page === options.wrongCharsPage) chars += 1;
+    if (page === options.bomPage) chars -= 1;
+    rows.push([number, `section-${page}`, source, Buffer.byteLength(text), chars].join("\t"));
   }
   files[`${BASELINE}/manifest.tsv`] = `${rows.join("\n")}\n`;
   files[`${BASELINE}/README.md`] = "The extracted text is unreviewed.\n";
@@ -63,7 +63,9 @@ function baselineFixture(wrongCharsPage?: number): { files: Record<string, strin
 function brokenCases(): BrokenCase[] {
   const fakeKey = `sk-${"A".repeat(24)}`;
   const completeBaseline = baselineFixture();
-  const wrongCount = baselineFixture(7);
+  const wrongCount = baselineFixture({ wrongCharsPage: 7 });
+  const bomCount = baselineFixture({ bomPage: 7 });
+  const pageGap = baselineFixture({ renumber: { from: EXPECTED_PAGES, to: EXPECTED_PAGES + 1 } });
   return [
     {
       gate: typecheck,
@@ -104,6 +106,21 @@ function brokenCases(): BrokenCase[] {
       tracked: ["leak.txt"],
       postFail: (failures) =>
         failures.some((line) => line.includes(fakeKey)) ? "secrets: failure output echoed the credential value" : null,
+    },
+    {
+      gate: secrets,
+      label: "credential in a large tracked text file",
+      files: { "large.md": `${"x".repeat(5 * 1024 * 1024 + 1)}\nconst key = "${fakeKey}";\n` },
+      tracked: ["large.md"],
+      postFail: (failures) => {
+        if (!failures.some((line) => line.includes("large.md") && line.includes("OpenAI-style key"))) {
+          return "secrets: did not scan the large text file";
+        }
+        if (failures.some((line) => line.includes(fakeKey))) {
+          return "secrets: failure output echoed the credential value";
+        }
+        return null;
+      },
     },
     {
       gate: localOnly,
@@ -167,6 +184,26 @@ function brokenCases(): BrokenCase[] {
     },
     {
       gate: baseline,
+      label: "baseline count treats U+FEFF as whitespace",
+      files: bomCount.files,
+      tracked: bomCount.tracked,
+      postFail: (failures) =>
+        failures.length === 1 && failures[0].includes("page-007.txt") && failures[0].includes("non-space chars")
+          ? null
+          : `baseline: expected one wrong char count on page-007.txt, saw ${failures.length}: ${failures.join("; ")}`,
+    },
+    {
+      gate: baseline,
+      label: "baseline page set has a gap",
+      files: pageGap.files,
+      tracked: pageGap.tracked,
+      postFail: (failures) =>
+        failures.some((line) => line.includes(`manifest page ${EXPECTED_PAGES} is missing`))
+          ? null
+          : `baseline: expected a missing manifest page, saw: ${failures.join("; ")}`,
+    },
+    {
+      gate: baseline,
       label: "test fixture references the baseline",
       files: {
         ...completeBaseline.files,
@@ -187,6 +224,16 @@ function brokenCases(): BrokenCase[] {
         "go.mod": GO_MOD,
         "x_test.go": 'package x\n\nimport "testing"\n\nfunc TestFail(t *testing.T) { t.Fatal("boom") }\n',
       },
+    },
+    {
+      gate: goTest,
+      label: "skipped Go test",
+      files: {
+        "go.mod": GO_MOD,
+        "x_test.go": 'package x\n\nimport "testing"\n\nfunc TestSkipped(t *testing.T) { t.Skip("deliberately skipped") }\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.includes("TestSkipped")) ? null : `go-test: did not report the skipped test, saw: ${failures.join("; ")}`,
     },
     {
       gate: goVet,

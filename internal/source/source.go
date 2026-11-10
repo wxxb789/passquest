@@ -70,8 +70,10 @@ const (
 	AnswerReviewed AnswerStatus = "reviewed"
 )
 
-// Flag is a visible doubt about imported material. Flags never change the text
-// or the stored review status; they are shown next to it.
+// Flag is a visible doubt about imported material. Import facts
+// (ocr_unverified, provenance_unknown, reading_order_unverified) survive review
+// and correction; review_status is the separate current-state signal. Flags
+// never change the text or the stored review status; they are shown next to it.
 type Flag string
 
 const (

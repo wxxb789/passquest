@@ -90,6 +90,31 @@ func TestOpenCreatesSchemaAndProtectsFiles(t *testing.T) {
 	}
 }
 
+func TestOpenPrivateTightensExistingDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := OpenPrivate(filepath.Join(dir, "attempts.sqlite"))
+	if err != nil {
+		t.Fatalf("OpenPrivate: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat directory: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("directory mode = %04o, want 0700", perm)
+	}
+}
+
 func TestAppendListAndReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "attempts.sqlite")
 	st := mustOpen(t, path)

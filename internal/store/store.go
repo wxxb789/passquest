@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -80,8 +81,22 @@ type Store struct {
 }
 
 // Open creates the database (and parent directory) when absent, migrates it to
-// SchemaVersion, and returns a single-writer handle.
+// SchemaVersion, and returns a single-writer handle. An existing parent
+// directory is left as it is: Open is used with user-chosen paths.
 func Open(path string) (*Store, error) {
+	return open(path, false)
+}
+
+// OpenPrivate is Open for the application's own state directory. On platforms
+// with POSIX modes it also tightens an existing parent directory to 0700, so a
+// state directory created before this rule cannot remain listable by other
+// local users. It must not be used with a directory shared with other
+// applications. Windows has no POSIX mode; see Q-0002-02.
+func OpenPrivate(path string) (*Store, error) {
+	return open(path, true)
+}
+
+func open(path string, privateDir bool) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("store: empty database path")
 	}
@@ -89,8 +104,14 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: resolve path: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
+	dir := filepath.Dir(abs)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("store: create directory: %w", err)
+	}
+	if privateDir && runtime.GOOS != "windows" {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("store: protect directory: %w", err)
+		}
 	}
 
 	u := &url.URL{Scheme: "file", Path: abs}

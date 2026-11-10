@@ -54,6 +54,7 @@ export const importSmoke: Gate = {
     const db = path.join(temp, "smoke.sqlite");
     const checks: string[] = [];
     let assertions = 0;
+    let skipped = 0;
     const check = (condition: boolean, message: string): boolean => {
       assertions++;
       if (!condition) checks.push(message);
@@ -142,6 +143,10 @@ export const importSmoke: Gate = {
       if (process.platform !== "win32") {
         const mode = statSync(db).mode & 0o777;
         check(mode === 0o600, `database mode = 0${mode.toString(8)}, want 0600`);
+      } else {
+        // Windows has no POSIX file mode; os.Chmod(0600) does not create an ACL.
+        // Report the skip instead of silently dropping the assertion.
+        skipped++;
       }
     } catch (error) {
       checks.push(error instanceof Error ? error.message : String(error));
@@ -150,6 +155,7 @@ export const importSmoke: Gate = {
     }
 
     if (checks.length > 0) return fail(checks);
-    return pass(`${assertions} assertions`);
+    const skipNote = skipped > 0 ? `, ${skipped} skipped (POSIX mode unavailable on ${process.platform})` : "";
+    return pass(`${assertions} assertions${skipNote}`);
   },
 };

@@ -99,10 +99,11 @@ Entry format:
   and point at the TXT path; (B) add a pure-Go PDF module; (C) require the user to pre-convert PDF to
   TXT outside the app.
 - Default taken: (A). PDF import makes one local `pdftotext -layout -enc UTF-8` call (path
-  overridable with `PASSQUEST_PDFTOTEXT`), compares page count with `pdfinfo` when available, and
-  never downloads or OCRs anything. A missing tool is exit 2 with the TXT instructions. The extractor
-  sits behind `source.ImportOptions`, so a pure-Go implementation can replace it without changing the
-  CLI or schema. Reverse by removing the PDF branch.
+  overridable with `PASSQUEST_PDFTOTEXT`) and requires `pdfinfo` for the page count (overridable with
+  `PASSQUEST_PDFINFO`); both tools must be present, and it never downloads or OCRs anything. A
+  missing tool is exit 2 with the TXT instructions. The extractor sits behind `source.ImportOptions`,
+  so a pure-Go implementation can replace it without changing the CLI or schema. Reverse by removing
+  the PDF branch.
 - Revisit when: a target platform cannot install poppler, or PDF import produces materially worse
   text than a maintained pure-Go parser on the owner's source.
 
@@ -116,6 +117,11 @@ Entry format:
   and `reviewed_at`; the database stays `0600` in a `0700` directory and is gitignored. The label is
   attribution, not authentication, and the evidence record says so. Reverse by adding an identity or
   encryption layer later; the columns remain.
+- Platform limit (2026-11-10): the `0700` rule is enforced for the app-owned default `.passquest/`
+  path on POSIX, including an existing directory created before the rule; a directory chosen with
+  `--db` or `PASSQUEST_DB` is left to the user. Windows has no POSIX mode and `os.Chmod(0o600)` does
+  not create an ACL, so the import smoke reports its database-mode assertion as skipped there. The
+  `0600` database file remains the private-data boundary on POSIX.
 - Revisit when: the desktop workspace (0011) stores multiple learners, or private source material
   needs at-rest encryption.
 
