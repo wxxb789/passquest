@@ -19,10 +19,12 @@ containment, honest failure — against a loopback stub, and reports a real prov
 
 **In scope**
 
-1. `passquest find` derives a bounded search intent from stored learning evidence: the skill with the most
-   wrong or skipped attempts inside the goal-0004 adaptive state, the exam section it belongs to, the
-   learner's level, and an explicit candidate limit. With no qualifying evidence the command says so and
-   exits 0 without a query.
+1. `passquest find` derives a bounded search intent from stored learning evidence with **one** selection
+   rule, used by the CLI, the acceptance checks and the decision record alike: among skills with at least
+   three attempts, take the highest `(wrong + skipped) / attempts` ratio, breaking a tie by the larger
+   attempt count; with no skill at three attempts, take the tactic of the most recent wrong answer; with no
+   wrong answer either, report "nothing to find" and exit 0 without a query. The intent carries that skill
+   (or tactic), its exam section, the learner's level, and an explicit candidate limit.
 2. One search adapter interface, configured by `PASSQUEST_SEARCH_ENDPOINT` / `PASSQUEST_SEARCH_KEY`. With no
    endpoint configured the command reports `no provider configured`, performs zero network I/O, and exits 0.
    The adapter is proven against a loopback stub that speaks the documented request and response shape.
@@ -51,8 +53,8 @@ ingestion pipeline, provider-specific SDKs, and any automatic download of third-
 - Search provider: none configured here → loopback stub in CI, real provider run is owner evidence.
 - Rights: `link-only` unless the provider response declares an open license; no auto-download, no scraping.
 - Budget: 5 queries/day and 20 candidates/run, both flags.
-- Representative gap: lowest-scoring skill with at least three attempts; otherwise the tactic of the most
-  recent wrong answer.
+- Representative gap: the single rule in clause 1 — highest error ratio among skills with at least three
+  attempts, else the most recent wrong answer's tactic, else "nothing to find".
 
 ## Acceptance and evidence
 

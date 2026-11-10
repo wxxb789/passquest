@@ -603,10 +603,12 @@ Entry format:
 ### Q-0008-04 — What counts as the observed gap that justifies a search?
 - Status: decided(default taken)
 - Context: "a learner's observed skill gap" has no definition and a search must not fire on noise.
-- Options considered: (A) lowest-scoring skill with at least three wrong or skipped attempts, else the tactic
-  of the most recent wrong answer; (B) any wrong answer; (C) the learner asks.
-- Default taken: (A). Three attempts is the smallest count that is not a coin flip, and the fallback keeps the
-  command useful on day one.
+- Options considered: (A) highest `(wrong + skipped) / attempts` ratio among skills with at least three
+  attempts, tie broken by attempt count, else the most recent wrong answer's tactic, else "nothing to find";
+  (B) the skill with the most wrong answers in absolute terms; (C) the learner asks.
+- Default taken: (A). A ratio keeps a 3-of-3 skill above a 10-of-100 one, three attempts is the smallest count
+  that is not a coin flip, and the two fallbacks keep the command honest instead of silent. Clause 1 of the
+  goal, this entry and the acceptance checks use this same rule.
 - Revisit when: real practice volume makes a better signal visible.
 
 ### Q-0008-05 — How is an injected instruction in fetched text contained?
