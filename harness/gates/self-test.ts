@@ -224,6 +224,29 @@ function brokenCases(): BrokenCase[] {
       },
     },
     {
+      gate: portablePaths,
+      label: "raw-string path literals",
+      files: {
+        "go.mod": GO_MOD,
+        "internal/x/x.go": "package x\n",
+        "internal/x/x_test.go":
+          "package x\n\nimport \"testing\"\n\nfunc TestRaw(t *testing.T) {\n\tposix := `/tmp/raw.sqlite`\n\twin := `C:\\Users\\runner\\agent.sqlite`\n\t_ = posix\n\t_ = win\n}\n",
+      },
+      tracked: ["internal/x/x_test.go"],
+      postFail: (failures) => {
+        if (failures.length !== 2) {
+          return `portable-paths: expected both raw-string literals, saw ${failures.length}: ${failures.join("; ")}`;
+        }
+        if (!failures.some((line) => line.includes("/tmp/raw.sqlite"))) {
+          return "portable-paths: did not report the raw-string POSIX path";
+        }
+        if (!failures.some((line) => line.includes("C:\\\\Users\\\\runner\\\\agent.sqlite"))) {
+          return "portable-paths: did not report the raw-string Windows path";
+        }
+        return null;
+      },
+    },
+    {
       gate: baseline,
       label: "baseline manifest disagrees with its page",
       files: wrongCount.files,

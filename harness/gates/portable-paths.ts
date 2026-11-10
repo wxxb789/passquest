@@ -4,8 +4,9 @@ import type { Gate } from "../lib/types.ts";
 
 /**
  * A path literal that only resolves on POSIX is a Windows defect waiting for CI.
- * The fixture cases where a literal is genuinely pure string data must say why
- * on the line, so the next reader does not have to re-derive the argument.
+ * Go has two string forms and a Windows path is usually written in the backticked
+ * one, so both are scanned; a fixture that is genuinely pure string data must say
+ * why on the line, so the next reader does not have to re-derive the argument.
  */
 const POSIX_ROOTS = [
   "/tmp/",
@@ -20,12 +21,16 @@ const POSIX_ROOTS = [
   "/mnt/",
 ];
 
-const WINDOWS_ROOTS = ["C:\\\\", "D:\\\\"];
-
 const ALLOW_MARKER = /portable-paths:\s*allow\s+\S/;
 
-/** A table entry spans several lines, so a marker may sit up to three lines above. */
+/** A table entry spans several lines, so a marker may sit up to three lines away. */
 const ALLOW_LOOKBACK = 3;
+
+/** Both Go string forms: interpreted (escapes intact) and raw (backticked). */
+const LITERAL = /"(?:[^"\\\n]|\\.)*"|`[^`\n]*`/g;
+
+const DRIVE_PATH = /^[A-Za-z]:[\\/]/;
+const UNC_PATH = /^\\\\[^\\]/;
 
 interface Hit {
   file: string;
@@ -33,14 +38,30 @@ interface Hit {
   literal: string;
 }
 
-function literalOnLine(text: string): string | null {
-  for (const root of [...POSIX_ROOTS, ...WINDOWS_ROOTS]) {
-    const index = text.indexOf(`"${root}`);
-    if (index < 0) continue;
-    const end = text.indexOf('"', index + 1);
-    return end < 0 ? text.slice(index + 1) : text.slice(index + 1, end);
+/** Collapses the escapes that matter, so both string forms compare the same way. */
+function unescape(body: string): string {
+  return body
+    .replace(/\\\\/g, "\\")
+    .replace(/\\"/g, '"')
+    .replace(/\\t/g, "\t")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\r");
+}
+
+function platformBound(value: string): boolean {
+  if (DRIVE_PATH.test(value) || UNC_PATH.test(value)) return true;
+  return POSIX_ROOTS.some((root) => value.startsWith(root));
+}
+
+function literalsOnLine(text: string): string[] {
+  const found: string[] = [];
+  for (const match of text.matchAll(LITERAL)) {
+    const token = match[0];
+    const body = token.slice(1, -1);
+    const value = token.startsWith("`") ? body : unescape(body);
+    if (platformBound(value)) found.push(value);
   }
-  return null;
+  return found;
 }
 
 function isComment(trimmed: string): boolean {
@@ -62,10 +83,16 @@ export function scanGoSource(file: string, content: string): Hit[] {
         break;
       }
     }
+    for (let ahead = 1; !allowed && ahead <= ALLOW_LOOKBACK && index + ahead < lines.length; ahead++) {
+      if (ALLOW_MARKER.test(lines[index + ahead])) {
+        allowed = true;
+        break;
+      }
+    }
     if (allowed) continue;
-    const literal = literalOnLine(line);
-    if (literal === null) continue;
-    hits.push({ file, line: index + 1, literal });
+    for (const literal of literalsOnLine(line)) {
+      hits.push({ file, line: index + 1, literal });
+    }
   }
   return hits;
 }
