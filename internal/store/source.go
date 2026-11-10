@@ -531,7 +531,7 @@ func (s *Store) AddQuestion(q source.Question) error {
 	); err != nil {
 		return fmt.Errorf("store: insert question %s: %w", q.ID, err)
 	}
-	detail, err := questionDetail(q)
+	detail, err := questionDetail(q, optionsJSON, reasoningJSON)
 	if err != nil {
 		return err
 	}
@@ -592,7 +592,7 @@ func (s *Store) SaveQuestion(q source.Question, kind string) error {
 	} else if affected == 0 {
 		return fmt.Errorf("%w: question %q in source %s", ErrNotFound, q.ID, q.SourceID)
 	}
-	detail, err := questionDetail(q)
+	detail, err := questionDetail(q, optionsJSON, reasoningJSON)
 	if err != nil {
 		return err
 	}
@@ -621,21 +621,28 @@ func encodeQuestionParts(q source.Question) (string, string, error) {
 	return string(optionsJSON), string(reasoningJSON), nil
 }
 
-func questionDetail(q source.Question) (string, error) {
+// questionDetail encodes the complete question snapshot appended to the audit
+// trail. Options and option reasoning arrive already encoded so the event and
+// the stored row cannot disagree about what was added, reviewed or edited.
+func questionDetail(q source.Question, optionsJSON, reasoningJSON string) (string, error) {
 	payload := struct {
-		ID           string            `json:"id"`
-		Page         int               `json:"page"`
-		Answer       string            `json:"answer"`
-		AnswerStatus string            `json:"answer_status"`
-		Review       string            `json:"review_status"`
-		ReviewedBy   string            `json:"reviewed_by"`
-		ReviewedAt   string            `json:"reviewed_at"`
-		Evidence     string            `json:"evidence"`
-		OptionReason map[string]string `json:"option_reasoning"`
+		ID           string          `json:"id"`
+		Page         int             `json:"page"`
+		Stem         string          `json:"stem"`
+		Options      json.RawMessage `json:"options"`
+		Answer       string          `json:"answer"`
+		AnswerStatus string          `json:"answer_status"`
+		Review       string          `json:"review_status"`
+		ReviewedBy   string          `json:"reviewed_by"`
+		ReviewedAt   string          `json:"reviewed_at"`
+		Evidence     string          `json:"evidence"`
+		Reasoning    string          `json:"reasoning"`
+		OptionReason json.RawMessage `json:"option_reasoning"`
 	}{
-		ID: q.ID, Page: q.Page, Answer: q.Answer, AnswerStatus: string(q.AnswerStatus),
+		ID: q.ID, Page: q.Page, Stem: q.Stem, Options: json.RawMessage(optionsJSON),
+		Answer: q.Answer, AnswerStatus: string(q.AnswerStatus),
 		Review: string(q.Review), ReviewedBy: q.ReviewedBy, ReviewedAt: source.FormatTime(q.ReviewedAt),
-		Evidence: q.Evidence, OptionReason: q.OptionReasoning,
+		Evidence: q.Evidence, Reasoning: q.Reasoning, OptionReason: json.RawMessage(reasoningJSON),
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

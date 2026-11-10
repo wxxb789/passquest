@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -266,10 +267,10 @@ func TestQuestionAddReviewEditKeepsAudit(t *testing.T) {
 	replacement, err := source.ParseQuestionJSON([]byte(`{
 		"id": "q1",
 		"stem": "When does the library close on Saturdays, from 3 March?",
-		"options": [{"label":"A","text":"At 7 p.m."},{"label":"B","text":"At 4 p.m."}],
+		"options": [{"label":"A","text":"At 7 p.m."},{"label":"B","text":"At four o'clock."}],
 		"answer": "B",
 		"evidence": "close at 4 p.m.",
-		"reasoning": "The page states the Saturday time.",
+		"reasoning": "The page now states the Saturday time as 4 p.m.",
 		"option_reasoning": {"A":"That is the weekday time.","B":"The page states 4 p.m."}
 	}`), src.ID, 2, sourceNow.Add(4*time.Minute), "q1")
 	if err != nil {
@@ -298,6 +299,43 @@ func TestQuestionAddReviewEditKeepsAudit(t *testing.T) {
 	want := []string{EventImport, EventQuestionAdded, EventPageReviewed, EventQuestionReviewed, EventQuestionEdited}
 	if strings.Join(kinds, ",") != strings.Join(want, ",") {
 		t.Fatalf("event kinds = %v, want %v", kinds, want)
+	}
+
+	type questionSnapshot struct {
+		Stem    string `json:"stem"`
+		Options []struct {
+			Label string `json:"label"`
+			Text  string `json:"text"`
+		} `json:"options"`
+		Reasoning string `json:"reasoning"`
+	}
+	snapshots := map[string]questionSnapshot{}
+	for _, event := range events {
+		if event.QuestionID != "q1" {
+			continue
+		}
+		var snapshot questionSnapshot
+		if err := json.Unmarshal([]byte(event.Detail), &snapshot); err != nil {
+			t.Fatalf("decode %s detail: %v", event.Kind, err)
+		}
+		snapshots[event.Kind] = snapshot
+	}
+	added := snapshots[EventQuestionAdded]
+	if added.Stem != "When does the library close on Saturdays?" ||
+		added.Reasoning != "The page states the Saturday time." ||
+		len(added.Options) != 2 || added.Options[1].Text != "At 4 p.m." {
+		t.Fatalf("added snapshot = %+v", added)
+	}
+	reviewedSnapshot := snapshots[EventQuestionReviewed]
+	if reviewedSnapshot.Stem != added.Stem || reviewedSnapshot.Reasoning != added.Reasoning ||
+		len(reviewedSnapshot.Options) != 2 || reviewedSnapshot.Options[1].Text != added.Options[1].Text {
+		t.Fatalf("reviewed snapshot = %+v, want the content that was reviewed (%+v)", reviewedSnapshot, added)
+	}
+	editedSnapshot := snapshots[EventQuestionEdited]
+	if editedSnapshot.Stem != "When does the library close on Saturdays, from 3 March?" ||
+		editedSnapshot.Reasoning != "The page now states the Saturday time as 4 p.m." ||
+		len(editedSnapshot.Options) != 2 || editedSnapshot.Options[1].Text != "At four o'clock." {
+		t.Fatalf("edited snapshot = %+v", editedSnapshot)
 	}
 }
 
