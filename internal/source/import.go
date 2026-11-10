@@ -16,8 +16,6 @@ import (
 	"time"
 )
 
-// Import sentinel errors let the CLI distinguish invalid input from a storage
-// failure without parsing messages.
 var (
 	ErrInvalidInput = errors.New("invalid import input")
 	ErrToolMissing  = errors.New("required local tool is missing")
@@ -174,8 +172,6 @@ func importTXTDir(dir string) (Source, error) {
 			})
 			continue
 		}
-		// The manifest or the highest page file implies a page that was not
-		// extracted. Keep the page number so coverage is not silently reduced.
 		src.Pages = append(src.Pages, Page{
 			Number:   number,
 			Origin:   PageNone,
@@ -202,18 +198,10 @@ func importTXTFile(path string) (Source, error) {
 
 	switch {
 	case strings.Contains(text, "\f"):
-		chunks := strings.Split(text, "\f")
-		if len(chunks) > 0 && chunks[len(chunks)-1] == "" {
-			chunks = chunks[:len(chunks)-1]
-		}
-		if len(chunks) == 0 {
-			chunks = []string{""}
-		}
-		for i, chunk := range chunks {
-			flags := appendFlag(flagsForText(PageUnknown, chunk), FlagProvenanceUnknown)
+		for i, chunk := range splitFormFeedPages(text) {
 			src.Pages = append(src.Pages, Page{
 				Number: i + 1, Origin: PageUnknown, Review: Unreviewed,
-				Flags: flags, Text: chunk, Revision: 1,
+				Flags: flagsForText(PageUnknown, chunk), Text: chunk, Revision: 1,
 			})
 		}
 	case hasPageMarkers(text):
@@ -237,19 +225,15 @@ func importTXTFile(path string) (Source, error) {
 				})
 				continue
 			}
-			flags := flagsForText(page.origin, page.text)
-			if page.origin == PageUnknown {
-				flags = appendFlag(flags, FlagProvenanceUnknown)
-			}
 			src.Pages = append(src.Pages, Page{
 				Number: number, Origin: page.origin, Review: Unreviewed,
-				Flags: flags, Text: page.text, Revision: 1,
+				Flags: flagsForText(page.origin, page.text), Text: page.text, Revision: 1,
 			})
 		}
 	default:
 		src.Pages = []Page{{
 			Number: 1, Origin: PageUnknown, Review: Unreviewed,
-			Flags: appendFlag(flagsForText(PageUnknown, text), FlagProvenanceUnknown),
+			Flags: flagsForText(PageUnknown, text),
 			Text:  text, Revision: 1,
 		}}
 	}
@@ -280,17 +264,11 @@ func importPDF(path string, opts ImportOptions) (Source, error) {
 	if !ValidUTF8(text) {
 		return Source{}, fmt.Errorf("%w: extracted PDF text is not valid UTF-8", ErrInvalidInput)
 	}
-	chunks := strings.Split(text, "\f")
-	if len(chunks) > 0 && chunks[len(chunks)-1] == "" {
-		chunks = chunks[:len(chunks)-1]
-	}
-	if len(chunks) > count {
+	chunks := splitFormFeedPages(text)
+	if len(chunks) != count {
+		// The extractor did not emit one chunk per page, so position-based page
+		// numbers would silently mislabel later pages. Refuse the import.
 		return Source{}, fmt.Errorf("%w: extracted %d page chunks but the PDF reports %d pages", ErrInvalidInput, len(chunks), count)
-	}
-	for len(chunks) < count {
-		// A page that the extractor did not emit is kept as an unextracted
-		// placeholder rather than shifting later pages.
-		chunks = append(chunks, "")
 	}
 
 	src := Source{Title: DefaultTitle(path), Import: ImportPDF}
@@ -327,13 +305,30 @@ func flagsForText(origin PageOrigin, text string) []Flag {
 	case PageUnknown:
 		flags = appendFlag(flags, FlagProvenanceUnknown)
 	}
-	chars := CountNonSpace(text)
-	if strings.TrimSpace(text) == "" {
-		flags = appendFlag(flags, FlagEmpty)
-	} else if chars < LowTextThreshold {
-		flags = appendFlag(flags, FlagLowText)
+	return append(flags, textDoubtFlags(text)...)
+}
+
+// textDoubtFlags is the single empty/low_text decision shared by import and
+// correction.
+func textDoubtFlags(text string) []Flag {
+	switch {
+	case strings.TrimSpace(text) == "":
+		return []Flag{FlagEmpty}
+	case CountNonSpace(text) < LowTextThreshold:
+		return []Flag{FlagLowText}
+	default:
+		return nil
 	}
-	return flags
+}
+
+// splitFormFeedPages splits extractor or TXT output into page chunks. A single
+// trailing form feed is a per-page terminator, not an extra page.
+func splitFormFeedPages(text string) []string {
+	chunks := strings.Split(text, "\f")
+	if n := len(chunks); n > 1 && chunks[n-1] == "" {
+		return chunks[:n-1]
+	}
+	return chunks
 }
 
 func appendFlag(flags []Flag, flag Flag) []Flag {
@@ -359,12 +354,7 @@ func FlagsAfterCorrection(existing []Flag, text string) []Flag {
 		}
 	}
 	flags = appendFlag(flags, FlagCorrected)
-	if strings.TrimSpace(text) == "" {
-		flags = appendFlag(flags, FlagEmpty)
-	} else if CountNonSpace(text) < LowTextThreshold {
-		flags = appendFlag(flags, FlagLowText)
-	}
-	return flags
+	return append(flags, textDoubtFlags(text)...)
 }
 
 func mapOrigin(raw string) PageOrigin {
@@ -381,7 +371,6 @@ func mapOrigin(raw string) PageOrigin {
 }
 
 type manifestRow struct {
-	page    int
 	section string
 	origin  string
 	bytes   int
@@ -431,7 +420,7 @@ func readManifest(path string) (map[int]manifestRow, error) {
 			return nil, fmt.Errorf("%w: manifest page %d appears twice", ErrInvalidInput, page)
 		}
 		rows[page] = manifestRow{
-			page: page, section: strings.TrimSpace(fields[1]), origin: strings.TrimSpace(fields[2]),
+			section: strings.TrimSpace(fields[1]), origin: strings.TrimSpace(fields[2]),
 			bytes: size, chars: chars,
 		}
 	}
@@ -528,8 +517,6 @@ func defaultPDFText(path string) (string, error) {
 	return string(out), nil
 }
 
-// runLocalTool runs one local converter. It never downloads anything and has a
-// bounded timeout so a pathological PDF cannot hang the CLI.
 func runLocalTool(bin string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()

@@ -38,9 +38,7 @@ export async function run(cmd: string, args: string[], options: RunOptions = {})
   return { code, stdout, stderr };
 }
 
-export function outputLines(result: RunResult, limit = 40): string[] {
+export function outputLines(result: RunResult): string[] {
   const text = `${result.stdout}${result.stderr}`.replace(/\r\n/g, "\n");
-  const lines = text.split("\n").filter((line) => line.trim() !== "");
-  if (lines.length <= limit) return lines;
-  return [...lines.slice(0, limit), `... ${lines.length - limit} more line(s)`];
+  return text.split("\n").filter((line) => line.trim() !== "");
 }

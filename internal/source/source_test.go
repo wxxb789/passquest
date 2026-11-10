@@ -39,8 +39,9 @@ func TestImportTXTDirReadsManifestAndPages(t *testing.T) {
 	dir := t.TempDir()
 	page1 := "A native page with enough words to inspect and review carefully.\n"
 	page2 := "oc r page ~ \\| with doubtful column order and a typo"
-	manifest := fmt.Sprintf("page\tsection\tsource\tbytes\tchars_no_ws\n1\tfront-matter\tnative\t%d\t%d\n2\tmock-exam\tocr\t%d\t%d\n",
-		len(page1), CountNonSpace(page1), len(page2), CountNonSpace(page2))
+	manifest := "page\tsection\tsource\tbytes\tchars_no_ws\n" +
+		"1\tfront-matter\tnative\t65\t54\n" +
+		"2\tmock-exam\tocr\t52\t41\n"
 	writePageFiles(t, dir, map[int]string{1: page1, 2: page2}, manifest)
 
 	src, err := ImportPath(dir, ImportOptions{Now: testNow})
@@ -70,7 +71,6 @@ func TestImportTXTDirReadsManifestAndPages(t *testing.T) {
 		}
 	}
 	if second.HasFlag(FlagManifestMismatch) {
-		// The manifest counts above were written to match the files.
 		t.Fatalf("unexpected manifest mismatch: %v", second.Flags)
 	}
 	if !strings.HasPrefix(src.ID, "src-") || len(src.ID) != 20 {
@@ -250,27 +250,86 @@ func TestImportPDFRejectsMismatchedPageCounts(t *testing.T) {
 	if err := os.WriteFile(path, []byte("%PDF-1.7 placeholder"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ImportPath(path, ImportOptions{
-		Now:          testNow,
-		PDFPageCount: func(string) (int, error) { return 1, nil },
-		PDFText:      func(string) (string, error) { return "one\ftwo", nil },
-	})
-	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("error = %v, want ErrInvalidInput", err)
+	cases := []struct {
+		name  string
+		count int
+		text  string
+	}{
+		{"more chunks than pages", 1, "one\ftwo"},
+		{"fewer chunks than pages", 3, "one\ftwo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ImportPath(path, ImportOptions{
+				Now:          testNow,
+				PDFPageCount: func(string) (int, error) { return tc.count, nil },
+				PDFText:      func(string) (string, error) { return tc.text, nil },
+			})
+			if !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("error = %v, want ErrInvalidInput", err)
+			}
+		})
 	}
 }
 
-func TestImportPDFReportsMissingTool(t *testing.T) {
+func TestImportPDFThresholdsAndShortText(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "source.pdf")
 	if err := os.WriteFile(path, []byte("%PDF-1.7 placeholder"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ImportPath(path, ImportOptions{
+	short, err := ImportPath(path, ImportOptions{
 		Now:          testNow,
-		PDFPageCount: func(string) (int, error) { return 0, ErrToolMissing },
+		PDFPageCount: func(string) (int, error) { return 1, nil },
+		PDFText:      func(string) (string, error) { return "abcde", nil },
 	})
-	if !errors.Is(err, ErrToolMissing) {
+	if err != nil {
+		t.Fatalf("short-page import: %v", err)
+	}
+	page := short.Pages[0]
+	if page.Origin != PageNone || !page.HasFlag(FlagScanUnextracted) || page.HasFlag(FlagEmpty) || page.Text != "abcde" {
+		t.Fatalf("short page = %s/%v/%q, want scan_unextracted without empty and raw text kept", page.Origin, page.Flags, page.Text)
+	}
+
+	threshold := strings.Repeat("a", 19) + "\f" + strings.Repeat("b", 20)
+	src, err := ImportPath(path, ImportOptions{
+		Now:          testNow,
+		PDFPageCount: func(string) (int, error) { return 2, nil },
+		PDFText:      func(string) (string, error) { return threshold, nil },
+	})
+	if err != nil {
+		t.Fatalf("threshold import: %v", err)
+	}
+	if got := src.Pages[0]; got.Origin != PageNone || !got.HasFlag(FlagScanUnextracted) {
+		t.Fatalf("19 chars = %s/%v, want none + scan_unextracted", got.Origin, got.Flags)
+	}
+	if got := src.Pages[1]; got.Origin != PageNative || !got.HasFlag(FlagReadingOrderUnverified) {
+		t.Fatalf("20 chars = %s/%v, want native + reading_order_unverified", got.Origin, got.Flags)
+	}
+}
+
+func TestImportPDFReportsMissingTool(t *testing.T) {
+	t.Setenv("PASSQUEST_PDFINFO", "passquest-test-missing-pdfinfo")
+	if _, err := defaultPDFPageCount("/nonexistent/source.pdf"); !errors.Is(err, ErrToolMissing) {
 		t.Fatalf("error = %v, want ErrToolMissing", err)
+	}
+}
+
+func TestImportTXTFileWithoutSeparatorsIsOneUnknownPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "plain.txt")
+	text := "a plain page without form feeds or page markers"
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	src, err := ImportPath(path, ImportOptions{Now: testNow})
+	if err != nil {
+		t.Fatalf("ImportPath: %v", err)
+	}
+	if len(src.Pages) != 1 {
+		t.Fatalf("pages = %d, want 1", len(src.Pages))
+	}
+	page := src.Pages[0]
+	if page.Origin != PageUnknown || !page.HasFlag(FlagProvenanceUnknown) || page.Text != text {
+		t.Fatalf("page = %s/%v/%q", page.Origin, page.Flags, page.Text)
 	}
 }
 
@@ -329,15 +388,40 @@ func TestParseQuestionJSONStaysUnreviewed(t *testing.T) {
 }
 
 func TestParseQuestionJSONRejectsBadInput(t *testing.T) {
-	cases := map[string]string{
-		"unknown field":  `{"id":"q1","stem":"s","options":[],"evidence":"e","reasoning":"r","option_reasoning":{},"extra":1}`,
-		"missing answer": `{"id":"q1","stem":"","options":[],"evidence":"","reasoning":"","option_reasoning":{}}`,
-		"bad answer":     strings.Replace(validQuestionJSON("C"), `"answer": "C"`, `"answer": "C"`, 1),
+	base := validQuestionJSON("B")
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"unknown field", strings.Replace(base, `"reasoning"`, `"extra": 1, "reasoning"`, 1), "unknown field"},
+		{"missing id", strings.Replace(base, `"id": "q1",`, "", 1), "question id is required"},
+		{"empty options", `{"id":"q1","stem":"s","options":[],"answer":"","evidence":"e","reasoning":"r","option_reasoning":{}}`, "has 0 options, want 2..8"},
+		{"answer not in options", validQuestionJSON("C"), `answer "C" is not one of its options`},
+		{"duplicate label", strings.Replace(base, `{"label": "B", "text": "At 4 p.m."}`, `{"label": "A", "text": "At 4 p.m."}`, 1), `option label "A" is duplicated`},
+		{"missing explanation", strings.Replace(base, `"A": "That is the weekday closing time.",`, "", 1), "option A has no explanation"},
+		{"unknown explanation", strings.Replace(base, `"B": "The notice gives 4 p.m. for Saturdays."`, `"B": "The notice gives 4 p.m. for Saturdays.", "C": "x"`, 1), `explains unknown option "C"`},
 	}
-	for name, input := range cases {
-		if _, err := ParseQuestionJSON([]byte(input), "src-test", 1, testNow, ""); !errors.Is(err, ErrInvalidInput) {
-			t.Fatalf("%s: error = %v, want ErrInvalidInput", name, err)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseQuestionJSON([]byte(tc.input), "src-test", 1, testNow, "")
+			if !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("error = %v, want ErrInvalidInput", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want fragment %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseQuestionJSONAllowsProposedEmptyAnswer(t *testing.T) {
+	q, err := ParseQuestionJSON([]byte(validQuestionJSON("")), "src-test", 1, testNow, "")
+	if err != nil {
+		t.Fatalf("ParseQuestionJSON: %v", err)
+	}
+	if q.Answer != "" || q.AnswerStatus != AnswerUnmapped || q.Review != Unreviewed {
+		t.Fatalf("question = answer %q/%s review %s", q.Answer, q.AnswerStatus, q.Review)
 	}
 }
 
@@ -388,7 +472,7 @@ func TestReviewAnswerRequiresReviewedPageAndMatchingEvidence(t *testing.T) {
 }
 
 func TestBuildPracticeExamOnlyServesReviewedQuestions(t *testing.T) {
-	page := Page{Number: 2, Origin: PageNative, Review: Reviewed, ReviewedBy: "owner", Text: "it will close at 4 p.m."}
+	page := Page{Number: 2, Origin: PageNative, Review: Reviewed, ReviewedBy: "owner", ReviewedAt: testNow, Text: "it will close at 4 p.m."}
 	ready, err := ParseQuestionJSON([]byte(validQuestionJSON("B")), "src-test", 2, testNow, "")
 	if err != nil {
 		t.Fatal(err)
@@ -420,8 +504,14 @@ func TestBuildPracticeExamOnlyServesReviewedQuestions(t *testing.T) {
 	if content.ID != ContentID("src-test", 2) || !strings.HasPrefix(content.Version, "1-") {
 		t.Fatalf("content id/version = %s/%s", content.ID, content.Version)
 	}
-	if !strings.Contains(content.Notice, "reviewed by owner") || !strings.Contains(content.Notice, "private") {
-		t.Fatalf("notice = %q", content.Notice)
+	for _, want := range []string{
+		"page reviewed by owner at 2026-11-10T09:00:00Z",
+		"q1 by owner at 2026-11-10T09:00:00Z",
+		"private",
+	} {
+		if !strings.Contains(content.Notice, want) {
+			t.Fatalf("notice = %q, want %q", content.Notice, want)
+		}
 	}
 
 	_, _, err = BuildPracticeExam(src, Page{Number: 2, Review: Unreviewed, Text: page.Text}, []Question{ready})
@@ -439,11 +529,23 @@ func TestPracticeContentIDRoundTrip(t *testing.T) {
 	if id != "src-abc123-p024" {
 		t.Fatalf("id = %q", id)
 	}
-	sourceID, page, ok := ParseContentID(id)
-	if !ok || sourceID != "src-abc123" || page != 24 {
-		t.Fatalf("parse = %q/%d/%v", sourceID, page, ok)
+	accepted := []struct {
+		id       string
+		sourceID string
+		page     int
+	}{
+		{"src-abc123-p024", "src-abc123", 24},
+		{"src-abc123-p012", "src-abc123", 12},
 	}
-	if _, _, ok := ParseContentID("sample-0001"); ok {
-		t.Fatal("sample id parsed as an imported content")
+	for _, tc := range accepted {
+		sourceID, page, ok := ParseContentID(tc.id)
+		if !ok || sourceID != tc.sourceID || page != tc.page {
+			t.Fatalf("ParseContentID(%q) = %q/%d/%v", tc.id, sourceID, page, ok)
+		}
+	}
+	for _, raw := range []string{"sample-0001", "foo-p12", "src-abc123-p000", "-p001"} {
+		if _, _, ok := ParseContentID(raw); ok {
+			t.Fatalf("ParseContentID(%q) accepted an id not produced by ContentID", raw)
+		}
 	}
 }

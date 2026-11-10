@@ -16,8 +16,6 @@ import (
 	"github.com/wxxb789/passquest/internal/store"
 )
 
-// --- argument helpers -------------------------------------------------------
-
 // reorderArgs moves flags before positionals so "show SOURCE --page 2" works.
 // valueFlags names the flags that consume the following argument.
 func reorderArgs(args []string, valueFlags map[string]bool) []string {
@@ -55,15 +53,36 @@ func newFlagSet(name string, opt Options, wantJSON bool) *flag.FlagSet {
 	return fs
 }
 
-func parseFlagSet(fs *flag.FlagSet, args []string, opt Options, wantJSON bool) int {
+func parseArgs(fs *flag.FlagSet, args []string, opt Options, wantJSON bool, positionals int, usage string) int {
 	if err := fs.Parse(args); err != nil {
 		if wantJSON {
 			return usageError(opt, true, "invalid_flags", err.Error())
 		}
 		return 2
 	}
-	if fs.NArg() > 0 {
-		return usageError(opt, wantJSON, "unexpected_argument", fmt.Sprintf("unexpected argument %q", fs.Arg(0)))
+	if positionals == 0 {
+		if fs.NArg() > 0 {
+			return usageError(opt, wantJSON, "unexpected_argument", fmt.Sprintf("unexpected argument %q", fs.Arg(0)))
+		}
+		return 0
+	}
+	if fs.NArg() != positionals {
+		return usageError(opt, wantJSON, "invalid_input", usage)
+	}
+	return 0
+}
+
+func parsePageArg(raw string, opt Options, jsonMode bool) (int, int) {
+	page, err := strconv.Atoi(raw)
+	if err != nil || page < 1 {
+		return 0, usageError(opt, jsonMode, "invalid_input", fmt.Sprintf("invalid page %q", raw))
+	}
+	return page, 0
+}
+
+func requireReviewer(reviewer string, opt Options, jsonMode bool) int {
+	if strings.TrimSpace(reviewer) == "" {
+		return usageError(opt, jsonMode, "invalid_input", "--reviewer is required")
 	}
 	return 0
 }
@@ -84,8 +103,6 @@ func sourceError(opt Options, jsonMode bool, err error) int {
 	}
 }
 
-// --- import -----------------------------------------------------------------
-
 func runImport(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
 	args = reorderArgs(args, map[string]bool{"path": true, "title": true, "db": true})
@@ -94,7 +111,7 @@ func runImport(args []string, opt Options) int {
 	titleFlag := fs.String("title", "", "source title")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if code := parseFlagSet(fs, args, opt, wantJSON); code != 0 {
+	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
 	if strings.TrimSpace(*pathFlag) == "" {
@@ -153,15 +170,13 @@ func runImport(args []string, opt Options) int {
 	return 0
 }
 
-// --- sources / show / questions --------------------------------------------
-
 func runSources(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
 	args = reorderArgs(args, map[string]bool{"db": true})
 	fs := newFlagSet("sources", opt, wantJSON)
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if code := parseFlagSet(fs, args, opt, wantJSON); code != 0 {
+	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
 	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
@@ -202,14 +217,8 @@ func runShow(args []string, opt Options) int {
 	pageFlag := fs.Int("page", 0, "page number to show in detail")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if err := fs.Parse(args); err != nil {
-		if wantJSON {
-			return usageError(opt, true, "invalid_flags", err.Error())
-		}
-		return 2
-	}
-	if fs.NArg() != 1 {
-		return usageError(opt, *jsonFlag || wantJSON, "invalid_input", "show requires exactly one source id")
+	if code := parseArgs(fs, args, opt, wantJSON, 1, "show requires exactly one source id"); code != 0 {
+		return code
 	}
 	sourceID := fs.Arg(0)
 	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
@@ -259,7 +268,7 @@ func runShow(args []string, opt Options) int {
 
 	fmt.Fprintf(opt.Stdout, "Pass Quest — imported source %s\n%s\n", src.ID, src.Title)
 	fmt.Fprintf(opt.Stdout, "Origin: %s\nPath: %s\nSHA-256: %s\nCreated: %s\n",
-		src.Import, src.Path, src.SHA256, formatOptionalTime(src.CreatedAt))
+		src.Import, src.Path, src.SHA256, source.FormatTime(src.CreatedAt))
 	fmt.Fprintf(opt.Stdout, "Notice: %s\n", src.Notice)
 	fmt.Fprintf(opt.Stdout, "Pages: %d (reviewed %d)\n", summary.PageCount, summary.ReviewedPages)
 	if page == nil {
@@ -271,7 +280,7 @@ func runShow(args []string, opt Options) int {
 		fmt.Fprintf(opt.Stdout, "Origin: %s\nReview: %s\nFlags: %s\nRevision: %d\nChars (no whitespace): %d\n",
 			page.Origin, page.Review, displayFlags(page.Flags), page.Revision, source.CountNonSpace(page.Text))
 		if page.ReviewedBy != "" {
-			fmt.Fprintf(opt.Stdout, "Reviewed by: %s at %s\n", page.ReviewedBy, formatOptionalTime(page.ReviewedAt))
+			fmt.Fprintf(opt.Stdout, "Reviewed by: %s at %s\n", page.ReviewedBy, source.FormatTime(page.ReviewedAt))
 		}
 		if page.ReviewNote != "" {
 			fmt.Fprintf(opt.Stdout, "Review note: %s\n", page.ReviewNote)
@@ -298,14 +307,8 @@ func runQuestions(args []string, opt Options) int {
 	pageFlag := fs.Int("page", 0, "only questions on this page")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if err := fs.Parse(args); err != nil {
-		if wantJSON {
-			return usageError(opt, true, "invalid_flags", err.Error())
-		}
-		return 2
-	}
-	if fs.NArg() != 1 {
-		return usageError(opt, *jsonFlag || wantJSON, "invalid_input", "questions requires exactly one source id")
+	if code := parseArgs(fs, args, opt, wantJSON, 1, "questions requires exactly one source id"); code != 0 {
+		return code
 	}
 	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
 	if err != nil {
@@ -348,8 +351,6 @@ func runQuestions(args []string, opt Options) int {
 	return 0
 }
 
-// --- page corrections and reviews ------------------------------------------
-
 func runPage(args []string, opt Options) int {
 	if len(args) == 0 {
 		return usageError(opt, jsonFlagRequested(args), "invalid_input", "page requires edit or review")
@@ -373,25 +374,19 @@ func runPageEdit(args []string, opt Options) int {
 	note := fs.String("note", "", "why the text changed")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if err := fs.Parse(args); err != nil {
-		if wantJSON {
-			return usageError(opt, true, "invalid_flags", err.Error())
-		}
-		return 2
-	}
-	if fs.NArg() != 2 {
-		return usageError(opt, *jsonFlag || wantJSON, "invalid_input", "page edit requires SOURCE and PAGE")
+	if code := parseArgs(fs, args, opt, wantJSON, 2, "page edit requires SOURCE and PAGE"); code != 0 {
+		return code
 	}
 	sourceID := fs.Arg(0)
-	page, err := strconv.Atoi(fs.Arg(1))
-	if err != nil || page < 1 {
-		return usageError(opt, *jsonFlag, "invalid_input", fmt.Sprintf("invalid page %q", fs.Arg(1)))
+	page, code := parsePageArg(fs.Arg(1), opt, *jsonFlag)
+	if code != 0 {
+		return code
 	}
 	if *textFile == "" {
 		return usageError(opt, *jsonFlag, "invalid_input", "--text-file is required")
 	}
-	if strings.TrimSpace(*reviewer) == "" {
-		return usageError(opt, *jsonFlag, "invalid_input", "--reviewer is required")
+	if code := requireReviewer(*reviewer, opt, *jsonFlag); code != 0 {
+		return code
 	}
 	text, err := readInputFile(*textFile, opt)
 	if err != nil {
@@ -430,22 +425,16 @@ func runPageReview(args []string, opt Options) int {
 	note := fs.String("note", "", "review note")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if err := fs.Parse(args); err != nil {
-		if wantJSON {
-			return usageError(opt, true, "invalid_flags", err.Error())
-		}
-		return 2
-	}
-	if fs.NArg() != 2 {
-		return usageError(opt, *jsonFlag || wantJSON, "invalid_input", "page review requires SOURCE and PAGE")
+	if code := parseArgs(fs, args, opt, wantJSON, 2, "page review requires SOURCE and PAGE"); code != 0 {
+		return code
 	}
 	sourceID := fs.Arg(0)
-	page, err := strconv.Atoi(fs.Arg(1))
-	if err != nil || page < 1 {
-		return usageError(opt, *jsonFlag, "invalid_input", fmt.Sprintf("invalid page %q", fs.Arg(1)))
+	page, code := parsePageArg(fs.Arg(1), opt, *jsonFlag)
+	if code != 0 {
+		return code
 	}
-	if strings.TrimSpace(*reviewer) == "" {
-		return usageError(opt, *jsonFlag, "invalid_input", "--reviewer is required")
+	if code := requireReviewer(*reviewer, opt, *jsonFlag); code != 0 {
+		return code
 	}
 	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
 	if err != nil {
@@ -467,8 +456,6 @@ func runPageReview(args []string, opt Options) int {
 		reviewed.Number, reviewed.ReviewedBy, displayFlags(reviewed.Flags), st.Path())
 	return 0
 }
-
-// --- question authoring and review -----------------------------------------
 
 func runQuestion(args []string, opt Options) int {
 	if len(args) == 0 {
@@ -493,19 +480,13 @@ func runQuestionAdd(args []string, opt Options) int {
 	fileFlag := fs.String("file", "", "question JSON file, or - for stdin")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if err := fs.Parse(args); err != nil {
-		if wantJSON {
-			return usageError(opt, true, "invalid_flags", err.Error())
-		}
-		return 2
-	}
-	if fs.NArg() != 2 {
-		return usageError(opt, *jsonFlag || wantJSON, "invalid_input", "question add requires SOURCE and PAGE")
+	if code := parseArgs(fs, args, opt, wantJSON, 2, "question add requires SOURCE and PAGE"); code != 0 {
+		return code
 	}
 	sourceID := fs.Arg(0)
-	page, err := strconv.Atoi(fs.Arg(1))
-	if err != nil || page < 1 {
-		return usageError(opt, *jsonFlag, "invalid_input", fmt.Sprintf("invalid page %q", fs.Arg(1)))
+	page, code := parsePageArg(fs.Arg(1), opt, *jsonFlag)
+	if code != 0 {
+		return code
 	}
 	if *fileFlag == "" {
 		return usageError(opt, *jsonFlag, "invalid_input", "--file is required")
@@ -555,14 +536,8 @@ func runQuestionEdit(args []string, opt Options) int {
 	fileFlag := fs.String("file", "", "question JSON file, or - for stdin")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if err := fs.Parse(args); err != nil {
-		if wantJSON {
-			return usageError(opt, true, "invalid_flags", err.Error())
-		}
-		return 2
-	}
-	if fs.NArg() != 2 {
-		return usageError(opt, *jsonFlag || wantJSON, "invalid_input", "question edit requires SOURCE and QUESTION")
+	if code := parseArgs(fs, args, opt, wantJSON, 2, "question edit requires SOURCE and QUESTION"); code != 0 {
+		return code
 	}
 	sourceID, questionID := fs.Arg(0), fs.Arg(1)
 	if *fileFlag == "" {
@@ -613,20 +588,14 @@ func runQuestionReview(args []string, opt Options) int {
 	reviewer := fs.String("reviewer", "", "local reviewer label")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if err := fs.Parse(args); err != nil {
-		if wantJSON {
-			return usageError(opt, true, "invalid_flags", err.Error())
-		}
-		return 2
-	}
-	if fs.NArg() != 2 {
-		return usageError(opt, *jsonFlag || wantJSON, "invalid_input", "question review requires SOURCE and QUESTION")
+	if code := parseArgs(fs, args, opt, wantJSON, 2, "question review requires SOURCE and QUESTION"); code != 0 {
+		return code
 	}
 	if strings.TrimSpace(*answerFlag) == "" {
 		return usageError(opt, *jsonFlag, "invalid_input", "--answer is required")
 	}
-	if strings.TrimSpace(*reviewer) == "" {
-		return usageError(opt, *jsonFlag, "invalid_input", "--reviewer is required")
+	if code := requireReviewer(*reviewer, opt, *jsonFlag); code != 0 {
+		return code
 	}
 	sourceID, questionID := fs.Arg(0), fs.Arg(1)
 	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
@@ -661,20 +630,26 @@ func runQuestionReview(args []string, opt Options) int {
 	return 0
 }
 
-// --- practice selection -----------------------------------------------------
+type practiceSelection struct {
+	Content  exam.Exam
+	Question exam.Question
+	Number   int
+	Page     *source.Page
+	Review   *source.Question
+}
 
-func selectSourcePractice(st *store.Store, sourceID string, pageNumber int, questionID string, records []attempt.Attempt) (exam.Exam, exam.Question, int, *source.Page, *source.Question, error) {
+func selectSourcePractice(st *store.Store, sourceID string, pageNumber int, questionID string, records []attempt.Attempt) (practiceSelection, error) {
 	src, questions, err := loadSourceBundle(st, sourceID)
 	if err != nil {
-		return exam.Exam{}, exam.Question{}, 0, nil, nil, err
+		return practiceSelection{}, err
 	}
 	if len(src.Pages) == 0 {
-		return exam.Exam{}, exam.Question{}, 0, nil, nil, fmt.Errorf("%w: source %s has no pages", source.ErrNotPracticeable, sourceID)
+		return practiceSelection{}, fmt.Errorf("%w: source %s has no pages", source.ErrNotPracticeable, sourceID)
 	}
 
-	attempted := make(map[string]bool, len(records))
+	attempts := make(map[attempt.QuestionKey]int, len(records))
 	for _, rec := range records {
-		attempted[rec.ContentID+"\x00"+rec.QuestionID] = true
+		attempts[rec.Key()]++
 	}
 
 	pageIndex := -1
@@ -686,21 +661,21 @@ func selectSourcePractice(st *store.Store, sourceID string, pageNumber int, ques
 			}
 		}
 		if pageIndex < 0 {
-			return exam.Exam{}, exam.Question{}, 0, nil, nil, fmt.Errorf("%w: page %d is not in source %s", source.ErrInvalidInput, pageNumber, sourceID)
+			return practiceSelection{}, fmt.Errorf("%w: page %d is not in source %s", source.ErrInvalidInput, pageNumber, sourceID)
 		}
 		if questionID != "" {
 			q, ok := findQuestion(questions, questionID)
 			if !ok {
-				return exam.Exam{}, exam.Question{}, 0, nil, nil, fmt.Errorf("%w: question %q is not in source %s", source.ErrInvalidInput, questionID, sourceID)
+				return practiceSelection{}, fmt.Errorf("%w: question %q is not in source %s", source.ErrInvalidInput, questionID, sourceID)
 			}
 			if q.Page != pageNumber {
-				return exam.Exam{}, exam.Question{}, 0, nil, nil, fmt.Errorf("%w: question %q belongs to page %d, not %d", source.ErrInvalidInput, questionID, q.Page, pageNumber)
+				return practiceSelection{}, fmt.Errorf("%w: question %q belongs to page %d, not %d", source.ErrInvalidInput, questionID, q.Page, pageNumber)
 			}
 		}
 	} else if questionID != "" {
 		q, ok := findQuestion(questions, questionID)
 		if !ok {
-			return exam.Exam{}, exam.Question{}, 0, nil, nil, fmt.Errorf("%w: question %q is not in source %s", source.ErrInvalidInput, questionID, sourceID)
+			return practiceSelection{}, fmt.Errorf("%w: question %q is not in source %s", source.ErrInvalidInput, questionID, sourceID)
 		}
 		for i, page := range src.Pages {
 			if page.Number == q.Page {
@@ -709,7 +684,7 @@ func selectSourcePractice(st *store.Store, sourceID string, pageNumber int, ques
 			}
 		}
 		if pageIndex < 0 {
-			return exam.Exam{}, exam.Question{}, 0, nil, nil, fmt.Errorf("%w: question %q points at missing page %d", source.ErrInvalidInput, questionID, q.Page)
+			return practiceSelection{}, fmt.Errorf("%w: question %q points at missing page %d", source.ErrInvalidInput, questionID, q.Page)
 		}
 	} else {
 		// Prefer a page with an unattempted reviewed question; otherwise use the
@@ -723,14 +698,8 @@ func selectSourcePractice(st *store.Store, sourceID string, pageNumber int, ques
 			if firstPage < 0 {
 				firstPage = i
 			}
-			contentID := content.ID
-			for _, q := range content.Questions {
-				if !attempted[contentID+"\x00"+q.ID] {
-					pageIndex = i
-					break
-				}
-			}
-			if pageIndex >= 0 {
+			if firstUnattempted(content.ID, content.Questions, attempts) >= 0 {
+				pageIndex = i
 				break
 			}
 		}
@@ -738,14 +707,14 @@ func selectSourcePractice(st *store.Store, sourceID string, pageNumber int, ques
 			pageIndex = firstPage
 		}
 		if pageIndex < 0 {
-			return exam.Exam{}, exam.Question{}, 0, nil, nil, fmt.Errorf("%w: source %s has no reviewed page and question to practice; use passquest questions %s", source.ErrNotPracticeable, sourceID, sourceID)
+			return practiceSelection{}, fmt.Errorf("%w: source %s has no reviewed page and question to practice; use passquest questions %s", source.ErrNotPracticeable, sourceID, sourceID)
 		}
 	}
 
 	page := src.Pages[pageIndex]
 	content, _, err := source.BuildPracticeExam(src, page, questions)
 	if err != nil {
-		return exam.Exam{}, exam.Question{}, 0, nil, nil, err
+		return practiceSelection{}, err
 	}
 
 	index := -1
@@ -758,30 +727,37 @@ func selectSourcePractice(st *store.Store, sourceID string, pageNumber int, ques
 		}
 		if index < 0 {
 			q, _ := findQuestion(questions, questionID)
-			return exam.Exam{}, exam.Question{}, 0, nil, nil, fmt.Errorf(
+			return practiceSelection{}, fmt.Errorf(
 				"%w: question %s is not practiceable (review %s, answer %s, flags %s)",
 				source.ErrNotPracticeable, questionID, q.Review, q.AnswerStatus, displayFlags(q.Flags(page)))
 		}
+	} else if i := firstUnattempted(content.ID, content.Questions, attempts); i >= 0 {
+		index = i
 	} else {
-		for i, candidate := range content.Questions {
-			if !attempted[content.ID+"\x00"+candidate.ID] {
-				index = i
-				break
-			}
-		}
-		if index < 0 {
-			index = 0
-		}
+		index = 0
 	}
 
 	reviewQuestion, ok := findQuestion(questions, content.Questions[index].ID)
 	if !ok {
-		return exam.Exam{}, exam.Question{}, 0, nil, nil, fmt.Errorf("%w: selected question is missing from the source", source.ErrNotPracticeable)
+		return practiceSelection{}, fmt.Errorf("%w: selected question is missing from the source", source.ErrNotPracticeable)
 	}
-	return content, content.Questions[index], index, &page, &reviewQuestion, nil
+	return practiceSelection{
+		Content:  content,
+		Question: content.Questions[index],
+		Number:   index,
+		Page:     &page,
+		Review:   &reviewQuestion,
+	}, nil
 }
 
-// --- small helpers ----------------------------------------------------------
+func firstUnattempted(contentID string, questions []exam.Question, attempts map[attempt.QuestionKey]int) int {
+	for i, q := range questions {
+		if attempts[attempt.QuestionKey{ContentID: contentID, QuestionID: q.ID}] == 0 {
+			return i
+		}
+	}
+	return -1
+}
 
 func loadSourceBundle(st *store.Store, sourceID string) (source.Source, []source.Question, error) {
 	src, err := st.Source(sourceID)

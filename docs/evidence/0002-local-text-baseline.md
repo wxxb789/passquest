@@ -31,7 +31,7 @@ is set, every option is explained, and the evidence is a verbatim substring of t
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1 -v` | exit 0; 68 top-level tests, 49 subtests, 0 failures, 0 skips |
+| `go test ./... -count=1 -v` | exit 0; 75 top-level tests, 59 subtests, 0 failures, 0 skips |
 | `bun run gate` | exit 0; 12 gates passed (typecheck, gofmt, vet, build, test, tidy, docs links, secrets/sources, local-only, baseline integrity, import smoke, harness self-test), 0 failed, 0 skipped |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
@@ -273,10 +273,12 @@ The bash/Python gate chain was migrated because goal 0002 adds import/OCR gates,
 - `bun run gate` runs `harness/gate.ts`; 12 gates in order. `bash scripts/gate.sh` is a shim that
   execs it. `scripts/check-docs-links.py`, `scripts/check-secrets.sh` and
   `scripts/check-local-only.sh` were deleted.
-- `harness/gates/self-test.ts` feeds each other gate a deliberately broken input and passed 11/11.
-  It includes a real `tsc` type error, an unformatted Go file, a broken markdown link, a fake
-  credential, a `net/http` import, a mismatched baseline, failing/vet/build/tidy Go projects, and a
-  fake CLI whose import output is not the protocol.
+- `harness/gates/self-test.ts` feeds each other gate a deliberately broken input and passed 14 cases
+  over 11/11 gates. It includes a real `tsc` type error, an unformatted Go file, a broken markdown
+  link, a fake credential (whose value must not be echoed), three isolating `local-only` cases
+  (first-party import, transitive linked client, confidential marker), two `baseline` cases (a
+  complete 165-page tree with one wrong count, and a fixture that references the baseline),
+  failing/vet/build/tidy Go projects, and a fake CLI whose import output is not the protocol.
 - `bun.lock` is committed; the only dependencies are `typescript` and `@types/bun`, used by the
   typecheck gate. CI installs with `bun install --frozen-lockfile` and runs the same gate on ubuntu,
   macos and windows; `.gitattributes` pins LF.
@@ -361,7 +363,7 @@ PASS  baseline integrity (165 pages (22 native, 143 OCR), 0 fixture references)
 PASS  import smoke (35 assertions)
 
 == harness self-test
-PASS  harness self-test (11/11 gates failed on deliberately broken input)
+PASS  harness self-test (14 cases, 11/11 gates)
 
 12 passed, 0 failed, 0 skipped
 GATE: PASS

@@ -13,7 +13,6 @@ import { secrets } from "./secrets.ts";
 import { selfTest } from "./self-test.ts";
 import { typecheck } from "./typecheck.ts";
 
-/** Gate order is the reported order: cheap and structural checks first. */
 export const gates: Gate[] = [
   typecheck,
   gofmt,

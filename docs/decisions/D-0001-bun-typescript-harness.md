@@ -55,7 +55,7 @@ The migration landed in the same increment as the import/OCR gates, as required.
   deleted. `scripts/gate.sh` is a one-line compatibility shim that execs `bun run gate`; no second
   gate definition exists.
 - `harness/gates/self-test.ts` feeds each other gate a broken input and fails if the gate does not
-  fail (11/11 at this increment). CI runs `bun install --frozen-lockfile` then `bun run gate` on
+  fail (11/11 gates at this increment; the self-test now runs 14 cases over the same 11 gates). CI runs `bun install --frozen-lockfile` then `bun run gate` on
   ubuntu, macos and windows with `oven-sh/setup-bun`; `.gitattributes` pins LF.
 - Two dev dependencies (`typescript`, `@types/bun`) exist only for the typecheck gate; `bun.lock` is
   committed. No Bun package is a product dependency.

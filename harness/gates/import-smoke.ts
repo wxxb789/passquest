@@ -2,7 +2,8 @@ import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { executable, run } from "../lib/process.ts";
+import { runGo } from "../lib/go.ts";
+import { run } from "../lib/process.ts";
 import { resolve } from "../lib/repo.ts";
 import { fail, pass, skip } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
@@ -62,7 +63,7 @@ export const importSmoke: Gate = {
     const parse = (raw: string): unknown => JSON.parse(raw);
 
     try {
-      const build = await run(executable("go"), ["build", "-o", binary, "./cmd/passquest"], { cwd: ctx.root });
+      const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
       if (build.code !== 0) {
         return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
       }

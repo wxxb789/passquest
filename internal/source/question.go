@@ -94,33 +94,12 @@ func (q Question) Validate() error {
 	if strings.TrimSpace(q.Reasoning) == "" {
 		add("reasoning is empty")
 	}
-	if len(q.Options) < 2 || len(q.Options) > 8 {
-		add("has %d options, want 2..8", len(q.Options))
+	for _, problem := range exam.OptionProblems(q.Options, q.OptionReasoning) {
+		problems = append(problems, problem)
 	}
-	labels := make(map[string]bool, len(q.Options))
-	for i, opt := range q.Options {
-		if len(opt.Label) != 1 || opt.Label[0] < 'A' || opt.Label[0] > 'Z' {
-			add("options[%d].label %q is not one uppercase letter", i, opt.Label)
-		}
-		if labels[opt.Label] {
-			add("option label %q is duplicated", opt.Label)
-		}
-		labels[opt.Label] = true
-		if strings.TrimSpace(opt.Text) == "" {
-			add("option %s text is empty", opt.Label)
-		}
-	}
-	if q.Answer != "" && !labels[q.Answer] {
-		add("answer %q is not one of its options", q.Answer)
-	}
-	for label := range labels {
-		if strings.TrimSpace(q.OptionReasoning[label]) == "" {
-			add("option %s has no explanation", label)
-		}
-	}
-	for label := range q.OptionReasoning {
-		if !labels[label] {
-			add("explains unknown option %q", label)
+	if q.Answer != "" {
+		if _, ok := (exam.Question{Options: q.Options}).Option(q.Answer); !ok {
+			add("answer %q is not one of its options", q.Answer)
 		}
 	}
 	if !q.AnswerStatus.Valid() {
@@ -135,10 +114,8 @@ func (q Question) Validate() error {
 	return nil
 }
 
-// Valid reports whether a review status is stored legitimately.
 func (s ReviewStatus) Valid() bool { return s == Unreviewed || s == Reviewed }
 
-// Valid reports whether an answer status is stored legitimately.
 func (s AnswerStatus) Valid() bool { return s == AnswerUnmapped || s == AnswerReviewed }
 
 // Edited applies a replacement question file to an existing question. The
@@ -176,7 +153,7 @@ func (q Question) ReviewAnswer(page Page, answer, reviewer string, at time.Time)
 	if answer == "" {
 		return Question{}, fmt.Errorf("%w: answer label is required", ErrInvalidInput)
 	}
-	if !strings.Contains(page.Text, q.Evidence) {
+	if !evidenceInPage(page, q) {
 		return Question{}, fmt.Errorf("%w: question %s evidence is not present in the current page text; correct the page or the question first", ErrNotPracticeable, q.ID)
 	}
 
@@ -193,7 +170,6 @@ func (q Question) ReviewAnswer(page Page, answer, reviewer string, at time.Time)
 	return out, nil
 }
 
-// Flags returns the visible doubts about a question against its current page.
 func (q Question) Flags(page Page) []Flag {
 	var flags []Flag
 	if page.Review != Reviewed {
@@ -202,19 +178,22 @@ func (q Question) Flags(page Page) []Flag {
 	if q.AnswerStatus != AnswerReviewed || q.Answer == "" {
 		flags = appendFlag(flags, FlagAnswerUnmapped)
 	}
-	if !strings.Contains(page.Text, q.Evidence) {
+	if !evidenceInPage(page, q) {
 		flags = appendFlag(flags, FlagEvidenceMissing)
 	}
 	return flags
 }
 
-// PracticeReady reports whether a question may be scored as reviewed material.
 func PracticeReady(page Page, q Question) bool {
 	return page.Review == Reviewed &&
 		q.Review == Reviewed &&
 		q.AnswerStatus == AnswerReviewed &&
 		q.Answer != "" &&
-		strings.Contains(page.Text, q.Evidence)
+		evidenceInPage(page, q)
+}
+
+func evidenceInPage(page Page, q Question) bool {
+	return strings.Contains(page.Text, q.Evidence)
 }
 
 // BuildPracticeExam converts reviewed questions on one reviewed page into the
@@ -225,6 +204,7 @@ func BuildPracticeExam(src Source, page Page, questions []Question) (exam.Exam, 
 		return exam.Exam{}, nil, fmt.Errorf("%w: page %d is %s; review it first", ErrNotPracticeable, page.Number, page.Review)
 	}
 	var ready []exam.Question
+	var readyMeta []Question
 	var stale []string
 	for _, q := range questions {
 		if q.Page != page.Number || q.Review != Reviewed {
@@ -243,6 +223,7 @@ func BuildPracticeExam(src Source, page Page, questions []Question) (exam.Exam, 
 			Reasoning:       q.Reasoning,
 			OptionReasoning: copyReasoning(q.OptionReasoning),
 		})
+		readyMeta = append(readyMeta, q)
 	}
 	sort.Strings(stale)
 	if len(ready) == 0 {
@@ -257,7 +238,7 @@ func BuildPracticeExam(src Source, page Page, questions []Question) (exam.Exam, 
 		ID:            ContentID(src.ID, page.Number),
 		Version:       materialVersion(page, ready),
 		Title:         fmt.Sprintf("%s — page %d", src.Title, page.Number),
-		Notice:        practiceNotice(src, page, ready),
+		Notice:        practiceNotice(src, page, readyMeta),
 		Provenance: exam.Provenance{
 			Author:       src.Title,
 			Source:       fmt.Sprintf("local %s import: %s (sha256 %s)", src.Import, src.Path, src.SHA256),
@@ -284,15 +265,15 @@ func copyReasoning(in map[string]string) map[string]string {
 	return out
 }
 
-func practiceNotice(src Source, page Page, questions []exam.Question) string {
-	var reviewed []string
+func practiceNotice(src Source, page Page, questions []Question) string {
+	sort.Slice(questions, func(i, j int) bool { return questions[i].ID < questions[j].ID })
+	reviewed := make([]string, 0, len(questions))
 	for _, q := range questions {
-		reviewed = append(reviewed, q.ID)
+		reviewed = append(reviewed, fmt.Sprintf("%s by %s", q.ID, reviewAttribution(q.ReviewedBy, q.ReviewedAt)))
 	}
-	sort.Strings(reviewed)
 	notice := fmt.Sprintf(
 		"Imported private source page %d (%s, page reviewed by %s). Answer mapping reviewed for question(s) %s. Not a live exam, not an exam blueprint and not an external answer key.",
-		page.Number, page.Origin, page.ReviewedBy, strings.Join(reviewed, ", "),
+		page.Number, page.Origin, reviewAttribution(page.ReviewedBy, page.ReviewedAt), strings.Join(reviewed, "; "),
 	)
 	if src.Title != "" {
 		notice = fmt.Sprintf("%s %s", src.Title, notice)
@@ -300,24 +281,27 @@ func practiceNotice(src Source, page Page, questions []exam.Question) string {
 	return notice
 }
 
+func reviewAttribution(reviewer string, at time.Time) string {
+	if at.IsZero() {
+		return reviewer
+	}
+	return fmt.Sprintf("%s at %s", reviewer, FormatTime(at))
+}
+
 func materialVersion(page Page, questions []exam.Question) string {
 	h := sha256.New()
-	write := func(value string) {
-		fmt.Fprintf(h, "%d:", len(value))
-		h.Write([]byte(value))
-	}
-	write("passquest-practice-v1")
-	write(fmt.Sprintf("%d", page.Number))
-	write(page.Text)
+	writeHashField(h, "passquest-practice-v1")
+	writeHashField(h, fmt.Sprintf("%d", page.Number))
+	writeHashField(h, page.Text)
 	for _, q := range questions {
-		write(q.ID)
-		write(q.Stem)
-		write(q.Answer)
-		write(q.Evidence)
-		write(q.Reasoning)
+		writeHashField(h, q.ID)
+		writeHashField(h, q.Stem)
+		writeHashField(h, q.Answer)
+		writeHashField(h, q.Evidence)
+		writeHashField(h, q.Reasoning)
 		for _, opt := range q.Options {
-			write(opt.Label)
-			write(opt.Text)
+			writeHashField(h, opt.Label)
+			writeHashField(h, opt.Text)
 		}
 		labels := make([]string, 0, len(q.OptionReasoning))
 		for label := range q.OptionReasoning {
@@ -325,14 +309,13 @@ func materialVersion(page Page, questions []exam.Question) string {
 		}
 		sort.Strings(labels)
 		for _, label := range labels {
-			write(label)
-			write(q.OptionReasoning[label])
+			writeHashField(h, label)
+			writeHashField(h, q.OptionReasoning[label])
 		}
 	}
 	return "1-" + hex.EncodeToString(h.Sum(nil))[:8]
 }
 
-// SummaryOf computes the list-view counts.
 func SummaryOf(src Source, questions []Question) Summary {
 	summary := Summary{
 		ID:            src.ID,

@@ -4,12 +4,10 @@ import path from "node:path";
 import { executable, run } from "./process.ts";
 import type { GateContext } from "./types.ts";
 
-/** Repository-relative path to the absolute OS path. */
 export function resolve(root: string, relative: string): string {
   return path.join(root, ...relative.split("/"));
 }
 
-/** Reads a tracked file as UTF-8. */
 export function readText(root: string, relative: string): string {
   return readFileSync(resolve(root, relative), "utf8");
 }

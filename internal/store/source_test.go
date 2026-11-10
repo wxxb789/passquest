@@ -72,6 +72,11 @@ func TestImportSourceIsIdempotentAndLoadsPages(t *testing.T) {
 	if again {
 		t.Fatal("second import reported created=true")
 	}
+	different := testSource(t)
+	different.SHA256 = strings.Repeat("b", 64)
+	if _, err := st.ImportSource(different); err == nil || !strings.Contains(err.Error(), "different content hash") {
+		t.Fatalf("same id with another hash error = %v, want a content-hash rejection", err)
+	}
 
 	loaded, err := st.Source(src.ID)
 	if err != nil {
@@ -140,6 +145,11 @@ func TestPageRevisionsAndEventsAreAppendOnly(t *testing.T) {
 			t.Fatalf("%s error = %v, want append-only rejection", stmt, err)
 		}
 	}
+	if _, err := st.db.Exec(`INSERT OR REPLACE INTO source_events
+		(id, source_id, at, kind, page, question_id, detail)
+		VALUES (1, ?, '2026-11-10T10:00:00Z', 'import', 0, '', '{}')`, src.ID); err == nil || !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("event INSERT OR REPLACE error = %v, want append-only rejection", err)
+	}
 
 	loaded, err := st.Source(src.ID)
 	if err != nil {
@@ -181,6 +191,13 @@ func TestCorrectPageAppendsRevisionAndResetsReview(t *testing.T) {
 	}
 	if revisions != 2 {
 		t.Fatalf("revisions = %d, want 2", revisions)
+	}
+	var original string
+	if err := st.db.QueryRow(`SELECT text FROM page_revisions WHERE source_id = ? AND page = 2 AND revision = 1`, src.ID).Scan(&original); err != nil {
+		t.Fatal(err)
+	}
+	if original != "it will close at 4 p.m." {
+		t.Fatalf("revision 1 text = %q, want the imported text", original)
 	}
 
 	events, err := st.Events(src.ID)
@@ -355,5 +372,32 @@ func TestImportSourceRejectsOutOfOrderPages(t *testing.T) {
 	src.ID, src.SHA256 = source.Identity(src)
 	if _, err := st.ImportSource(src); err == nil || !strings.Contains(err.Error(), "out of order") {
 		t.Fatalf("ImportSource error = %v, want out-of-order rejection", err)
+	}
+}
+
+func TestImportSourceRejectsReviewedPage(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "source.sqlite"))
+	src := testSource(t)
+	src.Pages[0].Review = source.Reviewed
+	src.Pages[0].ReviewedBy = "owner"
+	src.Pages[0].ReviewedAt = sourceNow
+	if _, err := st.ImportSource(src); err == nil || !strings.Contains(err.Error(), "must start unreviewed") {
+		t.Fatalf("ImportSource error = %v, want a reviewed-page rejection", err)
+	}
+}
+
+func TestAddQuestionRejectsReviewedState(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "source.sqlite"))
+	src := testSource(t)
+	if _, err := st.ImportSource(src); err != nil {
+		t.Fatal(err)
+	}
+	q := questionForTest(t, src)
+	q.Review = source.Reviewed
+	q.AnswerStatus = source.AnswerReviewed
+	q.ReviewedBy = "owner"
+	q.ReviewedAt = sourceNow
+	if err := st.AddQuestion(q); err == nil || !strings.Contains(err.Error(), "must start unreviewed") {
+		t.Fatalf("AddQuestion error = %v, want an unreviewed-start rejection", err)
 	}
 }

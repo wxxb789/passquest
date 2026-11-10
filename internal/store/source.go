@@ -124,6 +124,9 @@ func (s *Store) ImportSource(src source.Source) (bool, error) {
 		if !utf8.ValidString(page.Text) {
 			return false, fmt.Errorf("store: source page %d is not valid UTF-8", page.Number)
 		}
+		if page.Review != source.Unreviewed || page.ReviewedBy != "" || !page.ReviewedAt.IsZero() || page.ReviewNote != "" {
+			return false, fmt.Errorf("store: imported page %d must start unreviewed", page.Number)
+		}
 	}
 	if !src.Import.Valid() {
 		return false, fmt.Errorf("store: invalid import origin %q", src.Import)
@@ -155,7 +158,7 @@ func (s *Store) ImportSource(src source.Source) (bool, error) {
 			id, title, import_origin, path, sha256, notice, rights, exam_relation, created_at, page_count
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		src.ID, src.Title, string(src.Import), src.Path, src.SHA256, src.Notice, src.Rights, src.ExamRelation,
-		formatTime(createdAt), len(src.Pages),
+		source.FormatTime(createdAt), len(src.Pages),
 	); err != nil {
 		return false, fmt.Errorf("store: insert source: %w", err)
 	}
@@ -167,14 +170,14 @@ func (s *Store) ImportSource(src source.Source) (bool, error) {
 				source_id, page, origin, section, review_status, flags, review_note, reviewed_by, reviewed_at
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			src.ID, page.Number, string(page.Origin), page.Section, string(source.Unreviewed),
-			source.FormatFlags(page.Flags), page.ReviewNote, page.ReviewedBy, formatTime(page.ReviewedAt),
+			source.FormatFlags(page.Flags), "", "", "",
 		); err != nil {
 			return false, fmt.Errorf("store: insert source page %d: %w", page.Number, err)
 		}
 		if _, err := tx.Exec(`INSERT INTO page_revisions (
 				source_id, page, revision, text, origin, created_at, note
 			) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			src.ID, page.Number, 1, page.Text, string(page.Origin), formatTime(createdAt), "imported",
+			src.ID, page.Number, 1, page.Text, string(page.Origin), source.FormatTime(createdAt), "imported",
 		); err != nil {
 			return false, fmt.Errorf("store: insert page revision %d: %w", page.Number, err)
 		}
@@ -189,7 +192,6 @@ func (s *Store) ImportSource(src source.Source) (bool, error) {
 	return true, nil
 }
 
-// Sources returns the list view of every imported source.
 func (s *Store) Sources() ([]source.Summary, error) {
 	rows, err := s.db.Query(`SELECT
 			s.id, s.title, s.import_origin, s.path, s.sha256, s.created_at, s.page_count,
@@ -227,7 +229,6 @@ func (s *Store) Sources() ([]source.Summary, error) {
 	return out, nil
 }
 
-// Source loads one source with its current page text and review state.
 func (s *Store) Source(id string) (source.Source, error) {
 	var (
 		src     source.Source
@@ -250,35 +251,15 @@ func (s *Store) Source(id string) (source.Source, error) {
 		return source.Source{}, fmt.Errorf("store: parse source %s created_at: %w", id, err)
 	}
 
-	rows, err := s.db.Query(`SELECT
-			p.page, p.origin, p.section, p.review_status, p.flags, p.review_note, p.reviewed_by, p.reviewed_at,
-			r.revision, r.text
-		FROM source_pages p
-		JOIN page_revisions r ON r.source_id = p.source_id AND r.page = p.page
-		WHERE p.source_id = ?
-			AND r.revision = (SELECT MAX(revision) FROM page_revisions WHERE source_id = p.source_id AND page = p.page)
-		ORDER BY p.page`, id)
+	rows, err := s.db.Query(pageSelect+` ORDER BY p.page`, id)
 	if err != nil {
 		return source.Source{}, fmt.Errorf("store: read pages of %s: %w", id, err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var (
-			page         source.Page
-			pageOrigin   string
-			reviewStatus string
-			flags        string
-			reviewedAt   string
-		)
-		if err := rows.Scan(&page.Number, &pageOrigin, &page.Section, &reviewStatus, &flags,
-			&page.ReviewNote, &page.ReviewedBy, &reviewedAt, &page.Revision, &page.Text); err != nil {
+		page, err := scanPage(rows)
+		if err != nil {
 			return source.Source{}, fmt.Errorf("store: scan page of %s: %w", id, err)
-		}
-		page.Origin = source.PageOrigin(pageOrigin)
-		page.Review = source.ReviewStatus(reviewStatus)
-		page.Flags = source.ParseFlags(flags)
-		if page.ReviewedAt, err = parseOptionalTime(reviewedAt); err != nil {
-			return source.Source{}, fmt.Errorf("store: parse page %d reviewed_at: %w", page.Number, err)
 		}
 		src.Pages = append(src.Pages, page)
 	}
@@ -288,12 +269,86 @@ func (s *Store) Source(id string) (source.Source, error) {
 	return src, nil
 }
 
-// Questions loads every question of a source ordered by page and id.
-func (s *Store) Questions(sourceID string) ([]source.Question, error) {
-	rows, err := s.db.Query(`SELECT
+const (
+	pageSelect = `SELECT
+			p.page, p.origin, p.section, p.review_status, p.flags, p.review_note, p.reviewed_by, p.reviewed_at,
+			r.revision, r.text
+		FROM source_pages p
+		JOIN page_revisions r ON r.source_id = p.source_id AND r.page = p.page
+		WHERE p.source_id = ?
+			AND r.revision = (SELECT MAX(revision) FROM page_revisions WHERE source_id = p.source_id AND page = p.page)`
+
+	questionSelect = `SELECT
 			source_id, id, page, stem, options_json, answer, evidence, reasoning, option_reasoning_json,
 			answer_status, review_status, reviewed_by, reviewed_at, created_at, updated_at
-		FROM source_questions WHERE source_id = ? ORDER BY page, id`, sourceID)
+		FROM source_questions`
+)
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanPage(row rowScanner) (source.Page, error) {
+	var (
+		page         source.Page
+		pageOrigin   string
+		reviewStatus string
+		flags        string
+		reviewedAt   string
+	)
+	if err := row.Scan(&page.Number, &pageOrigin, &page.Section, &reviewStatus, &flags,
+		&page.ReviewNote, &page.ReviewedBy, &reviewedAt, &page.Revision, &page.Text); err != nil {
+		return source.Page{}, err
+	}
+	page.Origin = source.PageOrigin(pageOrigin)
+	page.Review = source.ReviewStatus(reviewStatus)
+	page.Flags = source.ParseFlags(flags)
+	var err error
+	if page.ReviewedAt, err = parseOptionalTime(reviewedAt); err != nil {
+		return source.Page{}, fmt.Errorf("parse page %d reviewed_at: %w", page.Number, err)
+	}
+	return page, nil
+}
+
+func scanQuestion(row rowScanner) (source.Question, error) {
+	var (
+		q             source.Question
+		optionsJSON   string
+		reasoningJSON string
+		answerStatus  string
+		reviewStatus  string
+		reviewedAt    string
+		createdAt     string
+		updatedAt     string
+	)
+	if err := row.Scan(&q.SourceID, &q.ID, &q.Page, &q.Stem, &optionsJSON, &q.Answer,
+		&q.Evidence, &q.Reasoning, &reasoningJSON, &answerStatus, &reviewStatus,
+		&q.ReviewedBy, &reviewedAt, &createdAt, &updatedAt); err != nil {
+		return source.Question{}, err
+	}
+	if err := json.Unmarshal([]byte(optionsJSON), &q.Options); err != nil {
+		return source.Question{}, fmt.Errorf("decode options of question %s/%s: %w", q.SourceID, q.ID, err)
+	}
+	if err := json.Unmarshal([]byte(reasoningJSON), &q.OptionReasoning); err != nil {
+		return source.Question{}, fmt.Errorf("decode option reasoning of question %s/%s: %w", q.SourceID, q.ID, err)
+	}
+	q.AnswerStatus = source.AnswerStatus(answerStatus)
+	q.Review = source.ReviewStatus(reviewStatus)
+	var err error
+	if q.ReviewedAt, err = parseOptionalTime(reviewedAt); err != nil {
+		return source.Question{}, fmt.Errorf("parse question %s reviewed_at: %w", q.ID, err)
+	}
+	if q.CreatedAt, err = parseTime(createdAt); err != nil {
+		return source.Question{}, fmt.Errorf("parse question %s created_at: %w", q.ID, err)
+	}
+	if q.UpdatedAt, err = parseTime(updatedAt); err != nil {
+		return source.Question{}, fmt.Errorf("parse question %s updated_at: %w", q.ID, err)
+	}
+	return q, nil
+}
+
+func (s *Store) Questions(sourceID string) ([]source.Question, error) {
+	rows, err := s.db.Query(questionSelect+` WHERE source_id = ? ORDER BY page, id`, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list questions of %s: %w", sourceID, err)
 	}
@@ -301,37 +356,9 @@ func (s *Store) Questions(sourceID string) ([]source.Question, error) {
 
 	var out []source.Question
 	for rows.Next() {
-		var (
-			q             source.Question
-			optionsJSON   string
-			reasoningJSON string
-			answerStatus  string
-			reviewStatus  string
-			reviewedAt    string
-			createdAt     string
-			updatedAt     string
-		)
-		if err := rows.Scan(&q.SourceID, &q.ID, &q.Page, &q.Stem, &optionsJSON, &q.Answer,
-			&q.Evidence, &q.Reasoning, &reasoningJSON, &answerStatus, &reviewStatus,
-			&q.ReviewedBy, &reviewedAt, &createdAt, &updatedAt); err != nil {
+		q, err := scanQuestion(rows)
+		if err != nil {
 			return nil, fmt.Errorf("store: scan question: %w", err)
-		}
-		if err := json.Unmarshal([]byte(optionsJSON), &q.Options); err != nil {
-			return nil, fmt.Errorf("store: decode options of question %s/%s: %w", q.SourceID, q.ID, err)
-		}
-		if err := json.Unmarshal([]byte(reasoningJSON), &q.OptionReasoning); err != nil {
-			return nil, fmt.Errorf("store: decode option reasoning of question %s/%s: %w", q.SourceID, q.ID, err)
-		}
-		q.AnswerStatus = source.AnswerStatus(answerStatus)
-		q.Review = source.ReviewStatus(reviewStatus)
-		if q.ReviewedAt, err = parseOptionalTime(reviewedAt); err != nil {
-			return nil, fmt.Errorf("store: parse question %s reviewed_at: %w", q.ID, err)
-		}
-		if q.CreatedAt, err = parseTime(createdAt); err != nil {
-			return nil, fmt.Errorf("store: parse question %s created_at: %w", q.ID, err)
-		}
-		if q.UpdatedAt, err = parseTime(updatedAt); err != nil {
-			return nil, fmt.Errorf("store: parse question %s updated_at: %w", q.ID, err)
 		}
 		out = append(out, q)
 	}
@@ -341,32 +368,28 @@ func (s *Store) Questions(sourceID string) ([]source.Question, error) {
 	return out, nil
 }
 
-// Question returns one question or a not-found error.
 func (s *Store) Question(sourceID, questionID string) (source.Question, error) {
-	questions, err := s.Questions(sourceID)
+	row := s.db.QueryRow(questionSelect+` WHERE source_id = ? AND id = ?`, sourceID, questionID)
+	q, err := scanQuestion(row)
 	if err != nil {
-		return source.Question{}, err
-	}
-	for _, q := range questions {
-		if q.ID == questionID {
-			return q, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return source.Question{}, fmt.Errorf("%w: question %q in source %s", ErrNotFound, questionID, sourceID)
 		}
+		return source.Question{}, fmt.Errorf("store: read question %q in source %s: %w", questionID, sourceID, err)
 	}
-	return source.Question{}, fmt.Errorf("%w: question %q in source %s", ErrNotFound, questionID, sourceID)
+	return q, nil
 }
 
-// Page returns one page with its current text.
 func (s *Store) Page(sourceID string, page int) (source.Page, error) {
-	src, err := s.Source(sourceID)
+	row := s.db.QueryRow(pageSelect+` AND p.page = ?`, sourceID, page)
+	out, err := scanPage(row)
 	if err != nil {
-		return source.Page{}, err
-	}
-	for _, candidate := range src.Pages {
-		if candidate.Number == page {
-			return candidate, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return source.Page{}, fmt.Errorf("%w: page %d in source %s", ErrNotFound, page, sourceID)
 		}
+		return source.Page{}, fmt.Errorf("store: read page %d in source %s: %w", page, sourceID, err)
 	}
-	return source.Page{}, fmt.Errorf("%w: page %d in source %s", ErrNotFound, page, sourceID)
+	return out, nil
 }
 
 // CorrectPage appends a new text revision and resets the page review: the old
@@ -409,7 +432,7 @@ func (s *Store) CorrectPage(sourceID string, page int, text, note, reviewer stri
 	if _, err := tx.Exec(`INSERT INTO page_revisions (
 			source_id, page, revision, text, origin, created_at, note
 		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		sourceID, page, next, text, string(source.PageManual), formatTime(at), note,
+		sourceID, page, next, text, string(source.PageManual), source.FormatTime(at), note,
 	); err != nil {
 		return source.Page{}, fmt.Errorf("store: insert page revision: %w", err)
 	}
@@ -448,7 +471,7 @@ func (s *Store) ReviewPage(sourceID string, page int, reviewer, note string, at 
 
 	res, err := tx.Exec(`UPDATE source_pages SET review_status = ?, reviewed_by = ?, reviewed_at = ?, review_note = ?
 		WHERE source_id = ? AND page = ?`,
-		string(source.Reviewed), reviewer, formatTime(at), note, sourceID, page)
+		string(source.Reviewed), reviewer, source.FormatTime(at), note, sourceID, page)
 	if err != nil {
 		return source.Page{}, fmt.Errorf("store: review page: %w", err)
 	}
@@ -478,6 +501,9 @@ func (s *Store) AddQuestion(q source.Question) error {
 	if err := q.Validate(); err != nil {
 		return err
 	}
+	if q.Review != source.Unreviewed || q.AnswerStatus != source.AnswerUnmapped || q.ReviewedBy != "" || !q.ReviewedAt.IsZero() {
+		return fmt.Errorf("store: new question %s must start unreviewed with an unmapped answer", q.ID)
+	}
 	optionsJSON, reasoningJSON, err := encodeQuestionParts(q)
 	if err != nil {
 		return err
@@ -500,8 +526,8 @@ func (s *Store) AddQuestion(q source.Question) error {
 			answer_status, review_status, reviewed_by, reviewed_at, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		q.SourceID, q.ID, q.Page, q.Stem, optionsJSON, q.Answer, q.Evidence, q.Reasoning, reasoningJSON,
-		string(q.AnswerStatus), string(q.Review), q.ReviewedBy, formatTime(q.ReviewedAt),
-		formatTime(q.CreatedAt), formatTime(q.UpdatedAt),
+		string(q.AnswerStatus), string(q.Review), q.ReviewedBy, source.FormatTime(q.ReviewedAt),
+		source.FormatTime(q.CreatedAt), source.FormatTime(q.UpdatedAt),
 	); err != nil {
 		return fmt.Errorf("store: insert question %s: %w", q.ID, err)
 	}
@@ -555,8 +581,8 @@ func (s *Store) SaveQuestion(q source.Question, kind string) error {
 			reviewed_at = ?, updated_at = ?
 		WHERE source_id = ? AND id = ?`,
 		q.Page, q.Stem, optionsJSON, q.Answer, q.Evidence, q.Reasoning, reasoningJSON,
-		string(q.AnswerStatus), string(q.Review), q.ReviewedBy, formatTime(q.ReviewedAt),
-		formatTime(q.UpdatedAt), q.SourceID, q.ID,
+		string(q.AnswerStatus), string(q.Review), q.ReviewedBy, source.FormatTime(q.ReviewedAt),
+		source.FormatTime(q.UpdatedAt), q.SourceID, q.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("store: save question %s: %w", q.ID, err)
@@ -608,7 +634,7 @@ func questionDetail(q source.Question) (string, error) {
 		OptionReason map[string]string `json:"option_reasoning"`
 	}{
 		ID: q.ID, Page: q.Page, Answer: q.Answer, AnswerStatus: string(q.AnswerStatus),
-		Review: string(q.Review), ReviewedBy: q.ReviewedBy, ReviewedAt: formatTime(q.ReviewedAt),
+		Review: string(q.Review), ReviewedBy: q.ReviewedBy, ReviewedAt: source.FormatTime(q.ReviewedAt),
 		Evidence: q.Evidence, OptionReason: q.OptionReasoning,
 	}
 	data, err := json.Marshal(payload)
@@ -647,7 +673,6 @@ func (s *Store) Events(sourceID string) ([]Event, error) {
 	return out, nil
 }
 
-// Event is one append-only provenance record.
 type Event struct {
 	ID         int64
 	SourceID   string
@@ -660,17 +685,10 @@ type Event struct {
 
 func appendEvent(tx *sql.Tx, sourceID string, at time.Time, kind string, page int, questionID, detail string) error {
 	if _, err := tx.Exec(`INSERT INTO source_events (source_id, at, kind, page, question_id, detail)
-		VALUES (?, ?, ?, ?, ?, ?)`, sourceID, formatTime(at), kind, page, questionID, detail); err != nil {
+		VALUES (?, ?, ?, ?, ?, ?)`, sourceID, source.FormatTime(at), kind, page, questionID, detail); err != nil {
 		return fmt.Errorf("store: append source event %s: %w", kind, err)
 	}
 	return nil
-}
-
-func formatTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339Nano)
 }
 
 func parseTime(raw string) (time.Time, error) {

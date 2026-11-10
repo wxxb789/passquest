@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +18,6 @@ import (
 	"github.com/wxxb789/passquest/internal/exam"
 )
 
-// ImportOrigin is how a source entered the local database.
 type ImportOrigin string
 
 const (
@@ -26,7 +26,6 @@ const (
 	ImportPDF     ImportOrigin = "pdf"
 )
 
-// PageOrigin records where a page's text came from.
 type PageOrigin string
 
 const (
@@ -37,7 +36,6 @@ const (
 	PageManual  PageOrigin = "manual"
 )
 
-// Valid reports whether an import origin is one this build writes.
 func (o ImportOrigin) Valid() bool {
 	switch o {
 	case ImportTXTDir, ImportTXTFile, ImportPDF:
@@ -47,7 +45,6 @@ func (o ImportOrigin) Valid() bool {
 	}
 }
 
-// Valid reports whether a page origin is one this build writes.
 func (o PageOrigin) Valid() bool {
 	switch o {
 	case PageNative, PageOCR, PageNone, PageUnknown, PageManual:
@@ -66,7 +63,6 @@ const (
 	Reviewed   ReviewStatus = "reviewed"
 )
 
-// AnswerStatus is whether a question's answer mapping has been reviewed.
 type AnswerStatus string
 
 const (
@@ -109,7 +105,6 @@ const LowTextThreshold = 300
 // treated as having no usable text layer.
 const ScanThreshold = 20
 
-// Source is one imported document with page-linked text.
 type Source struct {
 	ID           string
 	Title        string
@@ -123,7 +118,6 @@ type Source struct {
 	Pages        []Page
 }
 
-// Page is one imported page and its current review state.
 type Page struct {
 	Number     int
 	Origin     PageOrigin
@@ -157,7 +151,6 @@ type Question struct {
 	UpdatedAt       time.Time
 }
 
-// Summary is the list view of a source.
 type Summary struct {
 	ID                string
 	Title             string
@@ -171,7 +164,6 @@ type Summary struct {
 	ReviewedQuestions int
 }
 
-// HasFlag reports whether the page carries the flag.
 func (p Page) HasFlag(flag Flag) bool {
 	for _, f := range p.Flags {
 		if f == flag {
@@ -181,7 +173,6 @@ func (p Page) HasFlag(flag Flag) bool {
 	return false
 }
 
-// FlagStrings returns the flags in storage order.
 func FlagStrings(flags []Flag) []string {
 	out := make([]string, 0, len(flags))
 	for _, f := range flags {
@@ -190,12 +181,10 @@ func FlagStrings(flags []Flag) []string {
 	return out
 }
 
-// FormatFlags renders flags for storage (comma separated) and display.
 func FormatFlags(flags []Flag) string {
 	return strings.Join(FlagStrings(flags), ",")
 }
 
-// ParseFlags decodes the stored flag list.
 func ParseFlags(raw string) []Flag {
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -224,7 +213,6 @@ func CountNonSpace(text string) int {
 	return count
 }
 
-// ContentID is the stable practice-content identity of one source page.
 func ContentID(sourceID string, page int) string {
 	return fmt.Sprintf("%s-p%03d", sourceID, page)
 }
@@ -240,30 +228,45 @@ func ParseContentID(id string) (sourceID string, page int, ok bool) {
 	if err != nil || n < 1 {
 		return "", 0, false
 	}
-	return id[:i], n, true
+	sourceID = id[:i]
+	if ContentID(sourceID, n) != id {
+		return "", 0, false
+	}
+	return sourceID, n, true
 }
 
 // Identity computes the deterministic source id and content hash. The input is
 // title, import kind and every page's number, origin, section and exact text.
 func Identity(s Source) (id, digest string) {
 	h := sha256.New()
-	writeField := func(value string) {
-		fmt.Fprintf(h, "%d:", len(value))
-		h.Write([]byte(value))
-	}
-	writeField("passquest-source-v1")
-	writeField(s.Title)
-	writeField(string(s.Import))
-	writeField(strconv.Itoa(len(s.Pages)))
+	writeHashField(h, "passquest-source-v1")
+	writeHashField(h, s.Title)
+	writeHashField(h, string(s.Import))
+	writeHashField(h, strconv.Itoa(len(s.Pages)))
 	for _, page := range s.Pages {
-		writeField(strconv.Itoa(page.Number))
-		writeField(string(page.Origin))
-		writeField(page.Section)
-		writeField(page.Text)
+		writeHashField(h, strconv.Itoa(page.Number))
+		writeHashField(h, string(page.Origin))
+		writeHashField(h, page.Section)
+		writeHashField(h, page.Text)
 	}
 	sum := h.Sum(nil)
 	digest = hex.EncodeToString(sum)
 	return "src-" + digest[:16], digest
+}
+
+// writeHashField writes a length-prefixed field so concatenations cannot
+// collide.
+func writeHashField(h hash.Hash, value string) {
+	fmt.Fprintf(h, "%d:", len(value))
+	h.Write([]byte(value))
+}
+
+// FormatTime renders a UTC RFC3339Nano timestamp; a zero time renders empty.
+func FormatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 // NoticeFor builds the import notice. It states the origin, coverage and the
@@ -291,7 +294,6 @@ func NoticeFor(s Source) string {
 	return notice
 }
 
-// DefaultTitle derives a title from a local path when the caller supplied none.
 func DefaultTitle(path string) string {
 	base := strings.TrimSpace(baseName(path))
 	if base == "" {
@@ -308,10 +310,8 @@ func baseName(path string) string {
 	return path
 }
 
-// ValidUTF8 reports whether text is valid UTF-8; imported text must be.
 func ValidUTF8(text string) bool { return utf8.ValidString(text) }
 
-// nowUTC normalizes injected clocks.
 func nowUTC(t time.Time) time.Time {
 	if t.IsZero() {
 		return time.Now().UTC()

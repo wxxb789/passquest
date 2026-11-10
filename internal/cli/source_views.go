@@ -4,12 +4,10 @@ import (
 	"github.com/wxxb789/passquest/internal/source"
 )
 
-// JSON documents for the source/import surface. Field names are protocol.
-
 type sourceSummaryView struct {
 	ID                string `json:"id"`
 	Title             string `json:"title"`
-	Origin            string `json:"origin"`
+	Origin            string `json:"import_origin"`
 	Path              string `json:"path"`
 	SHA256            string `json:"sha256"`
 	CreatedAt         string `json:"created_at"`
@@ -32,17 +30,9 @@ type pageSummaryView struct {
 }
 
 type pageDetailView struct {
-	Number       int      `json:"number"`
-	Origin       string   `json:"origin"`
-	Section      string   `json:"section"`
-	ReviewStatus string   `json:"review_status"`
-	Flags        []string `json:"flags"`
-	Chars        int      `json:"chars_no_ws"`
-	Revision     int      `json:"revision"`
-	ReviewedBy   string   `json:"reviewed_by"`
-	ReviewedAt   string   `json:"reviewed_at"`
-	ReviewNote   string   `json:"review_note"`
-	Text         string   `json:"text"`
+	pageSummaryView
+	ReviewNote string `json:"review_note"`
+	Text       string `json:"text"`
 }
 
 type sourceQuestionView struct {
@@ -106,7 +96,7 @@ func sourceSummaryViewOf(summary source.Summary) sourceSummaryView {
 		Origin:            string(summary.Import),
 		Path:              summary.Path,
 		SHA256:            summary.SHA256,
-		CreatedAt:         formatOptionalTime(summary.CreatedAt),
+		CreatedAt:         source.FormatTime(summary.CreatedAt),
 		PageCount:         summary.PageCount,
 		ReviewedPages:     summary.ReviewedPages,
 		QuestionCount:     summary.QuestionCount,
@@ -124,32 +114,19 @@ func pageSummaryViewOf(page source.Page) pageSummaryView {
 		Chars:        source.CountNonSpace(page.Text),
 		Revision:     page.Revision,
 		ReviewedBy:   page.ReviewedBy,
-		ReviewedAt:   formatOptionalTime(page.ReviewedAt),
+		ReviewedAt:   source.FormatTime(page.ReviewedAt),
 	}
 }
 
 func pageDetailViewOf(page source.Page) pageDetailView {
-	summary := pageSummaryViewOf(page)
 	return pageDetailView{
-		Number:       summary.Number,
-		Origin:       summary.Origin,
-		Section:      summary.Section,
-		ReviewStatus: summary.ReviewStatus,
-		Flags:        summary.Flags,
-		Chars:        summary.Chars,
-		Revision:     summary.Revision,
-		ReviewedBy:   summary.ReviewedBy,
-		ReviewedAt:   summary.ReviewedAt,
-		ReviewNote:   page.ReviewNote,
-		Text:         page.Text,
+		pageSummaryView: pageSummaryViewOf(page),
+		ReviewNote:      page.ReviewNote,
+		Text:            page.Text,
 	}
 }
 
 func sourceQuestionViewOf(q source.Question, page source.Page) sourceQuestionView {
-	options := make([]optionView, 0, len(q.Options))
-	for _, opt := range q.Options {
-		options = append(options, optionView{Label: opt.Label, Text: opt.Text})
-	}
 	var answer *string
 	if q.Answer != "" {
 		value := q.Answer
@@ -164,7 +141,7 @@ func sourceQuestionViewOf(q source.Question, page source.Page) sourceQuestionVie
 		SourceID:        q.SourceID,
 		Page:            q.Page,
 		Stem:            q.Stem,
-		Options:         options,
+		Options:         optionViews(q.Options),
 		Answer:          answer,
 		AnswerStatus:    string(q.AnswerStatus),
 		ReviewStatus:    string(q.Review),
@@ -172,7 +149,7 @@ func sourceQuestionViewOf(q source.Question, page source.Page) sourceQuestionVie
 		Reasoning:       q.Reasoning,
 		OptionReasoning: reasoning,
 		ReviewedBy:      q.ReviewedBy,
-		ReviewedAt:      formatOptionalTime(q.ReviewedAt),
+		ReviewedAt:      source.FormatTime(q.ReviewedAt),
 		Flags:           source.FlagStrings(q.Flags(page)),
 	}
 }

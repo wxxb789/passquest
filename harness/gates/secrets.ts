@@ -86,9 +86,7 @@ export const secrets: Gate = {
   async run(ctx: GateContext) {
     const tracked = await ctx.trackedFiles();
     const problems = await scanTracked(ctx.root, tracked);
-    if (problems.length > 0) {
-      return fail(problems.slice(0, 40).concat(problems.length > 40 ? [`... ${problems.length - 40} more`] : []));
-    }
+    if (problems.length > 0) return fail(problems);
     return pass(`${tracked.length} tracked files, 0 findings`);
   },
 };

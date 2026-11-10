@@ -102,8 +102,6 @@ export const baseline: Gate = {
       problems.push(`${readme}: does not state that the text is unreviewed`);
     }
 
-    // The unreviewed baseline is not an answer key or a test fixture. Automated
-    // tests and fixtures must use independently authored text.
     let fixtureReferences = 0;
     for (const file of await ctx.trackedFiles()) {
       const isFixture = file.endsWith("_test.go") || /(^|\/)testdata\//.test(file);
@@ -120,9 +118,7 @@ export const baseline: Gate = {
       }
     }
 
-    if (problems.length > 0) {
-      return fail(problems.slice(0, 40).concat(problems.length > 40 ? [`... ${problems.length - 40} more`] : []));
-    }
+    if (problems.length > 0) return fail(problems);
     return pass(`${rows.length} pages (${sources["native"] ?? 0} native, ${sources["ocr"] ?? 0} OCR), ${fixtureReferences} fixture references`);
   },
 };
