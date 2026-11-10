@@ -794,10 +794,12 @@ func TestSQLiteURIFormatsPathsForEveryOS(t *testing.T) {
 		want     string
 		wantPath string
 	}{
+		// portable-paths: allow the goos field selects the branch; these literals are the input under test
 		{
 			name: "posix", path: "/home/u/db.sqlite", goos: "linux",
 			want: "file:///home/u/db.sqlite" + options, wantPath: "/home/u/db.sqlite",
 		},
+		// portable-paths: allow the goos field selects the branch; these literals are the input under test
 		{
 			name: "posix darwin", path: "/Users/u/db.sqlite", goos: "darwin",
 			want: "file:///Users/u/db.sqlite" + options, wantPath: "/Users/u/db.sqlite",

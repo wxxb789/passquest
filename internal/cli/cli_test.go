@@ -631,6 +631,7 @@ func TestDatabasePath(t *testing.T) {
 		env  string
 		want string
 	}{
+		// portable-paths: allow databasePath compares these as strings and never resolves them
 		{"flag wins", "/tmp/flag.sqlite", "/tmp/env.sqlite", "/tmp/flag.sqlite"},
 		{"env when flag blank", "  ", "/tmp/env.sqlite", "/tmp/env.sqlite"},
 		{"default when both blank", "", " ", filepath.Join(".passquest", "passquest.sqlite")},

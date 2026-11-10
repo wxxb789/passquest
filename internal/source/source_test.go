@@ -513,6 +513,7 @@ func TestBuildPracticeExamCarriesTacticTagsAndVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// portable-paths: allow Path is stored and reported, never opened by this test
 	src := Source{ID: "src-test", Title: "Test source", Import: ImportTXTFile, Path: "/tmp/x.txt", SHA256: "abc", Rights: DefaultRights, ExamRelation: DefaultExamRelation}
 
 	taggedContent, _, err := BuildPracticeExam(src, page, []Question{tagged})
@@ -637,6 +638,7 @@ func TestBuildPracticeExamOnlyServesReviewedQuestions(t *testing.T) {
 	stale.ID = "q3"
 	stale.Evidence = "not on this page"
 
+	// portable-paths: allow Path is stored and reported, never opened by this test
 	src := Source{ID: "src-test", Title: "Test source", Import: ImportTXTFile, Path: "/tmp/x.txt", SHA256: "abc", Rights: DefaultRights, ExamRelation: DefaultExamRelation}
 
 	content, staleIDs, err := BuildPracticeExam(src, page, []Question{ready, unreviewed, stale})

@@ -19,6 +19,7 @@ import { goVet } from "./go-vet.ts";
 import { gofmt } from "./gofmt.ts";
 import { importSmoke } from "./import-smoke.ts";
 import { localOnly } from "./local-only.ts";
+import { portablePaths } from "./portable-paths.ts";
 import { secrets } from "./secrets.ts";
 import { tacticSmoke } from "./tactic-smoke.ts";
 import { tutorSmoke } from "./tutor-smoke.ts";
@@ -198,6 +199,29 @@ function brokenCases(): BrokenCase[] {
         failures.length === 1 && failures[0].includes("confidential source marker")
           ? null
           : `local-only: expected one confidential marker failure, saw ${failures.length}`,
+    },
+    {
+      gate: portablePaths,
+      label: "platform-bound path literal beside a justified one",
+      files: {
+        "go.mod": GO_MOD,
+        "internal/x/x.go": "package x\n",
+        "internal/x/x_test.go":
+          'package x\n\nimport "testing"\n\nfunc TestA(t *testing.T) {\n\topen("/tmp/fixture.sqlite")\n}\n\nfunc TestB(t *testing.T) {\n\t// portable-paths: allow a literal compared as string data, never resolved\n\tif "C:\\\\Users\\\\x" != "C:\\\\Users\\\\x" {\n\t\tt.Fatal("unreachable")\n\t}\n}\n',
+      },
+      tracked: ["internal/x/x_test.go"],
+      postFail: (failures) => {
+        if (failures.length !== 1) {
+          return `portable-paths: expected exactly one failure, saw ${failures.length}: ${failures.join("; ")}`;
+        }
+        if (!failures[0].includes("x_test.go:6") || !failures[0].includes("/tmp/fixture.sqlite")) {
+          return `portable-paths: did not name the unjustified literal: ${failures[0]}`;
+        }
+        if (failures[0].includes("C:\\\\Users")) {
+          return "portable-paths: reported a literal the allow marker justified";
+        }
+        return null;
+      },
     },
     {
       gate: baseline,

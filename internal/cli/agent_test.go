@@ -206,6 +206,7 @@ func normalizeAgentTemp(value any, temp string) any {
 // uses backslashes, but the golden stores <tmp>/agent.sqlite.
 func TestNormalizedAgentJSONHandlesWindowsTemp(t *testing.T) {
 	temp := `C:\Users\runneradmin\AppData\Local\Temp\TestAgent\001`
+	// portable-paths: allow the escaped win32 path is the JSON fixture under test, never resolved
 	raw := `{"run":{"store":"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\TestAgent\\001\\agent.sqlite"}}`
 	got := string(normalizedAgentJSON(t, raw, temp))
 	if !strings.Contains(got, `"\u003ctmp\u003e/agent.sqlite"`) {

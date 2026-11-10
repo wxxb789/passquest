@@ -8,6 +8,8 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 - [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0006
   are done; 0007 is next.
 - [Harness](docs/harness.md) — the single `bun run gate` entry point and what each gate reads.
+- [Cross-platform rules](docs/cross-platform.md) — Windows, macOS and Linux: paths, processes, mode
+  bits, goldens, and the path literals the `portable-paths` gate refuses.
 - [BYOK text tutor](docs/tutor.md) — one user-supplied text endpoint, advisory coaching, private
   source consent and credential handling.
 - [Durable agent work](docs/agent.md) — a bounded multi-step study brief on the Pi Durable runtime,

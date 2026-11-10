@@ -756,6 +756,7 @@ func TestQuoteCommandArgument(t *testing.T) {
 		want string
 	}{
 		{"plain", "attempts.sqlite", "attempts.sqlite"},
+		// portable-paths: allow the POSIX quoting form is the assertion here; the Windows form is Q-0006-06
 		{"path with space", "/tmp/learner data/attempts.sqlite", `"/tmp/learner data/attempts.sqlite"`},
 		{"windows path with space", `C:\Users\A Name\attempts.sqlite`, `"C:\Users\A Name\attempts.sqlite"`},
 		{"dollar", "$HOME/attempts.sqlite", `"\$HOME/attempts.sqlite"`},
