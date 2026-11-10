@@ -411,12 +411,15 @@ func (s *Store) TutorCall(id int64) (TutorCall, error) {
 	return call, nil
 }
 
-// TutorCallCountSince counts calls at or after at, including failures, for the
-// daily budget. SQLite parses the stored RFC3339 timestamps.
+// TutorCallCountSince counts provider calls at or after at, including failures
+// and note refinements, because both share the daily budget. SQLite parses the
+// stored RFC3339 timestamps. The tutor call list remains coaching-only.
 func (s *Store) TutorCallCountSince(at time.Time) (int, error) {
 	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM tutor_calls WHERE julianday(created_at) >= julianday(?)`,
-		at.UTC().Format(time.RFC3339Nano)).Scan(&count)
+	err := s.db.QueryRow(`SELECT
+			(SELECT COUNT(*) FROM tutor_calls WHERE julianday(created_at) >= julianday(?)) +
+			(SELECT COUNT(*) FROM note_refinements WHERE julianday(created_at) >= julianday(?))`,
+		at.UTC().Format(time.RFC3339Nano), at.UTC().Format(time.RFC3339Nano)).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("store: count tutor calls: %w", err)
 	}

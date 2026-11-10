@@ -1,8 +1,8 @@
 # Agent hosts
 
-`agent/` holds the only Node/TypeScript product runtime: the provider egress for the BYOK tutor and
-the Pi Durable host for bounded study-brief work. The Go core never imports a network package; both
-hosts are spawned as child processes over a versioned JSON boundary.
+`agent/` holds the only Node/TypeScript product runtime: the provider egress for the BYOK tutor, the
+loopback AnkiConnect transport and the Pi Durable host for bounded study-brief work. The Go core never
+imports a network package; every host is spawned as a child process over a versioned JSON boundary.
 
 Install the pinned runtime dependencies from the repository root (they are a Bun workspace):
 
@@ -31,6 +31,21 @@ while a BYOK text provider requires HTTPS. It is a single-shot process, not an a
   key.
 
 `docs/tutor.md` documents the CLI, the consent model and the exact request fields.
+
+## `anki-host.mjs` — the loopback AnkiConnect path
+
+`anki-host.mjs` exists for the same boundary reason: the Go core must not import a network client,
+while AnkiConnect is an HTTP endpoint. It is a bounded transport, not an Anki client.
+
+- One JSON request on stdin with an endpoint, a timeout and 1–50 allow-listed actions: `version`,
+  `createDeck`, `modelNames`, `createModel`, `addNote`, `updateNoteFields`, `notesInfo`.
+- The endpoint is validated again in the host: `http`/`https`, no userinfo/query/fragment, and a
+  loopback host (`localhost`, `127.0.0.0/8`, `[::1]`). A remote endpoint is a failed document.
+- Each action is posted as `{action, version: 6, params}`. The host returns Anki's raw result and
+  error string per action; the Go CLI classifies duplicates, missing notes and conflicts.
+- Redirects are refused, responses are capped at 1 MiB, the timeout is bounded, and the process logs
+  nothing. It has no database, filesystem or tool access and no credential.
+- `docs/notes.md` documents the CLI, consent gating, identity, export and push semantics.
 
 ## `durable-host.mjs` — the Pi Durable study brief
 

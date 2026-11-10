@@ -19,6 +19,7 @@ import { goVet } from "./go-vet.ts";
 import { gofmt } from "./gofmt.ts";
 import { importSmoke } from "./import-smoke.ts";
 import { localOnly } from "./local-only.ts";
+import { noteSmoke } from "./note-smoke.ts";
 import { portablePaths } from "./portable-paths.ts";
 import { secrets } from "./secrets.ts";
 import { tacticSmoke } from "./tactic-smoke.ts";
@@ -466,6 +467,15 @@ function brokenCases(): BrokenCase[] {
       files: {
         "go.mod": GO_MOD,
         "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
+      },
+    },
+    {
+      gate: noteSmoke,
+      label: "CLI whose note output is not the protocol",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
+        "internal/cli/testdata/import/question-q1.json": "{}",
       },
     },
   ];

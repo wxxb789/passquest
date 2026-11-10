@@ -5,8 +5,8 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 ## Design and development
 
 - [Core Design](docs/core-design.md) — product purpose, safety, quality and architecture principles.
-- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0006
-  are done; 0007 is next.
+- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0007
+  are done; 0008 is next.
 - [Harness](docs/harness.md) — the single `bun run gate` entry point and what each gate reads.
 - [Cross-platform rules](docs/cross-platform.md) — Windows, macOS and Linux: paths, processes, mode
   bits, goldens, and the path literals the `portable-paths` gate refuses.
@@ -14,6 +14,8 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
   source consent and credential handling.
 - [Durable agent work](docs/agent.md) — a bounded multi-step study brief on the Pi Durable runtime,
   with pause/resume, cancellation, idempotent steps and an independent durable history.
+- [Anki notes](docs/notes.md) — a deterministic note from a stored attempt or a learner mark,
+  consent-gated private text, revision history, atomic export and a loopback AnkiConnect push.
 
 **Implementation order:** verified headless practice → private local baseline → scoring tactic
 practice → evidence-driven adaptation → user-supplied text coaching and durable agent work → Anki
@@ -139,6 +141,32 @@ The host is the only provider egress; Go owns the run record, the step commit an
 history. `practice`, `report`, `next` and the tutor keep working when Node or the host is absent.
 Details: [`docs/agent.md`](docs/agent.md). Measured evidence:
 [`docs/evidence/0006-resumable-agent-work.md`](docs/evidence/0006-resumable-agent-work.md).
+
+## Turn study evidence into Anki notes
+
+Goal 0007 turns one high-value study moment — an incorrect or skipped attempt, or an explicit mark —
+into one concise local note, and then into an Anki card. The Go core needs no Node for drafting,
+previewing, accepting, skipping, showing, exporting or inspecting the model; only `push` spawns the
+narrow Anki host.
+
+```bash
+passquest note propose --attempt 1
+passquest note preview                    # exact field HTML; private text withheld until consent
+passquest tutor consent SOURCE --reviewer NAME
+passquest note accept                     # revision 1; repeat is a no-op, an edit bumps it
+passquest note show
+passquest note export                     # atomic HTML/TSV fallback
+passquest note push                       # loopback AnkiConnect
+passquest note model                      # deck, model, CSS, template, rendered sample
+```
+
+The note model is `PassQuest Note` in deck `Pass Quest` with fields `Front`, `Back`, `Tactic`,
+`Source`. Duplicates are reported as already-present, revisions update the same Anki note id, a
+learner edit is a visible conflict rather than a silent overwrite, and an unreachable endpoint leaves
+the note queued for exactly one later drain. A skipped attempt and an unanswered mark never include
+the correct option or its explanation. AnkiWeb and mobile synchronization remain the learner's own
+manual action; Pass Quest never contacts AnkiWeb or a phone. Details: [`docs/notes.md`](docs/notes.md).
+Measured evidence: [`docs/evidence/0007-anki-from-learning.md`](docs/evidence/0007-anki-from-learning.md).
 
 ## Run the gates
 
