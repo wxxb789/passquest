@@ -490,7 +490,7 @@ func noteCountsOf(items []notePushItemView) notePushCounts {
 			counts.Conflicts++
 		case store.AnkiStateFailed:
 			counts.Failed++
-		case "queued":
+		case store.AnkiStateQueued:
 			counts.Queued++
 		}
 	}

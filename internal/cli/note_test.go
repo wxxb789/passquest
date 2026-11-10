@@ -3,11 +3,16 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/note"
@@ -25,6 +30,8 @@ type fakeAnkiTransport struct {
 	unreachable  bool
 	failAddAfter int
 	adds         int
+	calls        int
+	shortCall    int
 	err          error
 }
 
@@ -34,6 +41,7 @@ func newFakeAnki() *fakeAnkiTransport {
 
 func (f *fakeAnkiTransport) Call(_ context.Context, req anki.HostRequest) (anki.HostResponse, error) {
 	f.requests = append(f.requests, req)
+	f.calls++
 	if f.err != nil {
 		return anki.HostResponse{}, f.err
 	}
@@ -119,6 +127,9 @@ func (f *fakeAnkiTransport) Call(_ context.Context, req anki.HostRequest) (anki.
 	if f.unreachable {
 		resp.State = "unreachable"
 	}
+	if f.shortCall > 0 && f.calls == f.shortCall && len(resp.Results) > 0 {
+		resp.Results = resp.Results[:len(resp.Results)-1]
+	}
 	return resp, nil
 }
 
@@ -149,6 +160,7 @@ func (f *fakeAnkiTransport) count(action string) int {
 func (f *fakeAnkiTransport) resetActions() {
 	f.actions = nil
 	f.requests = nil
+	f.calls = 0
 }
 
 func runNoteCLI(t *testing.T, db string, clock *stepClock, ankiTransport *fakeAnkiTransport,
@@ -202,6 +214,21 @@ func noteConsent(t *testing.T, db string, clock *stepClock, sourceID, reviewer s
 	mustRun(t, db, clock, "", "tutor", "consent", sourceID, "--reviewer", reviewer, "--json")
 }
 
+func noteAttempt(t *testing.T, db string, clock *stepClock, sourceID string) {
+	t.Helper()
+	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
+}
+
+// readyNoteSource leaves the fixture with one incorrect attempt and current
+// consent, so note commands can accept their draft.
+func readyNoteSource(t *testing.T, db string, clock *stepClock) string {
+	t.Helper()
+	sourceID := noteSourceFixture(t, db, clock)
+	noteAttempt(t, db, clock, sourceID)
+	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	return sourceID
+}
+
 func notePending(t *testing.T, db string) []store.NoteOutboxEntry {
 	t.Helper()
 	st, err := store.Open(db)
@@ -220,7 +247,7 @@ func TestNoteProposeConsentAcceptExport(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
-	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
+	noteAttempt(t, db, clock, sourceID)
 
 	draftDoc := noteDraftDoc{}
 	raw := mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
@@ -405,9 +432,7 @@ func TestNoteSkippedAttemptIsUnanswered(t *testing.T) {
 func TestNotePushCreatesUpdatesConflictsAndQueues(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
-	sourceID := noteSourceFixture(t, db, clock)
-	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
-	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	sourceID := readyNoteSource(t, db, clock)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	first := noteAcceptDoc{}
 	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")), &first); err != nil {
@@ -541,9 +566,7 @@ func TestNotePushCreatesUpdatesConflictsAndQueues(t *testing.T) {
 func TestNotePushRefusesRevokedConsentAndMissingHost(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
-	sourceID := noteSourceFixture(t, db, clock)
-	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
-	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	sourceID := readyNoteSource(t, db, clock)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "pending revision", "--json")
@@ -569,9 +592,7 @@ func TestNotePushRefusesRevokedConsentAndMissingHost(t *testing.T) {
 func TestNoteRefineUsesProviderAndRecordsIt(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
-	sourceID := noteSourceFixture(t, db, clock)
-	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
-	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	readyNoteSource(t, db, clock)
 	mustRun(t, db, clock, "", "tutor", "config", "--endpoint", "https://api.example.com/v1/chat/completions", "--model", "note-model", "--json")
 
 	transport := &fakeTutorTransport{response: tutor.HostResponse{
@@ -614,9 +635,7 @@ func TestNoteRefineUsesProviderAndRecordsIt(t *testing.T) {
 func TestNoteRefineFailureKeepsDeterministicDraft(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
-	sourceID := noteSourceFixture(t, db, clock)
-	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
-	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	readyNoteSource(t, db, clock)
 	mustRun(t, db, clock, "", "tutor", "config", "--endpoint", "https://api.example.com/v1/chat/completions", "--model", "note-model", "--json")
 
 	transport := &fakeTutorTransport{response: fixedTutorError("timeout", "provider timed out")}
@@ -691,9 +710,7 @@ func TestNoteModelDocument(t *testing.T) {
 func TestNoteOutputsNeverClaimAPhonePush(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
-	sourceID := noteSourceFixture(t, db, clock)
-	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
-	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	readyNoteSource(t, db, clock)
 	var outputs []string
 	outputs = append(outputs, mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1"))
 	outputs = append(outputs, mustNoteRun(t, db, clock, nil, nil, "", "note", "preview"))
@@ -728,9 +745,7 @@ func TestNoteOutputsNeverClaimAPhonePush(t *testing.T) {
 func TestNotePushEndpointMustBeLoopback(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
-	sourceID := noteSourceFixture(t, db, clock)
-	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
-	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	readyNoteSource(t, db, clock)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
 	code, _, errOut := runNoteCLI(t, db, clock, newFakeAnki(), nil, "", "note", "push", "--endpoint", "http://10.0.0.2:8765", "--json")
@@ -742,9 +757,7 @@ func TestNotePushEndpointMustBeLoopback(t *testing.T) {
 func TestNoteAcceptEditedFieldsAreValidated(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
-	sourceID := noteSourceFixture(t, db, clock)
-	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
-	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	readyNoteSource(t, db, clock)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	code, _, errOut := runNoteCLI(t, db, clock, nil, nil, "", "note", "accept", "--front", "   ", "--json")
 	if code != 2 || !strings.Contains(errOut, "invalid_front") {
@@ -759,9 +772,7 @@ func TestNoteAcceptEditedFieldsAreValidated(t *testing.T) {
 func TestNotePushKeepsAnAcknowledgedWriteInAPartialBatch(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
-	sourceID := noteSourceFixture(t, db, clock)
-	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
-	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	sourceID := readyNoteSource(t, db, clock)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose",
@@ -803,11 +814,198 @@ func TestNoteProposeRefusesContentChangedAfterTheAttempt(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
-	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
+	noteAttempt(t, db, clock, sourceID)
 	mustRun(t, db, clock, "", "page", "edit", sourceID, "1", "--text-file", fixtureFile(t, "page-001-corrected.txt"), "--reviewer", "note-reviewer", "--json")
 	mustRun(t, db, clock, "", "page", "review", sourceID, "1", "--reviewer", "note-reviewer", "--json")
 	code, _, errOut := runNoteCLI(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	if code != 2 || !strings.Contains(errOut, "content_changed") {
 		t.Fatalf("changed content = %d, %s", code, errOut)
+	}
+}
+
+func TestNotePushReaddsANoteDeletedFromAnki(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	readyNoteSource(t, db, clock)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+	first := noteAcceptDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")), &first); err != nil {
+		t.Fatal(err)
+	}
+
+	ankiTransport := newFakeAnki()
+	initial := notePushDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")), &initial); err != nil {
+		t.Fatal(err)
+	}
+	if initial.State != "pushed" || initial.Notes[0].AnkiNoteID != 101 {
+		t.Fatalf("first push = %+v", initial)
+	}
+
+	delete(ankiTransport.notes, 101)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sundays", "--json")
+	ankiTransport.resetActions()
+	readded := notePushDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")), &readded); err != nil {
+		t.Fatal(err)
+	}
+	if readded.State != "pushed" || len(readded.Notes) != 1 {
+		t.Fatalf("readd push = %+v", readded)
+	}
+	item := readded.Notes[0]
+	if item.AnkiNoteID != 102 {
+		t.Fatalf("readd item = %+v", item)
+	}
+	if got := strings.Join(ankiTransport.actions, ","); got != "version,createDeck,modelNames,notesInfo,addNote" {
+		t.Fatalf("readd actions = %s", got)
+	}
+	if ankiTransport.count("updateNoteFields") != 0 {
+		t.Fatalf("readd wrote an update: %v", ankiTransport.actions)
+	}
+
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	stored, err := st.Note(first.Note.NoteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AnkiNoteID != 102 || stored.AnkiState != store.AnkiStatePushed || stored.AnkiPushedRevision != 2 {
+		t.Fatalf("note after readd = %+v", stored)
+	}
+
+	handle, err := sql.Open("sqlite", db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handle.Close()
+	var action, outcome string
+	if err := handle.QueryRow(`SELECT action, outcome FROM anki_push_attempts
+		WHERE note_id = ? ORDER BY id DESC LIMIT 1`, first.Note.NoteID).Scan(&action, &outcome); err != nil {
+		t.Fatalf("read attempt ledger: %v", err)
+	}
+	if action != "readd" || outcome != "ok" {
+		t.Fatalf("ledger action = %s/%s, want readd/ok", action, outcome)
+	}
+}
+
+func TestNoteExportRechecksConsent(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	sourceID := readyNoteSource(t, db, clock)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
+	mustRun(t, db, clock, "", "tutor", "revoke", sourceID, "--reviewer", "note-reviewer", "--json")
+
+	out := filepath.Join(t.TempDir(), "revoked.tsv")
+	code, _, errOut := runNoteCLI(t, db, clock, nil, nil, "", "note", "export", "--out", out, "--json")
+	if code != 2 || !strings.Contains(errOut, "consent_required") {
+		t.Fatalf("revoked export = %d, %s", code, errOut)
+	}
+	if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("revoked export wrote a file: %v", err)
+	}
+
+	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	exported := noteExportDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "export", "--out", out, "--json")), &exported); err != nil {
+		t.Fatal(err)
+	}
+	if exported.Notes != 1 {
+		t.Fatalf("re-consented export = %+v", exported)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("re-consented export did not write: %v", err)
+	}
+}
+
+func TestNotePreviewAndAcceptRefuseChangedDraftContent(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	sourceID := readyNoteSource(t, db, clock)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+	mustRun(t, db, clock, "", "page", "edit", sourceID, "1", "--text-file", fixtureFile(t, "page-001-corrected.txt"), "--reviewer", "note-reviewer", "--json")
+	mustRun(t, db, clock, "", "page", "review", sourceID, "1", "--reviewer", "note-reviewer", "--json")
+	for _, command := range []string{"preview", "accept"} {
+		code, _, errOut := runNoteCLI(t, db, clock, nil, nil, "", "note", command, "--json")
+		if code != 2 || !strings.Contains(errOut, "content_changed") {
+			t.Fatalf("note %s after a content change = %d, %s", command, code, errOut)
+		}
+	}
+}
+
+func TestNoteDefaultDraftIsTheLatestOpenOne(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	sourceID := readyNoteSource(t, db, clock)
+	first := noteDraftDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "propose",
+		"--content", sourceID+"-p001", "--question", "q2", "--mark", "Sunday", "--json")), &first); err != nil {
+		t.Fatal(err)
+	}
+	second := noteDraftDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "propose",
+		"--content", sourceID+"-p001", "--question", "q2", "--mark", "Saturday", "--json")), &second); err != nil {
+		t.Fatal(err)
+	}
+	if first.Draft.ID == second.Draft.ID {
+		t.Fatalf("second mark reused draft %d", first.Draft.ID)
+	}
+
+	latest := notePreviewDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "preview", "--json")), &latest); err != nil {
+		t.Fatal(err)
+	}
+	if latest.Draft.ID != second.Draft.ID || latest.Plain.Front != "Saturday" {
+		t.Fatalf("default preview = %+v", latest.Draft)
+	}
+
+	explicit := notePreviewDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "preview",
+		"--draft", fmt.Sprint(first.Draft.ID), "--json")), &explicit); err != nil {
+		t.Fatal(err)
+	}
+	if explicit.Draft.ID != first.Draft.ID || explicit.Plain.Front != "Sunday" {
+		t.Fatalf("explicit preview = %+v", explicit.Draft)
+	}
+
+	accepted := noteAcceptDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")), &accepted); err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Plain.Front != "Saturday" {
+		t.Fatalf("default accept = %+v", accepted.Plain)
+	}
+}
+
+func TestNotePushReportsShortResultBatches(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	readyNoteSource(t, db, clock)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
+
+	ankiTransport := newFakeAnki()
+	ankiTransport.shortCall = 1
+	code, _, errOut := runNoteCLI(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")
+	if code != 3 || !strings.Contains(errOut, "anki_error") {
+		t.Fatalf("short capability batch = %d, %s", code, errOut)
+	}
+
+	ankiTransport.shortCall = 3
+	ankiTransport.resetActions()
+	code, _, errOut = runNoteCLI(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")
+	if code != 3 {
+		t.Fatalf("short write batch = %d, %s", code, errOut)
+	}
+	doc := notePushDoc{}
+	if err := json.Unmarshal([]byte(errOut), &doc); err != nil {
+		t.Fatalf("decode short write batch: %v\n%s", err, errOut)
+	}
+	if doc.State != "failed" || doc.Counts.Failed != 1 ||
+		doc.Notes[0].Detail != "AnkiConnect returned fewer results than actions" {
+		t.Fatalf("short write batch = %+v", doc)
 	}
 }

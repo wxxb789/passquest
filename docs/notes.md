@@ -130,9 +130,10 @@ Front	Back	Tactic	Source
 ```
 
 Fields are HTML: text is escaped, newlines become `<br>`, and the back's blank line becomes the
-meaning/example paragraphs. The file is written `0600` in a `0700` directory through a temporary file
-in the destination directory, synced and renamed; a failure leaves an existing export untouched and
-removes the temporary file.
+meaning/example paragraphs. The file is written `0600` through a temporary file in the destination
+directory, synced and renamed; a failure leaves an existing export untouched and removes the
+temporary file. A missing parent directory is created `0700`; an existing `--out` directory keeps its
+mode, so choose a private directory.
 
 Anki's text importer has no note id. Re-importing an edited export can create a duplicate card;
 `note push` is the revision path. The export file contains private note text and must be treated like
@@ -153,9 +154,12 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
   redirects and has no database or filesystem access.
 - `version` must be at least 6. The deck `Pass Quest` is created when missing; the model
   `PassQuest Note` is created when `modelNames` does not contain it.
-- `addNote` uses `allowDuplicate: false`. Anki's duplicate error is reported as `already_present`
-  (exit 0) and the local revision is marked delivered; a later revision of that duplicate-only note is
-  a **conflict**, because AnkiConnect reports no note id for the existing card.
+- `addNote` uses `allowDuplicate: false`. A duplicate of a note's first revision, with nothing pushed
+  before, is reported as `already_present` (exit 0) and that revision is marked delivered; a later
+  revision of that duplicate-only note is a **conflict**, because AnkiConnect reports no note id for
+  the existing card. A note edited before its first push is queued at revision ≥ 2, so a duplicate
+  error there is a **conflict** rather than `already_present`: Anki never received revision 1, and
+  marking an unwritten revision delivered would be false.
 - A revision with an Anki note id calls `notesInfo` first. If the fields no longer match the revision
   last pushed, the card is a **conflict**: Anki is left untouched and `push` exits 3. `--force` is the
   explicit overwrite. If the card is gone, it is re-added once and the new id is stored.
@@ -163,8 +167,9 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
   review history survives.
 - When no endpoint answers, every pending note stays queued and `push` exits 0. The next reachable
   push drains each pending revision once; a second push sends nothing. A transport failure after a
-  request was sent also leaves the note pending: retrying is safe because `addNote` deduplicates and
-  `updateNoteFields` is idempotent.
+  request was sent also leaves the note pending. A retried `addNote` is deduplicated by Anki; if Anki
+  applied an `updateNoteFields` before the error, the next push's read-back can surface a **conflict**
+  (exit 3) that `--force` resolves. No note text is lost.
 - A missing Node or host is `anki_unavailable` (exit 3) with the queue unchanged. `propose`, `preview`,
   `accept`, `skip`, `show`, `model` and `export` work with no Node and no Anki.
 

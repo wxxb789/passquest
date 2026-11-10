@@ -81,6 +81,13 @@ func noteDraftFor(st *store.Store, id int64) (store.NoteDraft, error) {
 	return draft, nil
 }
 
+// consentGranted reports whether the latest recorded consent for a source is a
+// grant. A lookup error is treated as no consent.
+func consentGranted(st *store.Store, sourceID string) bool {
+	event, ok, err := st.TutorConsent(sourceID)
+	return err == nil && ok && event.Granted
+}
+
 func noteInputFromDraft(st *store.Store, draft store.NoteDraft) (note.Input, error) {
 	loaded, err := loadTutorContent(st, draft.ContentID, draft.QuestionID)
 	if err != nil {
@@ -112,14 +119,7 @@ func noteInputFromDraft(st *store.Store, draft store.NoteDraft) (note.Input, err
 		}
 		record = &got
 	}
-	consent := false
-	if loaded.Private && sourceID != "" {
-		event, ok, err := st.TutorConsent(sourceID)
-		if err != nil {
-			return note.Input{}, err
-		}
-		consent = ok && event.Granted
-	}
+	consent := loaded.Private && sourceID != "" && consentGranted(st, sourceID)
 	return note.Input{
 		Target: note.Target{
 			ContentID:      draft.ContentID,
@@ -147,6 +147,12 @@ func noteEffectiveFor(st *store.Store, draft store.NoteDraft) (noteEffective, er
 	if err != nil {
 		return noteEffective{}, err
 	}
+	return noteEffectiveOf(draft, input, built), nil
+}
+
+// noteEffectiveOf applies a draft's refinement to an already built input, so a
+// command that has just derived the draft does not derive it again.
+func noteEffectiveOf(draft store.NoteDraft, input note.Input, built note.Draft) noteEffective {
 	effective := noteEffective{
 		Draft:  draft,
 		Input:  input,
@@ -165,7 +171,7 @@ func noteEffectiveFor(st *store.Store, draft store.NoteDraft) (noteEffective, er
 		effective.Advisory = true
 	}
 	effective.Fields = note.HTML(effective.Front, effective.Back, built.Tactic, built.SourceLabel)
-	return effective, nil
+	return effective
 }
 
 func runNotePropose(args []string, opt Options) int {
@@ -210,7 +216,7 @@ func runNotePropose(args []string, opt Options) int {
 	if err != nil {
 		return noteCommandError(opt, *jsonFlag, err)
 	}
-	draft, err := note.Build(input)
+	built, err := note.Build(input)
 	if err != nil {
 		return noteCommandError(opt, *jsonFlag, err)
 	}
@@ -233,20 +239,17 @@ func runNotePropose(args []string, opt Options) int {
 	}
 	refinement := (*noteRefinementView)(nil)
 	if *refineFlag {
-		if len(draft.Withheld) > 0 {
+		if len(built.Withheld) > 0 {
 			return usageError(opt, *jsonFlag, "consent_required", noteConsentMessage(saved))
 		}
-		refinedDraft, view, code := noteRefine(st, saved, input, opt, *jsonFlag)
+		refinedDraft, view, code := noteRefine(st, saved, input, built, opt, *jsonFlag)
 		if code != 0 {
 			return code
 		}
 		saved = refinedDraft
 		refinement = view
 	}
-	effective, err := noteEffectiveFor(st, saved)
-	if err != nil {
-		return noteCommandError(opt, *jsonFlag, err)
-	}
+	effective := noteEffectiveOf(saved, input, built)
 	doc := noteDraftDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         "draft",
@@ -287,7 +290,7 @@ func noteProposeInput(st *store.Store, attemptFlag int64, contentFlag, questionF
 			},
 			Question:       &loaded.Question,
 			PassageText:    loaded.Content.Passage.Text,
-			ConsentGranted: noteConsentGranted(st, loaded),
+			ConsentGranted: loaded.Private && loaded.SourceID != "" && consentGranted(st, loaded.SourceID),
 		}, nil
 	}
 
@@ -322,16 +325,8 @@ func noteProposeInput(st *store.Store, attemptFlag int64, contentFlag, questionF
 		Attempt:        &record,
 		Question:       &loaded.Question,
 		PassageText:    loaded.Content.Passage.Text,
-		ConsentGranted: noteConsentGranted(st, loaded),
+		ConsentGranted: loaded.Private && loaded.SourceID != "" && consentGranted(st, loaded.SourceID),
 	}, nil
-}
-
-func noteConsentGranted(st *store.Store, loaded tutorLoadedContent) bool {
-	if !loaded.Private || loaded.SourceID == "" {
-		return false
-	}
-	event, ok, err := st.TutorConsent(loaded.SourceID)
-	return err == nil && ok && event.Granted
 }
 
 func noteConsentMessage(draft store.NoteDraft) string {
@@ -623,7 +618,7 @@ func runNoteModel(args []string, opt Options) int {
 
 // noteRefine performs one explicit provider refinement and records its exact
 // request identity. It returns the updated draft and the recorded refinement.
-func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, opt Options, jsonMode bool) (store.NoteDraft, *noteRefinementView, int) {
+func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, deterministic note.Draft, opt Options, jsonMode bool) (store.NoteDraft, *noteRefinementView, int) {
 	cfg, configured, err := st.TutorConfig()
 	if err != nil {
 		return draft, nil, internalError(opt, jsonMode, err)
@@ -654,10 +649,6 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, opt Op
 		}
 	}()
 
-	deterministic, err := note.Build(input)
-	if err != nil {
-		return draft, nil, noteCommandError(opt, jsonMode, err)
-	}
 	material := note.RefineMaterial{PassageText: input.PassageText}
 	if input.Question != nil {
 		material.QuestionStem = input.Question.Stem
@@ -740,10 +731,10 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, opt Op
 }
 
 func noteRefineFailure(st *store.Store, draft store.NoteDraft, record store.NoteRefinement, reservation int64, opt Options, jsonMode bool) (store.NoteDraft, *noteRefinementView, int) {
-	saved, err := st.FinalizeNoteRefinement(record, reservation)
-	if err != nil {
-		// A failed refinement still consumed its reservation; the caller's
-		// deferred release is disabled because sendStarted is true.
+	if _, err := st.FinalizeNoteRefinement(record, reservation); err != nil {
+		// Recording the failure itself failed, so the reservation stays held:
+		// the provider may already have been contacted and the deferred release
+		// is disabled once sendStarted is true.
 		if jsonMode {
 			_ = writeJSONTo(opt.Stderr, errorDoc{SchemaVersion: ProtocolVersion, Error: errorBody{
 				Code: record.ErrorCode, Message: record.ErrorMessage,
@@ -753,7 +744,6 @@ func noteRefineFailure(st *store.Store, draft store.NoteDraft, record store.Note
 		}
 		return draft, nil, 3
 	}
-	_ = saved
 	if jsonMode {
 		_ = writeJSONTo(opt.Stderr, errorDoc{SchemaVersion: ProtocolVersion, Error: errorBody{
 			Code: record.ErrorCode, Message: record.ErrorMessage,

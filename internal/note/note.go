@@ -65,9 +65,8 @@ func (t Target) SourceLabel() string {
 	return fmt.Sprintf("sample · %s · %s", t.ContentID, t.QuestionID)
 }
 
-// Input is everything Build may use. Question and PassageText may be nil/empty
-// when the current build no longer has the content; the CLI refuses that case,
-// but Build keeps the invariant explicit.
+// Input is everything Build may use. Build refuses a nil Question, so every
+// derivation below can rely on it; PassageText may be empty.
 type Input struct {
 	Target         Target
 	Attempt        *attempt.Attempt
@@ -169,8 +168,7 @@ func Build(in Input) (Draft, error) {
 }
 
 // NormalizeMark collapses ordinary whitespace, including tabs and newlines, so
-// the mark is one safe line, and reports an empty/short/oversized mark as
-// invalid when it carries any text at all.
+// the mark is one safe line. ValidMark reports whether the value is usable.
 func NormalizeMark(raw string) string {
 	return strings.Join(strings.Fields(raw), " ")
 }
@@ -180,8 +178,7 @@ func ValidMark(mark string) bool {
 	if mark == "" {
 		return false
 	}
-	n := utf8.RuneCountInString(mark)
-	return n >= 1 && n <= MaxMarkRunes
+	return utf8.RuneCountInString(mark) <= MaxMarkRunes
 }
 
 func frontFor(in Input, unanswered bool, tactic string) string {
@@ -209,35 +206,25 @@ func explanationFor(in Input, unanswered bool, lesson skill.Skill, hasLesson boo
 	question := in.Question
 	if !unanswered && in.Attempt != nil {
 		if in.Attempt.Status == attempt.StatusIncorrect {
-			meaning := ""
-			if question != nil {
-				meaning = strings.TrimSpace(question.OptionReasoning[in.Attempt.CorrectLabel])
-				if meaning == "" {
-					meaning = strings.TrimSpace(question.Reasoning)
-				}
-				if meaning == "" {
-					meaning = "The verified key is " + in.Attempt.CorrectText + "."
-				}
-				example := strings.TrimSpace(question.Evidence)
-				if example == "" {
-					example = strings.TrimSpace(question.Stem)
-				}
-				return meaning, example
+			meaning := strings.TrimSpace(question.OptionReasoning[in.Attempt.CorrectLabel])
+			if meaning == "" {
+				meaning = strings.TrimSpace(question.Reasoning)
 			}
-			return "The verified key is " + in.Attempt.CorrectText + ".", ""
+			if meaning == "" {
+				meaning = "The verified key is " + in.Attempt.CorrectText + "."
+			}
+			example := strings.TrimSpace(question.Evidence)
+			if example == "" {
+				example = strings.TrimSpace(question.Stem)
+			}
+			return meaning, example
 		}
 		// Correct attempt with an explicit mark: the learner already saw the key.
-		meaning := ""
-		if question != nil {
-			meaning = strings.TrimSpace(question.Reasoning)
-		}
+		meaning := strings.TrimSpace(question.Reasoning)
 		if meaning == "" && hasLesson {
 			meaning = strings.TrimSpace(lesson.Principle)
 		}
-		example := ""
-		if question != nil {
-			example = strings.TrimSpace(question.Evidence)
-		}
+		example := strings.TrimSpace(question.Evidence)
 		if example == "" {
 			example = sentenceWith(in.PassageText, in.Target.Mark)
 		}
@@ -248,10 +235,10 @@ func explanationFor(in Input, unanswered bool, lesson skill.Skill, hasLesson boo
 	// reasoning is included. The key is read only to filter a passage sentence
 	// that would reproduce the keyed option, then only the visible stem is kept.
 	example := sentenceWith(in.PassageText, in.Target.Mark)
-	if example != "" && question != nil && revealsAnswer(example, *question) {
+	if example != "" && revealsAnswer(example, *question) {
 		example = strings.TrimSpace(question.Stem)
 	}
-	if example == "" && question != nil {
+	if example == "" {
 		example = strings.TrimSpace(question.Stem)
 	}
 	if hasLesson {
@@ -261,10 +248,7 @@ func explanationFor(in Input, unanswered bool, lesson skill.Skill, hasLesson boo
 		}
 		return meaning, example
 	}
-	if question != nil {
-		return "This item tests: " + strings.TrimSpace(question.Stem), example
-	}
-	return "", example
+	return "This item tests: " + strings.TrimSpace(question.Stem), example
 }
 
 // revealsAnswer reports whether a pre-answer passage sentence would reproduce
@@ -393,9 +377,9 @@ func clipText(value string, limit int) string {
 func SanitizeFront(raw string) (string, error) {
 	value := NormalizeMark(raw)
 	if !ValidMark(value) {
-		return "", fmt.Errorf("note: front must be 1..%d characters of ordinary text", MaxFrontRunes)
+		return "", fmt.Errorf("note: front must be 1..%d characters of ordinary text", MaxMarkRunes)
 	}
-	return clipText(value, MaxFrontRunes), nil
+	return clipText(value, MaxMarkRunes), nil
 }
 
 // SanitizeTactic validates a learner-edited tactic. Empty is allowed.

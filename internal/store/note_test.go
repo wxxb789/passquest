@@ -115,7 +115,7 @@ func TestNoteOutboxDrainsOnceAndKeepsPendingOnFailure(t *testing.T) {
 	}
 	if err := st.RecordAnkiAttempt(AnkiAttempt{
 		NoteID: target.NoteID, Revision: 1, Action: "add", Outcome: "conflict", Detail: "conflict",
-		At: time.Now(), AnkiState: AnkiStateConflict, OutboxStatus: "pending",
+		At: time.Now(), AnkiState: AnkiStateConflict,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -226,6 +226,27 @@ func TestNoteRefinementSharesTheDailyBudget(t *testing.T) {
 	}
 	if _, err := st.db.Exec(`UPDATE note_refinements SET model = 'evil'`); err == nil {
 		t.Fatal("refinement update was accepted")
+	}
+}
+
+func TestTutorReservationCountsFinalizedRefinements(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "shared-budget.sqlite"))
+	now := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+	day := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
+	reservation, _, err := st.ReserveNoteRefinement(day, now, 2)
+	if err != nil {
+		t.Fatalf("reserve refinement: %v", err)
+	}
+	refinement := NoteRefinement{
+		DraftID: 1, CreatedAt: now, Status: "ok", ProviderHost: "127.0.0.1:1", Model: "m",
+		PromptVersion: "note-refine-v1", RequestSHA256: strings.Repeat("e", 64), RequestBytes: 10,
+		OutputFront: "f", OutputBack: "b", HTTPStatus: 200, LatencyMS: 5,
+	}
+	if _, err := st.FinalizeNoteRefinement(refinement, reservation); err != nil {
+		t.Fatalf("finalize refinement: %v", err)
+	}
+	if refused, used, err := st.ReserveTutorCall(day, now, 1); err != nil || refused != 0 || used != 1 {
+		t.Fatalf("tutor reservation after a refinement = %d, %d, %v; want a refusal at 1", refused, used, err)
 	}
 }
 
