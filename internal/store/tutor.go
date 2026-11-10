@@ -82,7 +82,10 @@ type TutorConsentEvent struct {
 
 // TutorCall is one append-only advisory record. OutputText is model output,
 // not verified content; it is empty for a failed call. Raw prompt text is not
-// stored: RequestSHA256 identifies the exact provider chat body that was sent.
+// stored: RequestSHA256 and RequestBytes describe the exact serialized
+// provider request body, which the host posts verbatim, so a call that reached
+// the provider can be matched against its logs. A call that failed before the
+// request was sent still records the prepared body's identity.
 type TutorCall struct {
 	ID               int64
 	CreatedAt        time.Time

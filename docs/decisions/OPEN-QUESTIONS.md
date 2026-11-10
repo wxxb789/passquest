@@ -399,3 +399,8 @@ Entry format:
   protocol shape changes.
 - Revisit when: a supported provider needs a larger bound than the documented one, or the host
   protocol publishes an intentional host-only allowance.
+- Review fix (2026-11-10): the host counted UTF-16 code units while the Go client and this document
+  mean code points, so a 15,000-astral-character prompt passed `Build` and was then rejected as
+  over 20,000 units, and a 12,000-code-point response could be refused. `agent/tutor-host.mjs` now
+  counts `Array.from(text).length` for the message total and the response text; `tutor-smoke` sends a
+  15,000-code-point astral prompt and a 12,000-code-point astral response. Bound values are unchanged.

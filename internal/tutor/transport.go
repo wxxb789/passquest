@@ -191,6 +191,13 @@ func validateRequest(req HostRequest) error {
 	if req.Chat.Temperature != 0 || req.Chat.Stream {
 		return errors.New("tutor: chat request must be a non-streaming zero-temperature request")
 	}
+	body, err := json.Marshal(req.Chat)
+	if err != nil {
+		return fmt.Errorf("tutor: encode chat: %w", err)
+	}
+	if req.Body != string(body) {
+		return errors.New("tutor: host request body is not the serialized chat")
+	}
 	if len(req.Chat.Messages) < 2 {
 		return errors.New("tutor: chat request needs system and user messages")
 	}
@@ -233,6 +240,9 @@ func decodeResponse(data []byte, req HostRequest) (HostResponse, error) {
 	case "ok":
 		if resp.Error != nil {
 			return HostResponse{}, errors.New("tutor: successful host response carries an error")
+		}
+		if !resp.RequestSent {
+			return HostResponse{}, errors.New("tutor: successful host response does not confirm a sent request")
 		}
 		if strings.TrimSpace(resp.Text) == "" {
 			return HostResponse{}, errors.New("tutor: agent host returned empty text")

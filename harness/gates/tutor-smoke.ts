@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,12 +9,37 @@ import { executable, run } from "../lib/process.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
-type StubMode = "ok" | "error" | "error_with_key" | "auth" | "malformed" | "rate_limited" | "timeout";
+type StubMode = "ok" | "error" | "error_with_key" | "auth" | "malformed" | "rate_limited" | "timeout" | "astral";
 
 interface ReceivedRequest {
   authorization: string;
   path: string;
   body: unknown;
+  raw: string;
+}
+
+const ASTRAL_TEXT = "🚀".repeat(12000);
+const CREDENTIAL_ENV = "PASSQUEST_TUTOR_API_KEY";
+
+interface HostChat {
+  model: string;
+  messages: { role: string; content: string }[];
+  max_tokens: number;
+  temperature: number;
+  stream: boolean;
+}
+
+function hostChat(content: string, maxTokens = 350): HostChat {
+  return {
+    model: "smoke-model",
+    messages: [
+      { role: "system", content: "system" },
+      { role: "user", content },
+    ],
+    max_tokens: maxTokens,
+    temperature: 0,
+    stream: false,
+  };
 }
 
 function parse(raw: string): unknown {
@@ -55,13 +81,14 @@ export const tutorSmoke: Gate = {
       port: 0,
       async fetch(request) {
         const url = new URL(request.url);
+        const raw = await request.text();
         let body: unknown = {};
         try {
-          body = JSON.parse(await request.text());
+          body = JSON.parse(raw);
         } catch {
           body = { malformed: true };
         }
-        received.push({ authorization: request.headers.get("authorization") ?? "", path: url.pathname, body });
+        received.push({ authorization: request.headers.get("authorization") ?? "", path: url.pathname, body, raw });
         if (mode === "timeout") {
           await Bun.sleep(3000);
           return Response.json(
@@ -84,6 +111,12 @@ export const tutorSmoke: Gate = {
         if (mode === "malformed") {
           return Response.json({ choices: [] }, { status: 200 });
         }
+        if (mode === "astral") {
+          return Response.json(
+            { choices: [{ message: { content: ASTRAL_TEXT } }], usage: { prompt_tokens: 10, completion_tokens: 5 } },
+            { status: 200 },
+          );
+        }
         return Response.json(
           {
             choices: [{ message: { content: "Stub coaching marker 0005: find the sentence with the closing time." } }],
@@ -103,6 +136,7 @@ export const tutorSmoke: Gate = {
       call([...args, "--db", database], env);
 
     const hostPath = path.join(ctx.root, "agent", "tutor-host.mjs");
+    const endpoint = `http://127.0.0.1:${server.port}/v1/chat/completions`;
 
     try {
       const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
@@ -110,42 +144,61 @@ export const tutorSmoke: Gate = {
         return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
       }
 
+      const host = async (request: object): Promise<unknown> => {
+        const result = await run(executable("node"), [hostPath], {
+          cwd: ctx.root,
+          env: baseEnv,
+          stdin: JSON.stringify(request),
+        });
+        return parse(result.stdout);
+      };
+      const hostDocument = (chat: HostChat, body = JSON.stringify(chat)) => ({
+        protocol_version: 1,
+        endpoint,
+        timeout_ms: 30000,
+        max_response_chars: 12000,
+        chat,
+        body,
+      });
+
       for (const [label, maxTokens, contentChars] of [
         ["max_tokens 4096", 4096, 10],
         ["21001 message characters", 350, 21001],
       ] as const) {
-        const result = await run(executable("node"), [hostPath], {
-          cwd: ctx.root,
-          env: baseEnv,
-          stdin: JSON.stringify({
-            protocol_version: 1,
-            endpoint: "https://api.example.com/v1/chat/completions",
-            timeout_ms: 30000,
-            max_response_chars: 12000,
-            chat: {
-              model: "smoke-model",
-              messages: [
-                { role: "system", content: "system" },
-                { role: "user", content: "x".repeat(contentChars) },
-              ],
-              max_tokens: maxTokens,
-              temperature: 0,
-              stream: false,
-            },
-          }),
-        });
-        const doc = parse(result.stdout);
+        const chat = hostChat("x".repeat(contentChars), maxTokens);
+        const doc = await host(hostDocument(chat));
         check(stringField(doc, "status") === "error", `host accepted ${label}`);
         check(stringField(field(doc, "error"), "code") === "config_error", `host ${label} error code`);
       }
+      const matchingChat = hostChat("x".repeat(10));
+      const mismatched = await host(
+        hostDocument(matchingChat, JSON.stringify({ ...matchingChat, model: "other-model" })),
+      );
+      check(stringField(mismatched, "status") === "error", "host accepted a body that does not match chat");
+      check(stringField(field(mismatched, "error"), "code") === "config_error", "mismatched body error code");
 
       const db = path.join(temp, "tutor.sqlite");
-      const endpoint = `http://127.0.0.1:${server.port}/v1/chat/completions`;
+      const unconfigured = await callDB(["tutor", "config"], db, { PASSQUEST_TUTOR_API_KEY: "" });
+      check(unconfigured.code === 0, `human tutor config exit = ${unconfigured.code}`);
+      check(unconfigured.stdout.includes("Provider: not configured"), "human config does not report an unconfigured provider");
+      check(
+        unconfigured.stdout.includes(`Credential: ${CREDENTIAL_ENV} is missing`),
+        "human config does not report a missing credential",
+      );
       const configResult = await callDB(
         ["tutor", "config", "--endpoint", endpoint, "--model", "smoke-model", "--json"],
         db,
       );
       if (!check(configResult.code === 0, `tutor config exit = ${configResult.code}`)) return fail(checks);
+      const configHuman = await callDB(["tutor", "config"], db);
+      check(
+        configHuman.stdout.includes(`Credential: ${CREDENTIAL_ENV} is set`),
+        "human config does not report a present credential",
+      );
+      check(
+        configHuman.stdout.includes(`Provider endpoint: ${endpoint}`),
+        "human config does not print the saved endpoint",
+      );
       const config = parse(configResult.stdout);
       check(field(config, "configured") === true, "tutor config is not configured after saving");
       check(stringField(field(config, "config"), "model") === "smoke-model", "tutor config model");
@@ -199,6 +252,14 @@ export const tutorSmoke: Gate = {
       check(field(firstRequest.body, "stream") === false, "provider stream flag");
       check(arrayField(firstRequest.body, "messages").length === 2, "provider messages");
       check(!JSON.stringify(firstRequest.body).includes(key), "provider request body contains the credential");
+      const postedSHA = createHash("sha256").update(firstRequest.raw).digest("hex");
+      check(stringField(preview, "request_sha256") === postedSHA, "preview request hash is not the posted body");
+      check(stringField(field(ask, "call"), "request_sha256") === postedSHA, "call request hash is not the posted body");
+      check(numberField(preview, "request_bytes") === Buffer.byteLength(firstRequest.raw), "preview request size is not the posted body");
+      check(
+        numberField(field(ask, "call"), "request_bytes") === Buffer.byteLength(firstRequest.raw),
+        "call request size is not the posted body",
+      );
 
       const after = await callDB(["report", "--json"], db);
       check(before.stdout === after.stdout, "tutor ask changed the attempt report");
@@ -253,6 +314,11 @@ export const tutorSmoke: Gate = {
       check(field(field(authorized, "context"), "consent_granted") === true, "consent did not grant access");
       check(field(field(authorized, "context"), "source_text_shared") === true, "authorized preview does not share source text");
       check(userMessage(authorized).includes("The Westbridge Community Library closes at 4 p.m. on Saturdays."), "authorized preview omits the page text");
+      const grantedConsentsHuman = await callDB(["tutor", "consents"], db);
+      check(
+        grantedConsentsHuman.stdout.includes(`  ${sourceID}  import  authorized`),
+        "human consents does not label a granted source as authorized",
+      );
 
       const sourceAsk = await callDB(["tutor", "ask", "--json"], db);
       if (!check(sourceAsk.code === 0, `source tutor ask exit = ${sourceAsk.code}`)) return fail(checks);
@@ -260,6 +326,11 @@ export const tutorSmoke: Gate = {
       check(field(sourceCall, "source_text_shared") === true, "source ask record does not mark shared text");
       check(received.length === 2, "authorized source ask did not contact the provider");
       check(JSON.stringify(received[1].body).includes("The Westbridge Community Library closes at 4 p.m. on Saturdays."), "provider did not receive authorized page text");
+      const sharedHistoryHuman = await callDB(["tutor", "history"], db);
+      check(
+        sharedHistoryHuman.stdout.includes("source-text-shared"),
+        "human history does not label shared private text",
+      );
 
       const revoke = await callDB(["tutor", "revoke", sourceID!, "--reviewer", "smoke", "--json"], db);
       check(revoke.code === 0, `tutor revoke exit = ${revoke.code}`);
@@ -269,6 +340,11 @@ export const tutorSmoke: Gate = {
       const consents = parse((await callDB(["tutor", "consents", "--json"], db)).stdout);
       check(arrayField(consents, "sources").length === 1, "tutor consents did not list the source");
       check(field(arrayField(consents, "sources")[0], "granted") === false, "tutor consents effective state after revoke");
+      const revokedConsentsHuman = await callDB(["tutor", "consents"], db);
+      check(
+        revokedConsentsHuman.stdout.includes(`  ${sourceID}  import  withheld`),
+        "human consents does not label a revoked source as withheld",
+      );
 
       const reportBeforeFailure = await callDB(["report", "--json"], db);
       mode = "error";
@@ -396,6 +472,61 @@ export const tutorSmoke: Gate = {
       const budgetHistory = parse((await callDB(["tutor", "history", "--json"], budgetDB)).stdout);
       check(numberField(field(budgetHistory, "summary"), "calls") === 1, "budget history call count");
       check(numberField(field(budgetHistory, "summary"), "daily_limit") === 1, "budget history daily limit");
+
+      const humanDB = path.join(temp, "human.sqlite");
+      await callDB(["tutor", "config", "--endpoint", endpoint, "--model", "smoke-model", "--json"], humanDB);
+      await callDB(["practice", "--question", "q1", "--answer", "B", "--json"], humanDB);
+      const humanAsk = await callDB(["tutor", "ask"], humanDB);
+      if (!check(humanAsk.code === 0, `human tutor ask exit = ${humanAsk.code}`)) return fail(checks);
+      for (const want of [
+        "Pass Quest — advisory AI suggestion (not a verified answer)",
+        "--- AI suggestion (advisory) ---",
+        "This is model output. It is not a verified answer, grade or exam fact.",
+        "Privacy: first-party material only; no private source text is involved",
+        "Content: the current passage, question, options, verified key and evidence are included.",
+        "Stub coaching marker 0005",
+      ]) {
+        check(humanAsk.stdout.includes(want), `human advisory output is missing ${want}`);
+      }
+      check(!humanAsk.stdout.includes(key), "human advisory output contains the credential");
+      const humanShow = await callDB(["tutor", "show", "1"], humanDB);
+      check(humanShow.stdout.includes("Pass Quest — advisory call #1"), "human show does not identify the call");
+      check(
+        humanShow.stdout.includes("This stored text is model output, not a verified answer, grade or exam fact."),
+        "human show omits the advisory disclaimer",
+      );
+      const humanHistory = await callDB(["tutor", "history"], humanDB);
+      check(humanHistory.stdout.includes("first-party"), "human history does not label first-party calls");
+
+      // The host posts request.body verbatim: a body with &, < and > must
+      // arrive byte-identical, so the recorded SHA-256 can match provider logs.
+      const specialChat = hostChat("Marks & Spencer <tag> & more");
+      const specialBody = JSON.stringify(specialChat);
+      check(
+        field(await host(hostDocument(specialChat, specialBody)), "status") === "ok",
+        "host rejected a valid special-character body",
+      );
+      check(received.at(-1)?.raw === specialBody, "host did not post the request body verbatim");
+
+      // 15,000 astral code points are 30,000 UTF-16 units; the documented
+      // 20,000-character bound counts code points.
+      const astralChat = hostChat("🚀".repeat(15000));
+      check(
+        field(await host(hostDocument(astralChat)), "status") === "ok",
+        "host rejected a 15000-code-point astral prompt",
+      );
+
+      const boundsDB = path.join(temp, "bounds.sqlite");
+      await callDB(["tutor", "config", "--endpoint", endpoint, "--model", "smoke-model", "--json"], boundsDB);
+      await callDB(["practice", "--question", "q1", "--answer", "B", "--json"], boundsDB);
+      mode = "astral";
+      const astral = await callDB(["tutor", "ask", "--json"], boundsDB);
+      mode = "ok";
+      if (!check(astral.code === 0, `astral response exit = ${astral.code}`)) return fail(checks);
+      check(
+        numberField(field(parse(astral.stdout), "call"), "output_chars") === 12000,
+        "a 12000-code-point astral response was rejected or clipped",
+      );
 
       const mainBytes = readFileSync(db);
       check(!mainBytes.includes(Buffer.from(key)), "main database bytes contain the credential");

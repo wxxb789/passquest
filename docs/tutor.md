@@ -39,7 +39,9 @@ passquest tutor consents
 - URLs with userinfo, a query string or a fragment are rejected, so a credential cannot be smuggled
   into stored configuration.
 - The request body is exactly `{model, messages, max_tokens, temperature: 0, stream: false}`.
-  `preview` shows it. The host adds `Authorization: Bearer <key>` and refuses redirects.
+  `preview` shows it. The host checks the serialized body against that content and posts the bytes
+  unchanged, so the recorded SHA-256 and size identify what was sent. The host adds
+  `Authorization: Bearer <key>` and refuses redirects.
 - No provider-specific capability, model or account claim is made. Multiple providers, login flows,
   capability discovery, search, speech and images belong to goal 0010.
 
@@ -92,10 +94,12 @@ than instructions, that withheld content must not be guessed, and that output is
 180 plain-text words. The prompt is `tutor-v1`; the version is stored with every call.
 
 Bounds: timeout 1–120 s (default 30), `max_tokens` 64–2048 (default 350), provider body ≤ 1 MiB,
-model text ≤ 12 000 characters, prompt ≤ 20 000 characters, daily budget 1–200 (default 20). Passage
-3 000 characters (a window around the evidence), stem 1 000, each option 500, evidence 800, reasoning
-1 000, lesson fields 900 each. Extra skill lessons are omitted locally with an explicit line when the
-combined lesson budget is reached. `preview` names every clipped or omitted field.
+model text ≤ 12 000 characters, prompt ≤ 20 000 characters, daily budget 1–200 (default 20).
+Character means Unicode code point; the host counts the same units as the Go client, so astral text is
+not rejected early. Passage 3 000 characters (a window around the evidence), stem 1 000, each option
+500, evidence 800, reasoning 1 000, lesson fields 900 each. Extra skill lessons are omitted locally
+with an explicit line when the combined lesson budget is reached. `preview` names every clipped or
+omitted field.
 
 ## What is stored
 
@@ -108,10 +112,12 @@ Schema version 7 adds three tables:
   code/message, provider host, model, prompt version, whether private text was shared, request
   SHA-256/bytes, output text/characters, token usage, HTTP status and latency.
 
-Raw prompt text is not stored; the SHA-256 identifies the canonical chat content
-(model, messages and bounds) that was sent, and `tutor preview` is the inspection surface. `tutor history` lists usage and failures without model
-text; `tutor show CALL` prints one stored advisory text. `report`, `next`, `practice` and any export
-path do not read these tables.
+Raw prompt text is not stored; the SHA-256 and byte size describe the exact serialized request body,
+which the host posts without re-encoding, and `tutor preview` shows the same chat content before
+sending. `tutor history` lists usage and failures without model text; `tutor show CALL` prints one
+stored advisory text. A call records `source_text_shared` only when the host actually posted a request
+that carried private source text; a failure before the request was sent records `false`. `report`,
+`next`, `practice` and any export path do not read these tables.
 
 The call budget counts failed calls and resets at 00:00 UTC. There is no automatic retry: a retry can
 double provider spend and hide a failure. Run `tutor ask` again after fixing the cause.

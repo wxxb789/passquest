@@ -37,6 +37,7 @@ func fixedTutorResponse(text string) tutor.HostResponse {
 		Text:            text,
 		HTTPStatus:      200,
 		LatencyMS:       42,
+		RequestSent:     true,
 		Usage:           &tutor.Usage{PromptTokens: 120, CompletionTokens: 30},
 	}
 }
@@ -47,6 +48,7 @@ func fixedTutorError(code, message string) tutor.HostResponse {
 		Status:          "error",
 		HTTPStatus:      500,
 		LatencyMS:       20,
+		RequestSent:     true,
 		Error:           &tutor.HostError{Code: code, Message: message},
 	}
 }
@@ -845,6 +847,275 @@ func TestTutorHistoryLabelsWithheldPrivateSource(t *testing.T) {
 	human := mustTutorRun(t, db, clock, transport, true, "tutor", "history")
 	if !strings.Contains(human, "source-text-withheld") {
 		t.Fatalf("history does not distinguish withheld private text:\n%s", human)
+	}
+}
+
+// tutorLine returns the first output line containing needle, so a label
+// assertion cannot be satisfied by a different line.
+func tutorLine(t *testing.T, text, needle string) string {
+	t.Helper()
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	t.Fatalf("no output line contains %q:\n%s", needle, text)
+	return ""
+}
+
+// TestWriteTutorPrivacyContentSummary pins the human content summary against
+// the four reachable content states, including whether stored option texts
+// were included or withheld.
+func TestWriteTutorPrivacyContentSummary(t *testing.T) {
+	tests := []struct {
+		name    string
+		context tutorContextView
+		want    []string
+		absent  []string
+	}{
+		{
+			name:    "included first-party content",
+			context: tutorContextView{ContentMatched: true, ContentIncluded: true},
+			want: []string{
+				"Privacy: first-party material only; no private source text is involved",
+				"Content: the current passage, question, options, verified key and evidence are included.",
+			},
+			absent: []string{"Included instead", "Withheld as well"},
+		},
+		{
+			name:    "changed content keeps stored option texts",
+			context: tutorContextView{ContentMatched: true, ContentChanged: true, StoredTextIncluded: true},
+			want: []string{
+				"Content: the current version differs from the recorded attempt; no current passage, question, option, evidence or key text is included.",
+				"Included instead: the recorded selection and verified key labels with their stored option texts.",
+			},
+			absent: []string{"attempt facts and skill lessons", "Withheld as well"},
+		},
+		{
+			name:    "unavailable content keeps stored option texts",
+			context: tutorContextView{ContentUnavailable: true, StoredTextIncluded: true},
+			want: []string{
+				"Content: the attempted question is unavailable in this build; no current passage, question, option, evidence or key text is included.",
+				"Included instead: the recorded selection and verified key labels with their stored option texts.",
+			},
+			absent: []string{"Withheld as well"},
+		},
+		{
+			name: "private content without consent withholds everything",
+			context: tutorContextView{
+				PrivateSource: true, SourceID: "src-secret",
+				Withheld: []string{"passage", "selected_option_text", "correct_option_text"},
+			},
+			want: []string{
+				"Privacy: private source src-secret is NOT authorized; source text shared: no",
+				"Content: the current passage and question are withheld because this private source is not authorized.",
+				"Withheld as well: the recorded selection and verified key option texts.",
+			},
+			absent: []string{"Included instead"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var out strings.Builder
+			writeTutorPrivacy(&out, test.context)
+			got := out.String()
+			for _, want := range test.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("summary is missing %q\n%s", want, got)
+				}
+			}
+			for _, absent := range test.absent {
+				if strings.Contains(got, absent) {
+					t.Errorf("summary contains %q\n%s", absent, got)
+				}
+			}
+		})
+	}
+}
+
+func TestTutorHumanPreviewMatchesItsChat(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	transport := &fakeTutorTransport{}
+	practiceSample(t, db, clock)
+	configureTutor(t, db, clock, transport, true)
+
+	human := mustTutorRun(t, db, clock, transport, true, "tutor", "preview", "--attempt", "1")
+	for _, want := range []string{
+		"Pass Quest — tutor preview (not sent)",
+		"Privacy: first-party material only; no private source text is involved",
+		"Content: the current passage, question, options, verified key and evidence are included.",
+	} {
+		if !strings.Contains(human, want) {
+			t.Errorf("first-party preview is missing %q\n%s", want, human)
+		}
+	}
+
+	sourceID := importTutorSource(t, db, clock)
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "preview")
+	for _, want := range []string{
+		"Privacy: private source " + sourceID + " is NOT authorized; source text shared: no",
+		"Content: the current passage and question are withheld because this private source is not authorized.",
+		"Withheld as well: the recorded selection and verified key option texts.",
+	} {
+		if !strings.Contains(human, want) {
+			t.Errorf("private preview is missing %q\n%s", want, human)
+		}
+	}
+	for _, falseClaim := range []string{"only the stored selection/key are included", "only attempt facts and skill lessons are included"} {
+		if strings.Contains(human, falseClaim) {
+			t.Errorf("preview repeats the false summary %q\n%s", falseClaim, human)
+		}
+	}
+}
+
+// TestTutorHumanOutputStatesAuthorityAndScope pins the learner-facing labels:
+// credentials, advisory status, consent state and history provenance. The JSON
+// tests do not protect these strings.
+func TestTutorHumanOutputStatesAuthorityAndScope(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	transport := &fakeTutorTransport{response: fixedTutorResponse("Read the sentence with the closing time.")}
+
+	human := mustTutorRun(t, db, clock, transport, false, "tutor", "config")
+	for _, want := range []string{
+		"Provider: not configured",
+		"Credential: " + tutor.CredentialEnv + " is missing",
+	} {
+		if !strings.Contains(human, want) {
+			t.Errorf("unconfigured config is missing %q\n%s", want, human)
+		}
+	}
+
+	configureTutor(t, db, clock, transport, true)
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "config")
+	for _, want := range []string{
+		"Provider endpoint: https://api.example.com/v1/chat/completions",
+		"Credential: " + tutor.CredentialEnv + " is set",
+	} {
+		if !strings.Contains(human, want) {
+			t.Errorf("configured config is missing %q\n%s", want, human)
+		}
+	}
+
+	practiceSample(t, db, clock)
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "ask")
+	for _, want := range []string{
+		"Pass Quest — advisory AI suggestion (not a verified answer)",
+		"--- AI suggestion (advisory) ---",
+		"Usage: 120 prompt tokens, 30 completion tokens",
+		"This is model output. It is not a verified answer, grade or exam fact.",
+		"Advisory call #1 recorded; request sha256 ",
+	} {
+		if !strings.Contains(human, want) {
+			t.Errorf("advisory output is missing %q\n%s", want, human)
+		}
+	}
+	if strings.Contains(human, fakeTutorKey) {
+		t.Fatalf("advisory output contains the credential:\n%s", human)
+	}
+
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "show", "1")
+	for _, want := range []string{
+		"Pass Quest — advisory call #1",
+		"--- AI suggestion (advisory) ---",
+		"This stored text is model output, not a verified answer, grade or exam fact.",
+	} {
+		if !strings.Contains(human, want) {
+			t.Errorf("show output is missing %q\n%s", want, human)
+		}
+	}
+
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "history")
+	if line := tutorLine(t, human, "sample-0001/q1"); !strings.Contains(line, "first-party") {
+		t.Errorf("history does not label first-party calls:\n%s", line)
+	}
+
+	sourceID := importTutorSource(t, db, clock)
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "consents")
+	if line := tutorLine(t, human, sourceID); !strings.Contains(line, "withheld") {
+		t.Errorf("consents does not label an ungranted source:\n%s", line)
+	}
+
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "consent", sourceID, "--reviewer", "owner")
+	if !strings.Contains(human, "Tutor consent for "+sourceID+" (import): authorized") {
+		t.Errorf("consent output does not state authorization:\n%s", human)
+	}
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "consents")
+	if line := tutorLine(t, human, sourceID); !strings.Contains(line, "authorized") {
+		t.Errorf("consents does not label a granted source:\n%s", line)
+	}
+
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "ask")
+	if !strings.Contains(human, "Privacy: private source "+sourceID+" is authorized; source text shared: yes") {
+		t.Errorf("authorized ask does not state shared source text:\n%s", human)
+	}
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "history")
+	if line := tutorLine(t, human, sourceID); !strings.Contains(line, "source-text-shared") {
+		t.Errorf("history does not label a shared private call:\n%s", line)
+	}
+
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "revoke", sourceID, "--reviewer", "owner")
+	if !strings.Contains(human, "Tutor consent for "+sourceID+" (import): withheld") {
+		t.Errorf("revoke output does not state withholding:\n%s", human)
+	}
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "consents")
+	if line := tutorLine(t, human, sourceID); !strings.Contains(line, "withheld") {
+		t.Errorf("consents does not label a revoked source:\n%s", line)
+	}
+	human = mustTutorRun(t, db, clock, transport, true, "tutor", "ask")
+	if !strings.Contains(human, "Privacy: private source "+sourceID+" is NOT authorized; source text shared: no") {
+		t.Errorf("revoked ask does not state withheld source text:\n%s", human)
+	}
+}
+
+func TestTutorMissingNodeRecordsNoSharedPrivateText(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	sourceID := importTutorSource(t, db, clock)
+	configureTutor(t, db, clock, &fakeTutorTransport{}, true)
+	mustTutorRun(t, db, clock, &fakeTutorTransport{}, true, "tutor", "consent", sourceID, "--reviewer", "owner", "--json")
+	preview := decodeTutorPreview(t, mustTutorRun(t, db, clock, &fakeTutorTransport{}, true, "tutor", "preview", "--json"))
+	if !preview.Context.SourceTextShared {
+		t.Fatalf("authorized preview does not prepare shared source text: %+v", preview.Context)
+	}
+
+	host, err := filepath.Abs(filepath.Join("..", "..", "agent", "tutor-host.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{
+		tutor.CredentialEnv: fakeTutorKey,
+		tutor.HostEnv:       host,
+		tutor.NodeEnv:       filepath.Join(t.TempDir(), "missing-node"),
+	}
+	getenv := func(key string) string { return env[key] }
+	var stdout, stderr bytes.Buffer
+	options := Options{
+		Stdin:          strings.NewReader(""),
+		Stdout:         &stdout,
+		Stderr:         &stderr,
+		Now:            clock.Now,
+		NewSession:     func() string { return "sess-test" },
+		Getenv:         getenv,
+		TutorTransport: tutor.HostTransport{Getenv: getenv, Environ: os.Environ},
+	}
+	if code := Run([]string{"tutor", "ask", "--json", "--db", db}, options); code != 3 {
+		t.Fatalf("missing node exit = %d\n%s", code, stderr.String())
+	}
+	history := decodeTutorHistory(t, mustRun(t, db, clock, "", "tutor", "history", "--json"))
+	if len(history.Calls) != 1 {
+		t.Fatalf("history calls = %+v", history.Calls)
+	}
+	call := history.Calls[0]
+	if call.Status != "error" || call.ErrorCode != "agent_unavailable" {
+		t.Fatalf("missing node call = %+v", call)
+	}
+	if call.SourceTextShared {
+		t.Fatal("a request that never reached the host is recorded as shared private text")
+	}
+	if call.SourceID != sourceID {
+		t.Fatalf("source id = %q, want %q", call.SourceID, sourceID)
 	}
 }
 

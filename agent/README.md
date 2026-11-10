@@ -8,6 +8,13 @@ loop yet.
 ## Contract
 
 - One JSON request on stdin, one JSON result on stdout, protocol version `1`.
+- `chat` is the typed request content; `body` is its exact serialization. The host
+  rejects a request whose `body` does not match `chat`, then posts `body`
+  unchanged so the CLI's recorded SHA-256 and byte size identify the bytes that
+  left the machine. Message and response bounds count code points.
+- The result carries `request_sent`: `true` only after the provider request was
+  invoked. A failure before that point (configuration, missing credential) must
+  not be recorded as having shared private text.
 - The credential is read only from `PASSQUEST_TUTOR_API_KEY`. It is placed in the
   `Authorization: Bearer …` header and nowhere else. The process logs nothing.
 - Redirects are refused; `https` is required except for loopback endpoints.

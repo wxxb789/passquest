@@ -71,6 +71,8 @@ type tutorContextView struct {
 	ContentMatched              bool     `json:"content_matched"`
 	ContentChanged              bool     `json:"content_changed"`
 	ContentUnavailable          bool     `json:"content_unavailable"`
+	ContentIncluded             bool     `json:"content_included"`
+	StoredTextIncluded          bool     `json:"stored_text_included"`
 	Skills                      []string `json:"skills"`
 	SkillsMappedFromCurrentTags bool     `json:"skills_mapped_from_current_tags"`
 	TruncatedFields             []string `json:"truncated_fields"`
@@ -88,6 +90,8 @@ func tutorContextViewOf(context tutor.Context) tutorContextView {
 		ContentMatched:              context.ContentMatched,
 		ContentChanged:              context.ContentChanged,
 		ContentUnavailable:          context.ContentUnavailable,
+		ContentIncluded:             context.ContentIncluded,
+		StoredTextIncluded:          context.StoredTextIncluded,
 		Skills:                      append([]string{}, context.Skills...),
 		SkillsMappedFromCurrentTags: context.SkillsMappedFromCurrentTags,
 		TruncatedFields:             append([]string{}, context.TruncatedFields...),
@@ -272,7 +276,7 @@ type tutorConsentsDoc struct {
 var tutorLimits = []string{
 	"Model output is advisory study guidance; it is not a verified answer, grade, exam fact or readiness claim.",
 	"One recorded attempt is sent per call. No attempt history, database path, source title, endpoint path or credential is sent.",
-	"Raw prompt text is not stored: a call records a canonical request SHA-256 and size plus scope flags. Run `passquest tutor preview` to inspect the exact text before sending.",
+	"Raw prompt text is not stored: a call records the SHA-256 and byte size of the exact serialized request body plus scope flags. Run `passquest tutor preview` to inspect the exact text before sending.",
 	"Private imported source text is withheld until a recorded `tutor consent` event for that source; first-party material needs no consent.",
 	"A failed or malformed provider response is recorded as a failure and cannot append an attempt, change a grade or edit an answer key.",
 	"The daily call budget counts failed calls and resets at 00:00 UTC. No retry is attempted automatically.",

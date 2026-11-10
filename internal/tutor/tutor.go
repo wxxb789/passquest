@@ -169,9 +169,9 @@ type Message struct {
 	Content string `json:"content"`
 }
 
-// Chat is the exact provider request body. The preview shows it and the host
-// sends it without adding content, so a learner can inspect what leaves the
-// machine.
+// Chat is the provider request content: model, messages and bounds. The
+// preview shows it, and HostRequest.Body carries its exact serialization so a
+// learner can inspect what leaves the machine.
 type Chat struct {
 	Model       string    `json:"model"`
 	Messages    []Message `json:"messages"`
@@ -181,13 +181,17 @@ type Chat struct {
 }
 
 // HostRequest is one versioned stdin document for the Node host. The endpoint
-// and bounds are transport configuration; Chat is the provider body.
+// and bounds are transport configuration; Chat is the request content, and
+// Body is its exact serialization. The host validates Body against Chat and
+// posts those bytes without re-encoding them, so RequestSHA and RequestBytes
+// identify the bytes that left the machine.
 type HostRequest struct {
 	ProtocolVersion  int    `json:"protocol_version"`
 	Endpoint         string `json:"endpoint"`
 	TimeoutMS        int64  `json:"timeout_ms"`
 	MaxResponseChars int    `json:"max_response_chars"`
 	Chat             Chat   `json:"chat"`
+	Body             string `json:"body"`
 }
 
 // Usage is provider-reported token accounting. It is optional because a
@@ -213,6 +217,10 @@ type HostResponse struct {
 	LatencyMS       int64      `json:"latency_ms"`
 	Usage           *Usage     `json:"usage,omitempty"`
 	Error           *HostError `json:"error,omitempty"`
+	// RequestSent is true only when the host invoked the provider request. A
+	// failure before that point (configuration, missing credential) leaves
+	// private text on this machine, so it cannot be recorded as shared.
+	RequestSent bool `json:"request_sent"`
 }
 
 // Valid error codes. An unknown host code is folded into host_error by the
@@ -321,6 +329,8 @@ type Target struct {
 
 // Preview is the exact request plus the local context that explains it.
 type Preview struct {
+	// Request is the host document. RequestSHA and RequestBytes describe
+	// Request.Body, the bytes the host posts to the provider.
 	Request      HostRequest
 	RequestSHA   string
 	RequestBytes int
@@ -338,6 +348,8 @@ type Context struct {
 	ContentMatched              bool     `json:"content_matched"`
 	ContentChanged              bool     `json:"content_changed"`
 	ContentUnavailable          bool     `json:"content_unavailable"`
+	ContentIncluded             bool     `json:"content_included"`
+	StoredTextIncluded          bool     `json:"stored_text_included"`
 	Skills                      []string `json:"skills"`
 	SkillsMappedFromCurrentTags bool     `json:"skills_mapped_from_current_tags"`
 	TruncatedFields             []string `json:"truncated_fields"`
@@ -413,6 +425,7 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 	}
 
 	questionTextSent := false
+	storedTextIncluded := false
 	if includeCurrent {
 		questionTextSent = true
 		passage := target.PassageText
@@ -458,9 +471,11 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 		} else if includeStored {
 			if target.SelectedLabel != "" {
 				sections = append(sections, fmt.Sprintf("Recorded selection: %s — %s", target.SelectedLabel, target.SelectedText))
+				storedTextIncluded = true
 			}
 			if strings.TrimSpace(target.CorrectLabel) != "" {
 				sections = append(sections, fmt.Sprintf("Recorded verified key: %s — %s", target.CorrectLabel, target.CorrectText))
+				storedTextIncluded = true
 			}
 		}
 	}
@@ -499,6 +514,7 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 		TimeoutMS:        cfg.TimeoutMS,
 		MaxResponseChars: MaxResponseChars,
 		Chat:             chat,
+		Body:             string(encoded),
 	}
 	return Preview{
 		Request:      request,
@@ -509,11 +525,13 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 			SourceID:                    target.SourceID,
 			ConsentRequired:             target.PrivateSource,
 			ConsentGranted:              target.ConsentGranted,
-			SourceTextShared:            target.PrivateSource && target.ConsentGranted && (questionTextSent || includeStored),
+			SourceTextShared:            target.PrivateSource && target.ConsentGranted && (questionTextSent || storedTextIncluded),
 			Withheld:                    dedupe(withheld),
 			ContentMatched:              target.ContentMatched,
 			ContentChanged:              target.ContentChanged,
 			ContentUnavailable:          !target.ContentMatched,
+			ContentIncluded:             includeCurrent,
+			StoredTextIncluded:          storedTextIncluded,
 			Skills:                      append([]string(nil), target.Skills...),
 			SkillsMappedFromCurrentTags: target.SkillsMappedFromCurrentTags,
 			TruncatedFields:             dedupe(truncated),

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Pass Quest tutor host.
 //
-// Reads one versioned JSON request from stdin, sends one OpenAI-compatible
-// non-streaming chat request, and writes one versioned JSON result to stdout.
-// This file is the product's only network egress. It never logs, never writes
-// the credential anywhere except the Authorization header, and never follows a
-// redirect. See docs/tutor.md and agent/README.md.
+// Reads one versioned JSON request from stdin, posts the exact request body it
+// carries to one OpenAI-compatible non-streaming chat endpoint, and writes one
+// versioned JSON result to stdout. This file is the product's only network
+// egress. It never logs, never writes the credential anywhere except the
+// Authorization header, and never follows a redirect. See docs/tutor.md and
+// agent/README.md.
 
 const PROTOCOL_VERSION = 1;
 const CREDENTIAL_ENV = "PASSQUEST_TUTOR_API_KEY";
@@ -64,6 +65,31 @@ function validateEndpoint(raw) {
   return { url };
 }
 
+const BODY_KEYS = ["max_tokens", "messages", "model", "stream", "temperature"];
+
+// canonicalBody reduces a request body to its five meaningful fields so the Go
+// client's serialization and the parsed body can be compared as values.
+function canonicalBody(value) {
+  const messages = Array.isArray(value && value.messages)
+    ? value.messages.map((message) => ({ role: message && message.role, content: message && message.content }))
+    : null;
+  return JSON.stringify({
+    model: value && value.model,
+    messages,
+    max_tokens: value && value.max_tokens,
+    temperature: value && value.temperature,
+    stream: value && value.stream,
+  });
+}
+
+// sameBody reports whether the posted body carries exactly the validated chat
+// content. The host rejects a mismatch instead of guessing which one to send.
+function sameBody(posted, chat) {
+  if (!posted || typeof posted !== "object" || Array.isArray(posted)) return false;
+  if (Object.keys(posted).sort().join(",") !== BODY_KEYS.join(",")) return false;
+  return canonicalBody(posted) === canonicalBody(chat);
+}
+
 function validateRequest(request) {
   if (!request || typeof request !== "object" || Array.isArray(request)) return "request must be a JSON object";
   if (request.protocol_version !== PROTOCOL_VERSION) return `protocol_version must be ${PROTOCOL_VERSION}`;
@@ -83,12 +109,23 @@ function validateRequest(request) {
     if (!message || typeof message !== "object") return "every chat message must be an object";
     if (typeof message.role !== "string" || message.role.trim() === "") return "every chat message needs a role";
     if (typeof message.content !== "string" || message.content.trim() === "") return "every chat message needs content";
-    total += message.content.length;
+    // Code points, matching the Go client's utf8.RuneCountInString bound; a
+    // UTF-16 length would reject astral text the documented bound allows.
+    total += Array.from(message.content).length;
   }
   if (total > 20000) return "chat messages exceed the local size bound";
   if (!Number.isInteger(chat.max_tokens) || chat.max_tokens < 64 || chat.max_tokens > 2048) return "chat.max_tokens is invalid";
   if (chat.temperature !== 0) return "chat.temperature must be 0";
   if (chat.stream !== false) return "chat.stream must be false";
+  if (typeof request.body !== "string" || request.body.trim() === "") return "body is required";
+  if (Buffer.byteLength(request.body) > MAX_STDIN_BYTES) return "body exceeds 1 MiB";
+  let posted;
+  try {
+    posted = JSON.parse(request.body);
+  } catch {
+    return "body is not valid JSON";
+  }
+  if (!sameBody(posted, chat)) return "body does not match chat";
   return null;
 }
 
@@ -144,14 +181,9 @@ async function main() {
   if (endpoint.error) return failure("config_error", endpoint.error, { latency_ms: Date.now() - started });
   if (!credential) return failure("missing_credential", `${CREDENTIAL_ENV} is not set`, { latency_ms: Date.now() - started });
 
-  const chat = request.chat;
-  const body = JSON.stringify({
-    model: chat.model,
-    messages: chat.messages.map((message) => ({ role: message.role, content: message.content })),
-    max_tokens: chat.max_tokens,
-    temperature: 0,
-    stream: false,
-  });
+  // The body was validated against the chat content above; posting these
+  // exact bytes keeps the client's recorded SHA-256 and size truthful.
+  const body = request.body;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), request.timeout_ms);
@@ -174,11 +206,22 @@ async function main() {
   } catch (error) {
     const aborted = controller.signal.aborted;
     const latency = Date.now() - started;
-    if (aborted) return failure("timeout", `provider did not answer within ${request.timeout_ms} ms`, { latency_ms: latency });
-    if (error instanceof Error && error.message === "__body_too_large__") {
-      return failure("invalid_response", "provider response exceeds 1 MiB", { latency_ms: latency });
+    if (aborted) {
+      return failure("timeout", `provider did not answer within ${request.timeout_ms} ms`, {
+        latency_ms: latency,
+        request_sent: true,
+      });
     }
-    return failure("network_error", error instanceof Error ? error.message : String(error), { latency_ms: latency });
+    if (error instanceof Error && error.message === "__body_too_large__") {
+      return failure("invalid_response", "provider response exceeds 1 MiB", {
+        latency_ms: latency,
+        request_sent: true,
+      });
+    }
+    return failure("network_error", error instanceof Error ? error.message : String(error), {
+      latency_ms: latency,
+      request_sent: true,
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -191,17 +234,20 @@ async function main() {
       return failure("auth_failed", message || `provider rejected the credential (HTTP ${status})`, {
         http_status: status,
         latency_ms: latency,
+        request_sent: true,
       });
     }
     if (status === 429) {
       return failure("rate_limited", message || "provider rate limit reached (HTTP 429)", {
         http_status: status,
         latency_ms: latency,
+        request_sent: true,
       });
     }
     return failure("provider_error", message || `provider returned HTTP ${status}`, {
       http_status: status,
       latency_ms: latency,
+      request_sent: true,
     });
   }
 
@@ -209,7 +255,11 @@ async function main() {
   try {
     data = JSON.parse(responseBody);
   } catch {
-    return failure("invalid_response", "provider response is not JSON", { http_status: status, latency_ms: latency });
+    return failure("invalid_response", "provider response is not JSON", {
+      http_status: status,
+      latency_ms: latency,
+      request_sent: true,
+    });
   }
   const content = data && data.choices && data.choices[0] && data.choices[0].message
     ? data.choices[0].message.content
@@ -218,18 +268,22 @@ async function main() {
     return failure("invalid_response", "provider response has no text content", {
       http_status: status,
       latency_ms: latency,
+      request_sent: true,
     });
   }
-  if (content.length > request.max_response_chars) {
+  const contentChars = Array.from(content).length;
+  if (contentChars > request.max_response_chars) {
     return failure("invalid_response", "provider text exceeds the configured bound", {
       http_status: status,
       latency_ms: latency,
+      request_sent: true,
     });
   }
   if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/.test(content)) {
     return failure("invalid_response", "provider text contains a terminal control character", {
       http_status: status,
       latency_ms: latency,
+      request_sent: true,
     });
   }
 
@@ -239,6 +293,7 @@ async function main() {
     text: content.trim(),
     http_status: status,
     latency_ms: latency,
+    request_sent: true,
   };
   const usage = data.usage;
   if (

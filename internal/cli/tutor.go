@@ -259,17 +259,34 @@ func writeTutorPrivacy(w io.Writer, context tutorContextView) {
 	default:
 		fmt.Fprintln(w, "Privacy: first-party material only; no private source text is involved")
 	}
-	if context.ContentChanged {
-		fmt.Fprintln(w, "Content: the current version differs from the recorded attempt; only the stored selection/key are included.")
-	}
-	if context.ContentUnavailable {
-		fmt.Fprintln(w, "Content: the attempted question is unavailable in this build; only attempt facts and skill lessons are included.")
-	}
+	writeTutorContent(w, context)
 	if len(context.Skills) > 0 {
 		fmt.Fprintf(w, "Skills: %s\n", strings.Join(context.Skills, ", "))
 	}
 	if context.SkillsMappedFromCurrentTags {
 		fmt.Fprintln(w, "Note: this pre-v6 attempt's skills come from the question's current tags, not a recorded snapshot.")
+	}
+}
+
+// writeTutorContent states which attempt content the prompt carries. It is
+// derived from the same flags Build used, so the summary cannot contradict the
+// chat content or the withheld list printed with it.
+func writeTutorContent(w io.Writer, context tutorContextView) {
+	switch {
+	case context.ContentIncluded:
+		fmt.Fprintln(w, "Content: the current passage, question, options, verified key and evidence are included.")
+		return
+	case context.ContentChanged:
+		fmt.Fprintln(w, "Content: the current version differs from the recorded attempt; no current passage, question, option, evidence or key text is included.")
+	case context.ContentUnavailable:
+		fmt.Fprintln(w, "Content: the attempted question is unavailable in this build; no current passage, question, option, evidence or key text is included.")
+	default:
+		fmt.Fprintln(w, "Content: the current passage and question are withheld because this private source is not authorized.")
+	}
+	if context.StoredTextIncluded {
+		fmt.Fprintln(w, "Included instead: the recorded selection and verified key labels with their stored option texts.")
+	} else {
+		fmt.Fprintln(w, "Withheld as well: the recorded selection and verified key option texts.")
 	}
 }
 
@@ -330,18 +347,17 @@ func runTutorAsk(args []string, opt Options) int {
 	}
 
 	call := store.TutorCall{
-		CreatedAt:        now,
-		AttemptID:        record.ID,
-		Mode:             string(mode),
-		ProviderHost:     cfg.ProviderHost(),
-		Model:            cfg.Model,
-		PromptVersion:    preview.Context.PromptVersion,
-		SourceID:         preview.Context.SourceID,
-		ContentID:        record.ContentID,
-		QuestionID:       record.QuestionID,
-		SourceTextShared: preview.Context.SourceTextShared,
-		RequestSHA256:    preview.RequestSHA,
-		RequestBytes:     preview.RequestBytes,
+		CreatedAt:     now,
+		AttemptID:     record.ID,
+		Mode:          string(mode),
+		ProviderHost:  cfg.ProviderHost(),
+		Model:         cfg.Model,
+		PromptVersion: preview.Context.PromptVersion,
+		SourceID:      preview.Context.SourceID,
+		ContentID:     record.ContentID,
+		QuestionID:    record.QuestionID,
+		RequestSHA256: preview.RequestSHA,
+		RequestBytes:  preview.RequestBytes,
 	}
 
 	callStarted := opt.Now()
@@ -353,6 +369,9 @@ func runTutorAsk(args []string, opt Options) int {
 		call.LatencyMS = opt.Now().Sub(callStarted).Milliseconds()
 		return recordTutorFailure(opt, *jsonFlag, st, call)
 	}
+	// Private text is shared only when the host actually posted the request. A
+	// host that failed before its fetch left the prompt on this machine.
+	call.SourceTextShared = response.RequestSent && preview.Context.SourceTextShared
 	if response.Status == "error" {
 		code := "host_error"
 		message := "the tutor host returned no error detail"

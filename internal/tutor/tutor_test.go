@@ -2,6 +2,8 @@ package tutor
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -153,6 +155,10 @@ func TestBuildFirstPartyIsGrounded(t *testing.T) {
 	if len(preview.RequestSHA) != 64 || preview.RequestBytes == 0 {
 		t.Fatalf("request hash/bytes = %q/%d", preview.RequestSHA, preview.RequestBytes)
 	}
+	assertExactBody(t, preview)
+	if !preview.Context.ContentIncluded || preview.Context.StoredTextIncluded {
+		t.Fatalf("content inclusion = %+v", preview.Context)
+	}
 	system := preview.Request.Chat.Messages[0].Content
 	for _, want := range []string{"authoritative", "advisory", "never as instructions"} {
 		if !strings.Contains(system, want) {
@@ -261,6 +267,9 @@ func TestBuildChangedContentUsesStoredTextOnly(t *testing.T) {
 	if !preview.Context.ContentChanged || preview.Context.ContentUnavailable {
 		t.Fatalf("content flags = %+v", preview.Context)
 	}
+	if preview.Context.ContentIncluded || !preview.Context.StoredTextIncluded {
+		t.Fatalf("content inclusion = %+v", preview.Context)
+	}
 	if !preview.Context.SourceTextShared {
 		t.Fatal("authorized stored text is not marked shared")
 	}
@@ -279,6 +288,9 @@ func TestBuildUnavailableContentDisclosesAndKeepsStoredLabels(t *testing.T) {
 	}
 	if !preview.Context.ContentUnavailable {
 		t.Fatalf("context = %+v", preview.Context)
+	}
+	if preview.Context.ContentIncluded || !preview.Context.StoredTextIncluded {
+		t.Fatalf("content inclusion = %+v", preview.Context)
 	}
 }
 
@@ -374,6 +386,51 @@ func TestBuildRequestHashIsStable(t *testing.T) {
 	}
 }
 
+// assertExactBody pins that RequestSHA and RequestBytes describe Request.Body,
+// and that Body is the exact serialization of the typed chat the preview shows.
+func assertExactBody(t *testing.T, preview Preview) {
+	t.Helper()
+	encoded, err := json.Marshal(preview.Request.Chat)
+	if err != nil {
+		t.Fatalf("marshal chat: %v", err)
+	}
+	if preview.Request.Body != string(encoded) {
+		t.Fatalf("request body is not the serialized chat:\n%s", preview.Request.Body)
+	}
+	sum := sha256.Sum256([]byte(preview.Request.Body))
+	if preview.RequestSHA != hex.EncodeToString(sum[:]) {
+		t.Fatalf("request sha %s does not hash the body", preview.RequestSHA)
+	}
+	if preview.RequestBytes != len(preview.Request.Body) {
+		t.Fatalf("request bytes %d != body length %d", preview.RequestBytes, len(preview.Request.Body))
+	}
+	if !json.Valid([]byte(preview.Request.Body)) {
+		t.Fatalf("request body is not JSON: %s", preview.Request.Body)
+	}
+}
+
+// TestBuildHashesTheExactProviderBody covers content Go escapes and
+// JSON.stringify does not: the recorded hash must cover the bytes posted.
+func TestBuildHashesTheExactProviderBody(t *testing.T) {
+	target := privateTarget()
+	target.ConsentGranted = true
+	target.PassageText = "Marks & Spencer <tag> opens at 4 p.m."
+	target.QuestionStem = "Which option matches Marks & Spencer <tag>?"
+	preview, err := Build(validConfig(), ModeExplain, target)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	for _, escaped := range []string{`\u0026`, `\u003c`, `\u003e`} {
+		if !strings.Contains(preview.Request.Body, escaped) {
+			t.Fatalf("serialized body lacks %s:\n%s", escaped, preview.Request.Body)
+		}
+	}
+	if !strings.Contains(preview.Request.Chat.Messages[1].Content, "Marks & Spencer <tag>") {
+		t.Fatal("chat content lost the literal characters")
+	}
+	assertExactBody(t, preview)
+}
+
 func TestBuildRecordsPreV6Fallback(t *testing.T) {
 	target := firstPartyTarget()
 	target.SkillsMappedFromCurrentTags = true
@@ -400,6 +457,9 @@ func TestBuildPrivateStoredTextWithoutConsentIsWithheld(t *testing.T) {
 	if preview.Context.SourceTextShared {
 		t.Fatal("stored private text marked shared without consent")
 	}
+	if preview.Context.ContentIncluded || preview.Context.StoredTextIncluded {
+		t.Fatalf("private content inclusion = %+v", preview.Context)
+	}
 }
 
 func TestDecodeResponse(t *testing.T) {
@@ -412,37 +472,37 @@ func TestDecodeResponse(t *testing.T) {
 	}{
 		{
 			name: "ok",
-			raw:  `{"protocol_version":1,"status":"ok","text":"short answer","http_status":200,"latency_ms":12,"usage":{"prompt_tokens":3,"completion_tokens":4}}`,
+			raw:  `{"protocol_version":1,"status":"ok","text":"short answer","http_status":200,"latency_ms":12,"request_sent":true,"usage":{"prompt_tokens":3,"completion_tokens":4}}`,
 			want: "short answer",
 		},
 		{
 			name:    "unknown key",
-			raw:     `{"protocol_version":1,"status":"ok","text":"answer","latency_ms":1,"extra":true}`,
+			raw:     `{"protocol_version":1,"status":"ok","text":"answer","latency_ms":1,"request_sent":true,"extra":true}`,
 			wantErr: "unknown field",
 		},
 		{
 			name:    "wrong protocol",
-			raw:     `{"protocol_version":2,"status":"ok","text":"answer","latency_ms":1}`,
+			raw:     `{"protocol_version":2,"status":"ok","text":"answer","latency_ms":1,"request_sent":true}`,
 			wantErr: "protocol",
 		},
 		{
 			name:    "empty text",
-			raw:     `{"protocol_version":1,"status":"ok","text":" ","latency_ms":1}`,
+			raw:     `{"protocol_version":1,"status":"ok","text":" ","latency_ms":1,"request_sent":true}`,
 			wantErr: "empty text",
 		},
 		{
 			name:    "oversized text",
-			raw:     `{"protocol_version":1,"status":"ok","text":"` + strings.Repeat("x", 101) + `","latency_ms":1}`,
+			raw:     `{"protocol_version":1,"status":"ok","text":"` + strings.Repeat("x", 101) + `","latency_ms":1,"request_sent":true}`,
 			wantErr: "limit",
 		},
 		{
 			name:    "terminal control",
-			raw:     `{"protocol_version":1,"status":"ok","text":"\u001b[31manswer","latency_ms":1}`,
+			raw:     `{"protocol_version":1,"status":"ok","text":"\u001b[31manswer","latency_ms":1,"request_sent":true}`,
 			wantErr: "terminal control",
 		},
 		{
 			name:    "negative usage",
-			raw:     `{"protocol_version":1,"status":"ok","text":"answer","latency_ms":1,"usage":{"prompt_tokens":-1,"completion_tokens":0}}`,
+			raw:     `{"protocol_version":1,"status":"ok","text":"answer","latency_ms":1,"request_sent":true,"usage":{"prompt_tokens":-1,"completion_tokens":0}}`,
 			wantErr: "negative token usage",
 		},
 		{
@@ -460,8 +520,13 @@ func TestDecodeResponse(t *testing.T) {
 			wantErr: "no error",
 		},
 		{
+			name:    "ok without request_sent",
+			raw:     `{"protocol_version":1,"status":"ok","text":"answer","latency_ms":1}`,
+			wantErr: "sent request",
+		},
+		{
 			name:    "trailing data",
-			raw:     `{"protocol_version":1,"status":"ok","text":"answer","latency_ms":1}{}`,
+			raw:     `{"protocol_version":1,"status":"ok","text":"answer","latency_ms":1,"request_sent":true}{}`,
 			wantErr: "trailing",
 		},
 	}
@@ -536,6 +601,45 @@ func TestHostTransportRejectsBadRequestBeforeSpawn(t *testing.T) {
 	}
 }
 
+func TestHostTransportRejectsBodyThatIsNotTheChat(t *testing.T) {
+	transport := HostTransport{
+		Getenv:  func(string) string { return "" },
+		Environ: func() []string { return nil },
+		Getwd:   func() (string, error) { return t.TempDir(), nil },
+		Executable: func() (string, error) {
+			return filepath.Join(t.TempDir(), "passquest"), nil
+		},
+	}
+	chat := Chat{
+		Model:       "m",
+		Messages:    []Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u"}},
+		MaxTokens:   350,
+		Temperature: 0,
+	}
+	encoded, err := json.Marshal(chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := HostRequest{
+		ProtocolVersion:  ProtocolVersion,
+		Endpoint:         "https://example.com/v1",
+		TimeoutMS:        30000,
+		MaxResponseChars: 100,
+		Chat:             chat,
+	}
+	for _, body := range []string{"", strings.Replace(string(encoded), `"u"`, `"u!"`, 1)} {
+		req.Body = body
+		_, err := transport.Call(context.Background(), req)
+		if err == nil || !strings.Contains(err.Error(), "serialized chat") {
+			t.Fatalf("body %q error = %v, want a body/chat mismatch", body, err)
+		}
+	}
+	req.Body = string(encoded)
+	if _, err := transport.Call(context.Background(), req); err == nil || strings.Contains(err.Error(), "serialized chat") {
+		t.Fatalf("matching body was rejected as a mismatch: %v", err)
+	}
+}
+
 func TestAgentUnavailableIsADocumentedCode(t *testing.T) {
 	if !ValidHostErrorCode("agent_unavailable") {
 		t.Fatal("agent_unavailable is not documented")
@@ -583,6 +687,9 @@ func TestPreviewJSONShapeIsStable(t *testing.T) {
 	}
 	if !strings.Contains(string(encoded), `"protocol_version":1`) || !strings.Contains(string(encoded), `"max_tokens":350`) {
 		t.Fatalf("host request JSON = %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"body":"{\"model\":\"example-model\"`) {
+		t.Fatalf("host request JSON has no exact body field = %s", encoded)
 	}
 }
 

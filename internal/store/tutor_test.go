@@ -64,6 +64,10 @@ func TestMigrationFromVersionSixAddsTutorTables(t *testing.T) {
 		at, at); err != nil {
 		t.Fatalf("insert v6 attempt: %v", err)
 	}
+	if _, err := db.Exec(`INSERT INTO tactic_exposures (tactic_id, content_id, question_id, exposed_at)
+		VALUES ('not-except-polarity', 'sample-0001', 'q1', ?)`, at); err != nil {
+		t.Fatalf("insert v6 exposure: %v", err)
+	}
 	if _, err := db.Exec(`PRAGMA user_version = 6`); err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +89,14 @@ func TestMigrationFromVersionSixAddsTutorTables(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].QuestionID != "q1" {
 		t.Fatalf("v6 attempt after migration = %+v", list)
+	}
+	exposures, err := st.ListExposures()
+	if err != nil {
+		t.Fatalf("ListExposures: %v", err)
+	}
+	if len(exposures) != 1 || exposures[0].TacticID != "not-except-polarity" ||
+		exposures[0].ContentID != "sample-0001" || exposures[0].QuestionID != "q1" {
+		t.Fatalf("v6 exposures after migration = %+v", exposures)
 	}
 	if _, configured, err := st.TutorConfig(); err != nil || configured {
 		t.Fatalf("TutorConfig = configured %v, err %v", configured, err)

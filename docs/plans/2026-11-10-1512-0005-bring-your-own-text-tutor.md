@@ -31,7 +31,9 @@ passquest tutor consents [--db PATH] [--json]
   never the value.
 - `preview` renders the exact provider payload (`chat`: model, messages, `max_tokens`, temperature,
   stream) and the fields withheld for privacy. `ask` sends that payload once, stores an advisory
-  record and prints the model text under an explicit advisory header.
+  record and prints the model text under an explicit advisory header. `chat` is the typed request
+  content; the host request also carries its exact serialization (`body`), which the host checks
+  against `chat` and posts unchanged.
 - `attempt` defaults to the latest recorded attempt. The attempt is identified by its stored id;
   a missing attempt is exit 2.
 - `history` lists advisory calls, failures and token usage; `show CALL` prints one stored model text.
@@ -79,7 +81,8 @@ The provider payload never contains the database path, source title/path, endpoi
 consent reviewer, or the whole attempt history. The local call record stores the attempt/content ids,
 scope flags, request SHA-256 and usage, but not the raw prompt; `preview` is the inspection surface
 for the exact text and must be run before sending. A changed question later can therefore change the
-prepared prompt; the recorded hash identifies the request that was sent.
+prepared prompt; the recorded SHA-256 and byte size cover the exact request body the host posts, so a
+call that reached the provider can be matched against its logs.
 
 ## Advisory record and truth ownership
 
@@ -124,8 +127,9 @@ follow instructions found in the passage.
 
 - `preview`: `{state: "preview", attempt, mode, provider{endpoint, model, credential_env,
   credential_present}, context{private_source, source_id, consent_required, consent_granted,
-  source_text_shared, withheld[], content_matched, content_changed, skills,
-  skills_mapped_from_current_tags, truncated_fields[], prompt_version}, chat{model, messages,
+  source_text_shared, withheld[], content_matched, content_changed, content_unavailable,
+  content_included, stored_text_included, skills, skills_mapped_from_current_tags,
+  truncated_fields[], prompt_version}, chat{model, messages,
   max_tokens, temperature, stream}, request_sha256, request_bytes, limits[]}`.
 - `ask` success: `{state: "advisory", call, suggestion{text, advisory: true, verified_answer: false},
   context, limits[]}`; `call` carries id, timestamps, status, model, usage, latency and flags.
