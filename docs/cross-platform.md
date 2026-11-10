@@ -53,6 +53,12 @@ turns red.
   form. Normalise before comparing, or the same endpoint is accepted by one layer and refused by the
   other.
 - A child process on Windows is killed with `taskkill`-level semantics, not with a signal.
+- The Anki host validates its endpoint in Go and again in `agent/anki-host.mjs`; `new URL(...).hostname`
+  returns a bracketed IPv6 address, so the host strips brackets before the loopback check. Only a
+  loopback endpoint is accepted on either side.
+- A note export is written to a temporary file in the destination directory and renamed over the
+  target. The file is `0600` and the parent `0700` on POSIX; Windows has no POSIX mode, so only the
+  content and replacement are asserted there.
 
 ## Shell output
 
@@ -73,5 +79,5 @@ turns red.
 
 ## Gates
 
-`bun run gate` → 17 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
+`bun run gate` → 18 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
 gates run on all three OS in CI.

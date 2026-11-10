@@ -1,0 +1,209 @@
+# Anki notes from study
+
+Goal 0007 turns one high-value study moment into one concise Anki note. It is an owned integration,
+not an Anki clone: Pass Quest owns the local note identity, content revision and sync intent; Anki
+owns its note ids, cards and review scheduling after a push or import.
+
+A note is a **study aid**, not a verified answer key or grade. Nothing here changes an attempt, a
+question or a score.
+
+## Commands
+
+```bash
+# Draft from the latest attempt (an incorrect or skipped attempt is the default signal).
+passquest note propose
+passquest note propose --attempt 4 --mark "closes at 4 p.m." --json
+passquest note propose --content src-…-p024 --question q2 --mark "NOT stated"
+
+# See the exact four field values that would be written.
+passquest note preview
+passquest note preview --json
+
+# Accept the local revision, or close the draft without writing.
+passquest note accept
+passquest note accept --front "closes at 4 p.m." --back "Shut at a stated time.\n\nExample: …"
+passquest note skip
+
+# Inspect identity and retained history.
+passquest note show
+passquest note show note-…
+
+# Export an Anki-importable file, or push to a loopback AnkiConnect endpoint.
+passquest note export
+passquest note push
+passquest note push --endpoint http://127.0.0.1:8765 --force
+```
+
+Every command accepts `--db PATH`; the default is `$PASSQUEST_DB` or
+`./.passquest/passquest.sqlite`. `note model` prints the deck, model, CSS, card template and a rendered
+sample without touching the database.
+
+## What earns a note
+
+| Target | Allowed without a mark | Front |
+|---|---|---|
+| Incorrect attempt | yes | the recorded correct option text (the wording that was missed) |
+| Skipped attempt | yes | the question's registered tactic title, else the stem |
+| Correct attempt | no — `low_value` | the mark |
+| Reviewed question with no attempt | only with `--mark` | the mark |
+
+`--mark` is the learner's own wording, trimmed to one line of 1–120 characters. It is not treated as
+authoritative material. A note from an attempt refuses with `content_changed` if the question changed
+after that attempt; answer the current question again or propose from it with `--mark`. The same check
+runs at preview/accept if the content changes while a draft is open.
+
+The note carries four fields:
+
+- **Front** — the word or pattern.
+- **Back** — two plain paragraphs: an explanation and one exam-usable example. The explanation is
+  authored question/option reasoning when the learner already answered; otherwise it is a first-party
+  tactic principle or the visible stem. The example is the reviewed evidence sentence, or the stem
+  when the evidence is unavailable.
+- **Tactic** — the registered skill title (`NOT/EXCEPT polarity` for the tagged fixture), reused from
+  goal 0003 when the attempt or question carries one.
+- **Source** — `source-id · pNNN · question-id`, or `sample · content-id · question-id` for first-party
+  content. The imported source title is never used, so it cannot leak through a note.
+
+### Unanswered questions never include the key
+
+A skipped attempt is treated as unanswered for note content even though the attempt row records the
+key. A reviewed question with no attempt is allowed only with `--mark`. On that branch the builder
+does **not** read the correct label, the keyed option text, the keyed option reasoning or the question
+reasoning. It may use the passage sentence around the mark only when that sentence does not reproduce
+the keyed option or the evidence sentence; otherwise it falls back to the visible stem. The answer
+key is read solely to filter such a sentence, never to write it into the note.
+
+## Private source consent
+
+Every imported source is restricted, matching the goal-0005 private-source rule. Before consent:
+
+- `note preview` shows the tactic and source identifiers but withholds the front and back; the
+  `withheld` list names them.
+- `note accept` is refused with `consent_required`; a note without its example would be misleading.
+- `note export` and `note push` refuse a restricted note whose source is not currently authorized.
+
+```bash
+passquest tutor consent SOURCE --reviewer NAME
+passquest tutor revoke SOURCE --reviewer NAME
+```
+
+Consent is the existing append-only per-source ledger. `revoke` withholds the source on the next
+preview and blocks a new export or push; it does not delete a note the learner already accepted.
+First-party sample and skill content needs no consent.
+
+## Identity and revisions
+
+A note is identified by content, question and the marked wording:
+
+```text
+target_key = content_id + U+001F + question_id + U+001F + lower(trim(mark))
+note_id    = "note-" + first 16 hex of sha256(target_key)
+```
+
+One question without a mark is one note; two marks on the same question are two notes. Re-answering a
+question therefore cannot create a second card for the same lesson.
+
+`accept` writes the current content as a revision:
+
+- First accept: revision 1, a new local note.
+- An accept with identical content: `unchanged`, the same note id and revision; no revision row and no
+  new queue entry.
+- An edited accept (`--front`, `--back`, `--tactic`): revision `n+1`; every earlier revision stays in
+  append-only history and `note show` prints it.
+
+Drafts are transient proposals. An accepted draft stays open so a repeated or edited accept works;
+`note skip` closes it without writing anything. When more than one draft is open, `--draft ID`
+selects one; `preview`, `accept` and `skip` default to the latest open draft.
+
+## Export
+
+`note export` writes an Anki-importable text file, by default `<db dir>/passquest-notes.tsv`:
+
+```text
+#separator:tab
+#html:true
+#notetype:PassQuest Note
+#deck:Pass Quest
+#tags:passquest
+Front	Back	Tactic	Source
+…
+```
+
+Fields are HTML: text is escaped, newlines become `<br>`, and the back's blank line becomes the
+meaning/example paragraphs. The file is written `0600` in a `0700` directory through a temporary file
+in the destination directory, synced and renamed; a failure leaves an existing export untouched and
+removes the temporary file.
+
+Anki's text importer has no note id. Re-importing an edited export can create a duplicate card;
+`note push` is the revision path. The export file contains private note text and must be treated like
+the database.
+
+## AnkiConnect push
+
+The Go core never imports a network package. `note push` spawns the Node host `agent/anki-host.mjs`,
+which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and the Node binary with
+`PASSQUEST_NODE`.
+
+- Endpoint default `http://127.0.0.1:8765`, override with `--endpoint` or
+  `PASSQUEST_ANKI_ENDPOINT`. Only `http`/`https`, no userinfo/query/fragment, and the host must be
+  loopback (`127.0.0.1`, `localhost`, `[::1]`). A remote endpoint is refused with exit 2: a note can
+  contain private source text and AnkiConnect is a local bridge.
+- The host accepts one versioned document with at most 50 allow-listed actions: `version`,
+  `createDeck`, `modelNames`, `createModel`, `addNote`, `updateNoteFields`, `notesInfo`. It refuses
+  redirects and has no database or filesystem access.
+- `version` must be at least 6. The deck `Pass Quest` is created when missing; the model
+  `PassQuest Note` is created when `modelNames` does not contain it.
+- `addNote` uses `allowDuplicate: false`. Anki's duplicate error is reported as `already_present`
+  (exit 0) and the local revision is marked delivered; a later revision of that duplicate-only note is
+  a **conflict**, because AnkiConnect reports no note id for the existing card.
+- A revision with an Anki note id calls `notesInfo` first. If the fields no longer match the revision
+  last pushed, the card is a **conflict**: Anki is left untouched and `push` exits 3. `--force` is the
+  explicit overwrite. If the card is gone, it is re-added once and the new id is stored.
+- An update calls `updateNoteFields` for the recorded id, so no second card is created and Anki's
+  review history survives.
+- When no endpoint answers, every pending note stays queued and `push` exits 0. The next reachable
+  push drains each pending revision once; a second push sends nothing. A transport failure after a
+  request was sent also leaves the note pending: retrying is safe because `addNote` deduplicates and
+  `updateNoteFields` is idempotent.
+- A missing Node or host is `anki_unavailable` (exit 3) with the queue unchanged. `propose`, `preview`,
+  `accept`, `skip`, `show`, `model` and `export` work with no Node and no Anki.
+
+The local outbox is one desired revision per note with `pending`/`drained` state. Every acknowledged
+add/update/readd is appended to a per-note attempt ledger, so duplicate suppression and retries are
+countable.
+
+## Model and template
+
+Deck `Pass Quest`, model `PassQuest Note`, fields in order `Front`, `Back`, `Tactic`, `Source`.
+
+The CSS uses a system font stack (`-apple-system`, `BlinkMacSystemFont`, `Segoe UI`, `Roboto`,
+`Helvetica Neue`, `Arial`, `sans-serif`), comfortable line height, `max-width: 42rem`, and
+`overflow-wrap: anywhere`; it has no fixed height and no `overflow: hidden`, so a long imported
+sentence wraps at phone width. A small `.nightMode` contrast pair is included. There is no external
+font, stylesheet, script, image or URL. `note model` prints the whole template and a rendered sample.
+
+## Exit codes
+
+| Exit | Meaning |
+|---|---|
+| 0 | Success, including a queued push because no endpoint answered and an `already_present` duplicate. |
+| 2 | Invalid input, no open draft, low-value target, missing consent, no configured provider, not-practiceable question, remote endpoint, exhausted provider budget. |
+| 3 | Provider or Anki failure after an external attempt; Anki host unavailable; a conflict found by read-back. The local queue is retained. |
+| 1 | Local storage or export I/O failure. |
+
+## Limits
+
+- A real Anki Desktop write and AnkiWeb/mobile synchronization are **owner-supplied evidence**. This
+  machine has no Anki binary or endpoint; the adapter is proven against a loopback AnkiConnect stub.
+  CI cannot reach a learner's desktop on any OS.
+- Pass Quest never contacts AnkiWeb or a phone. Synchronization is the learner's own manual action in
+  Anki, and no output claims otherwise.
+- No Anki clone, own scheduling, `.apkg`, images, audio, AnkiWeb API calls or mobile apps.
+- `--refine` sends one provider request through the goal-0005 endpoint and shared daily budget. The
+  deterministic draft never needs a provider. Refined text is labelled advisory; the learner accepts
+  it explicitly.
+- `export` is a fallback, not a revision channel; re-importing an edited export may duplicate cards.
+- A conflict is never overwritten silently. Resolve it in Anki, or pass `--force`.
+
+Measured evidence: [`evidence/0007-anki-from-learning.md`](evidence/0007-anki-from-learning.md).
+Decisions: [`decisions/OPEN-QUESTIONS.md`](decisions/OPEN-QUESTIONS.md) (Q-0007-01..10).

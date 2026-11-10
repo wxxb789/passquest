@@ -568,3 +568,60 @@ Entry format:
   (C) create a new note and leave the old one.
 - Default taken: (A); a local revision that disagrees with what Anki holds is surfaced as a conflict, not
   silently overwritten.
+
+### Q-0007-07 — Must AnkiConnect be reached through a Node host?
+- Status: decided(default taken)
+- Context: the local-only gate forbids `net/http` in first-party packages, a note can contain private
+  source text, and AnkiConnect is an HTTP endpoint. Goal 0013 will eventually own a packaged runtime
+  lifecycle.
+- Options considered: (A) a second narrow Node host over the existing stdin/stdout pattern; (B) allow
+  `net/http` in an `internal/anki` package; (C) export only, with no adapter.
+- Default taken: (A). `agent/anki-host.mjs` is a 1–50 action allow-listed loopback transport; Go owns
+  endpoint validation, duplicate/missing-note/conflict classification and all queue state. Only
+  `note push` needs Node; drafting, previewing, accepting, skipping, showing, exporting and the model
+  view work with Go alone. Reverse by replacing `anki.HostTransport` behind the same
+  `anki.Transport` interface.
+- Revisit when: goal 0013 packages the desktop app with its own runtime lifecycle, or Node is absent
+  on a target platform.
+
+### Q-0007-08 — Is every imported source restricted for notes, and may accept write before consent?
+- Status: decided(default taken)
+- Context: the source model has no rights classification finer than the goal-0005 private-source
+  rule, and the contract requires restricted text to wait for a recorded consent.
+- Options considered: (A) every imported source is restricted, preview withholds front/back, accept
+  refuses until consent, and export/push re-check current consent; (B) only a marker-detected source
+  is restricted; (C) local accept is allowed and only export/push are gated.
+- Default taken: (A). A note without its example would be misleading, and a false "public" is
+  irreversible. `note preview` remains send-free and shows only first-party tactic text plus source
+  identifiers until consent; `accept` refuses with `consent_required`. A revoke blocks a later export
+  or push but does not delete an accepted local note. Reverse by adding a per-source rights field and
+  relaxing `noteEffectiveFor`/`runNoteAccept`.
+- Revisit when: an imported source carries an explicit redistribution or public-domain grant.
+
+### Q-0007-09 — What is note identity, and is a skipped attempt unanswered?
+- Status: decided(default taken)
+- Context: re-answering a question must not add a second card; a learner may mark two different words
+  on one question; a skipped attempt records a key the learner never selected.
+- Options considered: (A) one note per content + question + normalized mark, with a skipped attempt
+  treated as unanswered and an incorrect attempt allowed to include the key; (B) one note per
+  attempt; (C) one note per question always.
+- Default taken: (A). `note-<sha256(target_key)[:16]>` is stable across processes; an edited accept
+  appends a revision. A skipped or unattempted draft reads no correct label, keyed option text,
+  keyed option reasoning or question reasoning, and replaces a key-revealing passage sentence with
+  the visible stem. Reverse by changing `note.Target.Key` and the unanswered branch; stored
+  revisions remain.
+- Revisit when: a learner needs two unmarked notes per question, or goal 0009 defines a different
+  passage-exposure rule for notes.
+
+### Q-0007-10 — How is a provider refinement recorded and budgeted?
+- Status: decided(default taken)
+- Context: the contract allows refining a draft through the goal-0005 endpoint, but `tutor_calls`
+  requires an attempt id and a coaching mode, while a mark-only note may have no attempt.
+- Options considered: (A) a separate append-only `note_refinements` table sharing the tutor daily
+  budget through the same reservation ledger; (B) reuse `tutor_calls` with a new mode and attempt 0;
+  (C) omit provider refinement.
+- Default taken: (A). `note propose --refine` reserves one slot, records the model, prompt version,
+  request SHA-256/bytes, output, usage and failure, and releases the reservation in the same
+  transaction. `tutor history` reports the shared daily count but lists coaching calls only. Reverse
+  by adding a dedicated note budget display or removing the flag; deterministic drafts are unaffected.
+- Revisit when: goal 0010 introduces provider/capability choice or per-task budgets.

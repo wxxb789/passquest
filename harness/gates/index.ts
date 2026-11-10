@@ -11,6 +11,7 @@ import { goVet } from "./go-vet.ts";
 import { gofmt } from "./gofmt.ts";
 import { importSmoke } from "./import-smoke.ts";
 import { localOnly } from "./local-only.ts";
+import { noteSmoke } from "./note-smoke.ts";
 import { portablePaths } from "./portable-paths.ts";
 import { secrets } from "./secrets.ts";
 import { selfTest } from "./self-test.ts";
@@ -34,6 +35,7 @@ export const gates: Gate[] = [
   adaptiveSmoke,
   tutorSmoke,
   agentSmoke,
+  noteSmoke,
   portablePaths,
   selfTest,
 ];
