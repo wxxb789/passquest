@@ -50,6 +50,24 @@ Entry format:
   CI and for the language version.
 - Revisit when: a second machine or a contributor joins.
 
+### Q-0000-04 — Two agent loops are writing the same worktree and branch
+- Status: open
+- Context: while the agent loop was running goal 0001, two owner commits appeared on the same branch
+  in the same clone (`5e89188` D-0001 Bun/TS harness, `4a861ca` parsed private source). The reflog
+  shows a `reset --hard` + two commits + push from another process at the same second, i.e. a second
+  agent/loop edits `~/repos/passquest` directly. Two writers in one worktree can interleave stage
+  output and make a reviewed head unreproducible.
+- Options considered: (A) split file scopes — the other loop owns `data/`, `docs/decisions/`,
+  `harness/`; the delivery loop owns `cmd/`, `internal/`, `docs/goals|plans|evidence`, both
+  fetch-then-commit and stop on conflict; (B) the other loop works only in its own clone/worktree;
+  (C) the delivery loop stops until the owner finishes.
+- Default taken: (C) temporarily — the unattended conductor was stopped and the in-flight `apply` run
+  killed before it could commit. The working tree is clean at `4a861ca` and `bash scripts/gate.sh`
+  still reports `GATE: PASS` (45 links, 214 tracked files). The conductor now fetches and rebases
+  before every commit and push, blocks on a real conflict, and never force-pushes, so it can be
+  resumed safely under (A).
+- Revisit when: the owner answers, or a second concurrent commit appears while the conductor runs.
+
 ### Q-0001-01 — May a learner repeat a question after seeing the key, and how is it counted?
 - Status: decided(default taken)
 - Context: goal 0001 requires correct, incorrect, skipped and repeated attempts to be represented
