@@ -5,11 +5,13 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 ## Design and development
 
 - [Core Design](docs/core-design.md) — product purpose, safety, quality and architecture principles.
-- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0005
-  are done; 0006 is next.
+- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0006
+  are done; 0007 is next.
 - [Harness](docs/harness.md) — the single `bun run gate` entry point and what each gate reads.
 - [BYOK text tutor](docs/tutor.md) — one user-supplied text endpoint, advisory coaching, private
   source consent and credential handling.
+- [Durable agent work](docs/agent.md) — a bounded multi-step study brief on the Pi Durable runtime,
+  with pause/resume, cancellation, idempotent steps and an independent durable history.
 
 **Implementation order:** verified headless practice → private local baseline → scoring tactic
 practice → evidence-driven adaptation → user-supplied text coaching and durable agent work → Anki
@@ -112,6 +114,29 @@ and records `tutor consent SOURCE --reviewer NAME`; first-party exercises need n
 `revoke` appends a withholding event. Credentials are read only from `PASSQUEST_TUTOR_API_KEY` and
 are redacted from output and stored call records. Details: [`docs/tutor.md`](docs/tutor.md).
 Measured evidence: [`docs/evidence/0005-bring-your-own-text-tutor.md`](docs/evidence/0005-bring-your-own-text-tutor.md).
+
+## Resume agent work after interruption
+
+Goal 0006 adds one bounded multi-step `study-brief` on the real Pi Durable runtime. It builds a
+privacy-bounded evidence packet from recorded attempts and the adaptive policy, records up to six
+advisory steps through an idempotent application-owned effect, and can be paused, resumed or
+cancelled without duplicating content.
+
+```bash
+bun install                          # pinned Pi Durable workspace under agent/
+export PASSQUEST_TUTOR_API_KEY=...   # the host reads it; Pass Quest never stores it
+passquest agent start                # complete a bounded brief
+passquest agent status               # running / paused / completed / failed / needs action
+passquest agent cancel RUN           # stop a live host and refuse resume
+passquest agent resume RUN           # continue the same run and context
+passquest agent show RUN             # steps, event trail, effect reconciliation
+passquest agent transcript RUN       # the independent Pi history
+```
+
+The host is the only provider egress; Go owns the run record, the step commit and the verified
+history. `practice`, `report`, `next` and the tutor keep working when Node or the host is absent.
+Details: [`docs/agent.md`](docs/agent.md). Measured evidence:
+[`docs/evidence/0006-resumable-agent-work.md`](docs/evidence/0006-resumable-agent-work.md).
 
 ## Run the gates
 

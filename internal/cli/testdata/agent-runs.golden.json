@@ -1,0 +1,22 @@
+{
+  "limits": [
+    "Study steps are advisory model output, not verified answers, grades or exam facts.",
+    "The durable task carries recorded attempt facts, derived skill state and authored lesson text only; no private source text, answer key or learner identity.",
+    "One agent run at a time; a second start is refused until the current run completes or is cancelled."
+  ],
+  "runs": [
+    {
+      "attempts": 2,
+      "created_at": "2026-11-10T09:00:01Z",
+      "latest_event": "completed",
+      "max_steps": 3,
+      "model": "example-model",
+      "run_id": "run-20261110T100000Z-00000001",
+      "state": "completed",
+      "steps": 2,
+      "task": "study-brief"
+    }
+  ],
+  "schema_version": 1,
+  "state": "runs"
+}

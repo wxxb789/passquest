@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wxxb789/passquest/internal/agent"
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
@@ -39,6 +40,14 @@ type Options struct {
 	// TutorTransport isolates the CLI from the Node host. Tests inject a fake;
 	// production defaults to the stdin/stdout host process.
 	TutorTransport tutor.Transport
+	// AgentRunner isolates the durable-agent host. Tests inject a fake;
+	// production spawns agent/durable-host.mjs with the Pi runtime.
+	AgentRunner agent.Runner
+	// NewRunID isolates run identity for tests. Production uses a UTC
+	// timestamp plus random bits.
+	NewRunID func() (string, error)
+	// NewHostToken isolates heartbeat identity for tests.
+	NewHostToken func() (string, error)
 }
 
 func (o Options) withDefaults() Options {
@@ -62,6 +71,15 @@ func (o Options) withDefaults() Options {
 	}
 	if o.TutorTransport == nil {
 		o.TutorTransport = tutor.HostTransport{Getenv: o.Getenv, Environ: os.Environ}
+	}
+	if o.AgentRunner == nil {
+		o.AgentRunner = agent.HostRunner{Getenv: o.Getenv, Environ: os.Environ}
+	}
+	if o.NewRunID == nil {
+		o.NewRunID = func() (string, error) { return agent.NewRunID(o.Now()) }
+	}
+	if o.NewHostToken == nil {
+		o.NewHostToken = agent.NewHostToken
 	}
 	return o
 }
@@ -98,6 +116,8 @@ func Run(args []string, options Options) int {
 		return runNext(args[1:], opt)
 	case "tutor":
 		return runTutor(args[1:], opt)
+	case "agent":
+		return runAgent(args[1:], opt)
 	case "version":
 		return runVersion(opt)
 	case "help", "-h", "--help":
@@ -141,6 +161,14 @@ Usage:
   passquest tutor consent SOURCE --reviewer NAME [--db PATH] [--json]
   passquest tutor revoke  SOURCE --reviewer NAME [--db PATH] [--json]
   passquest tutor consents [--db PATH] [--json]
+  passquest agent start  [--task study-brief] [--max-steps N] [--timeout-seconds N]
+                     [--db PATH] [--agent-store PATH] [--json]
+  passquest agent status [RUN] [--db PATH] [--agent-store PATH] [--json]
+  passquest agent resume [RUN] [--timeout-seconds N] [--db PATH] [--agent-store PATH] [--json]
+  passquest agent cancel [RUN] [--wait-seconds N] [--db PATH] [--agent-store PATH] [--json]
+  passquest agent runs   [--db PATH] [--json]
+  passquest agent show   RUN [--db PATH] [--json]
+  passquest agent transcript RUN [--agent-store PATH] [--db PATH] [--limit N] [--json]
   passquest report   [--db PATH] [--json]
   passquest version
   passquest help

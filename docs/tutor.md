@@ -145,8 +145,8 @@ exchanges one versioned JSON document over stdin/stdout. The host validates the 
 bearer header, enforces the timeout and size bounds, and returns a structured result. If Node or the
 host is missing, `tutor ask` exits 3 with `agent_unavailable`; `tutor config`, `preview`, `history`,
 `show`, `consent`, `revoke` and `consents` never spawn the host, and ordinary practice, review, `next`
-and `report` keep working with Go alone. Goal 0006 can replace the per-call process with Pi Durable
-behind the same protocol.
+and `report` keep working with Go alone. Goal 0006 adds the separate Pi Durable host for bounded
+multi-step study briefs; `tutor ask` stays a single-shot call. See [agent.md](agent.md).
 
 ## Exit codes and failures
 
@@ -163,7 +163,8 @@ before and after the failure. `practice` still records and grades locally.
 ## Limits
 
 - One endpoint shape, one attempt and no streaming. Broad provider choice and capabilities are goal
-  0010; durable, resumable agent work is goal 0006.
+  0010; durable multi-step work lives in the separate `agent` commands ([agent.md](agent.md)), not in
+  `tutor ask`.
 - The credential lives in the environment until goal 0011's OS secret store. A learner must export it
   in each session or shell profile they control.
 - The model output is stored locally so the learner can reread it. It is not an answer key, a grade,

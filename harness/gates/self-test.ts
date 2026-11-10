@@ -9,6 +9,7 @@ import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
 import { adaptiveSmoke } from "./adaptive-smoke.ts";
+import { agentSmoke } from "./agent-smoke.ts";
 import { baseline } from "./baseline.ts";
 import { docsLinks } from "./docs-links.ts";
 import { goBuild } from "./go-build.ts";
@@ -314,6 +315,14 @@ function brokenCases(): BrokenCase[] {
     {
       gate: tutorSmoke,
       label: "CLI whose tutor output is not the protocol",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
+      },
+    },
+    {
+      gate: agentSmoke,
+      label: "CLI whose agent output is not the protocol",
       files: {
         "go.mod": GO_MOD,
         "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',

@@ -419,3 +419,83 @@ Entry format:
   `tutor_call_reservations`; no call or attempt record changes.
 - Revisit when: goal 0006 gives the host a durable call lifecycle that can report a call as finished
   or abandoned, or an operator needs the slot back before midnight.
+
+### Q-0006-01 — Which bounded agent task and side effect demonstrate interruption safety?
+- Status: decided(default taken)
+- Context: goal 0006 requires a real, nontrivial multi-step AI task whose side effect can be
+  interrupted/retried without duplicate learner evidence or content. The options had to fit before
+  Anki notes (0007) and resource discovery (0008), and could not invent an answer key or publish
+  private text.
+- Options considered: (A) a `study-brief` that records 2–3 advisory teaching steps through an
+  application-owned command; (B) a content-analysis task that proposes lesson rows; (C) an Anki-note
+  outbox, which would pre-empt goal 0007.
+- Default taken: (A). The packet contains recorded attempt facts, derived skill state and authored
+  lesson text only; the only tool is `record_study_step`, idempotent on `run_id:step_index`, with one
+  ledger row per invocation and one `reconciled` event per duplicate. `PASSQUEST_AGENT_FAULT=kill-after-step`
+  proves a crash after the commit reruns the same call without duplicate content. Reverse by adding a
+  new task kind and tool; stored steps and attempts are unaffected.
+- Revisit when: goal 0007 or 0008 introduces a note/resource effect, or real use shows the brief is
+  not useful enough to keep as the durable task.
+
+### Q-0006-02 — Is Pi Durable worth a product-runtime dependency now, and where does its state live?
+- Status: decided(default taken)
+- Context: the contract names the intended Pi Durable runtime, which is experimental (1.5.1), requires
+  Node ≥ 22.19 and pulls a large dependency tree. The core cannot import network packages, and the
+  application and agent have different lifecycles.
+- Options considered: (A) pin Pi Durable as a Bun workspace under `agent/`, with its own SQLite file;
+  (B) reimplement a durable loop in Go/Node; (C) keep the single-shot tutor host and defer.
+- Default taken: (A). `agent/package.json` pins `@earendil-works/pi-durable`, `pi-ai` and `chord` at
+  1.5.1; `bun install` at the root installs the workspace; the Pi store is
+  `<db dir>/<db base>-agent.sqlite` (`PASSQUEST_AGENT_STORE` overrides) and is recorded in the run.
+  Agent commands need Node; ordinary practice and the Go core do not. Reverse by replacing the host
+  behind the versioned document; the application run/effect tables stay.
+- Revisit when: Pi's API changes incompatibly, packaging goal 0013 starts, or the dependency tree is a
+  material install problem on a target platform.
+
+### Q-0006-03 — How is one run paused, resumed and cancelled across processes?
+- Status: decided(default taken)
+- Context: Pi allows one writer per storage, so a second process cannot safely write the durable state
+  while the host runs. The contract also forbids invisible uncontrolled execution and requires
+  running/paused/completed/failed/needs-action visibility.
+- Options considered: (A) application events plus POSIX signals and a 1-second heartbeat file;
+  (B) a long-lived agent service with an IPC socket; (C) terminal Ctrl-C only, with no cross-process
+  cancel.
+- Default taken: (A). `start`/`resume` run one host; a timeout or CLI signal sends SIGTERM, the host
+  closes with work pending, the application records `interrupted` and exits 4. `cancel` appends
+  `cancel_requested` first, sends SIGINT on POSIX (durable abort) or kills on Windows, waits up to
+  `--wait-seconds` for the heartbeat to stop, escalates to a kill, and records `cancelled` with
+  `confirmed`; resume refuses afterwards. The host is placed in its own process group so terminal
+  signals are the CLI's decision. One unfinished run is allowed per application database. Reverse by
+  replacing the signalling layer with a service; the event trail remains authoritative.
+- Revisit when: goal 0011 introduces a desktop lifecycle, or a target platform cannot stop a child
+  promptly.
+
+### Q-0006-04 — Which failures are `failed` and which are `needs_action`, and do agent calls count against the tutor budget?
+- Status: decided(default taken)
+- Context: the contract lists `failed` and `needs action` as distinct observable states but does not
+  define the boundary. Goal 0005 already has a daily-call ledger for one-call tutoring.
+- Options considered: (A) user-actionable provider/host failures are `needs_action`; malformed or
+  non-retryable task failures are `failed`; agent runs use a turn bound rather than the tutor ledger;
+  (B) every non-completed run is `failed`; (C) every provider failure is `needs_action` and agent
+  calls consume the daily ledger.
+- Default taken: (A). `missing_credential`, 401/403, 429, model/config 4xx, timeout, network, 5xx,
+  an `interrupted` run and `agent_unavailable` are `needs_action` with an action hint; `invalid_response`, host protocol or
+  storage errors, `no_steps`, `turn_limit`, `task_faulted`, `orphaned` and `restart_limit` are
+  `failed`. `resume` is the retry path; it refuses a completed run and a `no_steps` failure. A run is
+  capped at `max_turns + 1` provider requests and the configured timeout, not the `tutor` daily
+  ledger. Reverse by changing the classifier and adding a run-level reservation.
+- Revisit when: goal 0010 adds provider capabilities/budgets, or a real learner needs one spend cap
+  across tutor and agent calls.
+
+### Q-0006-05 — Does a resumed run use the current model or the recorded one?
+- Status: decided(default taken)
+- Context: a run can be interrupted, then the learner changes `tutor config` (endpoint, model,
+  timeout, output bound) before resuming. Switching models mid-task changes the durable conversation's
+  context and can invalidate prior output; keeping the old model can preserve a typo.
+- Options considered: (A) bind the run to its recorded model but use the current endpoint, timeout and
+  credential; (B) always use the current model; (C) refuse resume when any configuration changed.
+- Default taken: (A). `resume` uses the model stored on the run, so a corrected endpoint or credential
+  is picked up but a model rename needs `cancel` + `start`. The status/resume text says so. Reverse by
+  configuring the conversation to the current model before resume; the transcript records the model
+  per answer.
+- Revisit when: goal 0010 exposes provider/model choice or a run needs planned model hand-off.
