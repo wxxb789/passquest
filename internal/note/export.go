@@ -40,7 +40,14 @@ func ExportBytes(rows []Fields) ([]byte, error) {
 				return nil, fmt.Errorf("note: field %s of row %d contains a tab or newline", name, i+1)
 			}
 		}
-		fmt.Fprintf(&builder, "%s\t%s\t%s\t%s\n", row.Front, row.Back, row.Tactic, row.Source)
+		// Anki's text importer reads a row starting with '#' as an option or
+		// comment line. The entity keeps the learner's visible text while making
+		// the row unambiguously data.
+		front := row.Front
+		if strings.HasPrefix(front, "#") {
+			front = "&#35;" + front[1:]
+		}
+		fmt.Fprintf(&builder, "%s\t%s\t%s\t%s\n", front, row.Back, row.Tactic, row.Source)
 	}
 	return []byte(builder.String()), nil
 }

@@ -202,6 +202,7 @@ type notePushItemView struct {
 	AnkiNoteID int64  `json:"anki_note_id,omitempty"`
 	State      string `json:"state"`
 	Outcome    string `json:"outcome"`
+	Code       string `json:"code,omitempty"`
 	Detail     string `json:"detail,omitempty"`
 }
 
@@ -214,6 +215,7 @@ type notePushDoc struct {
 	ModelCreated  bool               `json:"model_created"`
 	Counts        notePushCounts     `json:"counts"`
 	Notes         []notePushItemView `json:"notes"`
+	Error         *errorBody         `json:"error,omitempty"`
 	Limits        []string           `json:"limits"`
 }
 
@@ -253,7 +255,7 @@ func noteViewOf(n store.Note) noteView {
 	return noteView{
 		NoteID:     n.NoteID,
 		Revision:   n.Revision,
-		Target:     noteTargetViewOf(n.ContentID, n.QuestionID, n.SourceID, n.Page, n.AttemptID, ""),
+		Target:     noteTargetViewOf(n.ContentID, n.QuestionID, n.SourceID, n.Page, n.AttemptID, n.Mark),
 		Front:      n.Front,
 		Back:       n.Back,
 		Tactic:     n.Tactic,
@@ -330,7 +332,7 @@ func writeNoteDraft(w io.Writer, doc noteDraftDoc) {
 	}
 	fmt.Fprintln(w)
 	if doc.Draft.Unanswered {
-		fmt.Fprintln(w, "Answer state: unanswered; the draft does not read or print the answer key.")
+		fmt.Fprintln(w, "Answer state: unanswered; the draft does not write or print the answer key.")
 	}
 	writeNotePrivacy(w, doc.Draft)
 	if len(doc.Draft.Withheld) > 0 {
@@ -461,7 +463,22 @@ func writeNotePush(w io.Writer, doc notePushDoc) {
 		fmt.Fprintln(w, "No endpoint answered; every note stays queued and the next reachable push drains it once.")
 	}
 	if doc.Counts.Conflicts > 0 {
-		fmt.Fprintln(w, "Conflicts were not overwritten. Inspect or edit the card in Anki, then push again; --force overwrites deliberately.")
+		fmt.Fprintln(w, "Conflicts were not overwritten. Inspect or edit the card in Anki, then push again.")
+		forceable, idUnknown := false, false
+		for _, item := range doc.Notes {
+			switch item.Code {
+			case "fields_changed":
+				forceable = true
+			case "note_id_unknown":
+				idUnknown = true
+			}
+		}
+		if forceable {
+			fmt.Fprintln(w, "  --force overwrites a card whose Anki fields changed.")
+		}
+		if idUnknown {
+			fmt.Fprintln(w, "  A duplicate conflict has no Anki note id; remove that card in Anki or align the local content. --force cannot update it.")
+		}
 	}
 	fmt.Fprintf(w, "%s\n", noteSyncStatement)
 }

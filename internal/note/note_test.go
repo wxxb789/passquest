@@ -76,7 +76,7 @@ func TestBuildIncorrectAttemptCarriesFields(t *testing.T) {
 	}
 }
 
-func TestBuildSkippedAttemptNeverReadsTheKey(t *testing.T) {
+func TestBuildSkippedAttemptNeverWritesTheKey(t *testing.T) {
 	q := sampleQuestion()
 	got, err := Build(Input{Target: baseTarget(), Attempt: sampleAttempt(attempt.StatusSkipped),
 		Question: &q, PassageText: samplePassage, ConsentGranted: true})
@@ -94,8 +94,11 @@ func TestBuildSkippedAttemptNeverReadsTheKey(t *testing.T) {
 	if got.Front != "NOT/EXCEPT polarity" {
 		t.Fatalf("front = %q, want the tactic title", got.Front)
 	}
-	if !strings.Contains(got.Back, "NOT stated") && !strings.Contains(got.Back, "Which of the following") {
-		t.Fatalf("back does not carry a visible example: %q", got.Back)
+	if !strings.Contains(got.Back, "Example: Which of the following is NOT stated") {
+		t.Fatalf("back does not carry the visible stem as its example: %q", got.Back)
+	}
+	if strings.Contains(got.Back, "Westbridge Community Library closes") {
+		t.Fatalf("back kept the key-revealing evidence sentence: %q", got.Back)
 	}
 }
 
@@ -133,6 +136,29 @@ func TestBuildMarkOnlyKeepsASafePassageSentence(t *testing.T) {
 	}
 	if !strings.Contains(got.Back, "Example: Westbridge Library — Saturday hours") {
 		t.Fatalf("back lost the safe sentence: %q", got.Back)
+	}
+}
+
+func TestRevealsAnswerDetectsKeyMaterial(t *testing.T) {
+	q := sampleQuestion()
+	for _, text := range []string{
+		"The library opens at 8 a.m. on Sundays.",
+		"No Sunday opening time appears in the notice.",
+		q.Reasoning,
+		"The Westbridge Community Library closes at 4 p.m. on Saturdays.",
+		"The answer is option C.",
+	} {
+		if !RevealsAnswer(q, text) {
+			t.Fatalf("RevealsAnswer(%q) = false", text)
+		}
+	}
+	for _, text := range []string{
+		"closes at 4 p.m.",
+		"A note about Saturday opening hours.",
+	} {
+		if RevealsAnswer(q, text) {
+			t.Fatalf("RevealsAnswer(%q) = true, want a non-revealing text accepted", text)
+		}
 	}
 }
 
@@ -338,23 +364,19 @@ func TestExportBytesAndAtomicWrite(t *testing.T) {
 }
 
 func TestWriteExportFailureLeavesExistingFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX directory modes are not available on Windows")
-	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "notes.tsv")
 	if err := os.WriteFile(path, []byte("previous"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(dir, 0o500); err != nil {
+	// A directory as the destination fails the final rename on every platform,
+	// unlike POSIX mode bits.
+	blocked := filepath.Join(dir, "blocked")
+	if err := os.Mkdir(blocked, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(dir, 0o700) })
-	if _, err := WriteExport([]Fields{HTML("f", "b", "t", "s")}, path); err == nil {
-		t.Fatal("WriteExport succeeded in a read-only directory")
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		t.Fatal(err)
+	if _, err := WriteExport([]Fields{HTML("f", "b", "t", "s")}, blocked); err == nil {
+		t.Fatal("WriteExport replaced a directory")
 	}
 	got, err := os.ReadFile(path)
 	if err != nil || string(got) != "previous" {
@@ -365,9 +387,29 @@ func TestWriteExportFailureLeavesExistingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".notes.tsv.tmp-") {
+		if strings.HasPrefix(entry.Name(), ".blocked.tmp-") {
 			t.Fatalf("temporary file left behind: %s", entry.Name())
 		}
+	}
+}
+
+func TestExportEncodesALeadingHashInFront(t *testing.T) {
+	data, err := ExportBytes([]Fields{
+		HTML("#1 reason", "meaning", "tactic", "source"),
+		HTML("#separator:semicolon", "meaning", "", "source"),
+	})
+	if err != nil {
+		t.Fatalf("ExportBytes: %v", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	if len(lines) < 8 {
+		t.Fatalf("export lines = %d\n%s", len(lines), data)
+	}
+	if !strings.HasPrefix(lines[6], "&#35;1 reason\t") {
+		t.Fatalf("hash-leading front was not encoded: %q", lines[6])
+	}
+	if !strings.HasPrefix(lines[7], "&#35;separator:semicolon\t") {
+		t.Fatalf("directive-shaped front was not encoded: %q", lines[7])
 	}
 }
 

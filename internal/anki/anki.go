@@ -24,6 +24,9 @@ const DefaultEndpoint = "http://127.0.0.1:8765"
 // MinAPIVersion is the minimum AnkiConnect API version this build understands.
 const MinAPIVersion = 6
 
+// MaxActionsPerCall bounds one host document; the CLI chunks a larger queue.
+const MaxActionsPerCall = 50
+
 // EndpointEnv and TimeoutEnv configure the default connection.
 const (
 	EndpointEnv = "PASSQUEST_ANKI_ENDPOINT"
@@ -134,8 +137,8 @@ func ValidateRequest(req HostRequest) error {
 	if req.TimeoutMS < 100 || req.TimeoutMS > 120_000 {
 		return fmt.Errorf("anki: timeout %d ms is outside 100..120000", req.TimeoutMS)
 	}
-	if len(req.Actions) == 0 || len(req.Actions) > 50 {
-		return fmt.Errorf("anki: action count %d is outside 1..50", len(req.Actions))
+	if len(req.Actions) == 0 || len(req.Actions) > MaxActionsPerCall {
+		return fmt.Errorf("anki: action count %d is outside 1..%d", len(req.Actions), MaxActionsPerCall)
 	}
 	total := 0
 	for i, action := range req.Actions {
@@ -163,7 +166,14 @@ func ValidateResponse(req HostRequest, resp HostResponse) error {
 		return fmt.Errorf("anki: host returned state %q", resp.State)
 	}
 	if len(resp.Results) != len(req.Actions) {
-		return fmt.Errorf("anki: host returned %d results for %d actions", len(resp.Results), len(req.Actions))
+		message := fmt.Sprintf("anki: host returned %d results for %d actions", len(resp.Results), len(req.Actions))
+		if detail := strings.TrimSpace(resp.Error); detail != "" {
+			if utf8.RuneCountInString(detail) > 500 {
+				detail = string([]rune(detail)[:500])
+			}
+			message += ": " + detail
+		}
+		return errors.New(message)
 	}
 	for i, result := range resp.Results {
 		if result.Action != req.Actions[i].Action {

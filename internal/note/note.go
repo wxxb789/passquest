@@ -76,13 +76,16 @@ type Input struct {
 }
 
 // Draft is one proposed note before persistence. Front, Back and Tactic are
-// plain text; Fields turns them into the exact Anki HTML values.
+// plain text; Fields turns them into the exact Anki HTML values. Example is the
+// single pre-answer-visible example the draft chose, so refinement material can
+// reuse it instead of the whole passage.
 type Draft struct {
 	Target         Target
 	Origin         Origin
 	Model          string
 	Front          string
 	Back           string
+	Example        string
 	TacticID       string
 	Tactic         string
 	SourceLabel    string
@@ -110,9 +113,11 @@ const (
 	MaxExampleRunes = 320
 )
 
-// Build derives the deterministic draft. It never reads a key for an
-// unanswered target: a skipped attempt is unanswered for note content even
-// though the attempt row records the key.
+// Build derives the deterministic draft. For an unanswered target it reads the
+// key material only to reject a passage sentence that would reproduce it; it
+// never writes or returns the correct label, keyed option text, keyed option
+// reasoning or question reasoning. A skipped attempt is unanswered for note
+// content even though the attempt row records the key.
 func Build(in Input) (Draft, error) {
 	target := in.Target
 	target.Mark = NormalizeMark(target.Mark)
@@ -153,6 +158,7 @@ func Build(in Input) (Draft, error) {
 	meaning = clipText(meaning, MaxMeaningRunes)
 	if strings.TrimSpace(example) != "" {
 		example = clipText(example, MaxExampleRunes)
+		draft.Example = example
 		draft.Back = meaning + "\n\nExample: " + example
 	} else {
 		draft.Back = meaning
@@ -163,6 +169,7 @@ func Build(in Input) (Draft, error) {
 		draft.Withheld = []string{"front", "back"}
 		draft.Front = ""
 		draft.Back = ""
+		draft.Example = ""
 	}
 	return draft, nil
 }
@@ -200,8 +207,9 @@ func frontFor(in Input, unanswered bool, tactic string) string {
 }
 
 // explanationFor returns the meaning paragraph and the single example. The
-// unanswered branch reads only pre-answer-visible material: the stem, the
-// passage sentence around the mark and first-party lesson text.
+// unanswered branch writes only pre-answer-visible material: the stem, the
+// passage sentence around the mark and first-party lesson text. Key material is
+// read only by revealsAnswer to reject a sentence that would reproduce it.
 func explanationFor(in Input, unanswered bool, lesson skill.Skill, hasLesson bool) (string, string) {
 	question := in.Question
 	if !unanswered && in.Attempt != nil {
@@ -251,25 +259,55 @@ func explanationFor(in Input, unanswered bool, lesson skill.Skill, hasLesson boo
 	return "This item tests: " + strings.TrimSpace(question.Stem), example
 }
 
-// revealsAnswer reports whether a pre-answer passage sentence would reproduce
-// the keyed option or the authored evidence sentence. It is used only to
-// replace such a sentence with the visible stem; the key never enters a note.
-func revealsAnswer(sentence string, question exam.Question) bool {
-	lower := strings.ToLower(sentence)
+// RevealsAnswer reports whether text reproduces answer-key material for
+// question: the keyed option's text or reasoning, the question reasoning, the
+// authored evidence sentence, or a phrase naming the correct label. The
+// unanswered note path uses it to reject provider refinement and any stale
+// draft text; it is never used to include the key in a note.
+func RevealsAnswer(question exam.Question, text string) bool {
+	lower := strings.ToLower(text)
 	key := question.Correct()
-	if key.Text != "" && strings.Contains(lower, strings.ToLower(key.Text)) {
-		return true
+	for _, value := range []string{
+		key.Text,
+		question.OptionReasoning[key.Label],
+		question.Reasoning,
+		question.Evidence,
+	} {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if strings.Contains(lower, strings.ToLower(value)) {
+			return true
+		}
 	}
-	evidence := strings.TrimSpace(question.Evidence)
-	if evidence != "" {
-		lowerEvidence := strings.ToLower(evidence)
-		// A sentence extractor can stop at an abbreviation such as "p.m.", so a
-		// prefix of the evidence must count as a reveal too.
-		if strings.Contains(lower, lowerEvidence) || strings.Contains(lowerEvidence, lower) {
+	label := strings.ToLower(strings.TrimSpace(key.Label))
+	if label == "" {
+		return false
+	}
+	for _, prefix := range []string{"answer ", "option ", "choice "} {
+		if strings.Contains(lower, prefix+label) {
 			return true
 		}
 	}
 	return false
+}
+
+// revealsAnswer reports whether a pre-answer passage sentence would reproduce
+// the keyed option or the authored evidence sentence. It is used only to
+// replace such a sentence with the visible stem; the key is read only to filter
+// and is never written into a note.
+func revealsAnswer(sentence string, question exam.Question) bool {
+	if RevealsAnswer(question, sentence) {
+		return true
+	}
+	evidence := strings.TrimSpace(question.Evidence)
+	if evidence == "" {
+		return false
+	}
+	// A sentence extractor can stop at an abbreviation such as "p.m.", so a
+	// prefix of the evidence must count as a reveal too.
+	return strings.Contains(strings.ToLower(evidence), strings.ToLower(sentence))
 }
 
 func tacticIDFor(record *attempt.Attempt, question *exam.Question) string {

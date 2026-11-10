@@ -34,9 +34,10 @@ passquest note push
 passquest note push --endpoint http://127.0.0.1:8765 --force
 ```
 
-Every command accepts `--db PATH`; the default is `$PASSQUEST_DB` or
-`./.passquest/passquest.sqlite`. `note model` prints the deck, model, CSS, card template and a rendered
-sample without touching the database.
+Commands that open the database (`propose`, `preview`, `accept`, `skip`, `show`, `export` and `push`)
+accept `--db PATH`; the default is `$PASSQUEST_DB` or `./.passquest/passquest.sqlite`.
+`note model` does not open a database and takes no `--db`; it prints the deck, model, CSS, card
+template and a rendered sample.
 
 ## What earns a note
 
@@ -68,10 +69,11 @@ The note carries four fields:
 
 A skipped attempt is treated as unanswered for note content even though the attempt row records the
 key. A reviewed question with no attempt is allowed only with `--mark`. On that branch the builder
-does **not** read the correct label, the keyed option text, the keyed option reasoning or the question
-reasoning. It may use the passage sentence around the mark only when that sentence does not reproduce
-the keyed option or the evidence sentence; otherwise it falls back to the visible stem. The answer
-key is read solely to filter such a sentence, never to write it into the note.
+does **not** write or return the correct label, the keyed option text, the keyed option reasoning or
+the question reasoning. It reads that key material only to reject a passage sentence that would
+reproduce it; otherwise the example is the visible stem. A provider refinement for an unanswered
+target receives only the draft's pre-answer-visible example, and a response that reproduces key
+material is rejected (`invalid_response`, exit 3) with the deterministic draft left open.
 
 ## Private source consent
 
@@ -130,7 +132,9 @@ Front	Back	Tactic	Source
 ```
 
 Fields are HTML: text is escaped, newlines become `<br>`, and the back's blank line becomes the
-meaning/example paragraphs. The file is written `0600` through a temporary file in the destination
+meaning/example paragraphs. Anki's importer reads a row beginning with `#` as an option or comment
+line, so a front that starts with `#` is written with the `&#35;` entity; it renders as the learner's
+text and the row stays data. The file is written `0600` through a temporary file in the destination
 directory, synced and renamed; a failure leaves an existing export untouched and removes the
 temporary file. A missing parent directory is created `0700`; an existing `--out` directory keeps its
 mode, so choose a private directory.
@@ -147,22 +151,27 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
 
 - Endpoint default `http://127.0.0.1:8765`, override with `--endpoint` or
   `PASSQUEST_ANKI_ENDPOINT`. Only `http`/`https`, no userinfo/query/fragment, and the host must be
-  loopback (`127.0.0.1`, `localhost`, `[::1]`). A remote endpoint is refused with exit 2: a note can
-  contain private source text and AnkiConnect is a local bridge.
+  loopback (`127.0.0.1`, `localhost`, `[::1]`, or an IPv4-mapped loopback such as
+  `[::ffff:127.0.0.1]`). A remote endpoint is refused with exit 2: a note can contain private source
+  text and AnkiConnect is a local bridge.
 - The host accepts one versioned document with at most 50 allow-listed actions: `version`,
   `createDeck`, `modelNames`, `createModel`, `addNote`, `updateNoteFields`, `notesInfo`. It refuses
-  redirects and has no database or filesystem access.
+  redirects and has no database or filesystem access. A push with more than 50 pending notes splits
+  its writes into consecutive documents of at most 50 actions, preserving queue order; a chunk whose
+  endpoint does not answer stays queued.
 - `version` must be at least 6. The deck `Pass Quest` is created when missing; the model
   `PassQuest Note` is created when `modelNames` does not contain it.
 - `addNote` uses `allowDuplicate: false`. A duplicate of a note's first revision, with nothing pushed
   before, is reported as `already_present` (exit 0) and that revision is marked delivered; a later
   revision of that duplicate-only note is a **conflict**, because AnkiConnect reports no note id for
-  the existing card. A note edited before its first push is queued at revision ≥ 2, so a duplicate
+  the existing card. `--force` cannot update it: remove the card in Anki or align the local content,
+  then push again. A note edited before its first push is queued at revision ≥ 2, so a duplicate
   error there is a **conflict** rather than `already_present`: Anki never received revision 1, and
   marking an unwritten revision delivered would be false.
 - A revision with an Anki note id calls `notesInfo` first. If the fields no longer match the revision
   last pushed, the card is a **conflict**: Anki is left untouched and `push` exits 3. `--force` is the
-  explicit overwrite. If the card is gone, it is re-added once and the new id is stored.
+  explicit overwrite. If the card is gone, a `check/not_found` ledger row is recorded, it is re-added
+  once and the new id is stored.
 - An update calls `updateNoteFields` for the recorded id, so no second card is created and Anki's
   review history survives.
 - When no endpoint answers, every pending note stays queued and `push` exits 0. The next reachable
@@ -170,12 +179,16 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
   request was sent also leaves the note pending. A retried `addNote` is deduplicated by Anki; if Anki
   applied an `updateNoteFields` before the error, the next push's read-back can surface a **conflict**
   (exit 3) that `--force` resolves. No note text is lost.
-- A missing Node or host is `anki_unavailable` (exit 3) with the queue unchanged. `propose`, `preview`,
-  `accept`, `skip`, `show`, `model` and `export` work with no Node and no Anki.
+- A missing Node or host is `anki_unavailable` (exit 3) with the queue unchanged. `propose` without
+  `--refine`, `preview`, `accept`, `skip`, `show` and `export` work with no Node and no Anki;
+  `propose --refine` needs Node, and `push` needs it only when there is pending work.
 
 The local outbox is one desired revision per note with `pending`/`drained` state. Every acknowledged
 add/update/readd is appended to a per-note attempt ledger, so duplicate suppression and retries are
-countable.
+countable. In a push document, `counts.pending` is the number of outbox rows still pending after that
+push: `queued`, `conflict` and `failed` rows all stay pending until a later push resolves them. A
+conflict or failed push on stderr carries the usual `error` object (`anki_conflict` or `anki_failed`)
+beside the counts and note list.
 
 ## Model and template
 
@@ -206,9 +219,12 @@ font, stylesheet, script, image or URL. `note model` prints the whole template a
 - No Anki clone, own scheduling, `.apkg`, images, audio, AnkiWeb API calls or mobile apps.
 - `--refine` sends one provider request through the goal-0005 endpoint and shared daily budget. The
   deterministic draft never needs a provider. Refined text is labelled advisory; the learner accepts
-  it explicitly.
+  it explicitly. A refinement that would reproduce an unanswered question's key is rejected and the
+  deterministic draft stays available.
 - `export` is a fallback, not a revision channel; re-importing an edited export may duplicate cards.
-- A conflict is never overwritten silently. Resolve it in Anki, or pass `--force`.
+- A conflict is never overwritten silently. A read-back field difference can be overwritten with
+  `--force`; a duplicate conflict whose Anki note id is unknown cannot be, and needs the card removed
+  in Anki or the local content aligned before a later push.
 
 Measured evidence: [`evidence/0007-anki-from-learning.md`](evidence/0007-anki-from-learning.md).
 Decisions: [`decisions/OPEN-QUESTIONS.md`](decisions/OPEN-QUESTIONS.md) (Q-0007-01..10).

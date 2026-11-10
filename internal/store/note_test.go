@@ -14,10 +14,10 @@ import (
 func noteTargetFixture() NoteTarget {
 	return NoteTarget{
 		NoteID:    "note-0123456789abcdef",
-		TargetKey: "src-x-p001\x1fq1\x1f",
+		TargetKey: "src-x-p001\x1fq1\x1fcloses",
 		AttemptID: 1,
 		ContentID: "src-x-p001", ContentVersion: "v1", QuestionID: "q1",
-		SourceID: "src-x", Page: 1, Restricted: true,
+		SourceID: "src-x", Page: 1, Mark: "closes", Restricted: true,
 	}
 }
 
@@ -43,6 +43,9 @@ func TestAcceptNoteIsIdempotentAndKeepsHistory(t *testing.T) {
 	}
 	if result.Note.AnkiState != AnkiStateLocal {
 		t.Fatalf("anki state = %q", result.Note.AnkiState)
+	}
+	if result.Note.Mark != "closes" {
+		t.Fatalf("note mark = %q", result.Note.Mark)
 	}
 	again, err := st.AcceptNote(target, content, at.Add(time.Second))
 	if err != nil {
@@ -294,6 +297,46 @@ func TestMigrationFromVersionNineKeepsAttempts(t *testing.T) {
 	}
 	if _, err := st.db.Exec(`UPDATE attempts SET status = 'incorrect'`); err == nil {
 		t.Fatal("attempt update was accepted")
+	}
+}
+
+func TestMigrationFromVersionTenAddsNoteMark(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v10.sqlite")
+	db := openSQLite(t, path)
+	for _, statements := range [][]string{
+		schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10,
+	} {
+		for _, statement := range statements {
+			if _, err := db.Exec(statement); err != nil {
+				t.Fatalf("create v10 schema: %v", err)
+			}
+		}
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 10`); err != nil {
+		t.Fatalf("set v10 version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close v10 fixture: %v", err)
+	}
+
+	st := mustOpen(t, path)
+	var version int
+	if err := st.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, SchemaVersion)
+	}
+	target := noteTargetFixture()
+	if _, err := st.AcceptNote(target, noteContentFixture("migrated"), time.Now()); err != nil {
+		t.Fatalf("accept after v11 migration: %v", err)
+	}
+	stored, err := st.Note(target.NoteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Mark != "closes" {
+		t.Fatalf("note mark after migration = %q", stored.Mark)
 	}
 }
 

@@ -145,9 +145,9 @@ Details: [`docs/agent.md`](docs/agent.md). Measured evidence:
 ## Turn study evidence into Anki notes
 
 Goal 0007 turns one high-value study moment — an incorrect or skipped attempt, or an explicit mark —
-into one concise local note, and then into an Anki card. The Go core needs no Node for drafting,
-previewing, accepting, skipping, showing, exporting or inspecting the model; only `push` spawns the
-narrow Anki host.
+into one concise local note, and then into an Anki card. The Go core needs no Node for the
+deterministic draft, preview, accept, skip, show, export or the model view; `note propose --refine`
+uses the tutor host, and only `note push` with pending work spawns the narrow Anki host.
 
 ```bash
 passquest note propose --attempt 1

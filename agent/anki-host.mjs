@@ -36,15 +36,28 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function ipv4Loopback(parts) {
+  return parts.length === 4 && parts[0] === "127" && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+}
+
 function loopback(hostname) {
   const host = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
   if (host.toLowerCase() === "localhost") return true;
   if (host === "::1") return true;
-  const parts = host.split(".");
-  if (parts.length === 4 && parts[0] === "127") {
-    return parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+  // Go's netip.IsLoopback accepts an IPv4-mapped loopback; URL serializes it as
+  // ::ffff:7f00:1, so both the dotted and the hex tail must be accepted here.
+  const mapped = /^::ffff:(.+)$/i.exec(host);
+  if (mapped) {
+    const tail = mapped[1];
+    if (tail.includes(".")) return ipv4Loopback(tail.split("."));
+    const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(tail);
+    if (!hex) return false;
+    const high = parseInt(hex[1], 16);
+    const low = parseInt(hex[2], 16);
+    return ipv4Loopback([String(high >> 8), String(high & 255), String(low >> 8), String(low & 255)]);
   }
-  return false;
+  const parts = host.split(".");
+  return parts.length === 4 && ipv4Loopback(parts);
 }
 
 function validateEndpoint(raw) {
