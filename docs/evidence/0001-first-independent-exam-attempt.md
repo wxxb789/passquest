@@ -19,7 +19,7 @@ A real CLI (`cmd/passquest`) over four first-party packages:
 |---|---|
 | `internal/exam` | Self-authored passage + three four-option questions, key, verbatim passage evidence, one-line reasoning and a distractor explanation per option. Embedded in the binary; no runtime file or network lookup. |
 | `internal/attempt` | Deterministic grading, selection parsing (`A`–`D`, `skip`), snapshotting selected/correct text and elapsed time, and the feedback/exposure model. |
-| `internal/store` | One SQLite table `attempts` (`PRAGMA user_version = 1`), idempotent migration, per-question attempt numbering inside the insert transaction, and triggers that abort `UPDATE`/`DELETE`. |
+| `internal/store` | One SQLite table `attempts` (`PRAGMA user_version = 2`), versioned idempotent migration (version 1 adds the insert guard and composite index), content-scoped (`content_id`, `question_id`) attempt numbering inside the insert transaction, and triggers that abort `UPDATE`, `DELETE` and id-reusing `INSERT OR REPLACE`. |
 | `internal/cli` | `practice`, `report`, `version`; human and `schema_version: 1` JSON protocols; `$PASSQUEST_DB` / `./.passquest/passquest.sqlite` default; `0600` database in a `0700` directory. |
 
 The exercise is a library-opening-hours notice written for this repository. It is not drawn from any
@@ -29,7 +29,7 @@ live examination, and no exam blueprint, time limit, pass threshold or readiness
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1 -v` | exit 0; 34 top-level tests, 37 subtests, 0 failures, 0 skips (re-measured 2026-11-10 after the simplification pass; the original increment measurement was 26/26 at `a13772e`) |
+| `go test ./... -count=1 -v` | exit 0; 38 top-level tests, 41 subtests, 0 failures, 0 skips (re-measured 2026-11-10 after the review fixes; the original increment measurement was 26/26 at `a13772e`) |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
 | `gofmt -l` (tracked `*.go`) | empty output |
@@ -39,14 +39,18 @@ The tests that pin the contract clauses:
 | Test | Clause it pins |
 |---|---|
 | `TestAwaitingJSONHidesTheKey` | `awaiting_answer` JSON has no `answer`, `correct_*`, `evidence`, `reasoning`, `status` or `feedback` key; no stored attempt |
-| `TestHumanPromptDoesNotRevealTheKey` | Human prompt has no `Correct answer:`, `Result:`, `Why:` or `Recorded attempt`; EOF records nothing |
+| `TestHumanPromptDoesNotRevealTheKey` | Human pre-answer output matches `testdata/human-prompt.golden.txt` and contains no key/evidence marker, no reasoning or option-reasoning string; EOF records nothing |
 | `TestCorrectIncorrectSkipAndRepeat` | Correct/incorrect/skipped records, `attempt_number`, `prior_attempts`, `repeat`, first/repeated exposure, report counts |
+| `TestNumberingScopesToContent` | Numbering and repeat exposure are scoped to `(content_id, question_id)`; the same question id in another content starts at attempt 1 |
+| `TestReportScopesQuestionRowsByContent` | Report rows and counts distinguish the same question id in two contents; human rows are content-qualified only when they differ from the report content |
+| `TestJSONUsageErrorsUseJSON` | A `--json` flag-parse or extra-argument failure writes exactly one `{"schema_version":1,"error":...}` document to stderr and nothing to stdout |
 | `TestInvalidInputRecordsNothing` | Invalid label, unknown question and conflicting flags exit 2 and store 0 attempts |
 | `TestInteractiveInput` | Lowercase answer, invalid-then-skip loop, `quit` stores nothing |
 | `TestProcessReopenSeesStoredEvidence` | Writes in one OS process, reads in a second OS process, same attempt id and session |
 | `TestGoldenAwaitingJSON`, `TestGoldenReportJSON` | Protocol golden files (`internal/cli/testdata/*.golden.json`) |
-| `TestAttemptsAreAppendOnly` | `UPDATE` and `DELETE` are rejected by SQLite triggers; count unchanged |
-| `TestMigrationKeepsOlderDatabaseAndIsIdempotent` | Version-0 database with unrelated data migrates to 1, data preserved, second open idempotent |
+| `TestAttemptsAreAppendOnly` | `UPDATE`, `DELETE` and id-reusing `INSERT OR REPLACE` are rejected by SQLite triggers; count and row are unchanged |
+| `TestMigrationKeepsOlderDatabaseAndIsIdempotent` | Version-0 database with unrelated data migrates to 2, data preserved, second open idempotent |
+| `TestMigrationAddsInsertGuardToVersionOne` | A version-1 database gains the composite index and the id-reusing insert trigger on open; the trigger rejects `INSERT OR REPLACE` |
 | `TestOpenRejectsNewerSchema` | Version 99 is refused instead of silently misread |
 | `TestOpenCreatesSchemaAndProtectsFiles` | `0600` file, `0700` new directory |
 | `TestSampleIsValidAndEvidenceGrounded` | Every evidence quote is a verbatim passage substring; 3 questions, 4 options, every option explained |
@@ -180,7 +184,7 @@ Attempts
   #4  q1  correct  repeat  selected B  0 ms  session cdc36be186c4bfe1
 
 Limitations
-  - Counts cover only this self-authored sample; they are not an exam score, pass estimate or readiness claim.
+  - Counts cover only the locally stored practice attempts shown above; they are not an exam score, pass estimate or readiness claim.
   - Repeated attempts come after the correct answer and evidence were shown and are not independent evidence.
   - The exam blueprint, time limit and pass threshold are unknown, so no pass probability is computed.
 
@@ -193,9 +197,9 @@ attempts because they are durable rows, not in-memory state.
 ### Direct SQLite inspection after all processes exited
 
 ```text
-user_version: 1
+user_version: 2
 tables: ['attempts', 'sqlite_sequence']
-triggers: ['attempts_append_only_delete', 'attempts_append_only_update']
+triggers: ['attempts_append_only_delete', 'attempts_append_only_insert', 'attempts_append_only_update']
 rows (id | question | status | selected | key | elapsed_ms):
   (1, 'q1', 'correct', 'B', 'B', 0)
   (2, 'q2', 'incorrect', 'A', 'B', 0)
@@ -214,7 +218,7 @@ DELETE rejected: attempts are append-only
 | First-party network imports | `go list -f '{{.ImportPath}}:{{range .Imports}} {{.}}{{end}}' $(go list ./cmd/... ./internal/...)` | 5 first-party packages, 0 `net`/`net/http`/`net/rpc`/`net/smtp` imports |
 | Linked HTTP/RPC/SMTP clients | `go list -deps ./cmd/passquest` | no `net/http`, `net/rpc`, `net/smtp` |
 | Runtime network syscalls | `strace -f -e trace=network -o net.log passquest report ...` (also practice) | 0 `socket`/`connect`/`sendto`/`recvfrom`/`bind` lines; the log contains only process-exit lines |
-| Confidential markers in runtime files | `bash scripts/check-local-only.sh` | 0 hits in `cmd/` and `internal/` (tests are excluded because one test asserts absence) |
+| Confidential markers in runtime and test files | `bash scripts/check-local-only.sh` | 0 hits in `cmd/` and `internal/` (tests are scanned too; the absence test builds its marker strings from parts so it can pass this gate) |
 | Sample provenance | `TestSampleMakesNoConfidentialOrLiveExamClaim` + CLI notice output | self-authored, "not from any live exam", "not drawn from a live examination"; no `CRSC`/internal-only marker |
 | Seed/tracked private state | `bash scripts/check-secrets.sh` | clean; no `.sqlite`, `.pdf` or local-state file tracked |
 
@@ -265,18 +269,18 @@ PASS  local-only CLI
 GATE: PASS
 ```
 
-Re-measured after the simplification pass (2026-11-10, tree at `ff80f2b` plus the uncommitted apply
-diff): `bash scripts/gate.sh` → exit 0, 8/8 `PASS`, 0 `SKIP`; docs links 45 checked/0 broken;
-secrets/sources clean (214 tracked files); local-only 5 first-party packages. The 41/45 counts in
-the transcript above are the original increment measurement at `a13772e`; owner commits `5e89188`
-and `4a861ca` added docs and data before this re-measurement.
+Re-measured after the review fixes (2026-11-10, tree at `9506c4e` plus the uncommitted fix diff):
+`bash scripts/gate.sh` → exit 0, 8/8 `PASS`, 0 `SKIP`; docs links 48 checked/0 broken;
+secrets/sources clean (215 tracked files); local-only 5 first-party packages. The 41/45 counts in
+the transcript above are the original increment measurement at `a13772e`; owner commits and later
+review fixes added docs, data and tests before this re-measurement.
 
 ## Contract clause → evidence
 
 | "Done when" clause | Evidence |
 |---|---|
 | A learner can answer an actual, coherent multiple-choice exercise without being shown the answer, and see deterministic correctness feedback plus concise evidence-based reasoning. | Pre-answer prompt and awaiting JSON above (no key fields); correct/incorrect/skip responses with key, verbatim passage evidence and authored reasoning; `TestAwaitingJSONHidesTheKey`, `TestHumanPromptDoesNotRevealTheKey`, `TestSampleIsValidAndEvidenceGrounded`, awaiting golden. |
-| Correct, incorrect, skipped and repeated attempts are represented truthfully, with no fictional scores or knowledge claims. | Stored rows and report above: 4 attempts, first 3 vs repeated 1, statuses 2/1/1, skip has `NULL` selection; report limitations; `TestCorrectIncorrectSkipAndRepeat`, `TestAttemptsAreAppendOnly`. No percentage, pass estimate or mastery claim is produced. |
+| Correct, incorrect, skipped and repeated attempts are represented truthfully, with no fictional scores or knowledge claims. | Stored rows and report above: 4 attempts, first 3 vs repeated 1, statuses 2/1/1, skip has `NULL` selection; report limitations; `TestCorrectIncorrectSkipAndRepeat`, `TestNumberingScopesToContent`, `TestReportScopesQuestionRowsByContent`, `TestAttemptsAreAppendOnly`. No percentage, pass estimate or mastery claim is produced. |
 | A fresh local invocation demonstrates the end-to-end attempt and shows durable evidence after reopening the app/process. | Four separate CLI processes wrote attempts; a fifth `report` process read them; SQLite dump after exit; `TestProcessReopenSeesStoredEvidence`; `TestMigrationKeepsOlderDatabaseAndIsIdempotent`. |
 | The demonstration contains no original confidential CRSC text, no external calls and no claim that the sample is from the live exam. | Self-authored sample and provenance notice; marker test and `check-local-only.sh`; 0 network syscalls under strace; notice says "Not from any live exam". |
 
@@ -290,8 +294,9 @@ and `4a861ca` added docs and data before this re-measurement.
 3. **No timer or time budget.** `elapsed_ms` is wall-clock from just before the prompt to submission
    (0 ms for flag-driven demo answers). It is recorded, not enforced.
 4. **Repeats are visible, not prevented.** A repeated attempt after the key was shown is labelled and
-   excluded from first-attempt counts. Question id is the stable identity across content versions;
-   a content rewrite that reuses an id inherits its exposure history (see Q-0001-01).
+   excluded from first-attempt counts. Question identity is `(content_id, question_id)`; a new
+   content version under the same content id inherits its exposure history, while a different
+   content id with the same question id is a separate item (see Q-0001-01).
 5. **Local single learner.** No account, encryption or multi-device sync. The database is `0600` in a
    `0700` directory, which protects against other OS users but not an administrator or a compromised
    account. It is gitignored.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fails when Pass Quest's own packages import a network package, when the CLI
-# links an HTTP/RPC/SMTP client, or when runtime content carries a confidential
-# source marker.
+# links an HTTP/RPC/SMTP client, or when a first-party file (runtime or test)
+# carries a confidential source marker.
 #
 # `net` itself is linked transitively by modernc.org/sqlite -> modernc.org/libc
 # -> github.com/google/uuid, which no Pass Quest code calls; the evidence record

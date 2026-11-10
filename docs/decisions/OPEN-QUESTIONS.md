@@ -83,7 +83,8 @@ Entry format:
   every attempt equally.
 - Default taken: (A). The CLI stores the repeat with `attempt_number`, `prior_attempts` and
   `repeat`, and `report` prints first and repeated counts separately. Reverse by changing the
-  selection/report policy only; stored attempts stay intact. The append-only table cannot be
-  rewritten, so a future policy can be recomputed from the same evidence.
+  selection/report policy only; stored attempts stay intact. The Store API and SQLite triggers
+  reject `UPDATE`, `DELETE` and an id-reusing `INSERT OR REPLACE`, so a future policy can be
+  recomputed from the same evidence.
 - Revisit when: goal 0004 selects practice from evidence, or goal 0009 defines independent
   readiness and needs a stricter exposure rule.

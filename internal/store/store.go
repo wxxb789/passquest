@@ -1,6 +1,6 @@
 // Package store persists attempts in SQLite. The table is append-only: storage
-// rejects updates and deletes so historical evidence cannot be rewritten by a
-// later feature.
+// rejects updates, deletes and id-reusing inserts (including INSERT OR REPLACE)
+// so historical evidence cannot be rewritten by a later feature.
 package store
 
 import (
@@ -19,8 +19,11 @@ import (
 )
 
 // SchemaVersion is the persisted schema this build understands.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
+// schemaV1 is the original version-1 shape. Migrations apply each version in
+// order, so a version-0 database gets both steps and a version-1 database gets
+// only the insert guard and the composite index.
 var schemaV1 = []string{
 	`CREATE TABLE IF NOT EXISTS attempts (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,6 +54,22 @@ var schemaV1 = []string{
 		BEGIN SELECT RAISE(ABORT, 'attempts are append-only'); END`,
 	`CREATE TRIGGER IF NOT EXISTS attempts_append_only_delete BEFORE DELETE ON attempts
 		BEGIN SELECT RAISE(ABORT, 'attempts are append-only'); END`,
+}
+
+var schemaV2 = []string{
+	`DROP INDEX IF EXISTS attempts_question_id`,
+	`CREATE INDEX IF NOT EXISTS attempts_content_question_id ON attempts(content_id, question_id, id)`,
+	`CREATE TRIGGER IF NOT EXISTS attempts_append_only_insert BEFORE INSERT ON attempts
+		WHEN EXISTS (SELECT 1 FROM attempts WHERE id = NEW.id)
+		BEGIN SELECT RAISE(ABORT, 'attempts are append-only'); END`,
+}
+
+var migrations = []struct {
+	version    int
+	statements []string
+}{
+	{1, schemaV1},
+	{2, schemaV2},
 }
 
 // Store is a handle to one attempts database.
@@ -120,10 +139,16 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("store: begin migration: %w", err)
 	}
 	defer tx.Rollback()
-	for _, stmt := range schemaV1 {
-		if _, err := tx.Exec(stmt); err != nil {
-			return fmt.Errorf("store: migrate to version %d: %w", SchemaVersion, err)
+	for _, migration := range migrations {
+		if version >= migration.version {
+			continue
 		}
+		for _, stmt := range migration.statements {
+			if _, err := tx.Exec(stmt); err != nil {
+				return fmt.Errorf("store: migrate to version %d: %w", migration.version, err)
+			}
+		}
+		version = migration.version
 	}
 	if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, SchemaVersion)); err != nil {
 		return fmt.Errorf("store: set schema version: %w", err)
@@ -141,7 +166,7 @@ func (s *Store) Path() string { return s.path }
 func (s *Store) Close() error { return s.db.Close() }
 
 // Append stores one graded attempt and returns it with its row id, prior count
-// and per-question attempt number filled in.
+// and content-scoped question attempt number filled in.
 func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 	if err := validateForInsert(a); err != nil {
 		return attempt.Attempt{}, err
@@ -154,7 +179,8 @@ func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 	defer tx.Rollback()
 
 	var prior int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM attempts WHERE question_id = ?`, a.QuestionID).Scan(&prior); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM attempts WHERE content_id = ? AND question_id = ?`,
+		a.ContentID, a.QuestionID).Scan(&prior); err != nil {
 		return attempt.Attempt{}, fmt.Errorf("store: count prior attempts: %w", err)
 	}
 
@@ -184,8 +210,8 @@ func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 	return a, nil
 }
 
-// List returns all attempts in insertion order with per-question attempt
-// numbers recomputed from that order.
+// List returns all attempts in insertion order with content-scoped question
+// attempt numbers recomputed from that order.
 func (s *Store) List() ([]attempt.Attempt, error) {
 	rows, err := s.db.Query(`SELECT
 			id, session_id, question_id, content_id, content_version, status,
@@ -198,7 +224,7 @@ func (s *Store) List() ([]attempt.Attempt, error) {
 	defer rows.Close()
 
 	var out []attempt.Attempt
-	seen := make(map[string]int)
+	seen := make(map[attempt.QuestionKey]int)
 	for rows.Next() {
 		var (
 			a           attempt.Attempt
@@ -228,8 +254,9 @@ func (s *Store) List() ([]attempt.Attempt, error) {
 		if a.AnsweredAt, err = time.Parse(time.RFC3339Nano, answered); err != nil {
 			return nil, fmt.Errorf("store: parse answered_at of attempt %d: %w", a.ID, err)
 		}
-		seen[a.QuestionID]++
-		a.AttemptNumber = seen[a.QuestionID]
+		key := a.Key()
+		seen[key]++
+		a.AttemptNumber = seen[key]
 		a.PriorAttempts = a.AttemptNumber - 1
 		out = append(out, a)
 	}

@@ -28,6 +28,11 @@ threshold or readiness probability is computed. Design and evidence:
 
 ## Confidential baseline material
 
-The original 165-page CRSC preparation PDF states *仅限内部使用，严禁外传*. At the project owner's explicit direction, an **unreviewed partial text-layer transcription** is present at [`data/baselines/2025-crsc-english-partial.txt`](data/baselines/2025-crsc-english-partial.txt). This repository is **public**, regardless of the app's intended internal use; the file therefore is publicly accessible. It only covers 22 pages with meaningful native text; the remaining scanned pages are placeholders, and extracted text/answers have not been verified. This commit is not evidence of redistribution rights or permission for agents to upload additional source material. The complete source PDF and future OCR outputs stay local by default, and tests must use independently authored or otherwise redistributable exercises.
+The original 165-page CRSC preparation PDF states *仅限内部使用，严禁外传*. At the project owner's explicit direction, two **unreviewed** text extractions are present in this repository:
+
+- [`data/baselines/2025-crsc-english-partial.txt`](data/baselines/2025-crsc-english-partial.txt) — the earlier 22-page native-text extraction, kept as history.
+- [`data/baselines/2026-crsc-english/`](data/baselines/2026-crsc-english/README.md) — the page-linked parsed text of all 165 pages (22 native-text pages plus 143 OCR pages), authorised by the owner on 2026-11-10. Its `README.md` records the parse method, the per-page provenance in `manifest.tsv`, and the visibility boundary.
+
+This repository is **public**, regardless of the app's intended internal use; both extractions are therefore publicly accessible. Extracted text, OCR and answer keys have not been verified. Publication is not evidence of redistribution rights: the original PDF stays at `data/private/source/` (gitignored), no further OCR or new source material is published automatically, no text may be uploaded to an external provider without a new recorded decision, and tests must use independently authored or clearly licensed fixtures — never this material.
 
 No API keys or personal study history belong in this repository.

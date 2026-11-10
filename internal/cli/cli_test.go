@@ -178,9 +178,24 @@ func TestHumanPromptDoesNotRevealTheKey(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, errOut)
 	}
-	for _, leaked := range []string{"Correct answer:", "Result:", "Why:", "Why your answer is wrong:", "Recorded attempt"} {
+	for _, leaked := range []string{"Correct answer:", "Result:", "Why:", "Why your answer is wrong:", "Evidence:", "Recorded attempt"} {
 		if strings.Contains(out, leaked) {
 			t.Errorf("pre-answer output contains %q", leaked)
+		}
+	}
+	checkGolden(t, filepath.Join("testdata", "human-prompt.golden.txt"), []byte(out))
+	sample, err := exam.Sample()
+	if err != nil {
+		t.Fatalf("Sample: %v", err)
+	}
+	for _, q := range sample.Questions {
+		if strings.Contains(out, q.Reasoning) {
+			t.Errorf("pre-answer output contains reasoning for %s", q.ID)
+		}
+		for _, why := range q.OptionReasoning {
+			if strings.Contains(out, why) {
+				t.Errorf("pre-answer output contains option reasoning for %s", q.ID)
+			}
 		}
 	}
 	if !strings.Contains(out, "No attempt recorded.") {
@@ -377,6 +392,42 @@ func TestInvalidInputRecordsNothing(t *testing.T) {
 	report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
 	if report.Counts.Attempts != 0 {
 		t.Fatalf("invalid requests stored %d attempts", report.Counts.Attempts)
+	}
+}
+
+func TestJSONUsageErrorsUseJSON(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	tests := []struct {
+		name string
+		args []string
+		code string
+	}{
+		{"practice unknown flag", []string{"practice", "--json", "--bogus"}, "invalid_flags"},
+		{"practice extra argument", []string{"practice", "--json", "extra"}, "unexpected_argument"},
+		{"report unknown flag", []string{"report", "--json", "--bogus"}, "invalid_flags"},
+		{"report extra argument", []string{"report", "--json", "extra"}, "unexpected_argument"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, db, clock, "", tt.args...)
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+			}
+			if stdout != "" {
+				t.Fatalf("stdout = %s", stdout)
+			}
+			var doc errorDoc
+			if err := json.Unmarshal([]byte(stderr), &doc); err != nil {
+				t.Fatalf("stderr is not exactly one JSON document: %v\n%s", err, stderr)
+			}
+			if doc.SchemaVersion != ProtocolVersion || doc.Error.Code != tt.code {
+				t.Fatalf("error doc = %+v, want code %q", doc, tt.code)
+			}
+			if doc.Error.Message == "" {
+				t.Fatal("error message is empty")
+			}
+		})
 	}
 }
 
@@ -622,6 +673,89 @@ func TestReportKeepsHistoricalQuestionRows(t *testing.T) {
 	historical := report.Questions[3]
 	if historical.ID != "q9" || historical.Attempts != 1 || historical.FirstStatus != "correct" || historical.LatestStatus != "correct" {
 		t.Fatalf("historical row = %+v", historical)
+	}
+}
+
+func TestReportScopesQuestionRowsByContent(t *testing.T) {
+	db := newDB(t)
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	started := goldenBase
+	records := []attempt.Attempt{
+		{
+			SessionID:      "sess-sample",
+			QuestionID:     "q1",
+			ContentID:      "sample-0001",
+			ContentVersion: "1",
+			Status:         attempt.StatusCorrect,
+			SelectedLabel:  "B",
+			SelectedText:   "At 4 p.m.",
+			CorrectLabel:   "B",
+			CorrectText:    "At 4 p.m.",
+			StartedAt:      started,
+			AnsweredAt:     started.Add(time.Second),
+			ElapsedMS:      1000,
+		},
+		{
+			SessionID:      "sess-other",
+			QuestionID:     "q1",
+			ContentID:      "sample-9999",
+			ContentVersion: "1",
+			Status:         attempt.StatusIncorrect,
+			SelectedLabel:  "A",
+			SelectedText:   "At 7 p.m.",
+			CorrectLabel:   "B",
+			CorrectText:    "At 4 p.m.",
+			StartedAt:      started,
+			AnsweredAt:     started.Add(time.Second),
+			ElapsedMS:      1000,
+		},
+	}
+	for _, record := range records {
+		if _, err := st.Append(record); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	clock := &stepClock{base: goldenBase}
+	report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
+	want := countsView{
+		Attempts: 2, Correct: 1, Incorrect: 1,
+		FirstAttempts: 2, FirstCorrect: 1, FirstIncorrect: 1,
+	}
+	if report.Counts != want {
+		t.Fatalf("counts = %+v, want %+v", report.Counts, want)
+	}
+	if len(report.Questions) != 4 {
+		t.Fatalf("question rows = %d, want 4", len(report.Questions))
+	}
+	rows := make(map[string]questionReport, len(report.Questions))
+	for _, q := range report.Questions {
+		rows[q.ContentID+"/"+q.ID] = q
+	}
+	first := rows["sample-0001/q1"]
+	if first.Attempts != 1 || first.FirstStatus != "correct" || first.Repeated != 0 {
+		t.Fatalf("sample-0001 q1 row = %+v", first)
+	}
+	other := rows["sample-9999/q1"]
+	if other.Attempts != 1 || other.FirstStatus != "incorrect" || other.Repeated != 0 {
+		t.Fatalf("sample-9999 q1 row = %+v", other)
+	}
+
+	human := mustRun(t, db, clock, "", "report")
+	for _, want := range []string{
+		"  q1  attempts 1  first correct",
+		"  sample-9999/q1  attempts 1  first incorrect",
+		"  #2  sample-9999/q1  incorrect",
+	} {
+		if !strings.Contains(human, want) {
+			t.Errorf("human report lacks %q:\n%s", want, human)
+		}
 	}
 }
 

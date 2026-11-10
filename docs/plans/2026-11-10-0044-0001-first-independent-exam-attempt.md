@@ -138,3 +138,16 @@ revision cannot silently rewrite what was answered.
 - [x] README usage; evidence record with real output.
 - [x] Goal archived unchanged, `docs/goals/README.md` state updated, open question appended.
 - [x] `bash scripts/gate.sh` exit 0 recorded.
+
+## Post-review corrections (2026-11-10)
+
+Review findings F5–F7 changed three statements above without changing the goal contract:
+
+- Repeat numbering and exposure are scoped to `(content_id, question_id)`, not `question_id` alone.
+  A new content version under the same content id still inherits exposure; the same question id
+  under a different content id is a separate item.
+- The report's question rows carry `content_id`; the human report qualifies a row or attempt with its
+  content id only when it differs from the report content.
+- The append-only triggers also reject an id-reusing `INSERT OR REPLACE`; the schema is version 2,
+  so an existing version-1 database gains that trigger and the composite index on open.
+- `--json` flag-parse or extra-argument errors emit the documented JSON error document.

@@ -29,6 +29,7 @@
   "questions": [
     {
       "id": "q1",
+      "content_id": "sample-0001",
       "attempts": 2,
       "first_status": "correct",
       "latest_status": "correct",
@@ -36,6 +37,7 @@
     },
     {
       "id": "q2",
+      "content_id": "sample-0001",
       "attempts": 1,
       "first_status": "incorrect",
       "latest_status": "incorrect",
@@ -43,6 +45,7 @@
     },
     {
       "id": "q3",
+      "content_id": "sample-0001",
       "attempts": 1,
       "first_status": "skipped",
       "latest_status": "skipped",
@@ -124,7 +127,7 @@
     }
   ],
   "limitations": [
-    "Counts cover only this self-authored sample; they are not an exam score, pass estimate or readiness claim.",
+    "Counts cover only the locally stored practice attempts shown above; they are not an exam score, pass estimate or readiness claim.",
     "Repeated attempts come after the correct answer and evidence were shown and are not independent evidence.",
     "The exam blueprint, time limit and pass threshold are unknown, so no pass probability is computed."
   ]

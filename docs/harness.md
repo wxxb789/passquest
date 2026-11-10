@@ -24,9 +24,13 @@ stays the honest entry point. **New checks are written directly as TypeScript ga
 as another `scripts/*.sh` or `scripts/*.py` one-off. `bun run gate` becomes the single entry point at
 that point, and CI then runs the same command on ubuntu, macos and windows (`oven-sh/setup-bun`).
 
-CI (`.github/workflows/ci.yml`) runs exactly this on every pull request and on `main`. There is no
-second gate definition — if CI and a local run disagree, the script is the authority and the workflow
-is broken.
+The scripts already in the chain (`gate.sh`, `check-docs-links.py`, `check-secrets.sh`,
+`check-local-only.sh`) are grandfathered as the pre-migration harness, not a template for new checks;
+`check-local-only.sh` migrates with the goal-0002 Bun increment.
+
+CI (`.github/workflows/gate.yml`) runs `bash scripts/gate.sh` on every pull request and on `main`.
+There is no second gate definition — if CI and a local run disagree, the script is the authority and
+the workflow is broken.
 
 ## Gates, in order
 
@@ -39,7 +43,7 @@ is broken.
 | 5 | Tidy | `go mod tidy -diff` | Empty diff; a dirty module file means a dependency was added or dropped silently. |
 | 6 | Docs links | `python3 scripts/check-docs-links.py` | Relative links in markdown must resolve to a real path. |
 | 7 | Secrets / sources | `bash scripts/check-secrets.sh` | Credentials, private keys, `.env` files and confidential source markers outside the allowlist fail the run. |
-| 8 | Local-only CLI | `bash scripts/check-local-only.sh` | Pass Quest's own packages must not import `net`, `net/http`, `net/rpc` or `net/smtp`; runtime files must not contain the internal-only source marker. `net` is linked transitively by the pure-Go SQLite chain (`modernc.org/sqlite` → `libc` → `google/uuid`) and is never called; runtime proof belongs in the evidence record. |
+| 8 | Local-only CLI | `bash scripts/check-local-only.sh` | Pass Quest's own packages must not import `net`, `net/http`, `net/rpc` or `net/smtp`; files under `cmd/` and `internal/` — runtime **and** test files (`*.go`, `*.json`, `*.md`, `*.txt`) — must not contain the internal-only source marker. `net` is linked transitively by the pure-Go SQLite chain (`modernc.org/sqlite` → `libc` → `google/uuid`) and is never called; runtime proof belongs in the evidence record. |
 
 Skipped gates print `SKIP` with a reason. A skip is only legitimate for a surface that does not exist
 yet (for example: no `go.mod` before the first increment); a skip that hides a real surface is a

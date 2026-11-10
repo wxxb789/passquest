@@ -31,6 +31,14 @@ func (s Status) Valid() bool {
 	}
 }
 
+// QuestionKey is the identity of a question inside one content. Attempt
+// numbering, repeat exposure and report rows are scoped to it: the same
+// question id under another content id is a different question.
+type QuestionKey struct {
+	ContentID  string
+	QuestionID string
+}
+
 // Attempt is one immutable answer record. AttemptNumber and PriorAttempts are
 // assigned by Append inside the insert transaction and recomputed by List from
 // row order.
@@ -52,8 +60,13 @@ type Attempt struct {
 	PriorAttempts  int
 }
 
+// Key returns the content-scoped identity used for numbering and repeats.
+func (a Attempt) Key() QuestionKey {
+	return QuestionKey{ContentID: a.ContentID, QuestionID: a.QuestionID}
+}
+
 // Repeat reports whether the key had already been shown by an earlier attempt
-// on the same question.
+// on the same content-scoped question.
 func (a Attempt) Repeat() bool { return a.AttemptNumber > 1 }
 
 // Selection is a parsed learner response: an option, or an explicit skip.
@@ -83,8 +96,10 @@ func ParseSelection(q exam.Question, raw string) (Selection, error) {
 	return Selection{Option: &opt}, nil
 }
 
-// BuildRecord grades a selection and snapshots what was shown, so a later
-// content revision cannot change the meaning of a historical attempt.
+// BuildRecord grades a selection and snapshots the selected and correct option
+// text, so a later content revision cannot change the meaning of a historical
+// attempt. It does not snapshot the passage or stem; the store does not keep
+// them.
 func BuildRecord(contentID, contentVersion string, q exam.Question, sel Selection, sessionID string, started, answered time.Time) (Attempt, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return Attempt{}, errors.New("attempt: empty session id")

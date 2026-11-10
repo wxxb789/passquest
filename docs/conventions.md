@@ -47,7 +47,7 @@ Binding project conventions. Read this before writing code for any goal.
 cmd/passquest/          CLI entry point (the pre-0011 access surface)
 internal/<domain>/      Go packages by domain truth, not by layer
 agent/                  Node/TypeScript Pi Durable host (from goal 0005)
-data/baselines/         owner-directed public partial extraction (unreviewed)
+data/baselines/         owner-directed public parsed text (unreviewed; see its README)
 data/private/, data/local/, local-data/, .passquest/   never committed
 docs/goals/             numbered contracts; docs/goals/archive/ after close
 docs/plans/             per-increment plans
@@ -71,7 +71,13 @@ testdata/               small, independently authored fixtures only
 - Commits: conventional prefix (`feat:`, `fix:`, `docs:`, `test:`, `chore:`), imperative, one
   increment per branch. Agent runs do **not** commit or push — the operator does.
 - Every gate you report carries its real exit code. A gate you did not run is missing work.
-- New capability ⇒ new machine check. Extend `scripts/` and `gate.sh` in the same increment.
+- New capability ⇒ new machine check in the same increment. Until the Bun migration lands
+  ([`decisions/D-0001-bun-typescript-harness.md`](decisions/D-0001-bun-typescript-harness.md)),
+  `scripts/gate.sh` stays the entry point and its existing bash/Python gates are grandfathered. The
+  next new check ships the Bun runner in that same increment and is written as a TypeScript gate
+  module under `harness/gates/` sharing `harness/lib/` — never another `scripts/*.sh` or
+  `scripts/*.py` one-off. `scripts/check-local-only.sh` is grandfathered and migrates with the
+  goal-0002 Bun increment.
 
 ## Uncertainty protocol (binding)
 

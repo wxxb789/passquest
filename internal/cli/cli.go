@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,20 +112,45 @@ func databasePath(flagValue string, getenv func(string) string) string {
 	return filepath.Join(".passquest", "passquest.sqlite")
 }
 
+// jsonFlagRequested reports whether args ask for JSON before flag.Parse runs, so
+// a parse failure still produces the documented JSON error document. A
+// successful parse is authoritative for values such as --json=false.
+func jsonFlagRequested(args []string) bool {
+	for _, arg := range args {
+		name := strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-")
+		if name == "json" {
+			return true
+		}
+		if value, ok := strings.CutPrefix(name, "json="); ok {
+			if parsed, err := strconv.ParseBool(value); err == nil && parsed {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func runPractice(args []string, opt Options) int {
+	wantJSON := jsonFlagRequested(args)
 	fs := flag.NewFlagSet("practice", flag.ContinueOnError)
-	fs.SetOutput(opt.Stderr)
+	if wantJSON {
+		fs.SetOutput(io.Discard)
+	} else {
+		fs.SetOutput(opt.Stderr)
+	}
 	dbFlag := fs.String("db", "", "SQLite database path")
 	questionFlag := fs.String("question", "", "question id to practice")
 	answerFlag := fs.String("answer", "", "answer label (A, B, C, ...)")
 	skipFlag := fs.Bool("skip", false, "record a skipped attempt")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
 	if err := fs.Parse(args); err != nil {
+		if wantJSON {
+			return usageError(opt, true, "invalid_flags", err.Error())
+		}
 		return 2
 	}
 	if fs.NArg() > 0 {
-		fmt.Fprintf(opt.Stderr, "passquest: unexpected argument %q\n", fs.Arg(0))
-		return 2
+		return usageError(opt, *jsonFlag || wantJSON, "unexpected_argument", fmt.Sprintf("unexpected argument %q", fs.Arg(0)))
 	}
 	answerSet := false
 	fs.Visit(func(f *flag.Flag) {
@@ -150,9 +176,9 @@ func runPractice(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	perQuestion := make(map[string]int, len(records))
+	perQuestion := make(map[attempt.QuestionKey]int, len(records))
 	for _, rec := range records {
-		perQuestion[rec.QuestionID]++
+		perQuestion[rec.Key()]++
 	}
 
 	var (
@@ -167,7 +193,7 @@ func runPractice(args []string, opt Options) int {
 		}
 	} else {
 		for i, candidate := range content.Questions {
-			if perQuestion[candidate.ID] == 0 {
+			if perQuestion[attempt.QuestionKey{ContentID: content.ID, QuestionID: candidate.ID}] == 0 {
 				question, number = candidate, i
 				break
 			}
@@ -320,16 +346,23 @@ func writeFeedback(w io.Writer, record attempt.Attempt, feedback attempt.Feedbac
 }
 
 func runReport(args []string, opt Options) int {
+	wantJSON := jsonFlagRequested(args)
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
-	fs.SetOutput(opt.Stderr)
+	if wantJSON {
+		fs.SetOutput(io.Discard)
+	} else {
+		fs.SetOutput(opt.Stderr)
+	}
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
 	if err := fs.Parse(args); err != nil {
+		if wantJSON {
+			return usageError(opt, true, "invalid_flags", err.Error())
+		}
 		return 2
 	}
 	if fs.NArg() > 0 {
-		fmt.Fprintf(opt.Stderr, "passquest: unexpected argument %q\n", fs.Arg(0))
-		return 2
+		return usageError(opt, *jsonFlag || wantJSON, "unexpected_argument", fmt.Sprintf("unexpected argument %q", fs.Arg(0)))
 	}
 
 	content, err := exam.Sample()
@@ -368,11 +401,12 @@ func runReport(args []string, opt Options) int {
 
 func summarize(records []attempt.Attempt, content exam.Exam) (countsView, []questionReport) {
 	var counts countsView
-	index := make(map[string]int, len(content.Questions))
+	index := make(map[attempt.QuestionKey]int, len(content.Questions))
 	questions := make([]questionReport, 0, len(content.Questions))
 	for _, q := range content.Questions {
-		index[q.ID] = len(questions)
-		questions = append(questions, questionReport{ID: q.ID})
+		key := attempt.QuestionKey{ContentID: content.ID, QuestionID: q.ID}
+		index[key] = len(questions)
+		questions = append(questions, questionReport{ID: q.ID, ContentID: content.ID})
 	}
 
 	for _, record := range records {
@@ -407,11 +441,12 @@ func summarize(records []attempt.Attempt, content exam.Exam) (countsView, []ques
 			}
 		}
 
-		i, ok := index[record.QuestionID]
+		key := record.Key()
+		i, ok := index[key]
 		if !ok {
 			i = len(questions)
-			index[record.QuestionID] = i
-			questions = append(questions, questionReport{ID: record.QuestionID})
+			index[key] = i
+			questions = append(questions, questionReport{ID: record.QuestionID, ContentID: record.ContentID})
 		}
 		questions[i].Attempts++
 		questions[i].LatestStatus = string(record.Status)
@@ -425,7 +460,7 @@ func summarize(records []attempt.Attempt, content exam.Exam) (countsView, []ques
 }
 
 var limitations = []string{
-	"Counts cover only this self-authored sample; they are not an exam score, pass estimate or readiness claim.",
+	"Counts cover only the locally stored practice attempts shown above; they are not an exam score, pass estimate or readiness claim.",
 	"Repeated attempts come after the correct answer and evidence were shown and are not independent evidence.",
 	"The exam blueprint, time limit and pass threshold are unknown, so no pass probability is computed.",
 }
@@ -448,7 +483,11 @@ func writeReport(w io.Writer, doc reportDoc, dbPath string) {
 		if latest == "" {
 			latest = "—"
 		}
-		fmt.Fprintf(w, "  %s  attempts %d  first %s  latest %s  repeated %d\n", q.ID, q.Attempts, first, latest, q.Repeated)
+		id := q.ID
+		if q.ContentID != doc.Content.ID {
+			id = q.ContentID + "/" + q.ID
+		}
+		fmt.Fprintf(w, "  %s  attempts %d  first %s  latest %s  repeated %d\n", id, q.Attempts, first, latest, q.Repeated)
 	}
 
 	fmt.Fprintln(w, "\nAttempts")
@@ -464,8 +503,12 @@ func writeReport(w io.Writer, doc reportDoc, dbPath string) {
 		if a.Repeat {
 			kind = "repeat"
 		}
+		questionID := a.QuestionID
+		if a.ContentID != doc.Content.ID {
+			questionID = a.ContentID + "/" + a.QuestionID
+		}
 		fmt.Fprintf(w, "  #%d  %s  %s  %s  selected %s  %d ms  session %s\n",
-			a.ID, a.QuestionID, a.Status, kind, selected, a.ElapsedMS, a.SessionID)
+			a.ID, questionID, a.Status, kind, selected, a.ElapsedMS, a.SessionID)
 	}
 
 	fmt.Fprintln(w, "\nLimitations")
@@ -695,6 +738,7 @@ type countsView struct {
 
 type questionReport struct {
 	ID           string `json:"id"`
+	ContentID    string `json:"content_id"`
 	Attempts     int    `json:"attempts"`
 	FirstStatus  string `json:"first_status"`
 	LatestStatus string `json:"latest_status"`

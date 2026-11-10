@@ -30,6 +30,14 @@ func sampleAttempt(questionID string) attempt.Attempt {
 	}
 }
 
+const replaceAttemptSQL = `INSERT OR REPLACE INTO attempts (
+		id, session_id, question_id, content_id, content_version, status,
+		selected_label, selected_text, correct_label, correct_text,
+		started_at, answered_at, elapsed_ms
+	) VALUES (1, 'sess-evil', 'q1', 'sample-0001', '1', 'incorrect',
+		'A', 'At 7 p.m.', 'B', 'At 4 p.m.',
+		'2026-11-10T09:00:00Z', '2026-11-10T09:00:02Z', 2000)`
+
 func mustOpen(t *testing.T, path string) *Store {
 	t.Helper()
 	st, err := Open(path)
@@ -171,6 +179,41 @@ func TestNumberingSpansContentVersions(t *testing.T) {
 	}
 }
 
+func TestNumberingScopesToContent(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "attempts.sqlite"))
+
+	first := mustAppend(t, st, sampleAttempt("q1"))
+	if first.AttemptNumber != 1 || first.PriorAttempts != 0 {
+		t.Fatalf("first content numbering = %d/%d", first.AttemptNumber, first.PriorAttempts)
+	}
+
+	otherContent := sampleAttempt("q1")
+	otherContent.ContentID = "sample-9999"
+	other := mustAppend(t, st, otherContent)
+	if other.AttemptNumber != 1 || other.PriorAttempts != 0 || other.Repeat() {
+		t.Fatalf("other content numbering = %d/%d repeat %t", other.AttemptNumber, other.PriorAttempts, other.Repeat())
+	}
+
+	sameQuestionAgain := mustAppend(t, st, sampleAttempt("q1"))
+	if sameQuestionAgain.AttemptNumber != 2 || sameQuestionAgain.PriorAttempts != 1 {
+		t.Fatalf("repeat in first content = %d/%d", sameQuestionAgain.AttemptNumber, sameQuestionAgain.PriorAttempts)
+	}
+
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	want := []int{1, 1, 2}
+	if len(list) != len(want) {
+		t.Fatalf("attempts = %d, want %d", len(list), len(want))
+	}
+	for i, number := range want {
+		if list[i].AttemptNumber != number {
+			t.Fatalf("attempt %d number = %d, want %d", i+1, list[i].AttemptNumber, number)
+		}
+	}
+}
+
 func TestAttemptsAreAppendOnly(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "attempts.sqlite"))
 	mustAppend(t, st, sampleAttempt("q1"))
@@ -181,12 +224,18 @@ func TestAttemptsAreAppendOnly(t *testing.T) {
 	if _, err := st.db.Exec(`DELETE FROM attempts`); err == nil || !strings.Contains(err.Error(), "append-only") {
 		t.Fatalf("DELETE error = %v, want append-only rejection", err)
 	}
+	if _, err := st.db.Exec(replaceAttemptSQL); err == nil || !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("INSERT OR REPLACE error = %v, want append-only rejection", err)
+	}
 	list, err := st.List()
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if len(list) != 1 {
 		t.Fatalf("attempts after rejected writes = %d, want 1", len(list))
+	}
+	if list[0].Status != attempt.StatusCorrect || list[0].SelectedLabel != "B" {
+		t.Fatalf("rejected replace changed the row: %+v", list[0])
 	}
 }
 
@@ -276,6 +325,53 @@ func TestMigrationKeepsOlderDatabaseAndIsIdempotent(t *testing.T) {
 	}
 	if len(list) != 1 {
 		t.Fatalf("attempts after idempotent migration = %d, want 1", len(list))
+	}
+}
+
+func TestMigrationAddsInsertGuardToVersionOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v1.sqlite")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open v1: %v", err)
+	}
+	for _, stmt := range schemaV1 {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("create v1 schema: %v", err)
+		}
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 1`); err != nil {
+		t.Fatalf("set version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close v1: %v", err)
+	}
+
+	st := mustOpen(t, path)
+	var version int
+	if err := st.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("user_version: %v", err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, SchemaVersion)
+	}
+	var indexCount int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'attempts_content_question_id'`).Scan(&indexCount); err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if indexCount != 1 {
+		t.Fatalf("composite index count = %d, want 1", indexCount)
+	}
+
+	mustAppend(t, st, sampleAttempt("q1"))
+	if _, err := st.db.Exec(replaceAttemptSQL); err == nil || !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("INSERT OR REPLACE after migration error = %v, want append-only rejection", err)
+	}
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 || list[0].Status != attempt.StatusCorrect {
+		t.Fatalf("attempt after rejected replace = %+v", list)
 	}
 }
 

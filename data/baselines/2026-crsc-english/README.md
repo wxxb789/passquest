@@ -30,9 +30,11 @@ file per PDF page, for private-source import work (goal 0002).
 - OCR noise: column order, stray glyphs (`|`, `~`, box characters), vertical page numbers folded into
   lines, and occasional merged words. Numbers in question/option positions are the least reliable
   part.
-- Three pages are near-empty (under 300 bytes): p50, p77, p135 — figure or separator pages.
-- `manifest.tsv` `chars_no_ws` is the honesty check: a page with a low count is a page you must look
-  at before trusting.
+- Four pages are near-empty (under 300 bytes): p1 (cover) and p50, p77, p135 (figure or separator
+  pages).
+- `manifest.tsv` `chars_no_ws` counts code points that are not Unicode whitespace; the form feed
+  (`\f`) that `pdftotext` emits between pages is also excluded. It is the honesty check: a page with
+  a low count is a page you must look at before trusting.
 - Answer keys and answer explanations are **not verified**. Nothing here may be treated as an
   authoritative key or used as a test fixture; goal 0002 requires user-reviewed answers with
   provenance before that changes.
