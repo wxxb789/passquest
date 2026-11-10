@@ -11,16 +11,23 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 
-if [ ! -f go.mod ] || [ ! -d cmd/passquest ]; then
-  echo "SKIP local-only CLI (no CLI surface yet)"
-  exit 0
-fi
-
 fail=0
 bad() { printf 'FAIL  %s\n' "$*"; fail=1; }
 
-if ! package_list="$(go list ./cmd/... ./internal/... 2>&1)"; then
-  bad "go list ./cmd/... ./internal/..."
+# Exit 3 requests a SKIP: the surface does not exist yet. gate.sh turns it into
+# a SKIP line. Once go.mod exists the CLI is a real surface, so a missing
+# cmd/passquest is a failure, not a skip.
+if [ ! -f go.mod ]; then
+  echo "SKIP local-only CLI (no go.mod yet)"
+  exit 3
+fi
+if [ ! -d cmd/passquest ]; then
+  bad "cmd/passquest is missing but go.mod exists"
+  exit 1
+fi
+
+if ! package_list="$(go list ./cmd/passquest ./internal/... 2>&1)"; then
+  bad "go list ./cmd/passquest ./internal/..."
   printf '%s\n' "$package_list"
   exit 1
 fi
@@ -40,7 +47,11 @@ if hits="$(printf '%s\n' "$imports" | grep -E ' (net|net/http|net/rpc|net/smtp)(
   printf '%s\n' "$hits"
 fi
 
-if linked="$(go list -deps ./cmd/passquest 2>/dev/null | grep -E '^(net/http|net/rpc|net/smtp)$' || true)" && [ -n "$linked" ]; then
+if ! deps="$(go list -deps ./cmd/passquest)"; then
+  bad "go list -deps ./cmd/passquest"
+  exit 1
+fi
+if linked="$(printf '%s\n' "$deps" | grep -E '^(net/http|net/rpc|net/smtp)$' || true)" && [ -n "$linked" ]; then
   bad "network client linked into the CLI"
   printf '%s\n' "$linked"
 fi

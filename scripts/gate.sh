@@ -48,7 +48,13 @@ if bash scripts/check-secrets.sh ; then ok "secrets/sources"; else bad "secrets/
 
 # 8. Local-only runtime (no first-party network imports, no confidential markers)
 step "local-only CLI"
-if bash scripts/check-local-only.sh ; then ok "local-only CLI"; else bad "local-only CLI"; fi
+bash scripts/check-local-only.sh
+local_only_status=$?
+case "$local_only_status" in
+  0) ok "local-only CLI" ;;
+  3) : ;; # the check printed SKIP with its reason
+  *) bad "local-only CLI" ;;
+esac
 
 printf '\n'
 if [ "$fail" -ne 0 ]; then

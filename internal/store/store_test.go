@@ -145,6 +145,32 @@ func TestAppendListAndReopen(t *testing.T) {
 	}
 }
 
+func TestNumberingSpansContentVersions(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "attempts.sqlite"))
+	first := mustAppend(t, st, sampleAttempt("q1"))
+	if first.AttemptNumber != 1 || first.PriorAttempts != 0 {
+		t.Fatalf("first version numbering = %d/%d", first.AttemptNumber, first.PriorAttempts)
+	}
+
+	nextVersion := sampleAttempt("q1")
+	nextVersion.ContentVersion = "2"
+	second := mustAppend(t, st, nextVersion)
+	if second.AttemptNumber != 2 || second.PriorAttempts != 1 {
+		t.Fatalf("second version numbering = %d/%d", second.AttemptNumber, second.PriorAttempts)
+	}
+
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(list))
+	}
+	if list[1].ContentVersion != "2" || list[1].AttemptNumber != 2 || list[1].PriorAttempts != 1 {
+		t.Fatalf("round-trip second version = %+v", list[1])
+	}
+}
+
 func TestAttemptsAreAppendOnly(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "attempts.sqlite"))
 	mustAppend(t, st, sampleAttempt("q1"))

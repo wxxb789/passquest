@@ -123,6 +123,20 @@ func TestBuildRecordRejectsBadInput(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "content id") {
 		t.Errorf("empty content id: error = %v", err)
 	}
+
+	emptyQuestion := q
+	emptyQuestion.ID = ""
+	_, err = BuildRecord("c", "1", emptyQuestion, ok, "sess", started, started.Add(time.Second))
+	if err == nil || !strings.Contains(err.Error(), "empty question id") {
+		t.Errorf("empty question id: error = %v", err)
+	}
+
+	unkeyed := q
+	unkeyed.Answer = "Z"
+	_, err = BuildRecord("c", "1", unkeyed, ok, "sess", started, started.Add(time.Second))
+	if err == nil || !strings.Contains(err.Error(), "has no keyed option") {
+		t.Errorf("unkeyed question: error = %v", err)
+	}
 }
 
 func TestExplain(t *testing.T) {

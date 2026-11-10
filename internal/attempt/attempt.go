@@ -32,7 +32,8 @@ func (s Status) Valid() bool {
 }
 
 // Attempt is one immutable answer record. AttemptNumber and PriorAttempts are
-// assigned by the store inside the insert transaction.
+// assigned by Append inside the insert transaction and recomputed by List from
+// row order.
 type Attempt struct {
 	ID             int64
 	SessionID      string
@@ -112,9 +113,6 @@ func BuildRecord(contentID, contentVersion string, q exam.Question, sel Selectio
 		StartedAt:      started.UTC(),
 		AnsweredAt:     answered.UTC(),
 		ElapsedMS:      answered.Sub(started).Milliseconds(),
-	}
-	if rec.ElapsedMS < 0 {
-		rec.ElapsedMS = 0
 	}
 
 	switch {

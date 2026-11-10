@@ -101,6 +101,13 @@ func TestParseRejectsUnknownFieldAndTrailingData(t *testing.T) {
 	if _, err := Parse([]byte(base + base)); err == nil {
 		t.Fatal("trailing JSON was accepted")
 	}
+
+	t.Run("unkeyed answer", func(t *testing.T) {
+		unkeyed := strings.Replace(base, `"answer":"A"`, `"answer":"Z"`, 1)
+		if _, err := Parse([]byte(unkeyed)); err == nil || !strings.Contains(err.Error(), `answer "Z" is not one of its options`) {
+			t.Fatalf("unkeyed answer error = %v", err)
+		}
+	})
 }
 
 func TestValidateRejects(t *testing.T) {
@@ -113,6 +120,8 @@ func TestValidateRejects(t *testing.T) {
 		{"empty id", func(e *Exam) { e.ID = "" }, "id is empty"},
 		{"empty passage", func(e *Exam) { e.Passage.Text = "" }, "passage.text is empty"},
 		{"no questions", func(e *Exam) { e.Questions = nil }, "no questions"},
+		{"empty question id", func(e *Exam) { e.Questions[0].ID = "" }, "questions[0].id is empty"},
+		{"empty stem", func(e *Exam) { e.Questions[0].Stem = "  " }, "stem is empty"},
 		{"duplicate question id", func(e *Exam) {
 			e.Questions = append(e.Questions, e.Questions[0])
 		}, "duplicated"},
@@ -127,6 +136,13 @@ func TestValidateRejects(t *testing.T) {
 		{"missing option explanation", func(e *Exam) { delete(e.Questions[0].OptionReasoning, "B") }, "option B has no explanation"},
 		{"extra option explanation", func(e *Exam) { e.Questions[0].OptionReasoning["C"] = "extra" }, "explains unknown option"},
 		{"too few options", func(e *Exam) { e.Questions[0].Options = e.Questions[0].Options[:1] }, "want 2..8"},
+		{"too many options", func(e *Exam) {
+			q := &e.Questions[0]
+			for _, label := range []string{"C", "D", "E", "F", "G", "H", "I"} {
+				q.Options = append(q.Options, Option{Label: label, Text: "Option " + label + "."})
+				q.OptionReasoning[label] = "Explanation " + label + "."
+			}
+		}, "has 9 options, want 2..8"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -362,7 +362,7 @@ func runReport(args []string, opt Options) int {
 	if *jsonFlag {
 		return writeJSON(opt, doc)
 	}
-	writeReport(opt.Stdout, content, doc, st.Path())
+	writeReport(opt.Stdout, doc, st.Path())
 	return 0
 }
 
@@ -430,9 +430,9 @@ var limitations = []string{
 	"The exam blueprint, time limit and pass threshold are unknown, so no pass probability is computed.",
 }
 
-func writeReport(w io.Writer, content exam.Exam, doc reportDoc, dbPath string) {
-	fmt.Fprintf(w, "Pass Quest — attempt evidence (%s v%s)\n", content.ID, content.Version)
-	fmt.Fprintf(w, "%s\n\n", content.Title)
+func writeReport(w io.Writer, doc reportDoc, dbPath string) {
+	fmt.Fprintf(w, "Pass Quest — attempt evidence (%s v%s)\n", doc.Content.ID, doc.Content.Version)
+	fmt.Fprintf(w, "%s\n\n", doc.Content.Title)
 	c := doc.Counts
 	fmt.Fprintf(w, "Attempts: %d (correct %d, incorrect %d, skipped %d)\n", c.Attempts, c.Correct, c.Incorrect, c.Skipped)
 	fmt.Fprintf(w, "First attempts: %d (correct %d, incorrect %d, skipped %d)\n", c.FirstAttempts, c.FirstCorrect, c.FirstIncorrect, c.FirstSkipped)

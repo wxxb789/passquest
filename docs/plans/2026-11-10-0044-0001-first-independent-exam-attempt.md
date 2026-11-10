@@ -47,8 +47,9 @@ budget is unknown.
 
 ### JSON schemas (schema_version 1)
 
-- `awaiting_answer`: `content{id,version,title,notice,source}`, `question{id,number,total,passage,
-  stem,options[{label,text}]}`. **No** answer/evidence/reasoning/status field exists in this document
+- `awaiting_answer`: `content{id,version,title,notice,provenance{author,source,rights,
+  exam_relation}}`, `question{id,number,total,passage,stem,options[{label,text}]}`. **No**
+  answer/evidence/reasoning/status field exists in this document
   or in the human pre-answer output.
 - `answered`: `content`, `attempt{id,session_id,question_id,attempt_number,prior_attempts,repeat,
   status,selected_label,selected_text,correct_label,correct_text,started_at,answered_at,
@@ -91,10 +92,12 @@ revision cannot silently rewrite what was answered.
 2. Real CLI transcript in `docs/evidence/0001-first-independent-exam-attempt.md`: fresh temp dir,
    awaiting output, correct/incorrect/skip/repeat, report from a new process, Python `sqlite3` table
    dump, `strace -f -e trace=network` showing no socket/connect syscalls.
-3. New gate `scripts/check-local-only.sh`, wired into `scripts/gate.sh`: fails if the CLI links `net`,
-   `net/http`, `net/rpc` or `net/smtp`, or if `cmd/`/`internal/` contain a confidential source
-   marker. The schema/JSON surface is covered by tests + goldens, so the harness grows in the same
-   increment.
+3. New gate `scripts/check-local-only.sh`, wired into `scripts/gate.sh`: fails if a first-party
+   package imports `net`, `net/http`, `net/rpc` or `net/smtp`, if the CLI links an HTTP/RPC/SMTP
+   client, or if `cmd/`/`internal/` contain a confidential source marker. The `net` package itself
+   is linked transitively by the pure-Go SQLite chain and disclosed by `docs/harness.md` gate 8,
+   not failed. The schema/JSON surface is covered by tests + goldens, so the harness grows in the
+   same increment.
 4. `bash scripts/gate.sh` with its real output and exit code.
 
 ## Trade-offs and defaults taken

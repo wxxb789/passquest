@@ -29,7 +29,7 @@ live examination, and no exam blueprint, time limit, pass threshold or readiness
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1 -v` | exit 0; 26 top-level tests, 26 subtests, 0 failures, 0 skips |
+| `go test ./... -count=1 -v` | exit 0; 34 top-level tests, 37 subtests, 0 failures, 0 skips (re-measured 2026-11-10 after the simplification pass; the original increment measurement was 26/26 at `a13772e`) |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
 | `gofmt -l` (tracked `*.go`) | empty output |
@@ -264,6 +264,12 @@ PASS  local-only CLI
 
 GATE: PASS
 ```
+
+Re-measured after the simplification pass (2026-11-10, tree at `ff80f2b` plus the uncommitted apply
+diff): `bash scripts/gate.sh` → exit 0, 8/8 `PASS`, 0 `SKIP`; docs links 45 checked/0 broken;
+secrets/sources clean (214 tracked files); local-only 5 first-party packages. The 41/45 counts in
+the transcript above are the original increment measurement at `a13772e`; owner commits `5e89188`
+and `4a861ca` added docs and data before this re-measurement.
 
 ## Contract clause → evidence
 

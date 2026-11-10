@@ -132,6 +132,9 @@ func (e Exam) Validate() error {
 		if strings.TrimSpace(q.Reasoning) == "" {
 			add("%s reasoning is empty", where)
 		}
+		// Authored items are 2..8 options. Two is the minimum for a choice; eight
+		// keeps one multiple-choice item readable in the CLI prompt, and no goal
+		// requires a larger item.
 		if len(q.Options) < 2 || len(q.Options) > 8 {
 			add("%s has %d options, want 2..8", where, len(q.Options))
 		}
@@ -150,9 +153,6 @@ func (e Exam) Validate() error {
 		}
 		if !labels[q.Answer] {
 			add("%s answer %q is not one of its options", where, q.Answer)
-		}
-		if len(q.OptionReasoning) != len(q.Options) {
-			add("%s has %d option explanations for %d options", where, len(q.OptionReasoning), len(q.Options))
 		}
 		for label := range labels {
 			if strings.TrimSpace(q.OptionReasoning[label]) == "" {

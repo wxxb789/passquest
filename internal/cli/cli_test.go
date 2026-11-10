@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
+	"github.com/wxxb789/passquest/internal/store"
 )
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite golden files")
@@ -84,6 +86,23 @@ func mustRun(t *testing.T, db string, clock *stepClock, stdin string, args ...st
 		t.Fatalf("Run(%v) = %d\nstdout:\n%s\nstderr:\n%s", args, code, out, errOut)
 	}
 	return out
+}
+
+// seedFourAttempts runs the shared q1 correct, q2 incorrect, q3 skipped,
+// q1 repeated scenario. Callers keep their own oracles over the returned docs.
+func seedFourAttempts(t *testing.T, db string, clock *stepClock) []answeredDoc {
+	t.Helper()
+	steps := [][]string{
+		{"practice", "--json", "--question", "q1", "--answer", "B"},
+		{"practice", "--json", "--question", "q2", "--answer", "A"},
+		{"practice", "--json", "--question", "q3", "--skip"},
+		{"practice", "--json", "--question", "q1", "--answer", "B"},
+	}
+	docs := make([]answeredDoc, 0, len(steps))
+	for _, args := range steps {
+		docs = append(docs, decodeAnswered(t, mustRun(t, db, clock, "", args...)))
+	}
+	return docs
 }
 
 func TestAwaitingJSONHidesTheKey(t *testing.T) {
@@ -179,8 +198,9 @@ func TestHumanPromptDoesNotRevealTheKey(t *testing.T) {
 func TestCorrectIncorrectSkipAndRepeat(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
+	docs := seedFourAttempts(t, db, clock)
+	correct, incorrect, skipped, repeated := docs[0], docs[1], docs[2], docs[3]
 
-	correct := decodeAnswered(t, mustRun(t, db, clock, "", "practice", "--json", "--question", "q1", "--answer", "B"))
 	if correct.State != "answered" || correct.Attempt.Status != "correct" {
 		t.Fatalf("correct doc = %+v", correct)
 	}
@@ -197,7 +217,6 @@ func TestCorrectIncorrectSkipAndRepeat(t *testing.T) {
 		t.Fatalf("feedback lacks evidence/reasoning: %+v", correct.Feedback)
 	}
 
-	incorrect := decodeAnswered(t, mustRun(t, db, clock, "", "practice", "--json", "--question", "q2", "--answer", "A"))
 	if incorrect.Attempt.Status != "incorrect" || incorrect.Attempt.Repeat {
 		t.Fatalf("incorrect doc = %+v", incorrect)
 	}
@@ -205,7 +224,6 @@ func TestCorrectIncorrectSkipAndRepeat(t *testing.T) {
 		t.Fatal("incorrect feedback has no distractor explanation")
 	}
 
-	skipped := decodeAnswered(t, mustRun(t, db, clock, "", "practice", "--json", "--question", "q3", "--skip"))
 	if skipped.Attempt.Status != "skipped" {
 		t.Fatalf("skipped status = %q", skipped.Attempt.Status)
 	}
@@ -216,7 +234,6 @@ func TestCorrectIncorrectSkipAndRepeat(t *testing.T) {
 		t.Fatalf("skip exposure = %q", skipped.Feedback.Exposure)
 	}
 
-	repeated := decodeAnswered(t, mustRun(t, db, clock, "", "practice", "--json", "--question", "q1", "--answer", "B"))
 	if !repeated.Attempt.Repeat || repeated.Attempt.AttemptNumber != 2 || repeated.Attempt.PriorAttempts != 1 {
 		t.Fatalf("repeat numbering = %+v", repeated.Attempt)
 	}
@@ -254,6 +271,72 @@ func TestCorrectIncorrectSkipAndRepeat(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("limitations do not state %q: %v", want, report.Limitations)
 		}
+	}
+}
+
+func TestHumanFeedbackAndReport(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+
+	first := mustRun(t, db, clock, "", "practice", "--question", "q1", "--answer", "B")
+	for _, want := range []string{"Result: CORRECT", "Evidence:", "First attempt on this question"} {
+		if !strings.Contains(first, want) {
+			t.Errorf("first human output lacks %q:\n%s", want, first)
+		}
+	}
+
+	incorrect := mustRun(t, db, clock, "", "practice", "--question", "q2", "--answer", "A")
+	for _, want := range []string{"Result: INCORRECT", "Why your answer is wrong:", "Evidence:", "Correct answer:"} {
+		if !strings.Contains(incorrect, want) {
+			t.Errorf("incorrect human output lacks %q:\n%s", want, incorrect)
+		}
+	}
+
+	repeated := mustRun(t, db, clock, "", "practice", "--question", "q1", "--answer", "B")
+	for _, want := range []string{"Result: CORRECT", "Repeated attempt:", "not independent evidence"} {
+		if !strings.Contains(repeated, want) {
+			t.Errorf("repeated human output lacks %q:\n%s", want, repeated)
+		}
+	}
+
+	report := mustRun(t, db, clock, "", "report")
+	for _, want := range []string{
+		"First attempts: 2 (correct 1, incorrect 1, skipped 0)",
+		"Repeated attempts (answer already shown): 1 (correct 1, incorrect 0, skipped 0)",
+		"q3  attempts 0  first not attempted",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("human report lacks %q:\n%s", want, report)
+		}
+	}
+}
+
+func TestReportRepeatedIncorrectAndSkipped(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	for _, args := range [][]string{
+		{"practice", "--json", "--question", "q1", "--answer", "B"},
+		{"practice", "--json", "--question", "q1", "--answer", "A"},
+		{"practice", "--json", "--question", "q2", "--skip"},
+		{"practice", "--json", "--question", "q2", "--skip"},
+	} {
+		mustRun(t, db, clock, "", args...)
+	}
+
+	report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
+	want := countsView{
+		Attempts: 4, Correct: 1, Incorrect: 1, Skipped: 2,
+		FirstAttempts: 2, FirstCorrect: 1, FirstSkipped: 1,
+		RepeatedAttempts: 2, RepeatedIncorrect: 1, RepeatedSkipped: 1,
+	}
+	if report.Counts != want {
+		t.Fatalf("counts = %+v, want %+v", report.Counts, want)
+	}
+	if report.Questions[0].LatestStatus != "incorrect" || report.Questions[0].Repeated != 1 {
+		t.Fatalf("q1 row = %+v", report.Questions[0])
+	}
+	if report.Questions[1].LatestStatus != "skipped" || report.Questions[1].Repeated != 1 {
+		t.Fatalf("q2 row = %+v", report.Questions[1])
 	}
 }
 
@@ -334,8 +417,102 @@ func TestInteractiveInput(t *testing.T) {
 	})
 }
 
+func TestInvalidInputThenEOF(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	out := mustRun(t, db, clock, "X", "practice", "--question", "q1")
+	if got := strings.Count(out, "Your answer ("); got != 1 {
+		t.Fatalf("prompted %d times before EOF, want 1:\n%s", got, out)
+	}
+	if !strings.Contains(out, "Enter A, B, C, D, skip, or quit.") {
+		t.Fatalf("re-prompt missing:\n%s", out)
+	}
+	if !strings.Contains(out, "No attempt recorded.") {
+		t.Fatalf("end-of-input message missing:\n%s", out)
+	}
+	report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
+	if report.Counts.Attempts != 0 {
+		t.Fatalf("EOF after invalid input stored %d attempts", report.Counts.Attempts)
+	}
+}
+
+func TestCLIFailurePaths(t *testing.T) {
+	newOptions := func(stdout, stderr *bytes.Buffer) Options {
+		return Options{
+			Stdout:     stdout,
+			Stderr:     stderr,
+			Now:        (&stepClock{base: goldenBase}).Now,
+			NewSession: func() string { return "sess-test" },
+			Getenv:     func(string) string { return "" },
+		}
+	}
+
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	badDB := filepath.Join(blocker, "db.sqlite")
+
+	t.Run("storage failure is a JSON internal error", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{"report", "--db", badDB, "--json"}, newOptions(&stdout, &stderr))
+		if code != 1 {
+			t.Fatalf("exit = %d, want 1", code)
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("stdout = %s", stdout.String())
+		}
+		var doc errorDoc
+		if err := json.Unmarshal(stderr.Bytes(), &doc); err != nil {
+			t.Fatalf("decode error doc: %v\n%s", err, stderr.String())
+		}
+		if doc.Error.Code != "internal_error" {
+			t.Fatalf("error code = %q", doc.Error.Code)
+		}
+	})
+
+	t.Run("storage failure is a human internal error", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{"report", "--db", badDB}, newOptions(&stdout, &stderr))
+		if code != 1 || !strings.Contains(stderr.String(), "passquest: ") {
+			t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+		}
+	})
+
+	t.Run("stdin read error", func(t *testing.T) {
+		db := newDB(t)
+		var stdout, stderr bytes.Buffer
+		opt := newOptions(&stdout, &stderr)
+		opt.Stdin = failingReader{err: errors.New("boom")}
+		code := Run([]string{"practice", "--db", db, "--question", "q1"}, opt)
+		if code != 1 || !strings.Contains(stderr.String(), "read answer: boom") {
+			t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+		}
+		report := decodeReport(t, mustRun(t, db, &stepClock{base: goldenBase}, "", "report", "--json"))
+		if report.Counts.Attempts != 0 {
+			t.Fatalf("read failure stored %d attempts", report.Counts.Attempts)
+		}
+	})
+
+	t.Run("JSON encode error", func(t *testing.T) {
+		var stderr bytes.Buffer
+		code := Run([]string{"practice", "--db", newDB(t), "--json", "--question", "q1"}, Options{
+			Stdout:     failWriter{},
+			Stderr:     &stderr,
+			Now:        (&stepClock{base: goldenBase}).Now,
+			NewSession: func() string { return "sess-test" },
+			Getenv:     func(string) string { return "" },
+		})
+		if code != 1 || !strings.Contains(stderr.String(), "encode JSON") {
+			t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+		}
+	})
+}
+
 func TestReportEmpty(t *testing.T) {
-	doc := decodeReport(t, mustRun(t, newDB(t), &stepClock{base: goldenBase}, "", "report", "--json"))
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	doc := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
 	if doc.Counts.Attempts != 0 {
 		t.Fatalf("counts = %+v", doc.Counts)
 	}
@@ -349,6 +526,102 @@ func TestReportEmpty(t *testing.T) {
 	}
 	if doc.Attempts == nil || len(doc.Attempts) != 0 {
 		t.Fatalf("attempts = %v", doc.Attempts)
+	}
+
+	human := mustRun(t, db, clock, "", "report")
+	if !strings.Contains(human, "(none recorded)") {
+		t.Fatalf("empty human report lacks the no-attempts line:\n%s", human)
+	}
+}
+
+func TestDefaultQuestionSelection(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+
+	if doc := decodeAnswered(t, mustRun(t, db, clock, "", "practice", "--json")); doc.Question.ID != "q1" || doc.Question.Number != 1 {
+		t.Fatalf("first default question = %s #%d", doc.Question.ID, doc.Question.Number)
+	}
+	mustRun(t, db, clock, "", "practice", "--json", "--answer", "B")
+
+	if doc := decodeAnswered(t, mustRun(t, db, clock, "", "practice", "--json")); doc.Question.ID != "q2" || doc.Question.Number != 2 {
+		t.Fatalf("second default question = %s #%d", doc.Question.ID, doc.Question.Number)
+	}
+	mustRun(t, db, clock, "", "practice", "--json", "--answer", "B")
+
+	if doc := decodeAnswered(t, mustRun(t, db, clock, "", "practice", "--json")); doc.Question.ID != "q3" || doc.Question.Number != 3 {
+		t.Fatalf("third default question = %s #%d", doc.Question.ID, doc.Question.Number)
+	}
+	mustRun(t, db, clock, "", "practice", "--json", "--skip")
+
+	if doc := decodeAnswered(t, mustRun(t, db, clock, "", "practice", "--json")); doc.Question.ID != "q1" || doc.Question.Number != 1 {
+		t.Fatalf("fallback default question = %s #%d", doc.Question.ID, doc.Question.Number)
+	}
+
+	report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
+	if report.Counts.Attempts != 3 {
+		t.Fatalf("default selection stored %d attempts", report.Counts.Attempts)
+	}
+}
+
+func TestDatabasePath(t *testing.T) {
+	tests := []struct {
+		name string
+		flag string
+		env  string
+		want string
+	}{
+		{"flag wins", "/tmp/flag.sqlite", "/tmp/env.sqlite", "/tmp/flag.sqlite"},
+		{"env when flag blank", "  ", "/tmp/env.sqlite", "/tmp/env.sqlite"},
+		{"default when both blank", "", " ", filepath.Join(".passquest", "passquest.sqlite")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := databasePath(tt.flag, func(string) string { return tt.env })
+			if got != tt.want {
+				t.Fatalf("databasePath(%q, env %q) = %q, want %q", tt.flag, tt.env, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReportKeepsHistoricalQuestionRows(t *testing.T) {
+	db := newDB(t)
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	started := goldenBase
+	_, err = st.Append(attempt.Attempt{
+		SessionID:      "sess-historical",
+		QuestionID:     "q9",
+		ContentID:      "sample-0001",
+		ContentVersion: "1",
+		Status:         attempt.StatusCorrect,
+		SelectedLabel:  "A",
+		SelectedText:   "Historical option.",
+		CorrectLabel:   "A",
+		CorrectText:    "Historical option.",
+		StartedAt:      started,
+		AnsweredAt:     started.Add(time.Second),
+		ElapsedMS:      1000,
+	})
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	report := decodeReport(t, mustRun(t, db, &stepClock{base: goldenBase}, "", "report", "--json"))
+	if report.Counts.Attempts != 1 || report.Counts.Correct != 1 {
+		t.Fatalf("counts = %+v", report.Counts)
+	}
+	if len(report.Questions) != 4 {
+		t.Fatalf("question rows = %d, want 4", len(report.Questions))
+	}
+	historical := report.Questions[3]
+	if historical.ID != "q9" || historical.Attempts != 1 || historical.FirstStatus != "correct" || historical.LatestStatus != "correct" {
+		t.Fatalf("historical row = %+v", historical)
 	}
 }
 
@@ -418,17 +691,18 @@ func TestGoldenAwaitingJSON(t *testing.T) {
 func TestGoldenReportJSON(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
-	for _, args := range [][]string{
-		{"practice", "--json", "--question", "q1", "--answer", "B"},
-		{"practice", "--json", "--question", "q2", "--answer", "A"},
-		{"practice", "--json", "--question", "q3", "--skip"},
-		{"practice", "--json", "--question", "q1", "--answer", "B"},
-	} {
-		mustRun(t, db, clock, "", args...)
-	}
+	seedFourAttempts(t, db, clock)
 	out := mustRun(t, db, clock, "", "report", "--json")
 	checkGolden(t, filepath.Join("testdata", "report.golden.json"), []byte(out))
 }
+
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 
 func checkGolden(t *testing.T, path string, got []byte) {
 	t.Helper()
