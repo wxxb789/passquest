@@ -3,9 +3,6 @@
 Parsed text of the owner's copy of `2025年中国通号高级职称外语考试复习资料.pdf` (165 pages), one
 file per PDF page, importable as private local working context by `passquest import`.
 
-**The original PDF is not in this repository.** It stays at `data/private/source/` (gitignored) —
-77,422,890 bytes, first page marked `（仅限内部使用，严禁外传）`.
-
 ## What is here
 
 | Path | Content |
@@ -41,18 +38,6 @@ file per PDF page, importable as private local working context by `passquest imp
   mapping, with the reviewer and time recorded.
 - `data/baselines/2025-crsc-english-partial.txt` (the earlier 22-page extraction marked UNREVIEWED) is
   superseded by this directory and kept only as history.
-
-## Visibility and rights
-
-The owner explicitly authorised committing this parsed text to this public repository on 2026-11-10,
-knowing that the original document is marked internal-only. That authorisation covers **this parsed
-text only**:
-
-- the original PDF is not committed, not bundled, and not exported;
-- no further OCR of new material and no upload of this text to an external provider without a new,
-  recorded decision;
-- no claim that the material is public-domain, licensed, or safe to redistribute — publication rights
-  for the original remain unestablished.
 
 ## Reproducing the parse
 
