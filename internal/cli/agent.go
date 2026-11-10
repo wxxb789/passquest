@@ -220,10 +220,14 @@ func runAgentResume(args []string, opt Options) int {
 		return usageError(opt, *flags.json, "cancel_pending",
 			fmt.Sprintf("cancellation was requested for run %s; run agent cancel to confirm it", run.RunID))
 	}
-	// A fresh heartbeat is a live host for this run whatever token it carries.
-	// A start/resume claim younger than the heartbeat window may not have
-	// written its heartbeat yet, so it is treated as live too.
-	if heartbeat, live := agent.HeartbeatLive(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow()); live {
+	// A fresh heartbeat is a live host only while the trail still describes a
+	// live claim. After an interruption or failure the recording process has
+	// already reaped the host; a heartbeat it could not remove (a Windows kill
+	// cannot) must not veto resume. A start/resume claim younger than the
+	// heartbeat window may not have written its heartbeat yet, so it is
+	// treated as live too.
+	if heartbeat, live := agent.HeartbeatLive(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow()); live &&
+		agent.HeartbeatAuthority(latest.Kind) {
 		return usageError(opt, *flags.json, "run_running",
 			fmt.Sprintf("run %s has a live host (pid %d); cancel it before resuming", run.RunID, heartbeat.PID))
 	}
@@ -363,7 +367,13 @@ func runAgentStatus(args []string, opt Options) int {
 	}
 	// A fresh heartbeat belongs to the run, not to the token of the latest
 	// trail event: a second host that raced the claim still means a live run.
+	// It describes a live host only while the trail is a live claim; an
+	// interrupted/failed/completed trail wins over a heartbeat the dead host
+	// could not remove.
 	heartbeat, fresh := agent.HeartbeatLive(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow())
+	if !agent.HeartbeatAuthority(latest.Kind) {
+		fresh = false
+	}
 
 	durable := agentDurableView{Available: false, Reason: "not_started", HeartbeatFresh: fresh, HeartbeatPID: heartbeat.PID}
 	var snapshot *agent.Snapshot
@@ -462,13 +472,28 @@ func runAgentCancel(args []string, opt Options) int {
 	if latest.Kind == store.AgentEventCompleted {
 		return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed", run.RunID))
 	}
-	if latest.Kind != store.AgentEventCancelRequested && latest.Kind != store.AgentEventCancelled {
-		token, err := agentLatestToken(st, run.RunID)
-		if err != nil {
-			return internalError(opt, *flags.json, err)
+	heartbeatPath := run.StorePath + ".host"
+	// The latest claim recorded the token given to the host before that host
+	// wrote a heartbeat. A live heartbeat is more precise when a host raced the
+	// claim. The token keeps an old control request from stopping a later
+	// resume, which always receives a new token.
+	controlToken, err := agentLatestToken(st, run.RunID)
+	if err != nil {
+		return internalError(opt, *flags.json, err)
+	}
+	heartbeat, live := agent.HeartbeatLive(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow())
+	if live && agent.HeartbeatAuthority(latest.Kind) {
+		if heartbeat.Token != "" {
+			controlToken = heartbeat.Token
 		}
-		info := map[string]any{"host_token": token}
-		if heartbeat, live := agent.HeartbeatLive(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow()); live {
+	} else {
+		// A heartbeat left by a host that already exited (interrupted/failed)
+		// is not a live host, so cancellation needs no wait.
+		live = false
+	}
+	if latest.Kind != store.AgentEventCancelRequested && latest.Kind != store.AgentEventCancelled {
+		info := map[string]any{"host_token": controlToken}
+		if live {
 			info["pid"] = heartbeat.PID
 			// A live heartbeat names the host to signal even when the latest
 			// event recorded another token; keep that host's token as
@@ -479,6 +504,8 @@ func runAgentCancel(args []string, opt Options) int {
 		}
 		if _, err := st.AppendAgentRunEvent(run.RunID, store.AgentEventCancelRequested, info, opt.Now()); err != nil {
 			if errors.Is(err, store.ErrAgentRunFinished) {
+				agent.RemoveHeartbeat(heartbeatPath)
+				agent.RemoveHostControl(heartbeatPath)
 				latest, _, _ := st.LatestAgentRunEvent(run.RunID)
 				if latest.Kind == store.AgentEventCompleted {
 					return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed", run.RunID))
@@ -493,9 +520,11 @@ func runAgentCancel(args []string, opt Options) int {
 			return internalError(opt, *flags.json, err)
 		}
 	}
+	// The host polls this file itself, so the request reaches a Windows host
+	// that cannot receive SIGINT. Signalling below is only an optimisation.
+	_ = agent.WriteHostControl(heartbeatPath, run.RunID, controlToken, agent.HostControlCancel)
 
-	heartbeatPath := run.StorePath + ".host"
-	heartbeat, live := agentHostClaimWait(heartbeatPath, run.RunID, latest, opt)
+	heartbeat, live = agentHostClaimWait(heartbeatPath, run.RunID, latest, opt)
 	confirmed := true
 	if live {
 		confirmed = false
@@ -543,6 +572,11 @@ func runAgentCancel(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
+	// The host is gone in both terminal paths, including when another process
+	// recorded cancelled first. A Windows hard kill cannot remove these files
+	// itself, so this process clears them.
+	agent.RemoveHeartbeat(heartbeatPath)
+	agent.RemoveHostControl(heartbeatPath)
 	if !changed {
 		latest, _, _ := st.LatestAgentRunEvent(run.RunID)
 		if latest.Kind == store.AgentEventCompleted {
@@ -555,7 +589,6 @@ func runAgentCancel(args []string, opt Options) int {
 		writeAgentCancel(opt.Stdout, existing)
 		return 0
 	}
-	agent.RemoveHeartbeat(heartbeatPath)
 	doc := agentCancelDocOf(run, agent.StateCancelled, heartbeat.PID)
 	if *flags.json {
 		return writeJSON(opt, doc)
@@ -813,6 +846,11 @@ func agentAppendFinished(opt Options, jsonMode bool, st *store.Store, run store.
 func executeAgentRun(opt Options, jsonMode bool, st *store.Store, run store.AgentRun, request agent.HostRequest, timeout time.Duration) int {
 	agent.RemoveHeartbeat(request.HeartbeatPath)
 	outcome, runErr := runAgentHost(opt, request, timeout)
+	// runAgentHost returns only after the host process has exited. A hard kill
+	// (Windows) cannot remove its liveness or control files itself, so the
+	// application clears both once the process is gone.
+	agent.RemoveHeartbeat(request.HeartbeatPath)
+	agent.RemoveHostControl(request.HeartbeatPath)
 	response := outcome.Response
 	steps, err := st.AgentSteps(run.RunID)
 	if err != nil {
@@ -1010,6 +1048,11 @@ func agentHeartbeatWindow() time.Duration {
 // claim can no longer be starting.
 func agentHostClaimWait(path, runID string, latest store.AgentRunEvent, opt Options) (agent.Heartbeat, bool) {
 	heartbeat, live := agent.HeartbeatLive(path, runID, opt.Now(), agentHeartbeatWindow())
+	if live && !agent.HeartbeatAuthority(latest.Kind) {
+		// The trail proves the host has gone; a heartbeat it left behind must
+		// not make cancellation wait or signal a dead pid.
+		live = false
+	}
 	if live || latest.At.IsZero() ||
 		(latest.Kind != store.AgentEventStarted && latest.Kind != store.AgentEventResumed) {
 		return heartbeat, live

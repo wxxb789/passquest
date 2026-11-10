@@ -395,6 +395,119 @@ func TestAgentPausedThenResume(t *testing.T) {
 	}
 }
 
+// TestAgentInterruptedHeartbeatDoesNotBlockStatusOrResume reproduces the
+// Windows timeout shape on Linux: the host is killed before it can remove its
+// heartbeat, so a fresh liveness file survives beside a recorded interruption.
+// The trail must decide liveness on every OS.
+func TestAgentInterruptedHeartbeatDoesNotBlockStatusOrResume(t *testing.T) {
+	temp := t.TempDir()
+	db := filepath.Join(temp, "app.sqlite")
+	storePath := filepath.Join(temp, "agent.sqlite")
+	configureAgentProvider(t, db)
+	clock := &stepClock{base: goldenBase}
+	leaked := &agentFakeRunner{fn: func(request agent.HostRequest) (agent.RunOutcome, error) {
+		raw, _ := json.Marshal(agent.Heartbeat{
+			RunID: request.RunID, PID: 4242, Token: request.HostToken, At: clock.Now().UnixMilli(),
+		})
+		if err := os.WriteFile(request.HeartbeatPath, raw, 0o600); err != nil {
+			t.Fatalf("write leaked heartbeat: %v", err)
+		}
+		return agent.RunOutcome{Interrupted: true, InterruptReason: "timeout", ExitCode: 1}, nil
+	}}
+	code, stdout, stderr := runAgentTest(t, agentTestOptions(t, clock, leaked, &agentIDSequence{}, agentTestKey), "",
+		"agent", "start", "--db", db, "--agent-store", storePath, "--json")
+	if code != 4 {
+		t.Fatalf("start code=%d stderr=%s", code, stderr)
+	}
+	var paused agentRunDoc
+	if err := json.Unmarshal([]byte(stdout), &paused); err != nil {
+		t.Fatalf("decode paused: %v", err)
+	}
+	runID := paused.Run.RunID
+	// The application reaped the host, so it must clear the liveness file the
+	// killed host could not remove.
+	if _, err := os.Stat(storePath + ".host"); !os.IsNotExist(err) {
+		t.Fatalf("interrupted host left a heartbeat after exit: %v", err)
+	}
+	// Recreate the leak as if the application had also crashed before cleanup.
+	raw, _ := json.Marshal(agent.Heartbeat{
+		RunID: runID, PID: 4242, Token: strings.Repeat("a", 32), At: clock.Now().UnixMilli(),
+	})
+	if err := os.WriteFile(storePath+".host", raw, 0o600); err != nil {
+		t.Fatalf("recreate leaked heartbeat: %v", err)
+	}
+	status := statusAgentRunner(&agent.Snapshot{Found: true, LiveRun: true, PendingTasks: 1})
+	code, statusRaw, stderr := runAgentTest(t, agentTestOptions(t, clock, status, nil, agentTestKey), "",
+		"agent", "status", runID, "--db", db, "--json")
+	if code != 0 || !strings.Contains(statusRaw, `"state": "paused"`) ||
+		!strings.Contains(statusRaw, `"heartbeat_fresh": false`) {
+		t.Fatalf("status beside a leaked heartbeat code=%d raw=%s stderr=%s", code, statusRaw, stderr)
+	}
+	completing := completingAgentRunner(t, db, goldenBase.Add(20*time.Second))
+	code, resumeRaw, stderr := runAgentTest(t, agentTestOptions(t, clock, completing, nil, agentTestKey), "",
+		"agent", "resume", runID, "--db", db, "--json")
+	if code != 0 {
+		t.Fatalf("resume beside a leaked heartbeat code=%d stderr=%s", code, stderr)
+	}
+	var resumed agentRunDoc
+	if err := json.Unmarshal([]byte(resumeRaw), &resumed); err != nil {
+		t.Fatalf("decode resumed: %v", err)
+	}
+	if resumed.State != string(agent.StateCompleted) || resumed.Run.RunID != runID || len(resumed.Steps) != 2 {
+		t.Fatalf("resumed = %+v", resumed)
+	}
+	if _, err := os.Stat(storePath + ".host"); !os.IsNotExist(err) {
+		t.Fatalf("heartbeat survived the resume: %v", err)
+	}
+}
+
+// TestAgentCancelInterruptedRunClearsLeakedHeartbeat pins the cancel rule when
+// the host is already gone: a fresh heartbeat left by the dead host must not
+// make cancellation wait for a signal or for the stale window.
+func TestAgentCancelInterruptedRunClearsLeakedHeartbeat(t *testing.T) {
+	temp := t.TempDir()
+	db := filepath.Join(temp, "app.sqlite")
+	storePath := filepath.Join(temp, "agent.sqlite")
+	configureAgentProvider(t, db)
+	runID := "run-20261110T100000Z-aaaaaaaa"
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	createAgentTestRunAt(t, st, runID, storePath, goldenBase.Add(-time.Minute),
+		map[string]any{"host_token": strings.Repeat("a", 32)})
+	if _, err := st.AppendAgentRunEvent(runID, store.AgentEventInterrupted,
+		map[string]any{"reason": "timeout"}, goldenBase.Add(-30*time.Second)); err != nil {
+		t.Fatalf("append interrupted: %v", err)
+	}
+	st.Close()
+	raw, _ := json.Marshal(agent.Heartbeat{
+		RunID: runID, PID: 0, Token: strings.Repeat("b", 32), At: goldenBase.UnixMilli(),
+	})
+	heartbeatPath := storePath + ".host"
+	if err := os.WriteFile(heartbeatPath, raw, 0o600); err != nil {
+		t.Fatalf("write leaked heartbeat: %v", err)
+	}
+	opt := agentTestOptions(t, &stepClock{base: goldenBase}, &agentFakeRunner{}, nil, agentTestKey)
+	code, stdout, stderr := runAgentTest(t, opt, "",
+		"agent", "cancel", runID, "--db", db, "--wait-seconds", "1", "--json")
+	if code != 0 {
+		t.Fatalf("cancel beside a dead host code=%d stderr=%s", code, stderr)
+	}
+	var cancelled agentCancelDoc
+	if err := json.Unmarshal([]byte(stdout), &cancelled); err != nil {
+		t.Fatalf("decode cancel: %v", err)
+	}
+	if !cancelled.Confirmed || cancelled.State != string(agent.StateCancelled) {
+		t.Fatalf("cancel = %+v", cancelled)
+	}
+	for _, path := range []string{heartbeatPath, agent.HostControlPath(heartbeatPath)} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s survived cancel: %v", path, err)
+		}
+	}
+}
+
 func TestAgentCancelThenResumeRefused(t *testing.T) {
 	db := newDB(t)
 	configureAgentProvider(t, db)
@@ -590,6 +703,20 @@ func TestAgentCancelKeepsTerminalOffALiveHost(t *testing.T) {
 	if doc.State != string(agent.StateCancelling) || doc.Confirmed {
 		t.Fatalf("unconfirmed cancel = %+v", doc)
 	}
+	// The host-observed control request is written even though no OS signal can
+	// reach pid 0. This is the path a Windows host relies on.
+	controlPath := agent.HostControlPath(heartbeatPath)
+	controlRaw, err := os.ReadFile(controlPath)
+	if err != nil {
+		t.Fatalf("read control request: %v", err)
+	}
+	var control agent.HostControl
+	if err := json.Unmarshal(controlRaw, &control); err != nil {
+		t.Fatalf("decode control request: %v", err)
+	}
+	if control.RunID != runID || control.Action != agent.HostControlCancel || control.HostToken != strings.Repeat("b", 32) {
+		t.Fatalf("control request = %+v", control)
+	}
 	close(stop)
 	<-done
 	st, err = store.Open(db)
@@ -615,6 +742,9 @@ func TestAgentCancelKeepsTerminalOffALiveHost(t *testing.T) {
 	}
 	if !confirmed.Confirmed || confirmed.State != string(agent.StateCancelled) {
 		t.Fatalf("confirmed cancel = %+v", confirmed)
+	}
+	if _, err := os.Stat(controlPath); !os.IsNotExist(err) {
+		t.Fatalf("control request survived cancel: %v", err)
 	}
 }
 

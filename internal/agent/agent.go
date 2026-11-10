@@ -297,7 +297,10 @@ func ClassifyStatus(input StatusInput) (State, *Failure) {
 		}
 		return StateCancelled, nil
 	}
-	if input.HeartbeatFresh {
+	// A fresh heartbeat means running only while the trail still describes a
+	// live claim. A host killed without a graceful shutdown leaves its last
+	// heartbeat behind; the recorded interrupted/failed event is authoritative.
+	if input.HeartbeatFresh && HeartbeatAuthority(input.LatestEvent) {
 		return StateRunning, nil
 	}
 	if input.DurableAvailable && input.Snapshot != nil && input.Snapshot.Found {

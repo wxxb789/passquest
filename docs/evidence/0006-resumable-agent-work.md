@@ -27,7 +27,7 @@ the fixed paths do not change their outcomes.
 | `internal/agent` | The deterministic study-brief packet (recorded facts, derived skill state, authored lesson, no private source text), the versioned host request/response and transport, endpoint/step/run validation, failure classification and the status state machine. No database, no network import. |
 | `internal/store` | Schema v9: immutable `agent_runs`, append-only `agent_run_events`, append-only advisory `agent_steps`, and the append-only `agent_step_attempts` effect ledger. The step key is idempotent; a duplicate keeps the first text and appends a `reconciled` event. No agent table can update `attempts`. |
 | `internal/cli` | `agent start/status/resume/cancel/runs/show/transcript/record-step`, run selection, provider/credential checks, signal/timeout pause, cancellation confirmation, the paired JSON/human documents and exit codes. |
-| `agent/durable-host.mjs` | The Pi Durable runtime: one conversation per run, a session mapping, a replay-safe `record_study_step` tool that invokes the application's validated command, read-only status/transcript, heartbeat, SIGTERM pause and SIGINT cancel. |
+| `agent/durable-host.mjs` | The Pi Durable runtime: one conversation per run, a session mapping, a replay-safe `record_study_step` tool that invokes the application's validated command, read-only status/transcript, heartbeat, control-file pause/cancel polling, and SIGTERM/SIGINT as extra prompts. |
 | `harness/gates/agent-smoke.ts` | Real binary + real host + real Pi SQLite + loopback SSE stub; 101 assertions over 8 scenarios. |
 
 ## Demonstration setup
@@ -150,7 +150,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (11 packages, 490 tests, 0 skipped)
+PASS  go test (11 packages, 498 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -195,6 +195,11 @@ resume, fault injection with reconciliation, cancellation with a resume refused 
 invariant, the copied-store transcript, the `0600` store/heartbeat modes and a credential scan of the
 application and Pi stores. It runs after the Go suite, not concurrently with it.
 
+The same gate was also run once on Linux with `terminate`, `cancel` and `killProcess` temporarily
+made no-ops, so no process signal or kill could be delivered. It passed the same 101 agent-smoke
+assertions, which proves pause and cancel were carried entirely by the control file; that temporary
+patch was not retained.
+
 ## Contract clause → evidence
 
 | Done-when clause | Evidence |
@@ -219,9 +224,12 @@ application and Pi stores. It runs after the Go suite, not concurrently with it.
   brief starts; two Pi writers on one store are unsupported.
 - A run keeps its recorded model. A changed model name needs `cancel` + `start`; a changed endpoint,
   timeout or credential is picked up by `resume`.
-- Windows has no POSIX signal/process-group behaviour: cancellation kills the host and relies on the
-  application `cancel_requested`/`cancelled` trail. The durable conversation may remain pending in the
-  Pi store, but `resume` refuses. The smoke gate reports permissions as skipped on Windows.
+- Windows has no POSIX signal/process-group behaviour. Pause and cancel publish the control file the
+  host polls, so control does not depend on signal delivery; a signal is only an optimisation and
+  may fail on any OS. The application trail decides liveness: a fresh heartbeat means running only
+  while the latest event is `started`, `resumed` or `cancel_requested`, so a heartbeat left by a
+  hard-killed host cannot veto `paused`, `status` or `resume`. The smoke gate reports permissions as
+  skipped on Windows.
 - The heartbeat is considered stale after 5 seconds. A host that hangs without refreshing it is
   reported as paused and can be cancelled. A stale pid is never signalled; a fresh heartbeat is
   signalled even when its token differs from the latest event's, because that means a host raced the

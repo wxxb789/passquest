@@ -349,6 +349,30 @@ func TestClassifyStatus(t *testing.T) {
 				Snapshot: &Snapshot{Found: true, Failure: &RunFailure{Reason: "aborted"}}},
 			state: StateCancelled,
 		},
+		{
+			// Windows kills a timed-out host without letting it remove its
+			// heartbeat. The recorded interruption is authoritative.
+			name: "fresh heartbeat after interruption is paused",
+			input: StatusInput{LatestEvent: "interrupted", HeartbeatFresh: true, DurableAvailable: true,
+				Snapshot: &Snapshot{Found: true, LiveRun: true, PendingTasks: 1}},
+			state: StatePaused,
+		},
+		{
+			name:  "fresh heartbeat after failure is failed",
+			input: StatusInput{LatestEvent: "failed", LatestCode: CodeProviderError, HeartbeatFresh: true},
+			state: StateFailed,
+		},
+		{
+			name:  "fresh heartbeat after needs_action keeps needs_action",
+			input: StatusInput{LatestEvent: "needs_action", LatestCode: CodeAgentUnavailable, HeartbeatFresh: true},
+			state: StateNeedsAction, code: CodeAgentUnavailable,
+		},
+		{
+			name: "fresh heartbeat after completion is completed",
+			input: StatusInput{LatestEvent: "completed", HeartbeatFresh: true, DurableAvailable: true,
+				Snapshot: answer, Steps: 2},
+			state: StateCompleted,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -360,6 +384,72 @@ func TestClassifyStatus(t *testing.T) {
 				t.Fatalf("failure = %+v, want code %s", failure, test.code)
 			}
 		})
+	}
+}
+
+func TestHeartbeatAuthorityFollowsTheTrail(t *testing.T) {
+	// This is the cross-platform liveness rule: only a live claim, or a cancel
+	// the host has not acknowledged, lets a fresh heartbeat mean running.
+	for _, event := range []string{"started", "resumed", "cancel_requested"} {
+		if !HeartbeatAuthority(event) {
+			t.Fatalf("HeartbeatAuthority(%q) = false, want true", event)
+		}
+	}
+	for _, event := range []string{"interrupted", "failed", "needs_action", "completed", "cancelled", ""} {
+		if HeartbeatAuthority(event) {
+			t.Fatalf("HeartbeatAuthority(%q) = true, want false", event)
+		}
+	}
+}
+
+func TestHostControlRoundTrip(t *testing.T) {
+	t.Chdir(t.TempDir())
+	// A status request has no heartbeat path; the guard must not create a
+	// control file in the working directory.
+	if err := WriteHostControl("", "run-20261110T100000Z-aaaaaaaa", "", HostControlCancel); err != nil {
+		t.Fatalf("write control without a heartbeat path: %v", err)
+	}
+	if _, err := os.Stat(".control"); !os.IsNotExist(err) {
+		t.Fatalf("empty heartbeat path created a control file: %v", err)
+	}
+	heartbeatPath := filepath.Join(t.TempDir(), "agent.host")
+	controlPath := HostControlPath(heartbeatPath)
+	if controlPath != heartbeatPath+".control" {
+		t.Fatalf("HostControlPath = %q", controlPath)
+	}
+	if err := WriteHostControl(heartbeatPath, "run-20261110T100000Z-aaaaaaaa", strings.Repeat("a", 32), HostControlCancel); err != nil {
+		t.Fatalf("write control: %v", err)
+	}
+	raw, err := os.ReadFile(controlPath)
+	if err != nil {
+		t.Fatalf("read control: %v", err)
+	}
+	var control HostControl
+	if err := json.Unmarshal(raw, &control); err != nil {
+		t.Fatalf("decode control: %v", err)
+	}
+	if control.RunID != "run-20261110T100000Z-aaaaaaaa" || control.HostToken != strings.Repeat("a", 32) ||
+		control.Action != HostControlCancel {
+		t.Fatalf("control = %+v", control)
+	}
+	// A second request replaces the first atomically.
+	if err := WriteHostControl(heartbeatPath, control.RunID, "", HostControlPause); err != nil {
+		t.Fatalf("rewrite control: %v", err)
+	}
+	raw, err = os.ReadFile(controlPath)
+	if err != nil {
+		t.Fatalf("read rewritten control: %v", err)
+	}
+	control = HostControl{}
+	if err := json.Unmarshal(raw, &control); err != nil {
+		t.Fatalf("decode rewritten control: %v", err)
+	}
+	if control.Action != HostControlPause || control.HostToken != "" {
+		t.Fatalf("rewritten control = %+v", control)
+	}
+	RemoveHostControl(heartbeatPath)
+	if _, err := os.Stat(controlPath); !os.IsNotExist(err) {
+		t.Fatalf("control file survived removal: %v", err)
 	}
 }
 

@@ -254,6 +254,10 @@ func (r HostRunner) Run(ctx context.Context, request HostRequest) (RunOutcome, e
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			interruptReason = "timeout"
 		}
+		// The control file is the authoritative pause request. Signals are an
+		// optimisation: Windows cannot deliver them, so the host polls this
+		// file and the kill below remains the bounded fallback.
+		_ = WriteHostControl(request.HeartbeatPath, request.RunID, request.HostToken, HostControlPause)
 		_ = terminate(cmd.Process)
 		select {
 		case err = <-done:
@@ -470,6 +474,76 @@ type Heartbeat struct {
 	PID   int    `json:"pid"`
 	Token string `json:"token"`
 	At    int64  `json:"at"`
+}
+
+// Host control actions. The host polls the control file beside its heartbeat,
+// so cancellation and pause do not depend on POSIX signal delivery.
+const (
+	HostControlPause  = "pause"
+	HostControlCancel = "cancel"
+)
+
+// HostControl is one durable request the host observes itself. The token keeps
+// a request from an earlier host from stopping a later resume of the same run.
+type HostControl struct {
+	RunID     string `json:"run_id"`
+	HostToken string `json:"host_token,omitempty"`
+	Action    string `json:"action"`
+}
+
+// HostControlPath is the control file beside one run's heartbeat.
+func HostControlPath(heartbeatPath string) string {
+	return heartbeatPath + ".control"
+}
+
+// WriteHostControl publishes one control request atomically. An empty token
+// applies to any host for the run; otherwise only the named host observes it.
+func WriteHostControl(heartbeatPath, runID, token, action string) error {
+	if heartbeatPath == "" {
+		return nil
+	}
+	path := HostControlPath(heartbeatPath)
+	payload, err := json.Marshal(HostControl{RunID: runID, HostToken: token, Action: action})
+	if err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if _, err := temp.Write(payload); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
+}
+
+// RemoveHostControl clears a consumed or abandoned control request.
+func RemoveHostControl(heartbeatPath string) {
+	if heartbeatPath == "" {
+		return
+	}
+	_ = os.Remove(HostControlPath(heartbeatPath))
+}
+
+// HeartbeatAuthority reports whether a fresh heartbeat can still describe a
+// live host for the run's latest application event. Only a live claim, or a
+// cancellation the host has not yet acknowledged, can. An interrupted,
+// failed, completed or cancelled event is proof the host process this
+// application started has exited, so a heartbeat it left behind (a hard kill
+// cannot remove it) must not override that trail on any OS.
+func HeartbeatAuthority(latestEvent string) bool {
+	switch latestEvent {
+	case "started", "resumed", "cancel_requested":
+		return true
+	default:
+		return false
+	}
 }
 
 // HeartbeatLive reports a fresh heartbeat for this run without matching the

@@ -37,6 +37,7 @@ const MAX_BODY = 600;
 const MAX_ATTEMPT_KEY = 200;
 const MAX_PROMPT = 20000;
 const HEARTBEAT_MS = 1000;
+const CONTROL_MS = 200;
 const MAX_TRANSCRIPT_TEXT = 4000;
 const MAX_TRANSCRIPT_ENTRIES = 200;
 
@@ -66,8 +67,10 @@ let stopKind = null;
 let harness = null;
 let conversation = null;
 let heartbeatTimer = null;
+let controlTimer = null;
 let deadlineTimer = null;
 let heartbeatPath = "";
+let controlPath = "";
 let credential = "";
 const reports = [];
 
@@ -81,8 +84,10 @@ function finish(doc, code = 0) {
   if (finished) return;
   finished = true;
   clearInterval(heartbeatTimer);
+  clearInterval(controlTimer);
   clearTimeout(deadlineTimer);
   removeHeartbeat();
+  removeControl();
   const payload = { schema_version: PROTOCOL_VERSION, run_id: request?.run_id ?? "", ...doc };
   let text;
   try {
@@ -108,6 +113,43 @@ function removeHeartbeat() {
   } catch {
     // A stale heartbeat is the expected result of a crash.
   }
+}
+
+function removeControl() {
+  if (!controlPath) return;
+  try {
+    fs.unlinkSync(controlPath);
+  } catch {
+    // A missing control file is the normal case.
+  }
+}
+
+// readControl observes the application's durable cancel/pause request. It is
+// authoritative on every OS; POSIX signals are only an extra prompt.
+function readControl() {
+  if (!controlPath || finished || closing) return;
+  let doc;
+  try {
+    doc = JSON.parse(fs.readFileSync(controlPath, "utf8"));
+  } catch {
+    return;
+  }
+  if (!doc || doc.run_id !== request?.run_id) return;
+  // A request names one host. An empty token applies to any host for the run.
+  if (doc.host_token && doc.host_token !== request.host_token) return;
+  if (doc.action === "cancel") {
+    void stop("cancelled");
+  } else if (doc.action === "pause") {
+    void stop("paused");
+  }
+}
+
+function startControl(path) {
+  if (!path) return;
+  controlPath = path;
+  controlTimer = setInterval(readControl, CONTROL_MS);
+  controlTimer.unref?.();
+  readControl();
 }
 
 function startHeartbeat(path) {
@@ -490,6 +532,7 @@ async function runTask() {
     return finish(hostError("storage_error", `open durable storage: ${error?.message ?? error}`));
   }
   startHeartbeat(request.heartbeat_path);
+  startControl(`${request.heartbeat_path}.control`);
   deadlineTimer = setTimeout(() => stop("paused"), request.deadline_ms);
 
   try {
@@ -716,6 +759,7 @@ process.on("SIGINT", () => {
 });
 process.on("exit", () => {
   removeHeartbeat();
+  removeControl();
 });
 
 main().catch((error) => {
