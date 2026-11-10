@@ -132,37 +132,11 @@ func (e Exam) Validate() error {
 		if strings.TrimSpace(q.Reasoning) == "" {
 			add("%s reasoning is empty", where)
 		}
-		// Authored items are 2..8 options. Two is the minimum for a choice; eight
-		// keeps one multiple-choice item readable in the CLI prompt, and no goal
-		// requires a larger item.
-		if len(q.Options) < 2 || len(q.Options) > 8 {
-			add("%s has %d options, want 2..8", where, len(q.Options))
+		for _, problem := range OptionProblems(q.Options, q.OptionReasoning) {
+			add("%s %s", where, problem)
 		}
-		labels := make(map[string]bool, len(q.Options))
-		for j, opt := range q.Options {
-			if len(opt.Label) != 1 || opt.Label[0] < 'A' || opt.Label[0] > 'Z' {
-				add("%s options[%d].label %q is not one uppercase letter", where, j, opt.Label)
-			}
-			if labels[opt.Label] {
-				add("%s option label %q is duplicated", where, opt.Label)
-			}
-			labels[opt.Label] = true
-			if strings.TrimSpace(opt.Text) == "" {
-				add("%s option %s text is empty", where, opt.Label)
-			}
-		}
-		if !labels[q.Answer] {
+		if _, ok := q.Option(q.Answer); !ok {
 			add("%s answer %q is not one of its options", where, q.Answer)
-		}
-		for label := range labels {
-			if strings.TrimSpace(q.OptionReasoning[label]) == "" {
-				add("%s option %s has no explanation", where, label)
-			}
-		}
-		for label := range q.OptionReasoning {
-			if !labels[label] {
-				add("%s explains unknown option %q", where, label)
-			}
 		}
 	}
 
@@ -170,6 +144,42 @@ func (e Exam) Validate() error {
 		return fmt.Errorf("invalid exam: %s", strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+// OptionProblems reports structural problems in options and their per-label
+// explanations. Source questions allow an empty answer until review; the
+// caller checks answer membership separately.
+func OptionProblems(options []Option, reasoning map[string]string) []string {
+	var problems []string
+	// Authored items are 2..8 options. Two is the minimum for a choice; eight
+	// keeps one multiple-choice item readable in the CLI prompt.
+	if len(options) < 2 || len(options) > 8 {
+		problems = append(problems, fmt.Sprintf("has %d options, want 2..8", len(options)))
+	}
+	labels := make(map[string]bool, len(options))
+	for i, opt := range options {
+		if len(opt.Label) != 1 || opt.Label[0] < 'A' || opt.Label[0] > 'Z' {
+			problems = append(problems, fmt.Sprintf("options[%d].label %q is not one uppercase letter", i, opt.Label))
+		}
+		if labels[opt.Label] {
+			problems = append(problems, fmt.Sprintf("option label %q is duplicated", opt.Label))
+		}
+		labels[opt.Label] = true
+		if strings.TrimSpace(opt.Text) == "" {
+			problems = append(problems, fmt.Sprintf("option %s text is empty", opt.Label))
+		}
+	}
+	for label := range labels {
+		if strings.TrimSpace(reasoning[label]) == "" {
+			problems = append(problems, fmt.Sprintf("option %s has no explanation", label))
+		}
+	}
+	for label := range reasoning {
+		if !labels[label] {
+			problems = append(problems, fmt.Sprintf("explains unknown option %q", label))
+		}
+	}
+	return problems
 }
 
 // Question returns the question with the given stable id and its position.

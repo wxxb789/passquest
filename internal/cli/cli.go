@@ -19,6 +19,7 @@ import (
 
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
+	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 )
 
@@ -70,6 +71,18 @@ func Run(args []string, options Options) int {
 		return runPractice(args[1:], opt)
 	case "report":
 		return runReport(args[1:], opt)
+	case "import":
+		return runImport(args[1:], opt)
+	case "sources":
+		return runSources(args[1:], opt)
+	case "show":
+		return runShow(args[1:], opt)
+	case "questions":
+		return runQuestions(args[1:], opt)
+	case "page":
+		return runPage(args[1:], opt)
+	case "question":
+		return runQuestion(args[1:], opt)
 	case "version":
 		return runVersion(opt)
 	case "help", "-h", "--help":
@@ -84,13 +97,24 @@ func Run(args []string, options Options) int {
 const usage = `Pass Quest — local practice and attempt evidence.
 
 Usage:
-  passquest practice [--db PATH] [--question ID] [--answer LABEL | --skip] [--json]
+  passquest import   --path PATH [--title TITLE] [--db PATH] [--json]
+  passquest sources  [--db PATH] [--json]
+  passquest show     SOURCE [--page N] [--db PATH] [--json]
+  passquest questions SOURCE [--page N] [--db PATH] [--json]
+  passquest page edit SOURCE PAGE --text-file PATH --reviewer NAME [--note TEXT] [--db PATH] [--json]
+  passquest page review SOURCE PAGE --reviewer NAME [--note TEXT] [--db PATH] [--json]
+  passquest question add SOURCE PAGE --file QUESTION.json [--db PATH] [--json]
+  passquest question edit SOURCE QUESTION --file QUESTION.json [--db PATH] [--json]
+  passquest question review SOURCE QUESTION --answer LABEL --reviewer NAME [--db PATH] [--json]
+  passquest practice [--db PATH] [--source SOURCE] [--page N] [--question ID]
+                     [--answer LABEL | --skip] [--json]
   passquest report   [--db PATH] [--json]
   passquest version
   passquest help
 
-The shipped exercise is a self-authored sample, not live exam content. No exam
-score, pass threshold or readiness probability is computed. Default database:
+Imported pages and questions start unreviewed; only reviewed material can be
+practiced. The shipped exercise is a self-authored sample. No exam score, pass
+threshold or readiness probability is computed. Default database:
 $PASSQUEST_DB or ./.passquest/passquest.sqlite
 `
 
@@ -110,6 +134,17 @@ func databasePath(flagValue string, getenv func(string) string) string {
 		return v
 	}
 	return filepath.Join(".passquest", "passquest.sqlite")
+}
+
+// openDatabase opens the resolved database path. The app-owned default state
+// directory is tightened to 0700; a directory chosen with --db or PASSQUEST_DB
+// is left to the user.
+func openDatabase(flagValue string, opt Options) (*store.Store, error) {
+	path := databasePath(flagValue, opt.Getenv)
+	if strings.TrimSpace(flagValue) == "" && strings.TrimSpace(opt.Getenv("PASSQUEST_DB")) == "" {
+		return store.OpenPrivate(path)
+	}
+	return store.Open(path)
 }
 
 // jsonFlagRequested reports whether args ask for JSON before flag.Parse runs, so
@@ -132,25 +167,16 @@ func jsonFlagRequested(args []string) bool {
 
 func runPractice(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
-	fs := flag.NewFlagSet("practice", flag.ContinueOnError)
-	if wantJSON {
-		fs.SetOutput(io.Discard)
-	} else {
-		fs.SetOutput(opt.Stderr)
-	}
+	fs := newFlagSet("practice", opt, wantJSON)
 	dbFlag := fs.String("db", "", "SQLite database path")
+	sourceFlag := fs.String("source", "", "imported source id to practice")
+	pageFlag := fs.Int("page", 0, "page number inside the imported source")
 	questionFlag := fs.String("question", "", "question id to practice")
 	answerFlag := fs.String("answer", "", "answer label (A, B, C, ...)")
 	skipFlag := fs.Bool("skip", false, "record a skipped attempt")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if err := fs.Parse(args); err != nil {
-		if wantJSON {
-			return usageError(opt, true, "invalid_flags", err.Error())
-		}
-		return 2
-	}
-	if fs.NArg() > 0 {
-		return usageError(opt, *jsonFlag || wantJSON, "unexpected_argument", fmt.Sprintf("unexpected argument %q", fs.Arg(0)))
+	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
+		return code
 	}
 	answerSet := false
 	fs.Visit(func(f *flag.Flag) {
@@ -161,12 +187,11 @@ func runPractice(args []string, opt Options) int {
 	if answerSet && *skipFlag {
 		return usageError(opt, *jsonFlag, "invalid_input", "--answer and --skip are mutually exclusive")
 	}
-
-	content, err := exam.Sample()
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+	if *pageFlag != 0 && *sourceFlag == "" {
+		return usageError(opt, *jsonFlag, "invalid_input", "--page requires --source")
 	}
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -176,30 +201,33 @@ func runPractice(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	perQuestion := make(map[attempt.QuestionKey]int, len(records))
-	for _, rec := range records {
-		perQuestion[rec.Key()]++
-	}
 
-	var (
-		question exam.Question
-		number   int
-	)
-	if *questionFlag != "" {
-		var ok bool
-		question, number, ok = content.Question(*questionFlag)
-		if !ok {
-			return usageError(opt, *jsonFlag, "unknown_question", fmt.Sprintf("question %q is not in content %s", *questionFlag, content.ID))
+	var selection practiceSelection
+	if *sourceFlag != "" {
+		selection, err = selectSourcePractice(st, *sourceFlag, *pageFlag, *questionFlag, records)
+		if err != nil {
+			return sourceError(opt, *jsonFlag, err)
 		}
 	} else {
-		for i, candidate := range content.Questions {
-			if perQuestion[attempt.QuestionKey{ContentID: content.ID, QuestionID: candidate.ID}] == 0 {
-				question, number = candidate, i
-				break
-			}
+		sample, err := exam.Sample()
+		if err != nil {
+			return internalError(opt, *jsonFlag, err)
 		}
-		if question.ID == "" {
-			question, number = content.Questions[0], 0
+		selection.Content = sample
+		perQuestion := make(map[attempt.QuestionKey]int, len(records))
+		for _, rec := range records {
+			perQuestion[rec.Key()]++
+		}
+		if *questionFlag != "" {
+			question, number, ok := sample.Question(*questionFlag)
+			if !ok {
+				return usageError(opt, *jsonFlag, "unknown_question", fmt.Sprintf("question %q is not in content %s", *questionFlag, sample.ID))
+			}
+			selection.Question, selection.Number = question, number
+		} else if index := firstUnattempted(sample.ID, sample.Questions, perQuestion); index >= 0 {
+			selection.Question, selection.Number = sample.Questions[index], index
+		} else {
+			selection.Question, selection.Number = sample.Questions[0], 0
 		}
 	}
 
@@ -208,34 +236,34 @@ func runPractice(args []string, opt Options) int {
 			return writeJSON(opt, awaitingDoc{
 				SchemaVersion: ProtocolVersion,
 				State:         "awaiting_answer",
-				Content:       contentViewOf(content),
-				Question:      questionViewOf(content, question, number),
+				Content:       contentViewOf(selection.Content),
+				Question:      questionViewOf(selection),
 			})
 		}
-		return answerQuestion(opt, content, question, number, st, answerFlag, answerSet, *skipFlag, true)
+		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true)
 	}
-	return answerQuestion(opt, content, question, number, st, answerFlag, answerSet, *skipFlag, false)
+	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
 }
 
-func answerQuestion(opt Options, content exam.Exam, question exam.Question, number int, st *store.Store, answerFlag *string, answerSet, skip, jsonMode bool) int {
+func answerQuestion(opt Options, selection practiceSelection, st *store.Store, answerFlag *string, answerSet, skip, jsonMode bool) int {
 	started := opt.Now()
 	if !jsonMode {
-		writePrompt(opt.Stdout, content, question, number)
+		writePrompt(opt.Stdout, selection.Content, selection.Question, selection.Number)
 	}
 
-	selection := attempt.Selection{Skip: skip}
+	chosen := attempt.Selection{Skip: skip}
 	if answerSet {
-		parsed, err := attempt.ParseSelection(question, *answerFlag)
+		parsed, err := attempt.ParseSelection(selection.Question, *answerFlag)
 		if err != nil {
 			return usageError(opt, jsonMode, "invalid_answer", err.Error())
 		}
-		selection = parsed
+		chosen = parsed
 	} else if !skip {
 		var (
 			recorded bool
 			code     int
 		)
-		selection, recorded, code = readSelection(opt, question)
+		chosen, recorded, code = readSelection(opt, selection.Question)
 		if code != 0 {
 			return code
 		}
@@ -246,7 +274,7 @@ func answerQuestion(opt Options, content exam.Exam, question exam.Question, numb
 	}
 
 	answered := opt.Now()
-	record, err := attempt.BuildRecord(content.ID, content.Version, question, selection, opt.NewSession(), started, answered)
+	record, err := attempt.BuildRecord(selection.Content.ID, selection.Content.Version, selection.Question, chosen, opt.NewSession(), started, answered)
 	if err != nil {
 		return internalError(opt, jsonMode, err)
 	}
@@ -254,14 +282,14 @@ func answerQuestion(opt Options, content exam.Exam, question exam.Question, numb
 	if err != nil {
 		return internalError(opt, jsonMode, err)
 	}
-	feedback := attempt.Explain(question, record)
+	feedback := attempt.Explain(selection.Question, record)
 
 	if jsonMode {
 		return writeJSON(opt, answeredDoc{
 			SchemaVersion: ProtocolVersion,
 			State:         "answered",
-			Content:       contentViewOf(content),
-			Question:      questionViewOf(content, question, number),
+			Content:       contentViewOf(selection.Content),
+			Question:      questionViewOf(selection),
 			Attempt:       attemptViewOf(record),
 			Feedback:      feedbackViewOf(feedback),
 		})
@@ -347,29 +375,18 @@ func writeFeedback(w io.Writer, record attempt.Attempt, feedback attempt.Feedbac
 
 func runReport(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
-	fs := flag.NewFlagSet("report", flag.ContinueOnError)
-	if wantJSON {
-		fs.SetOutput(io.Discard)
-	} else {
-		fs.SetOutput(opt.Stderr)
-	}
+	fs := newFlagSet("report", opt, wantJSON)
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if err := fs.Parse(args); err != nil {
-		if wantJSON {
-			return usageError(opt, true, "invalid_flags", err.Error())
-		}
-		return 2
-	}
-	if fs.NArg() > 0 {
-		return usageError(opt, *jsonFlag || wantJSON, "unexpected_argument", fmt.Sprintf("unexpected argument %q", fs.Arg(0)))
+	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
+		return code
 	}
 
-	content, err := exam.Sample()
+	sample, err := exam.Sample()
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	st, err := store.Open(databasePath(*dbFlag, opt.Getenv))
+	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -379,10 +396,30 @@ func runReport(args []string, opt Options) int {
 		return internalError(opt, *jsonFlag, err)
 	}
 
-	counts, questions := summarize(records, content)
+	ids := uniqueContentIDs(records)
+	if len(ids) == 0 {
+		ids = []string{sample.ID}
+	}
+	contents := make([]contentView, 0, len(ids))
+	sources := make(map[string]*reportSource)
+	var seeds []questionReport
+	for _, id := range ids {
+		view, questions := reportContentView(st, sample, id, sources)
+		contents = append(contents, view)
+		for _, q := range questions {
+			seeds = append(seeds, questionReport{ID: q.ID, ContentID: id})
+		}
+	}
+	counts, questions := summarize(records, seeds)
+	var content *contentView
+	if len(contents) == 1 {
+		only := contents[0]
+		content = &only
+	}
 	doc := reportDoc{
 		SchemaVersion: ProtocolVersion,
-		Content:       contentViewOf(content),
+		Content:       content,
+		Contents:      contents,
 		Counts:        counts,
 		Questions:     questions,
 		Attempts:      make([]attemptView, 0, len(records)),
@@ -399,14 +436,92 @@ func runReport(args []string, opt Options) int {
 	return 0
 }
 
-func summarize(records []attempt.Attempt, content exam.Exam) (countsView, []questionReport) {
+func uniqueContentIDs(records []attempt.Attempt) []string {
+	seen := make(map[string]bool, len(records))
+	var ids []string
+	for _, record := range records {
+		if !seen[record.ContentID] {
+			seen[record.ContentID] = true
+			ids = append(ids, record.ContentID)
+		}
+	}
+	return ids
+}
+
+type reportSource struct {
+	src       source.Source
+	questions []source.Question
+	err       error
+}
+
+// reportContentView caches per-source loads because a report contains one
+// content id per page of the same source.
+func reportContentView(st *store.Store, sample exam.Exam, id string, sources map[string]*reportSource) (contentView, []exam.Question) {
+	if id == sample.ID {
+		return contentViewOf(sample), sample.Questions
+	}
+	sourceID, page, ok := source.ParseContentID(id)
+	if !ok {
+		return unavailableContentView(id, "unrecognised content id"), nil
+	}
+	loaded := sources[sourceID]
+	if loaded == nil {
+		loaded = &reportSource{}
+		if loaded.src, loaded.err = st.Source(sourceID); loaded.err == nil {
+			loaded.questions, loaded.err = st.Questions(sourceID)
+		}
+		sources[sourceID] = loaded
+	}
+	if loaded.err != nil {
+		return unavailableContentView(id, loaded.err.Error()), nil
+	}
+	pageRecord, ok := findPage(loaded.src, page)
+	if !ok {
+		return unavailableSourceView(id, loaded.src, page, fmt.Errorf("page %d is not in the source", page)), nil
+	}
+	content, _, err := source.BuildPracticeExam(loaded.src, pageRecord, loaded.questions)
+	if err != nil {
+		return unavailableSourceView(id, loaded.src, page, err), nil
+	}
+	return contentViewOf(content), content.Questions
+}
+
+func unavailableContentView(id, reason string) contentView {
+	return contentView{
+		ID:      id,
+		Version: "unavailable",
+		Title:   fmt.Sprintf("Unavailable content %s", id),
+		Notice:  fmt.Sprintf("This build cannot load content %s (%s). Stored attempts remain the evidence and are shown by content id.", id, reason),
+		Provenance: provenanceView{
+			Author:       "unknown",
+			Source:       "local database",
+			Rights:       "private local data",
+			ExamRelation: "unavailable content; no exam claim is made",
+		},
+	}
+}
+
+func unavailableSourceView(id string, src source.Source, page int, cause error) contentView {
+	return contentView{
+		ID:      id,
+		Version: "unavailable",
+		Title:   fmt.Sprintf("%s — page %d", src.Title, page),
+		Notice:  fmt.Sprintf("Content is not practiceable in this build: %v. Stored attempts remain the evidence; the source stays private and local.", cause),
+		Provenance: provenanceView{
+			Author:       src.Title,
+			Source:       fmt.Sprintf("local %s import: %s", src.Import, src.Path),
+			Rights:       src.Rights,
+			ExamRelation: src.ExamRelation,
+		},
+	}
+}
+
+func summarize(records []attempt.Attempt, seeds []questionReport) (countsView, []questionReport) {
 	var counts countsView
-	index := make(map[attempt.QuestionKey]int, len(content.Questions))
-	questions := make([]questionReport, 0, len(content.Questions))
-	for _, q := range content.Questions {
-		key := attempt.QuestionKey{ContentID: content.ID, QuestionID: q.ID}
-		index[key] = len(questions)
-		questions = append(questions, questionReport{ID: q.ID, ContentID: content.ID})
+	index := make(map[attempt.QuestionKey]int, len(seeds))
+	questions := append([]questionReport(nil), seeds...)
+	for i, q := range questions {
+		index[attempt.QuestionKey{ContentID: q.ContentID, QuestionID: q.ID}] = i
 	}
 
 	for _, record := range records {
@@ -463,16 +578,41 @@ var limitations = []string{
 	"Counts cover only the locally stored practice attempts shown above; they are not an exam score, pass estimate or readiness claim.",
 	"Repeated attempts come after the correct answer and evidence were shown and are not independent evidence.",
 	"The exam blueprint, time limit and pass threshold are unknown, so no pass probability is computed.",
+	"Imported source content is private local material; page and answer reviews are user-attested and are not an external verification.",
 }
 
 func writeReport(w io.Writer, doc reportDoc, dbPath string) {
-	fmt.Fprintf(w, "Pass Quest — attempt evidence (%s v%s)\n", doc.Content.ID, doc.Content.Version)
-	fmt.Fprintf(w, "%s\n\n", doc.Content.Title)
+	primary := ""
+	if doc.Content != nil {
+		version := ""
+		if doc.Content.Version != "unavailable" {
+			version = " v" + doc.Content.Version
+		}
+		fmt.Fprintf(w, "Pass Quest — attempt evidence (%s%s)\n", doc.Content.ID, version)
+		fmt.Fprintf(w, "%s\n", doc.Content.Title)
+		primary = doc.Content.ID
+	} else {
+		fmt.Fprintf(w, "Pass Quest — attempt evidence (%d contents)\n", len(doc.Contents))
+		fmt.Fprintln(w, "Contents")
+		for _, content := range doc.Contents {
+			fmt.Fprintf(w, "  %s  %s\n", content.ID, content.Title)
+		}
+		if len(doc.Contents) > 0 {
+			primary = doc.Contents[0].ID
+		}
+	}
+	fmt.Fprintln(w)
 	c := doc.Counts
 	fmt.Fprintf(w, "Attempts: %d (correct %d, incorrect %d, skipped %d)\n", c.Attempts, c.Correct, c.Incorrect, c.Skipped)
 	fmt.Fprintf(w, "First attempts: %d (correct %d, incorrect %d, skipped %d)\n", c.FirstAttempts, c.FirstCorrect, c.FirstIncorrect, c.FirstSkipped)
 	fmt.Fprintf(w, "Repeated attempts (answer already shown): %d (correct %d, incorrect %d, skipped %d)\n\n", c.RepeatedAttempts, c.RepeatedCorrect, c.RepeatedIncorrect, c.RepeatedSkipped)
 
+	qualify := func(contentID, id string) string {
+		if contentID != primary {
+			return contentID + "/" + id
+		}
+		return id
+	}
 	fmt.Fprintln(w, "Questions")
 	for _, q := range doc.Questions {
 		first := q.FirstStatus
@@ -483,11 +623,8 @@ func writeReport(w io.Writer, doc reportDoc, dbPath string) {
 		if latest == "" {
 			latest = "—"
 		}
-		id := q.ID
-		if q.ContentID != doc.Content.ID {
-			id = q.ContentID + "/" + q.ID
-		}
-		fmt.Fprintf(w, "  %s  attempts %d  first %s  latest %s  repeated %d\n", id, q.Attempts, first, latest, q.Repeated)
+		fmt.Fprintf(w, "  %s  attempts %d  first %s  latest %s  repeated %d\n",
+			qualify(q.ContentID, q.ID), q.Attempts, first, latest, q.Repeated)
 	}
 
 	fmt.Fprintln(w, "\nAttempts")
@@ -503,12 +640,8 @@ func writeReport(w io.Writer, doc reportDoc, dbPath string) {
 		if a.Repeat {
 			kind = "repeat"
 		}
-		questionID := a.QuestionID
-		if a.ContentID != doc.Content.ID {
-			questionID = a.ContentID + "/" + a.QuestionID
-		}
 		fmt.Fprintf(w, "  #%d  %s  %s  %s  selected %s  %d ms  session %s\n",
-			a.ID, questionID, a.Status, kind, selected, a.ElapsedMS, a.SessionID)
+			a.ID, qualify(a.ContentID, a.QuestionID), a.Status, kind, selected, a.ElapsedMS, a.SessionID)
 	}
 
 	fmt.Fprintln(w, "\nLimitations")
@@ -580,22 +713,37 @@ func contentViewOf(content exam.Exam) contentView {
 	}
 }
 
-func questionViewOf(content exam.Exam, question exam.Question, number int) questionView {
-	options := make([]optionView, 0, len(question.Options))
-	for _, opt := range question.Options {
-		options = append(options, optionView{Label: opt.Label, Text: opt.Text})
-	}
-	return questionView{
-		ID:     question.ID,
-		Number: number + 1,
-		Total:  len(content.Questions),
+func questionViewOf(selection practiceSelection) questionView {
+	view := questionView{
+		ID:     selection.Question.ID,
+		Number: selection.Number + 1,
+		Total:  len(selection.Content.Questions),
 		Passage: passageView{
-			Title: content.Passage.Title,
-			Text:  content.Passage.Text,
+			Title: selection.Content.Passage.Title,
+			Text:  selection.Content.Passage.Text,
 		},
-		Stem:    question.Stem,
-		Options: options,
+		Stem:    selection.Question.Stem,
+		Options: optionViews(selection.Question.Options),
 	}
+	if selection.Page != nil && selection.Review != nil {
+		view.Review = &reviewView{
+			PageStatus:         string(selection.Page.Review),
+			PageReviewedBy:     selection.Page.ReviewedBy,
+			PageReviewedAt:     source.FormatTime(selection.Page.ReviewedAt),
+			QuestionStatus:     string(selection.Review.Review),
+			QuestionReviewedBy: selection.Review.ReviewedBy,
+			QuestionReviewedAt: source.FormatTime(selection.Review.ReviewedAt),
+		}
+	}
+	return view
+}
+
+func optionViews(options []exam.Option) []optionView {
+	views := make([]optionView, 0, len(options))
+	for _, opt := range options {
+		views = append(views, optionView{Label: opt.Label, Text: opt.Text})
+	}
+	return views
 }
 
 func attemptViewOf(record attempt.Attempt) attemptView {
@@ -674,6 +822,16 @@ type questionView struct {
 	Passage passageView  `json:"passage"`
 	Stem    string       `json:"stem"`
 	Options []optionView `json:"options"`
+	Review  *reviewView  `json:"review,omitempty"`
+}
+
+type reviewView struct {
+	PageStatus         string `json:"page_status"`
+	PageReviewedBy     string `json:"page_reviewed_by"`
+	PageReviewedAt     string `json:"page_reviewed_at"`
+	QuestionStatus     string `json:"question_status"`
+	QuestionReviewedBy string `json:"question_reviewed_by"`
+	QuestionReviewedAt string `json:"question_reviewed_at"`
 }
 
 type awaitingDoc struct {
@@ -747,7 +905,8 @@ type questionReport struct {
 
 type reportDoc struct {
 	SchemaVersion int              `json:"schema_version"`
-	Content       contentView      `json:"content"`
+	Content       *contentView     `json:"content,omitempty"`
+	Contents      []contentView    `json:"contents"`
 	Counts        countsView       `json:"counts"`
 	Questions     []questionReport `json:"questions"`
 	Attempts      []attemptView    `json:"attempts"`

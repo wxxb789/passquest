@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -48,6 +49,17 @@ func mustOpen(t *testing.T, path string) *Store {
 	return st
 }
 
+// openSQLite opens a fixture through the same DSN construction as Open, so
+// test setup cannot drift to a second path scheme.
+func openSQLite(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", sqliteURI(path, runtime.GOOS))
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	return db
+}
+
 func mustAppend(t *testing.T, st *Store, rec attempt.Attempt) attempt.Attempt {
 	t.Helper()
 	got, err := st.Append(rec)
@@ -87,6 +99,31 @@ func TestOpenCreatesSchemaAndProtectsFiles(t *testing.T) {
 		if perm := dirInfo.Mode().Perm(); perm != 0o700 {
 			t.Errorf("directory mode = %04o, want 0700", perm)
 		}
+	}
+}
+
+func TestOpenPrivateTightensExistingDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st, err := OpenPrivate(filepath.Join(dir, "attempts.sqlite"))
+	if err != nil {
+		t.Fatalf("OpenPrivate: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat directory: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("directory mode = %04o, want 0700", perm)
 	}
 }
 
@@ -277,10 +314,7 @@ func TestAppendRejectsInconsistentRecords(t *testing.T) {
 
 func TestMigrationKeepsOlderDatabaseAndIsIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.sqlite")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open legacy: %v", err)
-	}
+	db := openSQLite(t, path)
 	if _, err := db.Exec(`CREATE TABLE legacy_notes (body TEXT)`); err != nil {
 		t.Fatalf("create legacy table: %v", err)
 	}
@@ -330,10 +364,7 @@ func TestMigrationKeepsOlderDatabaseAndIsIdempotent(t *testing.T) {
 
 func TestMigrationAddsInsertGuardToVersionOne(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.sqlite")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open v1: %v", err)
-	}
+	db := openSQLite(t, path)
 	for _, stmt := range schemaV1 {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("create v1 schema: %v", err)
@@ -377,10 +408,7 @@ func TestMigrationAddsInsertGuardToVersionOne(t *testing.T) {
 
 func TestOpenRejectsNewerSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "future.sqlite")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
+	db := openSQLite(t, path)
 	if _, err := db.Exec(`PRAGMA user_version = 99`); err != nil {
 		t.Fatalf("set version: %v", err)
 	}
@@ -395,5 +423,81 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 func TestOpenRejectsEmptyPath(t *testing.T) {
 	if _, err := Open("  "); err == nil || !strings.Contains(err.Error(), "empty database path") {
 		t.Fatalf("Open error = %v", err)
+	}
+}
+
+// TestSQLiteURIFormatsPathsForEveryOS pins the DSN for both path families on
+// any host. A Windows drive path must not land in the URI authority, which is
+// what produced "invalid uri authority: C:..." on windows-latest.
+func TestSQLiteURIFormatsPathsForEveryOS(t *testing.T) {
+	const options = "?_pragma=busy_timeout%285000%29&_txlock=immediate"
+	tests := []struct {
+		name     string
+		path     string
+		goos     string
+		want     string
+		wantPath string
+	}{
+		{
+			name: "posix", path: "/home/u/db.sqlite", goos: "linux",
+			want: "file:///home/u/db.sqlite" + options, wantPath: "/home/u/db.sqlite",
+		},
+		{
+			name: "posix darwin", path: "/Users/u/db.sqlite", goos: "darwin",
+			want: "file:///Users/u/db.sqlite" + options, wantPath: "/Users/u/db.sqlite",
+		},
+		{
+			name: "windows drive", path: `C:\Users\runner\db.sqlite`, goos: "windows",
+			want: "file:///C:/Users/runner/db.sqlite" + options, wantPath: "/C:/Users/runner/db.sqlite",
+		},
+		{
+			name: "windows drive with forward slashes", path: "C:/Users/runner/db.sqlite", goos: "windows",
+			want: "file:///C:/Users/runner/db.sqlite" + options, wantPath: "/C:/Users/runner/db.sqlite",
+		},
+		{
+			name:     "windows import smoke temp path",
+			path:     `C:\Users\RUNNER~1\AppData\Local\Temp\passquest-import-smoke-bEarG2\smoke.sqlite`,
+			goos:     "windows",
+			want:     "file:///C:/Users/RUNNER~1/AppData/Local/Temp/passquest-import-smoke-bEarG2/smoke.sqlite" + options,
+			wantPath: "/C:/Users/RUNNER~1/AppData/Local/Temp/passquest-import-smoke-bEarG2/smoke.sqlite",
+		},
+		{
+			// SQLite rejects every authority but "" and "localhost", so a UNC
+			// path must keep its leading "\\" in the path component: the DSN
+			// needs four slashes, not two.
+			name: "windows unc", path: `\\server\share\db.sqlite`, goos: "windows",
+			want: "file:////server/share/db.sqlite" + options, wantPath: "//server/share/db.sqlite",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sqliteURI(tt.path, tt.goos)
+			if got != tt.want {
+				t.Fatalf("sqliteURI(%q, %q) = %q, want %q", tt.path, tt.goos, got, tt.want)
+			}
+			if strings.Contains(got, "%5C") || strings.Contains(got, `\`) {
+				t.Fatalf("URI keeps a backslash: %q", got)
+			}
+			if strings.Contains(got, "file:C:") {
+				t.Fatalf("drive path is in the URI authority: %q", got)
+			}
+			u, err := url.Parse(got)
+			if err != nil {
+				t.Fatalf("parse %q: %v", got, err)
+			}
+			if u.Scheme != "file" || u.Host != "" || u.User != nil {
+				t.Fatalf("scheme/authority = %q/%q/%v, want file and no authority", u.Scheme, u.Host, u.User)
+			}
+			if u.Path != tt.wantPath {
+				t.Fatalf("path component = %q, want %q", u.Path, tt.wantPath)
+			}
+			q := u.Query()
+			if q.Get("_pragma") != "busy_timeout(5000)" {
+				t.Fatalf("_pragma = %q, want busy_timeout(5000)", q.Get("_pragma"))
+			}
+			if q.Get("_txlock") != "immediate" {
+				t.Fatalf("_txlock = %q, want immediate", q.Get("_txlock"))
+			}
+		})
 	}
 }

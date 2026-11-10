@@ -1,0 +1,21 @@
+{
+  "page": {
+    "chars_no_ws": 106,
+    "flags": [
+      "reading_order_unverified",
+      "corrected",
+      "low_text"
+    ],
+    "number": 1,
+    "origin": "manual",
+    "review_note": "",
+    "review_status": "unreviewed",
+    "reviewed_at": "",
+    "reviewed_by": "",
+    "revision": 2,
+    "section": "notice",
+    "text": "Westbridge Library — Saturday hours\nThe Westbridge Community Library closes at 4 p.m. on Saturdays. Corrected after review.\n"
+  },
+  "schema_version": 1,
+  "state": "page_edited"
+}

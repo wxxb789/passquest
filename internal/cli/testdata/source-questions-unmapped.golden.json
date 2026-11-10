@@ -1,0 +1,48 @@
+{
+  "questions": [
+    {
+      "answer": "B",
+      "answer_status": "unmapped",
+      "evidence": "closes at 4 p.m. on Saturdays",
+      "flags": [
+        "page_unreviewed",
+        "answer_unmapped"
+      ],
+      "id": "q1",
+      "option_reasoning": {
+        "A": "The notice does not say 7 p.m. for Saturdays.",
+        "B": "The notice states 4 p.m. on Saturdays."
+      },
+      "options": [
+        {
+          "label": "A",
+          "text": "At 7 p.m."
+        },
+        {
+          "label": "B",
+          "text": "At 4 p.m."
+        }
+      ],
+      "page": 1,
+      "reasoning": "The notice gives the Saturday closing time directly.",
+      "review_status": "unreviewed",
+      "reviewed_at": "",
+      "reviewed_by": "",
+      "source_id": "src-bb4d9a5479518365",
+      "stem": "When does the library close on Saturdays?"
+    }
+  ],
+  "schema_version": 1,
+  "source": {
+    "created_at": "2026-11-10T09:00:01Z",
+    "id": "src-bb4d9a5479518365",
+    "import_origin": "txt-directory",
+    "page_count": 2,
+    "path": "<fixture>",
+    "question_count": 1,
+    "reviewed_pages": 0,
+    "reviewed_questions": 0,
+    "sha256": "bb4d9a54795183656660313deeacf4618ef617c8569a46ac41a534d0169142dc",
+    "title": "import"
+  }
+}

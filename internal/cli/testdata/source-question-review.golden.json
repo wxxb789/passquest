@@ -1,0 +1,32 @@
+{
+  "question": {
+    "answer": "B",
+    "answer_status": "reviewed",
+    "evidence": "closes at 4 p.m. on Saturdays",
+    "flags": [],
+    "id": "q1",
+    "option_reasoning": {
+      "A": "The notice does not say 7 p.m. for Saturdays.",
+      "B": "The notice states 4 p.m. on Saturdays."
+    },
+    "options": [
+      {
+        "label": "A",
+        "text": "At 7 p.m."
+      },
+      {
+        "label": "B",
+        "text": "At 4 p.m."
+      }
+    ],
+    "page": 1,
+    "reasoning": "The notice gives the Saturday closing time directly.",
+    "review_status": "reviewed",
+    "reviewed_at": "2026-11-10T09:00:04Z",
+    "reviewed_by": "fixture-reviewer",
+    "source_id": "src-bb4d9a5479518365",
+    "stem": "When does the library close on Saturdays?"
+  },
+  "schema_version": 1,
+  "state": "question_reviewed"
+}
