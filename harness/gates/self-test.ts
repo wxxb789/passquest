@@ -247,6 +247,28 @@ function brokenCases(): BrokenCase[] {
       },
     },
     {
+      gate: portablePaths,
+      label: "interpreted Windows paths that start with t, n or r",
+      files: {
+        "go.mod": GO_MOD,
+        "internal/x/x.go": "package x\n",
+        "internal/x/x_test.go":
+          'package x\n\nimport "testing"\n\nfunc TestEscapes(t *testing.T) {\n\t_t := "C:\\\\tmp\\\\fixture.sqlite"\n\t_n := "C:\\\\new\\\\fixture.sqlite"\n\t_r := "C:\\\\repo\\\\fixture.sqlite"\n\t_, _, _ = _t, _n, _r\n}\n',
+      },
+      tracked: ["internal/x/x_test.go"],
+      postFail: (failures) => {
+        if (failures.length !== 3) {
+          return `portable-paths: expected all three interpreted paths, saw ${failures.length}: ${failures.join("; ")}`;
+        }
+        for (const segment of ["\\tmp\\", "\\new\\", "\\repo\\"]) {
+          if (!failures.some((line) => line.includes(segment))) {
+            return `portable-paths: did not decode ${segment} in an interpreted literal`;
+          }
+        }
+        return null;
+      },
+    },
+    {
       gate: baseline,
       label: "baseline manifest disagrees with its page",
       files: wrongCount.files,

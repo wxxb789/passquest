@@ -40,12 +40,23 @@ interface Hit {
 
 /** Collapses the escapes that matter, so both string forms compare the same way. */
 function unescape(body: string): string {
-  return body
-    .replace(/\\\\/g, "\\")
-    .replace(/\\"/g, '"')
-    .replace(/\\t/g, "\t")
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "\r");
+  return body.replace(/\\(.)/g, (_match, ch: string) => {
+    switch (ch) {
+      case "n":
+        return "\n";
+      case "t":
+        return "\t";
+      case "r":
+        return "\r";
+      case "\\":
+        return "\\";
+      case '"':
+        return '"';
+      default:
+        // Go rejects an unknown escape in an interpreted string, so this is unreachable in valid source.
+        return ch;
+    }
+  });
 }
 
 function platformBound(value: string): boolean {
