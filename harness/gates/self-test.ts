@@ -228,6 +228,31 @@ function brokenCases(): BrokenCase[] {
     },
     {
       gate: portablePaths,
+      label: "pointer assignment and a block comment",
+      files: {
+        "go.mod": GO_MOD,
+        "internal/x/x.go": "package x\n",
+        "internal/x/x_test.go":
+          'package x\n\nimport "testing"\n\nfunc TestPointer(t *testing.T) {\n\tvar p *string\n\t*p = "/tmp/pointer.sqlite"\n\t_ = p\n}\n',
+        "internal/x/doc_test.go":
+          'package x\n\n/*\nA fixture usually looks like "/tmp/documentation.sqlite".\n*/\nfunc TestDoc(t *testing.T) {}\n',
+      },
+      tracked: ["internal/x/x_test.go", "internal/x/doc_test.go"],
+      postFail: (failures) => {
+        if (failures.length !== 1) {
+          return `portable-paths: expected only the pointer assignment, saw ${failures.length}: ${failures.join("; ")}`;
+        }
+        if (!failures[0].includes("x_test.go:7") || !failures[0].includes("/tmp/pointer.sqlite")) {
+          return `portable-paths: did not report the pointer assignment: ${failures[0]}`;
+        }
+        if (failures.some((line) => line.includes("documentation.sqlite"))) {
+          return "portable-paths: treated a path inside a block comment as code";
+        }
+        return null;
+      },
+    },
+    {
+      gate: portablePaths,
       label: "raw-string path literals",
       files: {
         "go.mod": GO_MOD,

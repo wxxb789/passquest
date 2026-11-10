@@ -73,21 +73,63 @@ function literalsOnLine(text: string): string[] {
   return found;
 }
 
-function isComment(trimmed: string): boolean {
-  return trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*");
+/**
+ * Removes comments without touching string contents: a line beginning with `*` is a
+ * pointer assignment, not a doc comment, and a path inside a block comment is prose.
+ */
+function stripComments(line: string, state: { inBlock: boolean }): string {
+  let out = "";
+  let i = 0;
+  while (i < line.length) {
+    if (state.inBlock) {
+      const end = line.indexOf("*/", i);
+      if (end < 0) return out;
+      state.inBlock = false;
+      i = end + 2;
+      continue;
+    }
+    const ch = line[i];
+    if (ch === '"' || ch === "`") {
+      let j = i + 1;
+      while (j < line.length) {
+        if (ch === '"' && line[j] === "\\") {
+          j += 2;
+          continue;
+        }
+        if (line[j] === ch) {
+          j += 1;
+          break;
+        }
+        j += 1;
+      }
+      out += line.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (ch === "/" && line[i + 1] === "/") return out;
+    if (ch === "/" && line[i + 1] === "*") {
+      state.inBlock = true;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
 }
 
 export function scanGoSource(file: string, content: string): Hit[] {
   const hits: Hit[] = [];
   const lines = content.split(/\r?\n/);
+  const state = { inBlock: false };
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
-    const trimmed = line.trim();
-    if (isComment(trimmed)) continue;
+    const code = stripComments(line, state);
+    if (code.trim() === "") continue;
     // The marker justifies the literals on its own line only: a window would let one
     // justified fixture silence an unjustified path next to it.
     if (ALLOW_MARKER.test(line)) continue;
-    for (const literal of literalsOnLine(line)) {
+    for (const literal of literalsOnLine(code)) {
       hits.push({ file, line: index + 1, literal });
     }
   }
