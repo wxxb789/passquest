@@ -18,7 +18,7 @@ func testSource(t *testing.T) source.Source {
 	src := source.Source{
 		Title:  "Test baseline",
 		Import: source.ImportTXTDir,
-		Path:   "/private/test-baseline",
+		Path:   "/private/test-baseline", // portable-paths: allow a string prefix check on a stored path, never opened
 		Rights: source.DefaultRights,
 		Notice: "test import notice",
 		Pages: []source.Page{

@@ -205,7 +205,7 @@ func normalizeAgentTemp(value any, temp string) any {
 // Windows document shape on every OS: the temp path arrives JSON-escaped and
 // uses backslashes, but the golden stores <tmp>/agent.sqlite.
 func TestNormalizedAgentJSONHandlesWindowsTemp(t *testing.T) {
-	temp := `C:\Users\runneradmin\AppData\Local\Temp\TestAgent\001`
+	temp := `C:\Users\runneradmin\AppData\Local\Temp\TestAgent\001` // portable-paths: allow the win32 temp path is the fixture shape under test, never resolved
 	raw := `{"run":{"store":"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\TestAgent\\001\\agent.sqlite"}}`
 	got := string(normalizedAgentJSON(t, raw, temp))
 	if !strings.Contains(got, `"\u003ctmp\u003e/agent.sqlite"`) {

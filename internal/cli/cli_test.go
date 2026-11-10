@@ -631,8 +631,8 @@ func TestDatabasePath(t *testing.T) {
 		env  string
 		want string
 	}{
-		{"flag wins", "/tmp/flag.sqlite", "/tmp/env.sqlite", "/tmp/flag.sqlite"},
-		{"env when flag blank", "  ", "/tmp/env.sqlite", "/tmp/env.sqlite"},
+		{"flag wins", "/tmp/flag.sqlite", "/tmp/env.sqlite", "/tmp/flag.sqlite"}, // portable-paths: allow compared as strings; databasePath never resolves it
+		{"env when flag blank", "  ", "/tmp/env.sqlite", "/tmp/env.sqlite"},      // portable-paths: allow compared as strings; databasePath never resolves it
 		{"default when both blank", "", " ", filepath.Join(".passquest", "passquest.sqlite")},
 	}
 	for _, tt := range tests {
