@@ -1,0 +1,45 @@
+39 general calling                              全呼
+40 Global Positioning System (GPS)              全球定位系统
+41 group calling                                群呼/组呼
+42 GSM-Railway (GSM-R)                          铁路数字移动通信系统
+43 hot standby                                  热备份
+44 immunity                                     抗扰度
+45 information processing                       信息处理
+46 Information Technology (IT)                  信息技术
+47 interference source                          干扰源
+48 leaky coaxial cable                          漏泄同轴电缆
+49 link                                         链路
+50 link control                                 链路控制
+51 Local Area Network (LAN)                     局域网
+52 logical circuit                              逻辑电路
+53 Man Machine Interface (MMI)                  人机接口
+54 Network Management System (NMS)              网络管理系统
+55 network security; cyber security             网络安全
+56 noise                                        噪声
+57 optical fiber                                光纤
+58 packet switching                             分组交换
+59 Passenger Information System (PIS)           乘客信息系统
+60 private network                              专用网
+61 Radio Frequency (RF)                         射频
+62 radio frequency power amplifier              射频功率放大器
+63 real-time data                               实时数据
+64 repeater                                     直放站
+65 router                                       路由器
+66 safety management system                     安全管理系统
+67 safety protocol                              安全协议
+68 session                                      会话
+69 Signal to Noise Ratio (SNR)                  信噪比
+70 signaling                                    信令，信号系统
+71 switch                                       交换机
+72 synchronization                              同步
+73 synchronous transmission                     同步传输
+74 terminal                                     终端
+75 train radio dispatching communication        列车无线调度通信
+76 transmission delay                           传输时延
+77 video conference                             电视会议
+78 video monitoring; video surveillance         视频监控
+79 wave filter                                  滤波器
+80 Wavelength Division Multiplexing (WDM)       波分复用
+
+                                            ２
+

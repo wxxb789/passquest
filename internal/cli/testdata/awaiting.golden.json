@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "state": "awaiting_answer",
+  "content": {
+    "id": "sample-0001",
+    "version": "1",
+    "title": "Westbridge Library notice",
+    "notice": "Self-authored practice sample. Not from any live exam; not an exam blueprint or a claim about exam content, difficulty or pass threshold.",
+    "provenance": {
+      "author": "Pass Quest contributors",
+      "source": "self-authored for this repository",
+      "rights": "original text; redistributable with this repository",
+      "exam_relation": "illustrative practice only; not drawn from a live examination"
+    }
+  },
+  "question": {
+    "id": "q1",
+    "number": 1,
+    "total": 3,
+    "passage": {
+      "title": "Westbridge Community Library — opening hours",
+      "text": "The Westbridge Community Library will change its opening hours next month. From 3 March, the library will open at 9 a.m. and close at 7 p.m. from Monday to Friday. On Saturdays it will close at 4 p.m., two hours earlier than before. The library will stay closed on Sundays.\n\nThe change follows a six-month survey of visitors. Most people who answered the survey said they wanted longer weekday hours after work. The library director, Ms. Chen, said the Saturday change was necessary because few people visited late on Saturdays and the library needs to save money for new computers.\n\nDuring the first week of March, the library will offer a free class on using the online catalogue. The class is limited to twelve people, and visitors should register at the front desk. Anyone who cannot attend on a weekday may join the same class on Saturday morning."
+    },
+    "stem": "What time will the library close on Saturdays from 3 March?",
+    "options": [
+      {
+        "label": "A",
+        "text": "At 7 p.m."
+      },
+      {
+        "label": "B",
+        "text": "At 4 p.m."
+      },
+      {
+        "label": "C",
+        "text": "At 8 p.m."
+      },
+      {
+        "label": "D",
+        "text": "At 9 a.m."
+      }
+    ]
+  }
+}

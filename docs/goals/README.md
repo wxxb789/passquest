@@ -4,7 +4,7 @@ Work through these **one at a time**, in numeric order, accepting an earlier out
 
 | Goal | State | Prerequisite | Intended value |
 |---|---|---|---|
-| [0001 — First independent exam attempt](./0001-first-independent-exam-attempt.md) | Ready | None | Make a real, inspectable, answer-verified exam-style practice interaction usable without a GUI, an LLM, Anki or the private PDF. |
+| [0001 — First independent exam attempt](./archive/0001-first-independent-exam-attempt.md) | Done | None | Make a real, inspectable, answer-verified exam-style practice interaction usable without a GUI, an LLM, Anki or the private PDF. |
 | [0002 — Usable private baseline from local source material](./0002-local-text-baseline.md) | Ready | 0001 — first independent exam attempt | Enable the original PDF and its normalized UTF-8 text to serve as **private local** working context. |
 | [0003 — A scoring tactic applied on independent questions](./0003-exam-tactic-practice.md) | Ready | 0002 — usable private baseline | Teach one real scoring tactic (such as NOT/EXCEPT polarity, locating textual evidence, or avoiding distractor paraphrases), oriented to getting correct answers with limited English and time, rather than teaching a whole grammar curriculum. |
 | [0004 — Choose practice based on learner evidence](./0004-adaptive-next-exercise.md) | Ready | 0003 — scoring tactic practice | Make adaptive selection real for one learner, with a small set of scoring and minimal language prerequisite skills. |
@@ -21,7 +21,9 @@ Work through these **one at a time**, in numeric order, accepting an earlier out
 ## Constraints
 
 - Core design: [`../core-design.md`](../core-design.md)
-- **Source visibility exception:** the owner requested committing the unreviewed partial native-text extraction to this currently public repo at `data/baselines/2025-crsc-english-partial.txt`. Its original internal-only notice remains and publication rights have not been verified. Goal 0002 still requires local private import, honest scan review and verified answer mapping; do not automatically publish the PDF or further OCR, questions or private learner data.
+- **Source visibility exception:** the owner requested committing the unreviewed partial native-text extraction to this currently public repo at `data/baselines/2025-crsc-english-partial.txt`. Its original internal-only notice remains and publication rights have not been verified. Goal 0002 still requires local private import, honest scan review and verified answer mapping; do not automatically publish the PDF, questions or private learner data.
+- **Parsed-text visibility exception (2026-11-10):** the owner authorised committing the full page-linked parsed text of the same document — 165 pages, `data/baselines/2026-crsc-english/` — after being shown that this repository is public. Scope is that parsed text only: the original PDF stays out of the repository (`data/private/`, gitignored), nothing is uploaded to an external provider, no further source material is published automatically, and no redistribution right is implied by either exception.
+
 - The Exam Profile is updated when better exam evidence appears; learner-specific adaptive study priorities change with actual practice. Neither change rewrites historical attempts or verified facts.
 - The functional engine and agent experience precede polished MyGo UI. Goal 0012 is reserved for an Opus-led high-fidelity design pass; earlier goals must not require beautiful mock screens as their evidence.
 - The durable Pi runtime may manage long tasks; SQLite remains the local store of structured application truth. No independent cloud service or massive content library is assumed.

@@ -1,0 +1,47 @@
+410 switchgear                                                       开关柜
+411 traction power supply                                            电力牵引供电
+412 traction substation                                              牵引变电所
+413 transformer                                                      变压器
+
+414 uninterrupted power supply; uninterruptible power supply (UPS)   不间断电源
+
+415 voltage                                                          电压
+416 electro-magnetic current transformer                             电磁式电流互感器
+417 lightning rod                                                    避雷针
+418 integrated automation                                            综合自动化
+419 high voltage power distribution room                             高压配电室
+420 self-impedance                                                   自阻抗
+421 mutual impedance                                                 互阻抗
+422 electrical clearance                                             空气绝缘间隙
+                                           车辆机械电子词汇
+423 Alternator                                                       发电机
+424 bogie                                                            转向架
+425 Camshaft                                                         凸轮轴
+426 capacitance (电容量), capacitor (电容器)                               电容
+427 car body                                                         车体
+428 Connecting rod                                                   连杆
+429 contactor                                                        接触器
+430 Crankshaft                                                       曲轴
+431 current                                                          电流
+432 electric circuit                                                 电路
+433 Electric Multiple Unit (EMU)                                     动车组
+434 electromagnetic compatibility                                    电磁兼容
+435 Engine block                                                     发动机体
+436 heavy-haul railway                                               重载铁路
+437 high-speed railway                                               高速铁路
+438 inductance                                                       电感
+439 passenger-freight mixed line                                     客货共线铁路
+440 piston                                                           活塞
+441 resistance                                                       电阻
+442 turbocharger                                                     涡轮增压器
+443 urban rail transit                                               城市轨道交通
+444 wheelset                                                         轮对
+                                             项目管理词汇
+445 Bill of Quantities (BoQ)                                         工程量清单
+446 centralized purchasing                                           集中采购
+447 commencement date                                                开工日期
+448 contract                                                         合同
+
+
+                                                   １１
+

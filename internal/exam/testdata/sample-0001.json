@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "id": "sample-0001",
+  "version": "1",
+  "title": "Westbridge Library notice",
+  "notice": "Self-authored practice sample. Not from any live exam; not an exam blueprint or a claim about exam content, difficulty or pass threshold.",
+  "provenance": {
+    "author": "Pass Quest contributors",
+    "source": "self-authored for this repository",
+    "rights": "original text; redistributable with this repository",
+    "exam_relation": "illustrative practice only; not drawn from a live examination"
+  },
+  "passage": {
+    "title": "Westbridge Community Library — opening hours",
+    "text": "The Westbridge Community Library will change its opening hours next month. From 3 March, the library will open at 9 a.m. and close at 7 p.m. from Monday to Friday. On Saturdays it will close at 4 p.m., two hours earlier than before. The library will stay closed on Sundays.\n\nThe change follows a six-month survey of visitors. Most people who answered the survey said they wanted longer weekday hours after work. The library director, Ms. Chen, said the Saturday change was necessary because few people visited late on Saturdays and the library needs to save money for new computers.\n\nDuring the first week of March, the library will offer a free class on using the online catalogue. The class is limited to twelve people, and visitors should register at the front desk. Anyone who cannot attend on a weekday may join the same class on Saturday morning."
+  },
+  "questions": [
+    {
+      "id": "q1",
+      "stem": "What time will the library close on Saturdays from 3 March?",
+      "options": [
+        { "label": "A", "text": "At 7 p.m." },
+        { "label": "B", "text": "At 4 p.m." },
+        { "label": "C", "text": "At 8 p.m." },
+        { "label": "D", "text": "At 9 a.m." }
+      ],
+      "answer": "B",
+      "evidence": "On Saturdays it will close at 4 p.m., two hours earlier than before.",
+      "reasoning": "The notice gives the new Saturday closing time directly: 4 p.m., two hours earlier than the old time.",
+      "option_reasoning": {
+        "A": "7 p.m. is the new weekday closing time, not the Saturday closing time.",
+        "B": "The notice states that the Saturday closing time will be 4 p.m.",
+        "C": "8 p.m. is not mentioned in the notice.",
+        "D": "9 a.m. is the weekday opening time, not a closing time."
+      }
+    },
+    {
+      "id": "q2",
+      "stem": "Why will the library close earlier on Saturdays?",
+      "options": [
+        { "label": "A", "text": "The library wants to open on Sundays instead." },
+        { "label": "B", "text": "Few people visited late on Saturdays and the library needs to save money." },
+        { "label": "C", "text": "The survey asked for shorter weekend hours." },
+        { "label": "D", "text": "The library has bought new computers and needs time to install them." }
+      ],
+      "answer": "B",
+      "evidence": "few people visited late on Saturdays and the library needs to save money for new computers.",
+      "reasoning": "Both reasons are stated in one sentence: low late-Saturday attendance and saving money for new computers.",
+      "option_reasoning": {
+        "A": "The notice says the library will stay closed on Sundays; it does not plan to open then.",
+        "B": "This restates the two reasons given by the library director.",
+        "C": "The survey asked for longer weekday hours, not shorter Saturday hours.",
+        "D": "New computers are the reason for saving money, not a completed purchase or an installation schedule."
+      }
+    },
+    {
+      "id": "q3",
+      "stem": "How can a visitor join the free class on using the online catalogue?",
+      "options": [
+        { "label": "A", "text": "By paying a small fee at the front desk." },
+        { "label": "B", "text": "By registering at the front desk." },
+        { "label": "C", "text": "By bringing a computer to the class." },
+        { "label": "D", "text": "By calling Ms. Chen before March." }
+      ],
+      "answer": "B",
+      "evidence": "The class is limited to twelve people, and visitors should register at the front desk.",
+      "reasoning": "The notice states the class is free and that visitors should register at the front desk; no fee or call is mentioned.",
+      "option_reasoning": {
+        "A": "The notice calls the class free, so no fee is required.",
+        "B": "Registration at the front desk is the stated way to join.",
+        "C": "The notice does not ask visitors to bring a computer.",
+        "D": "The notice does not give a phone number or ask visitors to call Ms. Chen."
+      }
+    }
+  ]
+}

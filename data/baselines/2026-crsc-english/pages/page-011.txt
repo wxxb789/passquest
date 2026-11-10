@@ -1,0 +1,45 @@
+328 prestress                                             预应力
+329 Public Utility                                        公共设施
+330 reinforced concrete                                   钢筋混凝土
+331 retaining and protection of foundation pit            基坑支护
+332 Road Sign                                             路标
+333 rock mass                                             岩体
+334 room air conditioner                                  房间空气调节器
+335 seismic joint                                         抗震缝
+336 settlement                                            下沉/沉降
+337 severe cold area                                      严寒地区
+338 sewerage                                              排水系统
+339 snow load                                             雪荷载
+340 station and yard                                      站场
+341 Subdivision                                           住宅区开发
+342 subgrade                                              路基
+343 superstructure                                        上部结构
+344 tunnel                                                隧道
+345 water proof                                           防水
+346 water supply and drainage                             给排水
+347 water supply plant（station ）of railway                铁路给水厂（所）
+348 water supply station                                  给水站
+349 wind load                                             风荷载
+350 winter construction                                   冬期施工
+                                                 生产制造词汇
+351 advanced manufacturing                                先进制造业
+352 anti-static floor                                     防静电地板
+353 axle load                                             轴重
+354 broken rail detection                                 断轨检查
+355 cable laying                                          布线
+356 communication protocol                                通信协议
+357 compatibility                                         兼容性
+358 design document                                       设计文件
+359 digital transformation                                数字化转型
+360 electric insulated joint                              电气绝缘节
+361 emergency brake                                       紧急制动
+362 failure mode                                          失效模式
+363 fire-resistant shielded cable                         阻燃屏蔽电缆
+364 flexible assembly production line                     柔性组装生产线
+365 install (v.); installation (n.)                       安装
+366 isolation switch; disconnector                        隔离开关
+367 lightning protection earthing wire                    防雷地线
+368 manufacturing execution system                        制造执行系统
+
+                                                   ９
+

@@ -49,3 +49,42 @@ Entry format:
 - Default taken: (A) — `mise.toml` pins Go and Node for the dev host, `go.mod` is the authority for
   CI and for the language version.
 - Revisit when: a second machine or a contributor joins.
+
+### Q-0000-04 — Two agent loops are writing the same worktree and branch
+- Status: resolved
+- Resolution: (owner, 2026-11-10) the second loop is confirmed stopped — no process with a
+  `~/repos/passquest` cwd, no `omp-passquest-*` tmux session, no `.git` lock, and the last foreign
+  touch was the 01:20:56 commit; a single writer (the delivery loop) resumed at the `apply` stage by
+  instruction. Option (A) file-scope splitting is therefore unnecessary, and the fetch-then-rebase
+  guard in `conductor.py` stays as the standing protection against a recurrence.
+- Context: while the agent loop was running goal 0001, two owner commits appeared on the same branch
+  in the same clone (`5e89188` D-0001 Bun/TS harness, `4a861ca` parsed private source). The reflog
+  shows a `reset --hard` + two commits + push from another process at the same second, i.e. a second
+  agent/loop edits `~/repos/passquest` directly. Two writers in one worktree can interleave stage
+  output and make a reviewed head unreproducible.
+- Options considered: (A) split file scopes — the other loop owns `data/`, `docs/decisions/`,
+  `harness/`; the delivery loop owns `cmd/`, `internal/`, `docs/goals|plans|evidence`, both
+  fetch-then-commit and stop on conflict; (B) the other loop works only in its own clone/worktree;
+  (C) the delivery loop stops until the owner finishes.
+- Default taken: (C) temporarily — the unattended conductor was stopped and the in-flight `apply` run
+  killed before it could commit. The working tree is clean at `4a861ca` and `bash scripts/gate.sh`
+  still reports `GATE: PASS` (45 links, 214 tracked files). The conductor now fetches and rebases
+  before every commit and push, blocks on a real conflict, and never force-pushes, so it can be
+  resumed safely under (A).
+- Revisit when: the owner answers, or a second concurrent commit appears while the conductor runs.
+
+### Q-0001-01 — May a learner repeat a question after seeing the key, and how is it counted?
+- Status: decided(default taken)
+- Context: goal 0001 requires correct, incorrect, skipped and repeated attempts to be represented
+  truthfully, but does not say whether repeats are allowed or how they relate to independent
+  evidence. Goal 0003 (tactics) and goal 0009 (readiness) will interpret the same records.
+- Options considered: (A) allow repeats, keep every attempt, label repeats and exclude them from
+  first-attempt counts; (B) block a question once its key has been shown; (C) allow repeats and count
+  every attempt equally.
+- Default taken: (A). The CLI stores the repeat with `attempt_number`, `prior_attempts` and
+  `repeat`, and `report` prints first and repeated counts separately. Reverse by changing the
+  selection/report policy only; stored attempts stay intact. The Store API and SQLite triggers
+  reject `UPDATE`, `DELETE` and an id-reusing `INSERT OR REPLACE`, so a future policy can be
+  recomputed from the same evidence.
+- Revisit when: goal 0004 selects practice from evidence, or goal 0009 defines independent
+  readiness and needs a stricter exposure rule.

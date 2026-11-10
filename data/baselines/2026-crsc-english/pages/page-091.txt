@@ -1,0 +1,42 @@
+第 五 套
+©\ SECTION I Reading
+Part A 从
+Text 1
+
+26.A 【解析 】 细 节 题 。 根 据 第 一 段 第 三 名 “A good password has to be both easy to remember
+and hard to guess, but in practice people seem to pay attention to the former. ”可 知 ,一 个 好 的 密码
+应 该 兼 具 容 易 记 忆 和 难以 猜测 这 两 个 特点 ,但 在 实际 生活 中 ,人 们 似乎 更 注重 前 者 。 换 句 话说 ，
+虽然 密码 的 两 个 特点 都 很 重要 ,但 人 们 在 使 用 中 还 是 更 注重 更 容易 记忆 。 因 此 A 选项 easy to
+remember“ 易于 记忆 ”符合 题 意 ,为 正确 答案 。
+
+27.D 【解析 】 细 节 题 。 题 干 中 的 unsafe passwords 是 对 文章 第 二 段 第 二 名 passwords are
+insecure 的 同 义 转 述 ,由 该 向 可 知 , 研 究 者 认为 想 要 测算 密码 不 安全 的 程度 是 很 困难 的 ,因为 许
+多 研究 都 只 能 在 少量 的 样本 上 展开 工作 ,这 说 明 困难 是 由 于 缺少 样本 造成 的 。 因 此 了 D 选项
+limited size of samples“ 样本 大 小 受 限 ”符合 题 意 ,为 正确 答案 。
+
+28.C 【解析 】 推 理 题 。A 选项 “印尼 人 对 密码 安全 很 敏感 " 5 LES ORS = 4 P “those
+who spoke Indonesian the least” 即 “ 那 些 说 印尼 语 的 人 的 密码 最 不 安全 ”表达 相 予 盾 ,可 排除 。B
+选项 “年 轻 人 倾向 使 用 安全 的 密码 ”与 第 四 段 第 二 向 “Older users had better passwords than young
+ones.“ 即 年 长 的 人 的 密码 比 年 轻 人 的 密码 更 安全 。" 表 达 相 矛盾 ,可 排除 。D 选项 “信用 卡 的 密
+码 通常 是 安全 的 ”与 第 四 段 第 四 铅 “Passwords designed to hide sensitive information such as credit-
+card numbers were only slightly more secure than those protecting less important things, like access to
+games.“ 表 达 相 矛盾 , 亦 可 排除 。C 选项 “提示 窗口 对 密码 安全 帮助 不 大 ”与 第 四 段 第 五 句
+“* Nag screens’ that told users they had chosen a weak password made virtually no difference” 表 达 一
+致 ,故人 C 为 正确 答案 。
+
+29.C 【解析 】 语 义 题 。 由 第 五 段 第 三 句 中 “An attacker who can manage ten guesses per
+account will compromise around 1% of accounts. ”可 知 , 攻 击 者 对 一 个 账户 进行 10 次 密码 尝试 输
+入 就 会 对 约 1% 的 账户 造成 危害 。 结 合 该 段 最 后 一 名 “And that is a worthwhile outcome for a
+hacker“ 可 知 ， 这 1 和 % 账户 对 黑客 来 说 ,已 经 是 一 个 很 值得 的 结果 了 。?" 这 说 明 他 们 会 根据 对 密
+码 的 猜测 来 破解 账户 ,因此 对 账号 造成 威胁 。A 选项 comprise“ 包括 ,构成 ”,B 选项 compensate
+“补偿 ,赔偿 ”,C 选项 endanger“ 濒临 灭绝 的 ”, 可 引申 为 “遭受 威胁 的 ”,D 选项 encounter“ 遭遇 ，
+偶然 碰见 ”。 对 比 四 个 选项 ,只 有 C 选项 endanger 最 符合 题 意 , 故 C 为 正确 答案 。
+
+30.B 【解析 】 推 理 题 。 根 据 题 干 可 定位 至 文章 末 段 。A 选项 “网 络 使 用 者 要 规范 他 们 的
+网 上 行为 ,在 文中 并 未 提 及 ,可 排除 ;C 选项 “大 型 网 站 限制 尝试 输入 密码 的 次 数 ” 太 过 绝对 ，
+最 后 一 段 虽 然 提 到 谷歌 和 微软 采取 了 这 样 的 措施 ,但 并 不 是 所 有 的 大 型 网 站 都 这 样 做 了 , 故 排
+除 C;D 选项 “大 型 网 站 为 用 户 提供 方便 的 登入 ” ,文中 也 未 提 及 , 亦 可 排除 。B 选项 “网 络 使 用
+者 要 靠 自 己 注意 网 络 安全 ”与 末 段 末 句 的 “So it’s time for users to consider the alternatives to
+
+traditional passwords.” 表 达 一 致 , 故 了 为 正确 答案 。
+— 161 一

@@ -1,0 +1,45 @@
+121 balise                                        应答器
+122 ballast                                       道砟
+123 block                                         闭塞
+124 block post                                    线路所
+125 block signal                                  通过信号机
+126 cab signal                                    机车信号
+127 cabinet                                       机柜
+128 calling-on signal                             引导信号
+129 centralized interlocking                      集中联锁
+130 Centralized Traffic Control (CTC)             调度集中
+131 Chinese Train Control System (CTCS)           中国列车运行控制系统
+132 coding                                        电码化
+133 conflicting route                             敌对进路
+134 coupling                                      连挂
+135 departure yard                                出发场
+136 derailment                                    脱轨
+137 dispatching command system                    调度指挥系统
+138 double tracks                                 双线
+139 earthing; grounding                           接地
+140 electric traction                             电力牵引
+141 EMU depot                                     动车段
+142 existing line                                 既有线
+143 fail-safe                                     故障-安全
+144 frequency-shift modulated track circuit       移频轨道电路
+145 home signal                                   进站信号机
+146 hump                                          驼峰
+147 in advance of a signal                        信号机前方/信号机外方
+148 in rear of a signal                           信号机后方/信号机内方
+149 interlocking                                  联锁
+150 intermediate station                          中间站
+151 level crossing                                平交道口
+152 lightning protection                          防雷保护
+153 Line-side Electronic Unit (LEU)               地面电子单元
+154 locking; blocking                             锁闭
+155 locomotive                                    机车
+156 main line; main track                         正线
+157 manual release                                人工解锁
+158 non-ballast track; ballastless track          无砟轨道
+159 point machine; switch machine                 转辙机
+160 points; switch; turnout                       道岔
+161 power supply                                  电源
+162 power supply panel                            电源屏
+
+                                              ４
+

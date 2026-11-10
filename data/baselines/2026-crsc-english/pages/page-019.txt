@@ -1,0 +1,72 @@
+   The development of this Standard takes full consideration of the      本标准编制内容充分考虑新时代
+   needs of high-speed railway construction and development in the 高速铁路建设发展需要，聚焦“
+   new era, and focuses on the theme of “railway playing a leading       交通强国、铁路先行”，为中国
+28
+   role in building China into a transportation power”, trying to        铁路实现“四化”（机械化、工
+   transform China's railway practice of "Mechanization, Fabrication 厂化、专业化、信息化）的转型
+   in Plant, Specialization and Information".                            。
+   This standard, by innovating the contents and form of compilation, 本标准通过创新标准内容，为实
+   tries to lay a solid foundation for the sound development of China's 现中国高速铁路建设高质量发展
+   high-speed railway, for the purpose of defining China High-speed 奠定基础，以打造中国高铁4.0、
+   Railway 4.0, creating high quality works of communication,            创建高速铁路“四电”(通信、信
+29
+   signalling, electric power system and traction power supply system, 号、电力、电力牵引供电)精品工
+   promoting the continuous upgrading of railway construction            程、促进铁路建造技术和设备不
+   technology and equipment, and establishing a world-leading            断升级、建立世界领先的铁路建
+   railway construction standard system.                                 设标准体系为目标。
+                                                                         建设各方应健全质量保证体系，
+   All construction parties shall establish and improve quality
+                                                                         对工程施工质量进行全过程控制
+30 assurance system,exercise wholeprocess control of construction
+                                                                         管理，落实质量责任终身追究制
+   quality,and implement lifelong quality accountability system.
+                                                                         度。
+   The design of high-speed railway shall follow the concept of          高速铁路设计应遵循以人为本、
+                                                                         系统优化的建设理念，注重先进
+31 people orientation and system optimization, comfort and economy,
+                                                                         性与可靠性、舒适性与经济性、
+   high-speed and short headway.
+                                                                         高速度与高密度的协调匹配。
+   The interconnection among correlated railway lines in the railway 高速铁路设计应考虑与铁路网中
+32
+   network shall be considered in the design of high-speed railway.      相关线路的互联互通。
+   Risk prevention measures against natural disasters,foreign objects 高速铁路设计应加强自然灾害、
+33 intrusion,and secondary disasters shall be enhanced in the design of 异物侵限等灾害及次生灾害的风
+   high-speed railway.                                                   险防范措施。
+   Enhance process control for critical procedures such as indoor        加强室内机柜安装、线缆布放、
+                                                                         室外光电缆敷设等关键工序的过
+34 cabinets and panels installation,cable laying,outdoor optical and
+                                                                         程控制，提高实体工程的工艺质
+   electric cables laying,and improve the quality of works.
+                                                                         量。
+   Specify workmanship requirements as well as the requirements for 实施性施工组织设计应包含工艺
+35 personnel, equipment and material allocation in executive             要求及人员、机具、材料、配置
+   construction plan.                                                    要求。
+   Specify workmanship requirements for self-purchased materials in 自购物资招标应明确出厂设备工
+36 the tender documents, and material allocation in executive            艺质量要求，强化设备材料的进
+   construction plan.                                                    厂验收。
+   Carry out self-inspection to each procedure and make sure it pass 上道工序自检合格方可进入下道
+37
+   the inspection before the subsequent procedure starts.                工序的实施。
+   The dedicated templates and tools shall be adopted for drilling on 轨道板、防护墙、隧道壁、钢轨
+                                                                         等钻孔作业及线缆布放、设备配
+38 the track slab, protection wall, tunnel wall and rail, as well as for
+                                                                         线等应采用专用模具、工具施工
+   cable laying and equipment wiring.
+                                                                         。
+   Coordinate equipment installation with such disciplines as            设备安装应与房建、电力、暖通
+   building, HVAC, electric power and fire protection to ensure that 、消防等专业协调，确保各种设
+39
+   the equipment and decoration are neat and consistent in color,        备、装饰装修等在颜色、高度、
+   height, and marking.                                                  标识等方面协调、美观统一。
+   Check the installation conditions reserved for the passenger          核查信息机房、信息配线及设备
+   transport service equipment in the computer room, network wiring 间、综合控制室等的客服设备安
+40
+   room, integrated control room, etc.; make sure the installation       装条件；安装条件应符合施工工
+   conditions comply with the workmanship requirements.                  艺质量要求。
+   Prior to construction,the approved construction drawings shall be 施工单位应对批准的施工图进行
+41 checked on site by the contractor and it can only be used after       现场核对，核对无误后方可使用
+   being ascertained free of mistakes.                                   。
+
+                                          １７
+

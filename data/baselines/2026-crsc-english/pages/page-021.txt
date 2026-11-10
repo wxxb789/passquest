@@ -1,0 +1,62 @@
+   Here`s your ticket, boarding pass, passport and luggage label.       这是你的机票、登机牌、护照和
+53 You`ll be boarding at Gate 5. The boarding time is 3 p.m. The        行李标签，请在5号登机口登机，
+   security inspection is over there.                                   登机时间是下午3点，安检在那边
+                                                                          请通过安检门，把你的行李放到
+   Please go through the security gate, put your luggage on the           传送带上，请打开你的包，我们
+   conveyor belt, and open your bag. We`d like to have a look, it`s       要检查下。只是例行检查，确认
+54
+   just a routine check, just to make sure you do not have any liquid     没有携带液体，所有超过100毫升
+   with you. All liquid items of over 100ml are prohibited.               的液体物品都不允许携带上飞机
+                                                                          。
+   We are about to land in New York, here are a couple of forms you 我们即将抵达纽约，这是一些需
+                                                                          要填写的表格，只是出入境表
+   are supposed to fill out, they are E/D cards. All passengers except
+55                                                                        格，所有非美国公民乘客都必须
+   American citizens must complete these forms. Fill it out right now
+                                                                          填写这些表格，现在填写会节省
+   will save your time when you clear customs.
+                                                                          通关的时间
+   Excuse me, Would you please tell me the exchange rate for US           打扰下，你能告诉我今天美元的
+56 dollar today? I`d like to change 500 US dollars, and I want some       汇率是多少么？我想换500美元，
+   small change.                                                          我想要些小面额的钱
+   There are four set meals here. There are kid`s meal, single meal,      我们有四种套餐，儿童套餐、单
+                                                                          人套餐、商务套餐和家庭套餐，
+57 business meal and family set meal. The business meal include a big
+                                                                          商务套餐包括一份大的鸡肉汉堡
+   chicken burger and a cup of coffee.
+                                                                          和一杯咖啡
+   The test equipment box shall not be energized and tested until the 防雷器件及接地线连接安装完毕
+58 lightning protection devices and earthing wires are connected and 后，方可对测试设备箱加电调试
+   installed.                                                             。
+   It shall be confirmed before electric test that the manual transition 电动调试前，应确认各牵引点手
+   of each traction point is normal and the tested switch, the            动转换正常；确认调试道岔及相
+59
+   associated switches with follow up movement and protective             关联的带动道岔、防护道岔符合
+   switches can meet the transition conditions.                           转换条件。
+   The signalling/signaling system of an HSR is mainly composed of 高速铁路信号系统主要由信号室
+                                                                          外基础设备、联锁系统、列车运
+60 basic outdoor signallingtching and commanding system (TDCS),
+                                                                          行控制系统、列车调度指挥系统
+   centralized signalling monitoring system (CSM), etc.
+                                                                          、信号集中监测系统等构成。
+   Advantages of external locking device: when an external locking        外锁闭装置优点：尖轨与基本轨
+                                                                          、心轨与翼轨锁闭后，转辙机处
+   device is used to lock the switch rail to stock rail, or point rail to
+61                                                                        于不受力的卸荷状态，有利于延
+   wing rail, the switch machine is stress-free, lengthening its service
+                                                                          长转辙机的使用寿命、减少维修
+   life and reducing maintenance.
+                                                                          工作量。
+                                                                          列车运行控制系统是结合列车有
+   The train control system, based on parameters concerning trains        关参数和线路条件，根据行车计
+   and railway line, train operation schedule and the status of routes, 划及进路状态，通过列车测速与
+62 controls train direction, headway and train speed through train        定位技术，控制列车的运行方向
+   speed measurement and train positioning. It can guarantee train        、间隔和速度的技术装备，可保
+   safety and increase carrying capacity of the line.                     障列车运行安全，提高线路通过
+                                                                          能力。
+
+
+
+
+                                                     １９
+

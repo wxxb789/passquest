@@ -1,0 +1,18 @@
+第 五 套
+SECTION II Reading
+2 (50 minutes)
+Part A
+Directions:
+Read the following two texts. Answer the questions on each text by choosing A, B, C or D. Mark
+your answers on your ANSWER SHEET.
+Text |
+Passwords are everywhere in computer security. All too often, they are also ineffective. A good
+password has to be both easy to remember and hard to guess, but in practice people seem to pay
+attention to the former. Names of wives, husbands and children are popular. “123456” or “12345” are
+also common choices.
+
+That predictability lets security researchers (and hackers) create dictionaries which list common
+passwords, useful to those seeking to break in. But although researchers know that passwords are
+=
+
+49

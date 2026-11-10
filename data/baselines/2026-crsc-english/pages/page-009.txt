@@ -1,0 +1,45 @@
+245 I.S.O. Metric Series                                     I.S.O公制系列
+246 installation design                                      安装设计
+247 insulated joint located within the clearance limit       侵入限界绝缘
+248 insulated rail joint                                     钢轨绝缘节
+249 integration design                                       集成设计
+250 interface                                                接口
+251 Internal Wiring                                          内部配线
+252 labelling/labeling                                       标签
+253 liaison circuit with automatic blocks                    自动闭塞联系电路
+254 loop line                                                侧线
+255 manufacture                                              制造
+256 marking                                                  标记
+257 methods of workmanship                                   工艺方法
+258 name plates                                              铭牌
+259 Operation and Maintenance Manuals                        操作和维护手册
+260 overall design                                           总体设计
+261 overall jacket                                           外护套
+262 packing                                                  包装
+263 programme                                                计划
+264 protection facilities                                    防护设施
+265 provisional works                                        临时工程
+266 quality control                                          质量控制
+267 quality of workmanship                                   工艺质量
+268 quality system                                           质量体系
+269 rail gauge tie-bar                                       轨距杆
+270 rail insulation                                          钢轨绝缘
+271 relocation                                               迁改
+272 resistor                                                 电阻器
+273 retaining wall                                           挡土墙
+274 route indicator                                          进路表示器
+275 Scope of Works (SoW)                                     工程范围
+276 section without a switch                                 无岔区段
+277 site office                                              现场办公室
+278 site survey                                              现场定测
+279 spare parts                                              备件
+280 special tools                                            特殊工具
+281 stagework                                                阶段性工程
+282 steel tape armour                                        钢带铠装
+283 stripping of wires                                       剥线
+284 structure gauge                                          建筑限界
+285 submission and review                                    提交和审核
+286 supply                                                   供货
+
+                                                         ７
+

@@ -18,3 +18,9 @@ dist/
 build/
 *.exe
 *.app/
+
+# Bun harness: dependencies and type-checker/build cache stay out; bun.lock is a lockfile and IS
+# committed so a gate run is reproducible.
+.bun/
+coverage/
+*.tsbuildinfo

@@ -1,0 +1,40 @@
+527 dashboard                                          仪表盘
+528 Electronic Payment System (EPS)                    电子付款系统
+529 escalate                                           逐步增强
+530 Fiber to the Home (FTTH)                           光纤到户
+531 gauge、measure                                      测量，测定
+532 handbook                                           手册，指南
+533 invoice                                            发票
+534 light railway                                      轻轨铁路
+535 magnetic levitation railway/maglev                 磁浮铁路
+536 Mean Time Between Failures (MTBF)                  平均无故障时间
+537 Mean Time To Repair (MTTR)                         平均修复时间
+538 Mobile Switching Center (MSC)                      移动交换中心
+539 overtime                                           加班
+540 Packet Transport Network (PTN)                     分组传送网
+541 passing station                                    会让站
+542 Passive Optical Network (PON)                      无源光网络
+543 patent                                             专利
+544 Platforms Screen Door (PSD)                        站台屏蔽门
+545 prospective                                        预期的
+546 qualification                                      资格
+547 Quality of Service (QoS)                           服务质量
+548 reservation                                        保留、预定
+549 scrutiny                                           周密的调查
+550 Soft Switch (SS)                                   软交换
+551 suburban railway                                   市郊/市域铁路
+552 supervise                                          监督
+553 Supervisory Control And Data Acquisition (SCADA)   数据采集与控制系统
+554 symposium                                          专题讨论会
+555 trainee                                            受训者
+556 urgency                                            紧急
+557 Virtual Private network (VPN)                      虚拟专用网
+558 vocational                                         职业的
+559 warehouse                                          仓库
+560 workforce                                          劳工
+
+
+
+
+                                                １４
+

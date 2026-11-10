@@ -1,0 +1,76 @@
+   For the electric traction power supply railway section, when the      电力牵引供电铁路区段，长途通
+   long distance communication cable is led into the room, the indoor 信电缆引入室内时，电缆金属护
+16
+   part and the outdoor part of the metal sheath for the cable shall be 套的室内部分与室外部分应相互
+   insulated from each other.                                            绝缘。
+   The transmission rate and system capacity of transmission system 传输系统的传输速率、系统容量
+   shall be selected and configured according to the traffic, network 应根据业务量、网络冗余和网络
+17
+   redundancy and network protection methods, and expand condition 保护方式进行选择和配置，并预
+   shall be reserved.                                                    留发展条件。
+   The access network design should choose optical access                接入网设计宜选择光纤接入技
+18 technology, and also may choose wireless access technology or         术，也可选用无线接入技术或混
+   hybrid access technology.                                             合接入技术。
+   The new built telephone switching network should be based on IP
+                                                                         新建电话交换网宜基于IP交换技
+19 exchange technology, and should be carried by data
+                                                                         术，宜利用数据通信网承载。
+   communications network.
+   The data communication network shall provide IP bearer network
+                                                                         数据通信网应为铁路运输组织、
+   of wide area network for information systems such as railway
+                                                                         客货营销、经营管理等信息系
+20 transport organization, passenger and freight marketing, operation
+                                                                         统，以及GSM-R、视频等通信系统
+   and management, as well as communication systems such as GSM-
+                                                                         提供广域网IP承载网络。
+   R and video-related systems.
+   The video conferencing system shall be set with multipoint control 会议电视系统应设置多点控制单
+   unit (MCU), video conference terminal, conference room                元（MCU）、会场设备、网络管理
+21 equipment and network management equipment, etc. When the             设备等。采用基于H.323协议的会
+   video conferencing system based on H.323 protocol is adopted,         议电视系统时，还应设置网守
+   gatekeeper (GK) and other equipment shall be set.                     (GK)设备等。
+   According to the maintenance management system and the network
+   dimension, the telegraph switching center can be set up by two or 根据维护管理体制以及网络规
+                                                                         模，电报交换中心可按两级或单
+   single layer structure. When the two-layer structure is adopted, the
+                                                                         级结构设置。采用两级结构时，
+22 telegraph switching center should be set up in the dispatching
+                                                                         电报交换中心宜设置在调度中心
+   center and the dispatching office. When the single layer structure is
+                                                                         、调度所；采用单级结构时，电
+   adopted, the telegraph switching center should be set up in the
+                                                                         报交换中心宜设置在调度所。
+   dispatching office.
+   The design of video system shall comply with the video monitoring 视频系统设计应符合运输生产、
+   requirements of railway transportation production, equipment          设备监测、抢险救援和治安防范
+23
+   supervision, emergency rescue and security precaution to fulfill the 等视频监视需求，实现网络资源
+   sharing of network resource and video information.                    和视频信息共享。
+   The private emergency communication design shall adopt the wired 专业应急通信设计应采用有线、
+                                                                         无线相结合的方式，并充分利用
+   and wireless combined method, and take full advantage of railway
+24                                                                       铁路移动通信、公众移动通信、
+   mobile communication, public mobile communication, satellite
+                                                                         卫星通信、互联网以及区间通话
+   communication, Internet and the sectional communication post, etc.
+                                                                         柱等通信手段。
+   The clock synchronization network shall adopt hybrid synchronous 时钟同步网应采用分区、多基准
+   networking with regional control and multi reference clock control 钟控制的混合同步组网方式。每
+25 method. The master slave synchronization mode shall be adopted in 个同步区内应采用主从同步方
+   each synchronization region, and the quasi synchronization mode 式，同步区之间应采用准同步方
+   shall be adopted between regions.                                     式。
+   The equipment including video conferencing system, integrated         会议电视、综合视频监控、通信
+   video surveillance system, communication network management           网管、触摸屏终端等设备宜采用
+26
+   system and touch screen terminals should adopt AC power supply, 交流供电，其他设备宜采用直流
+   other equipment should adopt DC power supply.                         供电。
+   External AC power supply shall be the primary power source for        通信电源应以电力外供交流电源
+27 communication system. When external power supply is not               为主用供电，条件不具备时，可
+   available, internal power supply should be prepared.                  采用自备发电电源供电。
+
+
+
+
+                                           １６
+

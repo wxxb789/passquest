@@ -12,9 +12,25 @@ Binding project conventions (stack, truth ownership, layout, uncertainty protoco
 bash scripts/gate.sh
 ```
 
-CI (`.github/workflows/ci.yml`) runs exactly this on every pull request and on `main`. There is no
-second gate definition — if CI and a local run disagree, the script is the authority and the workflow
-is broken.
+### Harness platform (binding, 2026-11-10)
+
+The harness is a **Bun + TypeScript program** — one module per gate under `harness/gates/`, shared
+code under `harness/lib/` — because the owner runs this repository from Linux, macOS and Windows and
+a bash/Python gate chain needs Git Bash plus a system Python on Windows. Decision and migration plan:
+[`decisions/D-0001-bun-typescript-harness.md`](decisions/D-0001-bun-typescript-harness.md).
+
+Until the migration lands (it ships with the increment that adds import/OCR gates), `scripts/gate.sh`
+stays the honest entry point. **New checks are written directly as TypeScript gate modules** — never
+as another `scripts/*.sh` or `scripts/*.py` one-off. `bun run gate` becomes the single entry point at
+that point, and CI then runs the same command on ubuntu, macos and windows (`oven-sh/setup-bun`).
+
+The scripts already in the chain (`gate.sh`, `check-docs-links.py`, `check-secrets.sh`,
+`check-local-only.sh`) are grandfathered as the pre-migration harness, not a template for new checks;
+`check-local-only.sh` migrates with the goal-0002 Bun increment.
+
+CI (`.github/workflows/gate.yml`) runs `bash scripts/gate.sh` on every pull request and on `main`.
+There is no second gate definition — if CI and a local run disagree, the script is the authority and
+the workflow is broken.
 
 ## Gates, in order
 
@@ -27,6 +43,7 @@ is broken.
 | 5 | Tidy | `go mod tidy -diff` | Empty diff; a dirty module file means a dependency was added or dropped silently. |
 | 6 | Docs links | `python3 scripts/check-docs-links.py` | Relative links in markdown must resolve to a real path. |
 | 7 | Secrets / sources | `bash scripts/check-secrets.sh` | Credentials, private keys, `.env` files and confidential source markers outside the allowlist fail the run. |
+| 8 | Local-only CLI | `bash scripts/check-local-only.sh` | Pass Quest's own packages must not import `net`, `net/http`, `net/rpc` or `net/smtp`; files under `cmd/` and `internal/` — runtime **and** test files (`*.go`, `*.json`, `*.md`, `*.txt`) — must not contain the internal-only source marker. `net` is linked transitively by the pure-Go SQLite chain (`modernc.org/sqlite` → `libc` → `google/uuid`) and is never called; runtime proof belongs in the evidence record. |
 
 Skipped gates print `SKIP` with a reason. A skip is only legitimate for a surface that does not exist
 yet (for example: no `go.mod` before the first increment); a skip that hides a real surface is a
@@ -48,6 +65,7 @@ Add a gate when, and only when, a real failure mode exists that the current set 
 | New surface | Gate it should bring |
 |---|---|
 | JSON/CLI protocol or persisted schema | golden-file or schema test, and a migration test from the previous version |
+| Local practice CLI | first-party import scan for network packages and confidential markers (`check-local-only.sh`) |
 | Import / OCR | fixture-based test with a deliberately damaged input, plus an explicit "unverified" state assertion |
 | Provider call | recorded-fixture test with the network disabled; a failure path that cannot corrupt attempts |
 | Anki integration | fake AnkiConnect server test (idempotency, conflict, offline queue) — never a real deck |

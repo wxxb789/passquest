@@ -1,0 +1,45 @@
+489 intermodal transport                                      多式联运
+490 Internet of Things (IOT)                                  物联网
+491 interoperability                                          互联互通
+492 Operation Control Centre/Operation Control Center (OCC)   运营控制中心
+493 robot                                                     机器人
+494 train integrity                                           列车完整性
+495 virtual reality (VR)                                      虚拟现实
+496 zero emission                                             零排放
+497 Zone Controller (ZC)                                      区域控制器
+                                               国际工程管理词汇
+498 Cost, Insurance and Freight (CIF)                         到岸价
+499 customs duty; duty; tariff; customs dues                  关税
+500 free on board (FOB)                                       离岸价
+501 income; revenue; proceeds                                 收入
+502 profit                                                    利润
+                                                公司常识词汇
+503 the Belt and Road                                         一带一路
+504 Engineering, Procurement and Construction (EPC)           工程总承包
+505 infrastructure                                            基础设施
+506 realism, innovation, endeavor and dedication              求实 创新 拼搏 奉献
+507 Research & Development (R&D)                              研发
+508 Internationalization                                      国际化
+509 Capital Operation                                         资本运营
+510 Build-Operate-Transfer(BOT)                               建设-经营-转让
+511 Public-Private Partnership(PPP)                           政府和社会资本合作
+512 wholly-owned subsidiaries; wholly-owned subsidiary        全资子公司
+513 Import and Export Trade; Import and Export Trading        进出口贸易
+514 Diversification; Diversity;Pluralism                      多元化
+515 Reconstruction; Upgrading; Transformation                 改造
+516 Opportunity                                               机遇
+517 Leading; Take the lead; Lead                              牵头
+                                                出国常识词汇
+518 arrival                                                   到达
+519 departure                                                 离开
+520 passport                                                  护照
+521 visa                                                      签证
+                                                   通用词汇
+522 Active Optical Network (AON)                              有源光网络
+523 align                                                     使成一线，校直
+524 Border Gateway Protocol (BGP)                             边界网关协议
+525 calibrate                                                 使标准化
+526 corrective maintenance                                    故障修
+
+                                                    １３
+

@@ -1,0 +1,47 @@
+163 proceed signal                                                 进行信号
+164 rack                                                           机架
+165 Radio Block Center (RBC)                                       无线闭塞中心
+166 radio blocking                                                 无线闭塞
+167 redundancy                                                     冗余
+168 relay                                                          继电器
+169 release                                                        解锁
+                                                                   可靠性、可用性、可维护性和安
+170 reliability, availability, maintainability and safety (RAMS)
+                                                                   全性
+171 rolling; humping                                               溜放
+172 route                                                          进路
+173 section                                                        区段
+174 section block                                                  区间闭塞
+175 shunting                                                       调车
+176 signal                                                         信号机
+177 signal aspect and indication                                   信号显示
+178 signal at clear                                                信号开放
+179 signal at stop                                                 信号关闭
+180 speed measurement                                              测速
+181 switch locking                                                 道岔锁闭
+182 system integration                                             系统集成
+183 Temporary Speed Restriction Server (TSRS)                      临时限速服务器
+184 track circuit                                                  轨道电路
+185 trackside; lineside; wayside                                   轨旁
+186 Train Control Center (TCC)                                     列控中心
+187 train diagram; train graph                                     列车运行图
+188 up line                                                        上行线
+189 vehicle                                                        车辆
+190 Full Supervision mode (FS)                                     完全监控模式
+191 Partial Supervision mode (PS)                                  部分监控模式
+192 On Sight mode (OS)                                             目视行车模式
+193 Isolation mode (IS)                                            隔离模式
+194 vital computer                                                 安全计算机
+195 intermittent inquiry balise                                    点式查询应答器
+196 neutral zone                                                   分相区
+197 nominal direction                                              正方向
+198 leading unit                                                   本务端设备
+199 relay energized                                                继电器吸起
+200 catch up                                                       追钩
+201 braking curve                                                  制动曲线
+202 Specific Transmission Module (STM)                             专用传输模块
+203 overtaking station                                             越行站
+
+
+                                                      ５
+

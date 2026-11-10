@@ -1,0 +1,66 @@
+               中国通号2023年度工程系列高级职称外语考试-中英文段落
+序号                                     英文                                            中文
+     The signaling system and circuit design concerning operation           涉及行车安全的铁路信号系统及
+ 1   safety must comply with the principle of "fail-safe" in railway        电路设计，必须符合铁路信号“
+     signaling.                                                             故障－安全”原则。
+     Starting signals shall be installed for the main track and receiving-  车站的正线和到发线设置出站信
+ 2
+     departure track.                                                       号机。
+     Home signal must be installed for stations with train receiving        有列车接车作业的车站必须设置
+ 3
+     operation.                                                             进站信号机；
+     CTCS level transition information should be provided by balise         CTCS 等级转换信息宜由应答器组
+ 4
+     groups.                                                                提供。
+                                                                            复示信号机设置于主体信号机的
+   The repeating signal shall be installed within the sighting distance
+ 5                                                                          显示距离范围内、距主体信号机
+   of main signal, at a place as far from the main signal as possible.
+                                                                            尽可能远的处所。
+   Under lightning interference, signaling equipment related to safe        涉及行车安全的信号设备受雷电
+ 6
+   operation shall not generate unsafe output.                              干扰时不得产生非安全输出。
+   The cable between LEU and switchable balise shall not be longer LEU与有源应答器之间的电缆长度
+                                                                            不得大于2 500m，超过规定时宜
+ 7 than 2 500 m, otherwise LEU should be placed at trackside and
+                                                                            将LEU设置于轨旁，设置于轨旁的
+   redundantly configured.
+                                                                            LEU应冗余设置；
+   In the case no approach signal is installed in advance of the home 非自动闭塞区段的进站信号机、
+ 8 signal and block signal of a non-automatic block section, distant        通过信号机外方未设置接近信号
+   signal shall be installed.                                               机时，设置预告信号机。
+   The route indicator shall be turned lighting-on when the main            进路表示器应在主体信号机开放
+ 9 signal is on, in compliance with the requirements to distinguish         时点亮，并符合区分发车方向的
+   departure directions.                                                    需要。
+   Signal signs shall be set at the left side in train operation direction, 信号标志应设置于线路的列车运
+10 and the tuning zone sign of track circuit of double-track section        行方向左侧，双线区段轨道电路
+   shall be set at the outer side of the track.                             调谐区标志应设置于线路外侧。
+                                                                            轨道占用检查宜采用轨道电路，
+   Track circuit should be used for track occupancy detection, and
+11                                                                          也可采用计轴轨道占用检查装置
+   axle counting track occupancy detection device may also be used.
+                                                                            。
+   Independent centralized interlocking equipment should be installed 线路所宜设置独立的集中联锁设
+   in the block station; for yards independent of each other in the         备；车站内作业相对独立的各个
+12
+   station, independent centralized interlocking equipment should be 车场宜设置独立的集中联锁设备
+   installed.                                                               。
+   Bi-directional operation should be supported in the design of            区间闭塞宜按双方向运行设计。
+   section blocking. For double-track and bi-directional automatic          双线双方向运行的自动闭塞区
+13 block section, when the train is running in reverse direction,           段，反方向运行时可采用自动站
+   interstation auto-block may be used, and automatic block may also 间闭塞，根据需要也可采用自动
+   be used as required.                                                     闭塞。
+   The design of railway communication shall comply with the                铁路通信工程设计应符合设备使
+14 requirements of reliability, availability, maintainability and safety 用和维护对可靠性、可用性、可
+   for the equipment operation and maintenance.                             维护性和安全性的要求。
+   The number of optical fiber cores shall be determined according to 光纤芯数应根据路网规划、可靠
+   the network planning, reliability and service requirements and the 性、业务需求以及光缆结构确定
+15 structure of the optical cable. The number of reserved fiber should 。新建长途光缆中预留光纤数占
+   not be less than 50% of the total number of fiber in the new long- 该条光缆光纤总数的比例不宜低
+   distance optical cable.                                                  于50%。
+
+
+
+
+                                                        １５
+
