@@ -293,11 +293,9 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 	if err != nil {
 		return internalError(opt, jsonMode, err)
 	}
-	if selection.Tactic != nil {
-		record, err = record.WithTactic(selection.Tactic.ID, selection.Tactic.assistance())
-		if err != nil {
-			return internalError(opt, jsonMode, err)
-		}
+	record, err = annotateAssistance(st, selection, record)
+	if err != nil {
+		return internalError(opt, jsonMode, err)
 	}
 	record, err = st.Append(record)
 	if err != nil {
@@ -319,6 +317,24 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 	}
 	writeFeedback(opt.Stdout, record, feedback, st.Path())
 	return 0
+}
+
+// annotateAssistance records the condition under which the attempt was made. A
+// tactic run carries its stage and id. Ordinary practice has no tactic id, but
+// a question whose guided walkthrough was already delivered is still assisted:
+// the help was shown even though this command did not show it.
+func annotateAssistance(st *store.Store, selection practiceSelection, record attempt.Attempt) (attempt.Attempt, error) {
+	if selection.Tactic != nil {
+		return record.WithTactic(selection.Tactic.ID, selection.Tactic.assistance())
+	}
+	exposed, err := st.Exposed(record.Key())
+	if err != nil {
+		return attempt.Attempt{}, err
+	}
+	if !exposed {
+		return record, nil
+	}
+	return record.WithAssistance(attempt.AssistanceAssisted)
 }
 
 // readSelection prompts until it gets an option, "skip", or an exit request.

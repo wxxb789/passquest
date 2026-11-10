@@ -361,9 +361,9 @@ func validateForInsert(a attempt.Attempt) error {
 	if !a.Assistance.Valid() {
 		add("assistance %q is invalid", a.Assistance)
 	}
-	if a.Assistance == attempt.AssistanceAssisted && a.TacticID == "" {
-		add("assisted attempt has no tactic id")
-	}
+	// An assisted attempt need not name a tactic: ordinary practice on a
+	// question whose guided walkthrough was already delivered is assisted
+	// without being a tactic attempt.
 	if a.TacticID != "" && !attempt.ValidTacticID(a.TacticID) {
 		add("tactic_id %q is not a lowercase slug", a.TacticID)
 	}

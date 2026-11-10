@@ -344,6 +344,40 @@ func TestTacticGuidedAwaitingBlocksIndependentUse(t *testing.T) {
 	}
 }
 
+func TestOrdinaryPracticeAfterGuidedExposureIsAssisted(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	fixture := fixtureDir(t)
+	imported := decodeImport(t, mustRun(t, db, clock, "", "import", "--path", fixture, "--json"))
+	sourceID := imported.Source.ID
+	mustRun(t, db, clock, "", "question", "add", sourceID, "1", "--file", taggedQuestionFile(t, "not-except-polarity"))
+	mustRun(t, db, clock, "", "page", "review", sourceID, "1", "--reviewer", "fixture-reviewer")
+	mustRun(t, db, clock, "", "question", "review", sourceID, "q1", "--answer", "B", "--reviewer", "fixture-reviewer")
+
+	// Showing the walkthrough is help shown; it records no attempt.
+	exposed := decodeAwaiting(t, mustRun(t, db, clock, "",
+		"tactic", "practice", "not-except-polarity", "--source", sourceID, "--stage", "guided", "--question", "q1", "--json"))
+	if exposed.Question.ID != "q1" || exposed.Guidance == nil {
+		t.Fatalf("exposed question/guidance = %s / %+v", exposed.Question.ID, exposed.Guidance)
+	}
+
+	// Ordinary practice on that question must keep the assisted condition; it is
+	// not a tactic attempt, so the tactic id stays empty.
+	ordinary := decodeAnswered(t, mustRun(t, db, clock, "",
+		"practice", "--source", sourceID, "--question", "q1", "--answer", "B", "--json"))
+	if ordinary.Attempt.Assistance != "assisted" || ordinary.Attempt.TacticID != "" {
+		t.Fatalf("ordinary attempt after exposure = %+v", ordinary.Attempt)
+	}
+	if ordinary.Attempt.AttemptNumber != 1 || ordinary.Attempt.Status != "correct" {
+		t.Fatalf("ordinary attempt number/status = %+v", ordinary.Attempt)
+	}
+
+	report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
+	if report.Counts.AssistedCorrect != 1 || report.Counts.IndependentAttempts != 0 || report.Counts.IndependentCorrect != 0 {
+		t.Fatalf("counts after exposed ordinary practice = %+v", report.Counts)
+	}
+}
+
 func TestTacticHumanPromptRecordsExposureOnQuit(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}

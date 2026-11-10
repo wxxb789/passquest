@@ -57,7 +57,7 @@ An attempt records two independent dimensions:
 
 | Field | Values | Meaning |
 |---|---|---|
-| `assistance` | `assisted`, `independent` | Whether a tactic walkthrough accompanied the attempt. The guided response always carries it; an independent response carries none. |
+| `assistance` | `assisted`, `independent` | Whether help accompanied the attempt. A guided tactic response always carries the walkthrough; an independent tactic response carries none. Ordinary practice is `assisted` when that question's walkthrough was already exposed. |
 | `first`/`repeat` (existing) | first, repeated | Whether that content-scoped question was answered before. |
 
 - A `guided` attempt shows the tactic walkthrough and is stored as `assisted`: the pre-answer
@@ -75,8 +75,11 @@ An attempt records two independent dimensions:
   `independent`. `--stage independent` before any guided attempt exits 2 with `guided_required`.
 - If no eligible independent question remains, the command exits 2 with `not_practiceable` and names
   the reason. It never substitutes an attempted question.
-- Existing ordinary `practice` attempts are stored as `independent` with no tactic id. Older rows
-  migrate to that state because no help existed in those builds.
+- Existing ordinary `practice` attempts with no recorded help are stored as `independent` with no
+  tactic id. Older rows migrate to that state because no help existed in those builds.
+- Ordinary `practice` on a question whose guided walkthrough was already exposed is stored as
+  `assisted` with no tactic id: the help was shown even though that command did not show it. It is
+  not a tactic attempt, so it does not satisfy the guided-required gate.
 
 `report` keeps the existing attempts/first/repeated counts and adds:
 
@@ -87,8 +90,8 @@ Assisted attempts (help shown): 1 (correct 1, incorrect 0, skipped 0)
 
 The independent row counts first attempts only, because a no-hint repeat still comes after the answer
 and evidence were shown. A repeated attempt carries `assistance=independent` but is counted under
-`Repeated attempts`, not independent correctness. The assisted row counts every guided attempt,
-including a repeated guided example.
+`Repeated attempts`, not independent correctness. The assisted row counts every assisted attempt,
+including a repeated guided example and ordinary practice after an exposed walkthrough.
 
 Each question row adds `assisted` and `independent` counts; each attempt row names its assistance and
 tactic. The per-question `independent` count follows the same first-attempt rule. The same values are

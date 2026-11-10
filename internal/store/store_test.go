@@ -358,9 +358,13 @@ func TestAppendPersistsAssistanceAndTactic(t *testing.T) {
 	}
 
 	assistedNoTactic := sampleAttempt("q4")
-	assistedNoTactic.Assistance = attempt.AssistanceAssisted
-	if _, err := st.Append(assistedNoTactic); err == nil || !strings.Contains(err.Error(), "no tactic id") {
-		t.Fatalf("assisted attempt without a tactic error = %v", err)
+	assistedNoTactic, err = assistedNoTactic.WithAssistance(attempt.AssistanceAssisted)
+	if err != nil {
+		t.Fatalf("WithAssistance assisted: %v", err)
+	}
+	got = mustAppend(t, st, assistedNoTactic)
+	if got.Assistance != attempt.AssistanceAssisted || got.TacticID != "" {
+		t.Fatalf("assisted ordinary record = %+v", got)
 	}
 	badAssistance := sampleAttempt("q5")
 	badAssistance.Assistance = "guessed"
@@ -540,6 +544,20 @@ func TestRecordExposureIsIdempotentAndAppendOnly(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].Key() != exposure.Key() || !list[0].ExposedAt.Equal(at) {
 		t.Fatalf("exposures = %+v, want one observation of %+v", list, exposure)
+	}
+	exposed, err := st.Exposed(exposure.Key())
+	if err != nil {
+		t.Fatalf("Exposed: %v", err)
+	}
+	if !exposed {
+		t.Fatal("Exposed reports a recorded question as unexposed")
+	}
+	other, err := st.Exposed(attempt.QuestionKey{ContentID: exposure.ContentID, QuestionID: "t3"})
+	if err != nil {
+		t.Fatalf("Exposed other question: %v", err)
+	}
+	if other {
+		t.Fatal("Exposed reports another question as exposed")
 	}
 
 	if _, err := st.db.Exec(`UPDATE tactic_exposures SET question_id = 't1'`); err == nil || !strings.Contains(err.Error(), "append-only") {

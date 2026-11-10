@@ -185,6 +185,20 @@ func TestWithTactic(t *testing.T) {
 	if _, err := (Attempt{}).WithTactic("not-except-polarity", AssistanceAssisted); err == nil {
 		t.Fatal("WithTactic accepted an ungraded record")
 	}
+
+	assistedOrdinary, err := rec.WithAssistance(AssistanceAssisted)
+	if err != nil {
+		t.Fatalf("WithAssistance assisted: %v", err)
+	}
+	if assistedOrdinary.Assistance != AssistanceAssisted || assistedOrdinary.TacticID != "" {
+		t.Fatalf("assisted ordinary = %+v", assistedOrdinary)
+	}
+	if _, err := rec.WithAssistance("guessed"); err == nil || !strings.Contains(err.Error(), "invalid assistance") {
+		t.Errorf("WithAssistance bad condition: error = %v", err)
+	}
+	if _, err := (Attempt{}).WithAssistance(AssistanceAssisted); err == nil {
+		t.Fatal("WithAssistance accepted an ungraded record")
+	}
 }
 
 func TestExplain(t *testing.T) {

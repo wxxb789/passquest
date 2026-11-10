@@ -85,7 +85,9 @@ type Attempt struct {
 	AttemptNumber  int
 	PriorAttempts  int
 	// Assistance and TacticID record whether help was visible and which tactic
-	// the help belonged to. TacticID is empty for ordinary practice.
+	// the help belonged to. TacticID is empty for ordinary practice, which can
+	// still be assisted when a tactic walkthrough for the question was already
+	// delivered.
 	Assistance Assistance
 	TacticID   string
 }
@@ -178,6 +180,22 @@ func BuildRecord(contentID, contentVersion string, q exam.Question, sel Selectio
 	return rec, nil
 }
 
+// WithAssistance annotates a graded record with the condition under which it
+// was made, without attributing it to a tactic. Ordinary practice uses it when
+// the guided walkthrough for that question was already delivered: the help is
+// real even though the ordinary command did not show it. Tactic practice uses
+// WithTactic instead.
+func (a Attempt) WithAssistance(assistance Assistance) (Attempt, error) {
+	if !assistance.Valid() {
+		return Attempt{}, fmt.Errorf("attempt: invalid assistance %q", assistance)
+	}
+	if a.QuestionID == "" || a.ContentID == "" {
+		return Attempt{}, errors.New("attempt: annotate a graded record")
+	}
+	a.Assistance = assistance
+	return a, nil
+}
+
 // WithTactic annotates a graded record with the tactic exercise and the
 // assistance condition. A guided attempt is Assisted; an unguided attempt is
 // Independent. Ordinary practice never calls this.
@@ -189,14 +207,11 @@ func (a Attempt) WithTactic(tacticID string, assistance Assistance) (Attempt, er
 	if !ValidTacticID(id) {
 		return Attempt{}, fmt.Errorf("attempt: tactic id %q is not a lowercase slug", id)
 	}
-	if !assistance.Valid() {
-		return Attempt{}, fmt.Errorf("attempt: invalid assistance %q", assistance)
-	}
-	if a.QuestionID == "" || a.ContentID == "" {
-		return Attempt{}, errors.New("attempt: annotate a graded record")
+	a, err := a.WithAssistance(assistance)
+	if err != nil {
+		return Attempt{}, err
 	}
 	a.TacticID = id
-	a.Assistance = assistance
 	return a, nil
 }
 

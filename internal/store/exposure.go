@@ -60,6 +60,18 @@ func (s *Store) RecordExposure(e Exposure) error {
 	return nil
 }
 
+// Exposed reports whether the guided walkthrough has been delivered for the
+// content-scoped question under any tactic. Ordinary practice consults it so an
+// answer after a walkthrough is still recorded as assisted.
+func (s *Store) Exposed(key attempt.QuestionKey) (bool, error) {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tactic_exposures WHERE content_id = ? AND question_id = ?`,
+		key.ContentID, key.QuestionID).Scan(&count); err != nil {
+		return false, fmt.Errorf("store: check tactic exposure: %w", err)
+	}
+	return count > 0, nil
+}
+
 // ListExposures returns every recorded exposure in insertion order.
 func (s *Store) ListExposures() ([]Exposure, error) {
 	rows, err := s.db.Query(`SELECT tactic_id, content_id, question_id, exposed_at

@@ -1,8 +1,8 @@
 # 0003 — A scoring tactic applied on independent questions: evidence
 
-- Tree: uncommitted round-1 finding fix over `8ff342357e717707cc1335b9b10f019085968098` (goal-0003
-  commits `c6c6c67`, `7bf87e0`, `8ff3423`), branch `feat/0003-exam-tactic-practice`; the operator
-  commits.
+- Tree: uncommitted round-2 finding fix over `da4bf3393a7263d99da03fc9cc3e8c8b049a9346` (goal-0003
+  commits `c6c6c67`, `7bf87e0`, `8ff3423`, `da4bf33`), branch `feat/0003-exam-tactic-practice`; the
+  operator commits.
 - Date: 2026-11-10. Host: Linux 7.0.0-1017-azure x64.
 - Toolchain: Go 1.27.3 via mise; Bun 1.4.4; `modernc.org/sqlite` v1.62.0 (pure Go); no OCR engine was
   invoked and no PDF was read in this increment.
@@ -23,9 +23,9 @@ document; the raw key/value protocol is pinned by the golden tests and `tactic-s
 | `internal/tactic` | One registered tactic (`not-except-polarity`), its authored principle/why/when/steps, a structured boundary/counterexample, and an embedded first-party exercise with two tagged questions and one untagged decoy. Lesson and exercise are validated by construction. |
 | `internal/exam` | Additive `tactics` tags on questions and the lowercase-slug grammar (`ValidSkillTag`). Evidence, option and key invariants are unchanged. |
 | `internal/source` | Question-file `tactics`, registry validation at add/edit, tags carried into practice content and included in the content version when present. Review gates unchanged. |
-| `internal/attempt` | `Assistance` (`assisted`/`independent`) and `TacticID` on the immutable attempt; ordinary and pre-v4 records default to independent; `WithTactic` validates the condition. |
-| `internal/store` | Schema v5: v4's `attempts.assistance`, `attempts.tactic_id` and `source_questions.tactics_json`, plus the append-only `tactic_exposures` ledger; v0–v4 migration keeps attempts and defaults them to independent; an exposure records help shown, not an answer. |
-| `internal/cli` | `tactic list`, `tactic show`, `tactic practice` with guided/independent gating, source or embedded material, and additive report counts/rows. A guided pre-answer document records the exposure before the walkthrough is emitted, so an unanswered question cannot become independent evidence. Key-hiding protocols unchanged. |
+| `internal/attempt` | `Assistance` (`assisted`/`independent`) and `TacticID` on the immutable attempt; ordinary and pre-v4 records default to independent; `WithTactic` validates the condition and tactic id, `WithAssistance` records help without a tactic attribution. |
+| `internal/store` | Schema v5: v4's `attempts.assistance`, `attempts.tactic_id` and `source_questions.tactics_json`, plus the append-only `tactic_exposures` ledger; v0–v4 migration keeps attempts and defaults them to independent; an exposure records help shown, not an answer, and is queried by content-scoped question for the ordinary-practice path. |
+| `internal/cli` | `tactic list`, `tactic show`, `tactic practice` with guided/independent gating, source or embedded material, and additive report counts/rows. A guided pre-answer document records the exposure before the walkthrough is emitted, so an unanswered question cannot become independent evidence. The shared answer path consults that ledger: ordinary practice on an exposed question is recorded as assisted with no tactic id. Key-hiding protocols unchanged. |
 | `harness/` | New `tactic-smoke` gate (70 assertions, including the assisted/independent correctness counters, the answered-document guidance and the guided-exposure lockout), shared JSON readers and key-hiding check in `harness/lib/json.ts` (used by import-smoke and tactic-smoke), and a 19th self-test case over 12/12 gates. |
 
 The guided response carries the walkthrough — in the pre-answer document when the client asks for it,
@@ -33,13 +33,15 @@ and again in the answered document — and is stored as `assisted`; the `indepen
 guidance, must use a question distinct from every guided example for the tactic, and must be a first
 attempt. Requesting the guided pre-answer document records the exposure first: an exposed question
 cannot be the independent question even when no attempt followed, and the next guided request without
-`--question` resumes it. A third independent run with no eligible question is refused.
+`--question` resumes it. A third independent run with no eligible question is refused. Ordinary
+`practice` on an exposed question is stored as `assisted` with no tactic id, so the shared recording
+path cannot turn prior help into independent correctness.
 
 ## Tier 1 — automated checks
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1 -v` | exit 0; 114 top-level tests, 88 subtests, 0 failures, 0 skips |
+| `go test ./... -count=1 -v` | exit 0; 115 top-level tests, 88 subtests, 0 failures, 0 skips |
 | `bash scripts/gate.sh` | exit 0; 13 passed, 0 failed, 0 skipped (details below) |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
@@ -63,7 +65,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (7 packages, 202 tests, 0 skipped)
+PASS  go test (7 packages, 203 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -93,9 +95,7 @@ PASS  harness self-test (19 cases, 12/12 gates)
 GATE: PASS
 ```
 
-The new `internal/store/exposure.go` was marked intent-to-add for this run so the tracked-file
-gates (gofmt, secrets) see the file the operator will commit; the index was reset afterwards and the
-file remains untracked for operator verification.
+All files changed by this fix are tracked modifications; no index staging or intent-to-add was used.
 
 Exit code: 0.
 
@@ -109,10 +109,10 @@ The tests that pin this increment's contract clauses:
 | `TestValidSkillTag`, `TestValidateRejects` | Skill-tag grammar; malformed and duplicate question tags are rejected by exam validation. |
 | `TestParseQuestionJSONKeepsRegisteredTags`, `TestParseQuestionJSONRejectsBadInput` | Registered tags survive question parsing; unregistered, malformed and duplicate tags are exit-2 invalid input. |
 | `TestBuildPracticeExamCarriesTacticTagsAndVersion` | Tags reach practice content; a tag change changes the content version. |
-| `TestWithTactic`, `TestBuildRecord`, `TestExplain` | Assisted/independent conditions, tactic id validation, default independence, and feedback assistance. |
-| `TestAppendPersistsAssistanceAndTactic` | Attempts persist and read back the assistance/tactic split; assisted without a tactic and unknown assistance are rejected. |
+| `TestWithTactic`, `TestBuildRecord`, `TestExplain` | Assisted/independent conditions, tactic id validation, `WithAssistance` without a tactic id, default independence, and feedback assistance. |
+| `TestAppendPersistsAssistanceAndTactic` | Attempts persist and read back the assistance/tactic split; an assisted attempt with no tactic id persists for ordinary practice; an unknown assistance value is rejected. |
 | `TestMigrationFromVersionThreeAddsAssistanceColumns`, `TestMigrationFromVersionFourAddsGuidedExposures` | v3 attempts migrate as independent with no tactic; a v4 database gains the exposure ledger and keeps its assisted attempt; the database CHECK rejects an unknown assistance value. |
-| `TestRecordExposureIsIdempotentAndAppendOnly` | Recording the same exposure twice keeps one row and its first time; the database rejects UPDATE/DELETE on the ledger; malformed exposure fields are rejected. |
+| `TestRecordExposureIsIdempotentAndAppendOnly` | Recording the same exposure twice keeps one row and its first time; the key lookup reports the exposed question and not another one; the database rejects UPDATE/DELETE on the ledger; malformed exposure fields are rejected. |
 | `TestQuestionTagsRoundTrip`, `TestMigrationFromVersionThreeDefaultsQuestionTags` | Tags survive add/review/restart and appear in the audit event; a pre-v4 question reads as untagged. |
 | `TestTacticLessonSurfacesWhyWhenAndBoundary` | `tactic list`/`show` expose the lesson and boundary in JSON and human form. |
 | `TestTacticGuidedThenIndependentKeepsAssistanceSeparate` | Guided is assisted and both guided documents carry guidance; independent is unguided, its awaiting and answered documents carry none, and it is a distinct first attempt; report counts and per-question/try rows split assisted from independent; an exhausted independent request exits 2. |
@@ -120,6 +120,7 @@ The tests that pin this increment's contract clauses:
 | `TestTacticGuidedRerunUsesFirstExample` | A first one-shot guided JSON answer still carries the walkthrough; a third guided run returns the first example with attempt number 2, repeat exposure and assisted assistance. |
 | `TestTacticExplicitQuestionRules` | Explicit guided selection; a guided question or an untagged question cannot be the independent question. |
 | `TestTacticGuidedAwaitingBlocksIndependentUse`, `TestTacticHumanPromptRecordsExposureOnQuit` | A guided pre-answer document records exposure without creating an attempt; the exposed question is refused as independent with `invalid_input`; the pending guided question is resumed; an interactive quit after the walkthrough is still recorded. |
+| `TestOrdinaryPracticeAfterGuidedExposureIsAssisted` | Ordinary practice on a question whose walkthrough was exposed is stored as `assisted` with no tactic id, remains attempt number 1, and is counted as assisted correctness with zero independent attempts. |
 | `TestTacticHumanOutputShowsHelpAndCondition` | Human output states the guided/independent condition and the recorded attempt condition. |
 | `TestTacticSourcePracticeKeepsProvenance` | Tagged, reviewed source questions are used; the content id, page/answer review provenance, private notice, and assisted/independent split survive into the report. |
 | `TestTacticSourceRefusesUntaggedMaterial`, `TestTacticSourceRejectsPreviouslyAttemptedIndependentQuestion` | Untagged material is refused; an ordinary earlier attempt on a tagged question makes it ineligible for independent selection. |
@@ -410,6 +411,60 @@ page 21 or of the 165-page baseline.
 
 The source DB was `0600`; the embedded DB was `0600`.
 
+### Ordinary practice after an exposed walkthrough
+
+The exposure ledger is also read by the shared answer path, so ordinary practice after help keeps the
+assisted condition. This transcript uses the independently authored fixture under
+`internal/cli/testdata/import` on a fresh database, not the private baseline. A temporary copy of
+`question-q1.json` carried `"tactics": ["not-except-polarity"]`; it was not committed.
+
+```text
+$ passquest import --path internal/cli/testdata/import --json --db demo-source.sqlite
+source: src-bb4d9a5479518365
+
+$ passquest question add src-bb4d9a5479518365 1 --file /tmp/question-q1-tagged.json --db demo-source.sqlite
+$ passquest page review src-bb4d9a5479518365 1 --reviewer demo-reviewer --db demo-source.sqlite
+$ passquest question review src-bb4d9a5479518365 q1 --answer B --reviewer demo-reviewer --db demo-source.sqlite
+
+$ passquest tactic practice not-except-polarity --source src-bb4d9a5479518365 \
+    --stage guided --question q1 --json --db demo-source.sqlite
+{
+  "state": "awaiting_answer",
+  "question": "q1",
+  "tactic": {
+    "id": "not-except-polarity",
+    "title": "NOT/EXCEPT polarity",
+    "stage": "guided",
+    "assistance": "assisted"
+  },
+  "has_guidance": true
+}
+
+$ passquest practice --source src-bb4d9a5479518365 --question q1 --answer B --json --db demo-source.sqlite
+{
+  "attempt": {
+    "attempt_number": 1,
+    "status": "correct",
+    "assistance": "assisted",
+    "tactic_id": absent
+  },
+  "feedback_assistance": "assisted"
+}
+
+$ passquest report --json --db demo-source.sqlite
+{
+  "attempts": 1,
+  "correct": 1,
+  "assisted_attempts": 1,
+  "assisted_correct": 1,
+  "independent_attempts": 0,
+  "independent_correct": 0
+}
+```
+
+The ordinary attempt remains attempt number 1 and keeps no tactic id, but the earlier walkthrough makes
+it assisted: it is counted as assisted correctness and contributes nothing to independent correctness.
+
 ## Tier 3 — local-only and source boundary
 
 | Check | Command | Result |
@@ -432,7 +487,7 @@ it. The strace run is the runtime proof for this increment.
 | "Done when" clause | Evidence |
 |---|---|
 | A learner can practice a concrete evidence-based exam tactic on source-grounded material and understand why/when it works. | `tactic show` returns principle, why, when, 6 steps and a boundary; guided practice on both the first-party exercise and imported page 21; `q001`/`q002` answer reviews and source provenance; the pre-answer document hides the key. |
-| After help, the learner can try a distinct answer-verified question without hints; assisted success and independent correctness stay separately visible. | `--stage independent` before help is exit 2 `guided_required`; the independent awaiting document has no `guidance` and question `t2`/`q002` differs from guided `t1`/`q001`; attempts store `assisted` vs `independent`; report prints and JSON returns separate counts and per-question/try rows (1 assisted correct, 1 independent correct in both transcripts); a third independent request is refused. A question whose guided walkthrough was requested but never answered is recorded in `tactic_exposures` and refused as independent (`invalid_input`, zero attempts added), and the next guided request resumes it. |
+| After help, the learner can try a distinct answer-verified question without hints; assisted success and independent correctness stay separately visible. | `--stage independent` before help is exit 2 `guided_required`; the independent awaiting document has no `guidance` and question `t2`/`q002` differs from guided `t1`/`q001`; attempts store `assisted` vs `independent`; report prints and JSON returns separate counts and per-question/try rows (1 assisted correct, 1 independent correct in both transcripts); a third independent request is refused. A question whose guided walkthrough was requested but never answered is recorded in `tactic_exposures` and refused as independent (`invalid_input`, zero attempts added), and the next guided request resumes it. Ordinary `practice` on an exposed question is stored as `assisted` with no tactic id (attempt 1) and adds zero independent correctness (Tier 2, "Ordinary practice after an exposed walkthrough"; `TestOrdinaryPracticeAfterGuidedExposureIsAssisted`). |
 | The material includes a counterexample or boundary showing why naive folklore or blind keyword matching can fail. | The lesson's boundary names "repeat the most words"/"longest option" and explains word overlap versus truth; exercise `t1` option D and `t2` option C explain the repeated-vocabulary trap; source `q002` reverses the American-citizens exception while repeating its words; `TestBoundaryAndExerciseExposeTheKeywordTrap` pins the lesson and at least two trap explanations. |
 | Question provenance, local data confidentiality and deterministic scoring continue to hold. | Tags and reviewed answers are stored in the private DB; source content id/version, page/answer reviewers and private notice appear in practice and report; pre-answer JSON has 0 forbidden keys; the existing append-only attempt schema remains; migration keeps attempts; strace shows 0 network syscalls; DB `0600` in a `0700` default directory; no private source or database is tracked; same deterministic grading/feedback path as goal 0001/0002. |
 
@@ -457,7 +512,8 @@ the only documented shell entry point and still execs `bun run gate`.
   a new tag.
 - "Independent" here means no tactic walkthrough was shown on that question (no exposure row exists),
   a different question from the guided example, and zero earlier attempts on that content-scoped
-  question. It is not a delayed, timed or held-out assessment; those belong to goal 0009.
+  question. Ordinary practice after an exposure is assisted, not independent. It is not a delayed,
+  timed or held-out assessment; those belong to goal 0009.
 - The guided attempt is still an attempt and counts as repeat exposure for that question. Re-running
   the guided example is allowed and remains visibly assisted/repeated. A separate append-only
   `tactic_exposures` row records that the walkthrough was shown before an answer; it is not an
