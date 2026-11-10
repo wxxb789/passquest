@@ -81,6 +81,9 @@ func TestBuildRecord(t *testing.T) {
 	if rec.Assistance != AssistanceIndependent || rec.TacticID != "" {
 		t.Fatalf("default condition = %q/%q, want independent with no tactic", rec.Assistance, rec.TacticID)
 	}
+	if len(rec.Skills) != 0 {
+		t.Fatalf("untagged question snapshot = %v, want empty", rec.Skills)
+	}
 
 	wrong := Selection{Option: &exam.Option{Label: "B", Text: "At five."}}
 	rec, err = BuildRecord("c", "1", q, wrong, "sess", started, started.Add(time.Second))
@@ -142,6 +145,23 @@ func TestBuildRecordRejectsBadInput(t *testing.T) {
 	}
 }
 
+func TestBuildRecordSnapshotsSkillTags(t *testing.T) {
+	q := testQuestion()
+	q.Tactics = []string{"vocabulary-in-context", "sentence-structure"}
+	started := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	rec, err := BuildRecord("c", "1", q, Selection{Option: &exam.Option{Label: "A", Text: "At four."}}, "sess", started, started.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.Skills) != 2 || rec.Skills[0] != "vocabulary-in-context" || rec.Skills[1] != "sentence-structure" {
+		t.Fatalf("skills = %v", rec.Skills)
+	}
+	q.Tactics[0] = "mutated"
+	if rec.Skills[0] != "vocabulary-in-context" {
+		t.Fatal("BuildRecord aliases the question's tag slice")
+	}
+}
+
 func TestWithTactic(t *testing.T) {
 	q := testQuestion()
 	started := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
@@ -156,12 +176,28 @@ func TestWithTactic(t *testing.T) {
 	if assisted.TacticID != "not-except-polarity" || assisted.Assistance != AssistanceAssisted {
 		t.Fatalf("assisted = %+v", assisted)
 	}
+	if len(assisted.Skills) != 1 || assisted.Skills[0] != "not-except-polarity" {
+		t.Fatalf("assisted skills = %v, want the tactic id", assisted.Skills)
+	}
 	independent, err := rec.WithTactic("not-except-polarity", AssistanceIndependent)
 	if err != nil {
 		t.Fatalf("WithTactic independent: %v", err)
 	}
 	if independent.Assistance != AssistanceIndependent {
 		t.Fatalf("independent assistance = %q", independent.Assistance)
+	}
+	tagged := testQuestion()
+	tagged.Tactics = []string{"not-except-polarity"}
+	taggedRec, err := BuildRecord("c", "1", tagged, Selection{Option: &exam.Option{Label: "A", Text: "At four."}}, "sess", started, started.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	taggedRec, err = taggedRec.WithTactic("not-except-polarity", AssistanceAssisted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(taggedRec.Skills) != 1 || taggedRec.Skills[0] != "not-except-polarity" {
+		t.Fatalf("tagged tactic snapshot = %v, want one id", taggedRec.Skills)
 	}
 	if rec.TacticID != "" || rec.Assistance != AssistanceIndependent {
 		t.Fatalf("WithTactic mutated the receiver: %+v", rec)

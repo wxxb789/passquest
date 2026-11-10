@@ -7,6 +7,7 @@ import { context, resolve } from "../lib/repo.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
+import { adaptiveSmoke } from "./adaptive-smoke.ts";
 import { baseline } from "./baseline.ts";
 import { docsLinks } from "./docs-links.ts";
 import { goBuild } from "./go-build.ts";
@@ -273,6 +274,14 @@ function brokenCases(): BrokenCase[] {
     {
       gate: tacticSmoke,
       label: "CLI whose tactic output is not the protocol",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
+      },
+    },
+    {
+      gate: adaptiveSmoke,
+      label: "CLI whose skill and next output is not the protocol",
       files: {
         "go.mod": GO_MOD,
         "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',

@@ -188,3 +188,133 @@ Entry format:
   relaxing validation and adding a separate tag-vocabulary table.
 - Revisit when: users need to author their own tactic vocabularies, or goal 0004 introduces a larger
   skill taxonomy that should not be a compiled list.
+
+### Q-0004-01 — Is a new question on an already-seen passage independent transfer?
+- Status: decided(default taken)
+- Context: goal 0003 records `assistance=independent` for a first attempt on a distinct question and
+  calls it independent. Goal 0004 requires that "the same question or passage exposure does not
+  masquerade as independent transfer", and feedback on any question reveals the passage and its
+  evidence.
+- Options considered: (A) keep goal 0003's question-level rule and treat a new question on a seen
+  passage as independent; (B) count only the first independent attempt on a fresh content id as
+  independent transfer, and show later first attempts as passage re-exposure; (C) refuse a new
+  question on a seen passage entirely.
+- Default taken: (B). Stored attempts are unchanged; the adaptive policy classifies an independent
+  first attempt on an already-seen content id as `passage_repeats`, never as independent correctness.
+  Goal-0003 `t1`/`t2` therefore remain an assisted attempt plus an independent attempt in the report,
+  but the adaptive view shows one passage and zero independent transfers. Reverse by removing the
+  content-id condition in `internal/adaptive`; no migration is needed.
+- Revisit when: goal 0009 defines a delayed or held-out assessment whose passage exposure rule is
+  intentionally different, or a learner needs transfer measured on a passage they have already read.
+
+### Q-0004-02 — How small is the skill set, and which evidence thresholds are allowed?
+- Status: decided(default taken)
+- Context: goal 0004 asks for "a small set of scoring and minimal language prerequisite skills" and
+  requires recommendations to react to attempts, time, hints and revisits without claiming a measured
+  pass probability. The thresholds decide when a skill is called weak, mixed or supported.
+- Options considered: (A) one scoring skill plus two language prerequisites, with exact-count states
+  and a learner-relative pace rule; (B) a larger taxonomy with percentage thresholds and an
+  estimated mastery score; (C) one skill only, with no time rule.
+- Default taken: (A). `not-except-polarity` (scoring), `vocabulary-in-context` and
+  `sentence-structure` (language). States use exact counts: zero independent transfer is
+  `familiarity_only`, one answered observation is `insufficient`, two or more with zero correct is
+  `weak`, some correct is `mixed`, all correct is `supported`. "Slow" means the latest correct
+  independent answer took at least twice the learner's own fastest correct answer for that skill; no
+  exam time limit is invented. Vocabulary has three first-party passages so a supported state can
+  still have a fresh passage; sentence structure has two. Reverse by editing the registry thresholds
+  and authored content; stored attempts are unaffected.
+- Revisit when: real learner evidence shows the exact-count states are too coarse, or the owner wants
+  a different skill set or more passages.
+
+### Q-0004-03 — Does the question-file `tactics` field now accept language skill tags?
+- Status: decided(default taken)
+- Context: goal 0003 named the field `tactics` and validated it against the tactic registry. Goal
+  0004 needs question tags for language prerequisites, and renaming the JSON field would break every
+  authored question file and the goal-0003 protocol.
+- Options considered: (A) keep `tactics` as the field name and widen its values to any registered
+  skill; (B) rename it to `skills` and migrate question files; (C) add a second `skills` field and
+  accept both.
+- Default taken: (A). The field keeps its name and lowercase-slug grammar; validation now uses the
+  skill registry, where a scoring tactic is a skill kind. Human output labels the values `skills`.
+  Reverse by renaming the field with a one-release alias once existing local files can be migrated.
+- Revisit when: a question-file schema version is introduced or users need independent tactic and
+  language tag fields.
+
+### Q-0004-04 — Are skill tags snapshotted on attempts?
+- Status: decided(default taken)
+- Context: adaptive inference groups historical attempts by a skill. A question tag can be edited
+  after the attempt, which would otherwise regroup old evidence under a new label.
+- Options considered: (A) add an append-only `skills_json` snapshot to attempts and use it for
+  inference; (B) recompute every attempt from the question's current tags; (C) store a full derived
+  learner state.
+- Default taken: (A). Schema v6 adds a nullable `attempts.skills_json`; new attempts always write a
+  JSON array (including `[]`), and `NULL` marks a pre-v6 row. A later `question edit` cannot regroup a
+  recorded snapshot, even an empty one. Pre-v6 rows fall back to current tags, marked
+  `mapped_from_current_tags` with an uncertainty line. No derived learner state is stored; `next`
+  recomputes it. Reverse by ignoring the column and reading current tags, at the cost of historical
+  regrouping.
+- Revisit when: a tag-correction workflow needs to apply retroactively, or pre-v6 learner evidence
+  must stop being inferred from current tags.
+
+### Q-0004-05 — Does the guided-first rule apply to scoring `skill practice`?
+- Status: decided(default taken)
+- Context: Q-0003-02 requires an independent attempt to be a different question from every guided
+  example and refuses an independent tactic call before a guided attempt. Goal 0004 adds
+  `skill practice`, which the plan calls ordinary unassisted practice. On a fresh database it could
+  select the tactic exercise's guided example, record it as independent, and make the tactic's own
+  independent stage unreachable; the adaptive view then counted that answer as scoring transfer
+  before the walkthrough. The review asked whether the rule is universal or scoped to
+  `tactic practice`.
+- Options considered: (A) enforce Q-0003-02 on the scoring skill practice surface; (B) scope the rule
+  to `tactic practice` and amend the decision text.
+- Default taken: (A). `skill practice` for a scoring skill refuses with exit 2 (`guided_required`)
+  until a guided attempt for that skill exists, and candidate selection skips any question whose
+  walkthrough was already shown. Language skills are unaffected. `next` counts `guided_attempts` from
+  attempts that carry the tactic id, not from every assisted attempt, and a scoring skill with
+  recorded attempts but no guided tactic attempt selects `explain`; an assisted ordinary answer after
+  a walkthrough still selects the guided explanation instead of printing an unrunnable command.
+  This is the safer default: it cannot consume the guided-example question or overstate independent
+  scoring evidence. Reverse by removing `requireGuidedTactic` and the exposure skip in
+  `internal/cli/skill.go`; stored attempts are unaffected.
+- Revisit when: the owner wants a separate unassisted scoring surface that does not feed adaptive
+  transfer evidence, or goal 0009 defines a held-out assessment with different help rules.
+
+### Q-0004-06 — Does an exhausted review always yield to another skill's evidence-adding action?
+- Status: decided(default taken)
+- Context: round-1 review found that with only embedded material the scoring skill reaches
+  `insufficient`, has no fresh passage, and selects `review` at priority 2 forever. A review cannot
+  add an independent observation, so the untouched language skills at priority 5 were never
+  recommended. The same logic applies to any review-only skill, including a `supported` slow review.
+- Options considered: (A) every `review` action ranks after every action that can add independent
+  evidence, and reviews compete only when every material-bearing skill is on review; (B) only
+  under-sampled reviews (`familiarity_only`, `insufficient`) yield, preserving the slow-time review
+  above `no_evidence`; (C) change the review action to `explain` when no fresh passage remains.
+- Default taken: (A). `internal/adaptive.Recommend` selects a non-review candidate before a review
+  candidate; among reviews the existing state priority and registry order still decide. This removes
+  the permanent stall. The disclosed trade is that a slow `supported` review changes the skill's
+  inferred action and reason but does not become the top recommendation while another skill has an
+  action that can add evidence; the skill list still shows it. Reverse by changing the candidate
+  comparison in `Recommend`; stored attempts and the per-skill inference are unaffected.
+- Revisit when: goal 0009 defines a delayed or held-out assessment whose consolidation signal should
+  outrank fresh material, or real learner evidence shows the top recommendation should prefer a
+  review over an unpracticed skill.
+
+### Q-0004-07 — Does an exhausted explanation yield to another skill's evidence-adding action?
+- Status: decided(default taken)
+- Context: round-2 review found that with only embedded material, two wrong `sentence-structure`
+  answers leave the skill `weak` with `explain` at priority 0, and its lesson followed by
+  `skill practice --question s2` records no independent observation; the untouched vocabulary skill
+  was therefore never recommended. The same trap exists for an exhausted `mixed` skill whose latest
+  answered independent attempt was incorrect. Q-0004-06 covered `review` only, and the selection rule
+  demoted reviews alone.
+- Options considered: (A) at selection, rank any candidate that cannot add evidence — a review, or an
+  `explain` with no fresh passage — after one that can, while keeping the skill's own inferred
+  action; (B) change the `weak`/`mixed` branches to `review` when no fresh passage remains; (C) keep
+  the explanation as the unconditional top recommendation.
+- Default taken: (A). `internal/adaptive.Recommend` compares candidates by whether they lead to a
+  fresh passage; the skill's `inference.action` stays `explain` because the lesson is still its own
+  need, and the explanation is selected again once every skill is exhausted (its priority 0 outranks
+  a review). Reverse by changing the candidate comparison in `Recommend`; stored attempts and the
+  per-skill inference are unaffected.
+- Revisit when: goal 0009 needs a consolidation signal to outrank fresh material, or the owner wants
+  an exhausted repeated-error lesson to keep the top slot.

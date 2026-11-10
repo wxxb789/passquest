@@ -60,9 +60,15 @@ func (a Assistance) Valid() bool {
 	return a == AssistanceIndependent || a == AssistanceAssisted
 }
 
-// ValidTacticID reports whether id is a lowercase slug usable as a tactic id.
-func ValidTacticID(id string) bool {
+// ValidSkillID reports whether id is a lowercase slug usable as a skill id.
+func ValidSkillID(id string) bool {
 	return exam.ValidSkillTag(id)
+}
+
+// ValidTacticID reports whether id is a lowercase slug usable as a tactic id.
+// A tactic is a scoring skill, so the grammar is shared.
+func ValidTacticID(id string) bool {
+	return ValidSkillID(id)
 }
 
 // Attempt is one immutable answer record. AttemptNumber and PriorAttempts are
@@ -90,6 +96,17 @@ type Attempt struct {
 	// delivered.
 	Assistance Assistance
 	TacticID   string
+	// Skills snapshots the question's skill tags when the answer was recorded.
+	// Adaptive selection groups historical attempts by this snapshot, so a
+	// later tag edit cannot silently regroup old evidence. It is empty for
+	// untagged questions and for rows written before schema version 6.
+	Skills []string
+	// SkillsRecorded reports whether the row carries a skill snapshot at all.
+	// A recorded empty snapshot means the question had no registered tag when
+	// the answer was recorded; a row without a snapshot predates version 6 and
+	// may fall back to the question's current tags. The distinction is stored
+	// as NULL versus a JSON array.
+	SkillsRecorded bool
 }
 
 // Key returns the content-scoped identity used for numbering and repeats.
@@ -161,6 +178,8 @@ func BuildRecord(contentID, contentVersion string, q exam.Question, sel Selectio
 		AnsweredAt:     answered.UTC(),
 		ElapsedMS:      answered.Sub(started).Milliseconds(),
 		Assistance:     AssistanceIndependent,
+		Skills:         append([]string(nil), q.Tactics...),
+		SkillsRecorded: true,
 	}
 
 	switch {
@@ -212,6 +231,16 @@ func (a Attempt) WithTactic(tacticID string, assistance Assistance) (Attempt, er
 		return Attempt{}, err
 	}
 	a.TacticID = id
+	for _, skillID := range a.Skills {
+		if skillID == id {
+			return a, nil
+		}
+	}
+	// Copy before appending so annotating a record cannot mutate the caller's
+	// skill slice.
+	skills := make([]string, len(a.Skills), len(a.Skills)+1)
+	copy(skills, a.Skills)
+	a.Skills = append(skills, id)
 	return a, nil
 }
 

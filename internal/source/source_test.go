@@ -482,6 +482,16 @@ func TestParseQuestionJSONKeepsRegisteredTags(t *testing.T) {
 	if q.AnswerStatus != AnswerUnmapped || q.Review != Unreviewed {
 		t.Fatalf("tagged question state = %s/%s, want unreviewed/unmapped", q.Review, q.AnswerStatus)
 	}
+
+	languageRaw := strings.Replace(validQuestionJSON("B"), `"reasoning"`,
+		`"tactics": ["vocabulary-in-context", "sentence-structure"], "reasoning"`, 1)
+	language, err := ParseQuestionJSON([]byte(languageRaw), "src-test", 2, testNow, "")
+	if err != nil {
+		t.Fatalf("ParseQuestionJSON language tags: %v", err)
+	}
+	if len(language.Tactics) != 2 || language.Tactics[0] != "vocabulary-in-context" || language.Tactics[1] != "sentence-structure" {
+		t.Fatalf("language skill tags = %v", language.Tactics)
+	}
 }
 
 func TestBuildPracticeExamCarriesTacticTagsAndVersion(t *testing.T) {

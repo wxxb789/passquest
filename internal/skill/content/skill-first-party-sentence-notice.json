@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "skill-first-party-sentence-notice",
+  "version": "1",
+  "title": "Volunteer schedule — sentence structure",
+  "notice": "First-party practice content authored for Pass Quest. It is not a live examination item and makes no exam-blueprint claim.",
+  "provenance": {
+    "author": "Pass Quest first-party",
+    "source": "authored for this repository",
+    "rights": "Redistributable first-party practice content.",
+    "exam_relation": "Practice for a language prerequisite; not a live examination and not an exam blueprint."
+  },
+  "passage": {
+    "title": "Volunteer schedule",
+    "text": "Volunteer schedule\n\nVolunteers who arrive before 08:30 should sign the attendance sheet in the main office. The coordinator, who reviews the schedule every Friday, will contact anyone whose shift has changed. Because the community room is being painted, the Saturday session will take place in the library instead. Please bring the printed instructions that were sent with your confirmation letter."
+  },
+  "questions": [
+    {
+      "id": "s1",
+      "stem": "In the sentence \"Volunteers who arrive before 08:30 should sign the attendance sheet in the main office.\", the phrase \"who arrive before 08:30\" describes:",
+      "options": [
+        {"label": "A", "text": "the main office"},
+        {"label": "B", "text": "the attendance sheet"},
+        {"label": "C", "text": "the volunteers"},
+        {"label": "D", "text": "the coordinator"}
+      ],
+      "answer": "C",
+      "evidence": "Volunteers who arrive before 08:30 should sign the attendance sheet in the main office.",
+      "reasoning": "The word \"who\" follows \"Volunteers\" and introduces a relative clause that limits which volunteers should sign the sheet. The main verb \"should sign\" also belongs to \"Volunteers\".",
+      "option_reasoning": {
+        "A": "\"who\" can describe people, not the office.",
+        "B": "The sheet is what the volunteers sign, not who arrives early.",
+        "C": "The relative clause directly follows \"Volunteers\" and describes them.",
+        "D": "The coordinator is introduced in the next sentence and is not the noun before \"who\"."
+      },
+      "tactics": ["sentence-structure"]
+    }
+  ]
+}

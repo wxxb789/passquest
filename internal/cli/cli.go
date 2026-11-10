@@ -86,6 +86,10 @@ func Run(args []string, options Options) int {
 		return runQuestion(args[1:], opt)
 	case "tactic":
 		return runTactic(args[1:], opt)
+	case "skill":
+		return runSkill(args[1:], opt)
+	case "next":
+		return runNext(args[1:], opt)
 	case "version":
 		return runVersion(opt)
 	case "help", "-h", "--help":
@@ -115,6 +119,11 @@ Usage:
   passquest tactic show TACTIC [--json]
   passquest tactic practice TACTIC [--source SOURCE] [--stage guided|independent]
                      [--question ID] [--answer LABEL | --skip] [--db PATH] [--json]
+  passquest skill list [--json]
+  passquest skill show SKILL [--json]
+  passquest skill practice SKILL [--source SOURCE] [--question ID]
+                     [--answer LABEL | --skip] [--db PATH] [--json]
+  passquest next     [--source SOURCE] [--db PATH] [--json]
   passquest report   [--db PATH] [--json]
   passquest version
   passquest help
@@ -135,6 +144,10 @@ func newSessionID() string {
 	return hex.EncodeToString(b[:])
 }
 
+// defaultDatabasePath is the app-owned relative path resolved when neither
+// --db nor PASSQUEST_DB selects a database.
+var defaultDatabasePath = filepath.Join(".passquest", "passquest.sqlite")
+
 func databasePath(flagValue string, getenv func(string) string) string {
 	if strings.TrimSpace(flagValue) != "" {
 		return flagValue
@@ -142,7 +155,7 @@ func databasePath(flagValue string, getenv func(string) string) string {
 	if v := strings.TrimSpace(getenv("PASSQUEST_DB")); v != "" {
 		return v
 	}
-	return filepath.Join(".passquest", "passquest.sqlite")
+	return defaultDatabasePath
 }
 
 // openDatabase opens the resolved database path. The app-owned default state
@@ -245,6 +258,7 @@ func runPractice(args []string, opt Options) int {
 			return writeJSON(opt, awaitingDoc{
 				SchemaVersion: ProtocolVersion,
 				State:         "awaiting_answer",
+				Skill:         skillRunViewOf(selection.Skill),
 				Content:       contentViewOf(selection.Content),
 				Question:      questionViewOf(selection),
 			})
@@ -262,6 +276,9 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 				return internalError(opt, jsonMode, err)
 			}
 			writeTacticPreamble(opt.Stdout, selection.Tactic)
+		}
+		if selection.Skill != nil {
+			writeSkillPreamble(opt.Stdout, selection.Skill)
 		}
 		writePrompt(opt.Stdout, selection.Content, selection.Question, selection.Number)
 	}
@@ -309,13 +326,21 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 			State:         "answered",
 			Tactic:        tacticRunViewOf(selection.Tactic),
 			Guidance:      selection.Tactic.deliveredGuidance(),
+			Skill:         skillRunViewOf(selection.Skill),
 			Content:       contentViewOf(selection.Content),
 			Question:      questionViewOf(selection),
 			Attempt:       attemptViewOf(record),
 			Feedback:      feedbackViewOf(feedback),
 		})
 	}
-	writeFeedback(opt.Stdout, record, feedback, st.Path())
+	skillID := ""
+	if selection.Skill != nil {
+		skillID = selection.Skill.Skill.ID
+	}
+	writeFeedback(opt.Stdout, record, feedback, st.Path(), skillID)
+	if selection.Skill != nil {
+		writeSkillExposureLine(opt.Stdout, selection.Skill, record)
+	}
 	return 0
 }
 
@@ -389,7 +414,7 @@ func writePrompt(w io.Writer, content exam.Exam, question exam.Question, number 
 	fmt.Fprintln(w)
 }
 
-func writeFeedback(w io.Writer, record attempt.Attempt, feedback attempt.Feedback, dbPath string) {
+func writeFeedback(w io.Writer, record attempt.Attempt, feedback attempt.Feedback, dbPath, skillID string) {
 	if record.Status == attempt.StatusSkipped {
 		fmt.Fprintln(w, "Result: SKIPPED (no answer chosen)")
 	} else {
@@ -418,6 +443,9 @@ func writeFeedback(w io.Writer, record attempt.Attempt, feedback attempt.Feedbac
 	condition := fmt.Sprintf("assistance %s", record.Assistance)
 	if record.TacticID != "" {
 		condition += ", tactic " + record.TacticID
+	}
+	if skillID != "" {
+		condition += ", skill " + skillID
 	}
 	fmt.Fprintf(w, "Recorded attempt #%d (question %s, attempt %d on this question, %d ms, %s).\n",
 		record.ID, record.QuestionID, record.AttemptNumber, record.ElapsedMS, condition)
@@ -854,6 +882,7 @@ func attemptViewOf(record attempt.Attempt) attemptView {
 		Repeat:         record.Repeat(),
 		Assistance:     string(record.Assistance),
 		TacticID:       record.TacticID,
+		Skills:         append([]string(nil), record.Skills...),
 		Status:         string(record.Status),
 		SelectedLabel:  selectedLabel,
 		SelectedText:   selectedText,
@@ -931,29 +960,31 @@ type awaitingDoc struct {
 	State         string         `json:"state"`
 	Tactic        *tacticRunView `json:"tactic,omitempty"`
 	Guidance      *guidanceView  `json:"guidance,omitempty"`
+	Skill         *skillRunView  `json:"skill,omitempty"`
 	Content       contentView    `json:"content"`
 	Question      questionView   `json:"question"`
 }
 
 type attemptView struct {
-	ID             int64   `json:"id"`
-	SessionID      string  `json:"session_id"`
-	QuestionID     string  `json:"question_id"`
-	AttemptNumber  int     `json:"attempt_number"`
-	PriorAttempts  int     `json:"prior_attempts"`
-	Repeat         bool    `json:"repeat"`
-	Assistance     string  `json:"assistance"`
-	TacticID       string  `json:"tactic_id,omitempty"`
-	Status         string  `json:"status"`
-	SelectedLabel  *string `json:"selected_label"`
-	SelectedText   *string `json:"selected_text"`
-	CorrectLabel   string  `json:"correct_label"`
-	CorrectText    string  `json:"correct_text"`
-	StartedAt      string  `json:"started_at"`
-	AnsweredAt     string  `json:"answered_at"`
-	ElapsedMS      int64   `json:"elapsed_ms"`
-	ContentID      string  `json:"content_id"`
-	ContentVersion string  `json:"content_version"`
+	ID             int64    `json:"id"`
+	SessionID      string   `json:"session_id"`
+	QuestionID     string   `json:"question_id"`
+	AttemptNumber  int      `json:"attempt_number"`
+	PriorAttempts  int      `json:"prior_attempts"`
+	Repeat         bool     `json:"repeat"`
+	Assistance     string   `json:"assistance"`
+	TacticID       string   `json:"tactic_id,omitempty"`
+	Skills         []string `json:"skills,omitempty"`
+	Status         string   `json:"status"`
+	SelectedLabel  *string  `json:"selected_label"`
+	SelectedText   *string  `json:"selected_text"`
+	CorrectLabel   string   `json:"correct_label"`
+	CorrectText    string   `json:"correct_text"`
+	StartedAt      string   `json:"started_at"`
+	AnsweredAt     string   `json:"answered_at"`
+	ElapsedMS      int64    `json:"elapsed_ms"`
+	ContentID      string   `json:"content_id"`
+	ContentVersion string   `json:"content_version"`
 }
 
 type feedbackView struct {
@@ -972,6 +1003,7 @@ type answeredDoc struct {
 	State         string         `json:"state"`
 	Tactic        *tacticRunView `json:"tactic,omitempty"`
 	Guidance      *guidanceView  `json:"guidance,omitempty"`
+	Skill         *skillRunView  `json:"skill,omitempty"`
 	Content       contentView    `json:"content"`
 	Question      questionView   `json:"question"`
 	Attempt       attemptView    `json:"attempt"`

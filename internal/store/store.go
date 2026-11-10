@@ -5,6 +5,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -20,7 +21,7 @@ import (
 )
 
 // SchemaVersion is the persisted schema this build understands.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // schemaV1 is the original version-1 shape. Migrations apply each version in
 // order, so a version-0 database gets both steps and a version-1 database gets
@@ -76,6 +77,16 @@ var schemaV4 = []string{
 	`ALTER TABLE source_questions ADD COLUMN tactics_json TEXT NOT NULL DEFAULT '[]'`,
 }
 
+// schemaV6 snapshots the question's skill tags on the attempt. Adaptive
+// selection groups history by the tags visible when the answer was recorded, so
+// a later tag edit cannot regroup old evidence. The column is nullable: NULL
+// marks a pre-v6 row that may fall back to current tags, while a recorded
+// empty array means the question had no registered tag at answer time and must
+// never be regrouped.
+var schemaV6 = []string{
+	`ALTER TABLE attempts ADD COLUMN skills_json TEXT`,
+}
+
 var migrations = []struct {
 	version    int
 	statements []string
@@ -85,6 +96,7 @@ var migrations = []struct {
 	{3, schemaV3},
 	{4, schemaV4},
 	{5, schemaV5},
+	{6, schemaV6},
 }
 
 // Store is a handle to one attempts database.
@@ -229,6 +241,10 @@ func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 	if err := validateForInsert(a); err != nil {
 		return attempt.Attempt{}, err
 	}
+	skillsJSON, err := encodeSkills(a.Skills)
+	if err != nil {
+		return attempt.Attempt{}, err
+	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -245,12 +261,12 @@ func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 	res, err := tx.Exec(`INSERT INTO attempts (
 			session_id, question_id, content_id, content_version, status,
 			selected_label, selected_text, correct_label, correct_text,
-			started_at, answered_at, elapsed_ms, assistance, tactic_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			started_at, answered_at, elapsed_ms, assistance, tactic_id, skills_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.SessionID, a.QuestionID, a.ContentID, a.ContentVersion, string(a.Status),
 		nullIfEmpty(a.SelectedLabel), nullIfEmpty(a.SelectedText), a.CorrectLabel, a.CorrectText,
 		a.StartedAt.UTC().Format(time.RFC3339Nano), a.AnsweredAt.UTC().Format(time.RFC3339Nano), a.ElapsedMS,
-		string(a.Assistance), a.TacticID,
+		string(a.Assistance), a.TacticID, skillsJSON,
 	)
 	if err != nil {
 		return attempt.Attempt{}, fmt.Errorf("store: insert attempt: %w", err)
@@ -266,6 +282,7 @@ func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 	a.ID = id
 	a.PriorAttempts = prior
 	a.AttemptNumber = prior + 1
+	a.SkillsRecorded = true
 	return a, nil
 }
 
@@ -275,7 +292,7 @@ func (s *Store) List() ([]attempt.Attempt, error) {
 	rows, err := s.db.Query(`SELECT
 			id, session_id, question_id, content_id, content_version, status,
 			selected_label, selected_text, correct_label, correct_text,
-			started_at, answered_at, elapsed_ms, assistance, tactic_id
+			started_at, answered_at, elapsed_ms, assistance, tactic_id, skills_json
 		FROM attempts ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list attempts: %w", err)
@@ -293,16 +310,23 @@ func (s *Store) List() ([]attempt.Attempt, error) {
 			selectedTxt sql.NullString
 			started     string
 			answered    string
+			skillsRaw   sql.NullString
 		)
 		if err := rows.Scan(
 			&a.ID, &a.SessionID, &a.QuestionID, &a.ContentID, &a.ContentVersion, &status,
 			&selectedLbl, &selectedTxt, &a.CorrectLabel, &a.CorrectText,
-			&started, &answered, &a.ElapsedMS, &assistance, &a.TacticID,
+			&started, &answered, &a.ElapsedMS, &assistance, &a.TacticID, &skillsRaw,
 		); err != nil {
 			return nil, fmt.Errorf("store: scan attempt: %w", err)
 		}
 		a.Status = attempt.Status(status)
 		a.Assistance = attempt.Assistance(assistance)
+		if skillsRaw.Valid {
+			a.SkillsRecorded = true
+			if a.Skills, err = decodeSkills(skillsRaw.String); err != nil {
+				return nil, fmt.Errorf("store: decode skills of attempt %d: %w", a.ID, err)
+			}
+		}
 		if selectedLbl.Valid {
 			a.SelectedLabel = selectedLbl.String
 		}
@@ -367,6 +391,16 @@ func validateForInsert(a attempt.Attempt) error {
 	if a.TacticID != "" && !attempt.ValidTacticID(a.TacticID) {
 		add("tactic_id %q is not a lowercase slug", a.TacticID)
 	}
+	seenSkill := make(map[string]bool, len(a.Skills))
+	for _, id := range a.Skills {
+		if !attempt.ValidSkillID(id) {
+			add("skill id %q is not a lowercase slug", id)
+		}
+		if seenSkill[id] {
+			add("skill id %q is duplicated", id)
+		}
+		seenSkill[id] = true
+	}
 
 	switch a.Status {
 	case attempt.StatusSkipped:
@@ -398,4 +432,36 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+func encodeSkills(skills []string) (string, error) {
+	if len(skills) == 0 {
+		return "[]", nil
+	}
+	data, err := json.Marshal(skills)
+	if err != nil {
+		return "", fmt.Errorf("store: encode skills: %w", err)
+	}
+	return string(data), nil
+}
+
+func decodeSkills(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" || strings.TrimSpace(raw) == "[]" {
+		return nil, nil
+	}
+	var skills []string
+	if err := json.Unmarshal([]byte(raw), &skills); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(skills))
+	for _, id := range skills {
+		if !attempt.ValidSkillID(id) {
+			return nil, fmt.Errorf("stored skill id %q is not a lowercase slug", id)
+		}
+		if seen[id] {
+			return nil, fmt.Errorf("stored skill id %q is duplicated", id)
+		}
+		seen[id] = true
+	}
+	return skills, nil
 }

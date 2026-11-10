@@ -97,9 +97,11 @@ Each question row adds `assisted` and `independent` counts; each attempt row nam
 tactic. The per-question `independent` count follows the same first-attempt rule. The same values are
 fields in `report --json` (`assisted_attempts`, `independent_attempts`, and their status splits).
 
-## Tactic tags on imported questions
+## Skill tags on imported questions
 
-A locally authored question file may name the tactics it exercises:
+A locally authored question file may name the skills it exercises. The JSON field keeps its
+goal-0003 name `tactics`; its values may be any registered skill, including the language
+prerequisites added by goal 0004:
 
 ```json
 {
@@ -118,28 +120,34 @@ A locally authored question file may name the tactics it exercises:
 }
 ```
 
-- Tags are lowercase slugs and must name a registered tactic. An unknown or misspelled tag is an
+- Tags are lowercase slugs and must name a registered skill. An unknown or misspelled tag is an
   exit-2 question-file error; it is not silently ignored. This keeps a typo from making a question
-  permanently invisible to tactic practice.
+  permanently invisible to tactic or skill practice.
+- A scoring tactic is a skill kind, so `not-except-polarity` is still valid. The language skills are
+  `vocabulary-in-context` and `sentence-structure`; see [`adaptive.md`](adaptive.md).
 - Tags survive review, editing and restart. A tag change changes the practice content version (the
-  material is not identical), but not the content id, so attempts stay content-scoped.
+  material is not identical), but not the content id, so attempts stay content-scoped. New attempts
+  also snapshot the tags in `attempts.skills_json`; an edit cannot regroup those attempts.
 - Tactic practice uses only questions that pass goal 0002's review gate: reviewed page, reviewed
   answer, every option explained, and evidence still a verbatim substring of the current page text.
-  Untagged or unreviewed material is refused with an actionable message, never replaced by another
-  question.
+  `skill practice --source` uses the same review gate for any registered skill tag. Untagged or
+  unreviewed material is refused with an actionable message, never replaced by another question.
 - The source page text, the locally authored questions and the review labels stay in the private
   SQLite database. The tactic lesson itself contains no source text.
 
 ## Current limits
 
-- One tactic is registered. The registry and the question-tag field are designed for more, but each
-  addition needs its own authored lesson, boundary and tested material.
+- One scoring tactic and two language skills are registered. The registry and the question-tag field
+  are designed for more, but each addition needs its own authored lesson, practice material and tested
+  policy branch.
 - Tags are a closed vocabulary validated against the build's registry. A user cannot define a new
-  tactic id without a code change.
-- "Independent" means no tactic walkthrough was shown on that question and there is no prior attempt
-  on it. Exposure is permanent: a question whose guided walkthrough was requested stays ineligible
-  for the independent stage even if the learner quit without answering. It does not mean delayed,
-  time-limited or held-out assessment; those belong to goal 0009.
+  skill id without a code change.
+- "Independent" in the goal-0003 tactic flow means no tactic walkthrough was shown on that question
+  and there is no prior attempt on it. Exposure is permanent: a question whose guided walkthrough was
+  requested stays ineligible for the independent stage even if the learner quit without answering.
+  The goal-0004 adaptive policy is stricter again: a new question on an already-seen passage is
+  passage re-exposure, not independent transfer. Neither meaning is delayed, time-limited or held-out
+  assessment; those belong to goal 0009.
 - The guided attempt is still a recorded attempt with repeat exposure. Re-running a guided example is
   allowed and remains visibly assisted/repeated.
 - No automatic tactic detection, item generation or answer-key extraction is performed. A question is
