@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "state": "advisory",
+  "call": {
+    "id": 1,
+    "created_at": "2026-11-10T09:00:04Z",
+    "attempt_id": 1,
+    "content_id": "sample-0001",
+    "question_id": "q1",
+    "mode": "explain",
+    "status": "ok",
+    "provider_host": "api.example.com",
+    "model": "example-model",
+    "prompt_version": "tutor-v2",
+    "source_text_shared": false,
+    "request_sha256": "f93b3a81d9041a1230d05a971574022cdb80d3959bbd1979cde019f3132ca35c",
+    "request_bytes": 2543,
+    "output_chars": 82,
+    "prompt_tokens": 120,
+    "completion_tokens": 30,
+    "http_status": 200,
+    "latency_ms": 42
+  },
+  "suggestion": {
+    "text": "Locate the sentence that gives the Saturday closing time, then check the day word.",
+    "advisory": true,
+    "verified_answer": false
+  },
+  "context": {
+    "private_source": false,
+    "consent_required": false,
+    "consent_granted": false,
+    "source_text_shared": false,
+    "withheld": [],
+    "content_matched": true,
+    "content_changed": false,
+    "content_unavailable": false,
+    "content_included": true,
+    "stored_text_included": false,
+    "skills": [],
+    "skills_mapped_from_current_tags": false,
+    "truncated_fields": [],
+    "prompt_version": "tutor-v2"
+  },
+  "limits": [
+    "Model output is advisory study guidance; it is not a verified answer, grade, exam fact or readiness claim.",
+    "One recorded attempt is sent per call. No attempt history, database path, source title, endpoint path or credential is sent.",
+    "Raw prompt text is not stored: a call records the SHA-256 and byte size of the exact serialized request body plus scope flags. Run `passquest tutor preview` to inspect the exact text before sending.",
+    "Private imported source text is withheld until a recorded `tutor consent` event for that source; first-party material needs no consent.",
+    "A failed or malformed provider response is recorded as a failure and cannot append an attempt, change a grade or edit an answer key.",
+    "The daily call budget counts failed calls and resets at 00:00 UTC. No retry is attempted automatically."
+  ]
+}

@@ -21,7 +21,7 @@ import (
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
-	"github.com/wxxb789/passquest/internal/tactic"
+	"github.com/wxxb789/passquest/internal/tutor"
 )
 
 // ProtocolVersion is the JSON protocol emitted by --json.
@@ -36,6 +36,9 @@ type Options struct {
 	Now        func() time.Time
 	NewSession func() string
 	Getenv     func(string) string
+	// TutorTransport isolates the CLI from the Node host. Tests inject a fake;
+	// production defaults to the stdin/stdout host process.
+	TutorTransport tutor.Transport
 }
 
 func (o Options) withDefaults() Options {
@@ -56,6 +59,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.Getenv == nil {
 		o.Getenv = os.Getenv
+	}
+	if o.TutorTransport == nil {
+		o.TutorTransport = tutor.HostTransport{Getenv: o.Getenv, Environ: os.Environ}
 	}
 	return o
 }
@@ -90,6 +96,8 @@ func Run(args []string, options Options) int {
 		return runSkill(args[1:], opt)
 	case "next":
 		return runNext(args[1:], opt)
+	case "tutor":
+		return runTutor(args[1:], opt)
 	case "version":
 		return runVersion(opt)
 	case "help", "-h", "--help":
@@ -124,6 +132,15 @@ Usage:
   passquest skill practice SKILL [--source SOURCE] [--question ID]
                      [--answer LABEL | --skip] [--db PATH] [--json]
   passquest next     [--source SOURCE] [--db PATH] [--json]
+  passquest tutor config [--endpoint URL --model NAME] [--timeout-seconds N]
+                     [--max-output-tokens N] [--daily-calls N] [--db PATH] [--json]
+  passquest tutor preview [--attempt ID] [--mode explain|probe|micro_lesson] [--db PATH] [--json]
+  passquest tutor ask     [--attempt ID] [--mode explain|probe|micro_lesson] [--db PATH] [--json]
+  passquest tutor history [--attempt ID] [--db PATH] [--json]
+  passquest tutor show    CALL [--db PATH] [--json]
+  passquest tutor consent SOURCE --reviewer NAME [--db PATH] [--json]
+  passquest tutor revoke  SOURCE --reviewer NAME [--db PATH] [--json]
+  passquest tutor consents [--db PATH] [--json]
   passquest report   [--db PATH] [--json]
   passquest version
   passquest help
@@ -539,8 +556,10 @@ func reportContentView(st *store.Store, sample exam.Exam, id string, sources map
 	if id == sample.ID {
 		return contentViewOf(sample), sample.Questions
 	}
-	if exercise, err := tactic.Exercise(); err == nil && id == exercise.ID {
-		return contentViewOf(exercise), exercise.Questions
+	if content, found, err := embeddedContent(id); err != nil {
+		return unavailableContentView(id, err.Error()), nil
+	} else if found {
+		return contentViewOf(content), content.Questions
 	}
 	sourceID, page, ok := source.ParseContentID(id)
 	if !ok {

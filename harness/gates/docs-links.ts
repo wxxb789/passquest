@@ -6,7 +6,7 @@ export const docsLinks: Gate = {
   id: "docs-links",
   title: "docs links",
   async run(ctx) {
-    const { checked, broken } = await checkMarkdownLinks(ctx.root, await ctx.trackedFiles());
+    const { checked, broken } = await checkMarkdownLinks(ctx.root, await ctx.workingTreeFiles());
     if (broken.length > 0) {
       return fail([...broken, `${broken.length} broken of ${checked} checked`]);
     }

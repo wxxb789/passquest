@@ -13,6 +13,7 @@ import { localOnly } from "./local-only.ts";
 import { secrets } from "./secrets.ts";
 import { selfTest } from "./self-test.ts";
 import { tacticSmoke } from "./tactic-smoke.ts";
+import { tutorSmoke } from "./tutor-smoke.ts";
 import { typecheck } from "./typecheck.ts";
 
 export const gates: Gate[] = [
@@ -29,5 +30,6 @@ export const gates: Gate[] = [
   importSmoke,
   tacticSmoke,
   adaptiveSmoke,
+  tutorSmoke,
   selfTest,
 ];

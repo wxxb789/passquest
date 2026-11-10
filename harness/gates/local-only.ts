@@ -47,7 +47,7 @@ export const localOnly: Gate = {
       if (LINKED_CLIENTS.includes(dep)) problems.push(`network client linked into the CLI: ${dep}`);
     }
 
-    const scanned = (await ctx.trackedFiles()).filter(
+    const scanned = (await ctx.workingTreeFiles()).filter(
       (file) => (file.startsWith("cmd/") || file.startsWith("internal/")) && SCANNED_EXTENSIONS.test(file),
     );
     for (const file of scanned) {

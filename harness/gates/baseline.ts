@@ -114,7 +114,7 @@ export const baseline: Gate = {
       problems.push(`${readme}: does not state that the text is unreviewed`);
     }
 
-    for (const file of await ctx.trackedFiles()) {
+    for (const file of await ctx.workingTreeFiles()) {
       const isFixture = file.endsWith("_test.go") || /(^|\/)testdata\//.test(file);
       if (!isFixture) continue;
       let text: string;

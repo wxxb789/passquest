@@ -2,7 +2,7 @@ export type GateStatus = "pass" | "fail" | "skip";
 
 export interface GateContext {
   root: string;
-  trackedFiles: () => Promise<string[]>;
+  workingTreeFiles: () => Promise<string[]>;
 }
 
 export interface GateResult {

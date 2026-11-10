@@ -173,4 +173,6 @@ it, and the attempt is listed as unclassified.
   the attempt (or an ordinary attempt after an exposed walkthrough) is recorded as assisted.
 - `next` uses the current material catalog for fresh-passage counts. If a question is edited or
   removed, historical attempts remain evidence but the review command may not be available.
+- Tutor output is advisory text in a separate append-only table. It is never read by `next` or
+  `report`, never counted as an attempt and cannot change a skill state. See [tutor.md](tutor.md).
 - Nothing here is a held-out, delayed or timed assessment; those belong to goal 0009.

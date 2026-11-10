@@ -16,6 +16,7 @@ const SOURCE_EXTENSIONS: Record<string, true> = {
   ".go": true,
   ".ts": true,
   ".js": true,
+  ".mjs": true,
   ".json": true,
   ".yaml": true,
   ".yml": true,
@@ -71,9 +72,9 @@ function scanFile(root: string, file: string): string[] {
   return problems;
 }
 
-export async function scanTracked(root: string, tracked: string[]): Promise<string[]> {
+export async function scanFiles(root: string, files: string[]): Promise<string[]> {
   const problems: string[] = [];
-  for (const file of tracked) {
+  for (const file of files) {
     problems.push(...scanFile(root, file));
   }
   return problems;
@@ -83,9 +84,9 @@ export const secrets: Gate = {
   id: "secrets",
   title: "secrets/sources",
   async run(ctx: GateContext) {
-    const tracked = await ctx.trackedFiles();
-    const problems = await scanTracked(ctx.root, tracked);
+    const files = await ctx.workingTreeFiles();
+    const problems = await scanFiles(ctx.root, files);
     if (problems.length > 0) return fail(problems);
-    return pass(`${tracked.length} tracked files, 0 findings`);
+    return pass(`${files.length} files, 0 findings`);
   },
 };

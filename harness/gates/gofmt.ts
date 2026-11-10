@@ -6,8 +6,8 @@ export const gofmt: Gate = {
   id: "gofmt",
   title: "gofmt",
   async run(ctx) {
-    const files = (await ctx.trackedFiles()).filter((file) => file.endsWith(".go"));
-    if (files.length === 0) return skip("no tracked Go files yet");
+    const files = (await ctx.workingTreeFiles()).filter((file) => file.endsWith(".go"));
+    if (files.length === 0) return skip("no Go files yet");
     const result = await run(executable("gofmt"), ["-l", ...files], { cwd: ctx.root });
     if (result.code !== 0) return fail(outputLines(result));
     const unformatted = result.stdout

@@ -108,6 +108,15 @@ current-state signal.
 the text. `passquest questions` prints each question's answer status, review status and computed
 flags.
 
+## Tutor consent boundary
+
+Imported page and question text is private. The optional text tutor withholds it from a provider by
+default and sends only attempt facts and first-party skill lessons. Run `passquest tutor preview`
+to inspect the exact payload; `passquest tutor consent SOURCE --reviewer NAME` records a per-source
+authorization and `passquest tutor revoke SOURCE --reviewer NAME` appends a withholding event. The
+source title, path and full page are never included in the provider payload. See
+[tutor.md](tutor.md).
+
 ## Known limits
 
 - No OCR engine is bundled and no new OCR is produced. A scan with no text layer needs user-supplied

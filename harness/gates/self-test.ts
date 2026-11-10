@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { BASELINE, EXPECTED_NATIVE, EXPECTED_PAGES, nonSpaceChars } from "../lib/baseline.ts";
-import { context, resolve } from "../lib/repo.ts";
+import { executable, run } from "../lib/process.ts";
+import { context, resolve, workingTreeFiles } from "../lib/repo.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
@@ -19,6 +20,7 @@ import { importSmoke } from "./import-smoke.ts";
 import { localOnly } from "./local-only.ts";
 import { secrets } from "./secrets.ts";
 import { tacticSmoke } from "./tactic-smoke.ts";
+import { tutorSmoke } from "./tutor-smoke.ts";
 import { typecheck } from "./typecheck.ts";
 
 const GO_MOD = "module example.com/selftest\n\ngo 1.27.3\n";
@@ -60,6 +62,28 @@ function baselineFixture(options: BaselineFixtureOptions = {}): { files: Record<
   files[`${BASELINE}/README.md`] = "The extracted text is unreviewed.\n";
   tracked.push(`${BASELINE}/manifest.tsv`, `${BASELINE}/README.md`);
   return { files, tracked };
+}
+
+async function workingTreeDiscoveryProblem(): Promise<string | null> {
+  const root = mkdtempSync(path.join(tmpdir(), "passquest-repo-selftest-"));
+  try {
+    const init = await run(executable("git"), ["init", "-q"], { cwd: root });
+    if (init.code !== 0) return `working-tree discovery: git init failed: ${init.stderr || init.stdout}`;
+    writeFileSync(resolve(root, ".gitignore"), "ignored.txt\n");
+    writeFileSync(resolve(root, "tracked.txt"), "tracked\n");
+    writeFileSync(resolve(root, "untracked.txt"), "untracked\n");
+    writeFileSync(resolve(root, "ignored.txt"), "ignored\n");
+    const add = await run(executable("git"), ["add", "tracked.txt"], { cwd: root });
+    if (add.code !== 0) return `working-tree discovery: git add failed: ${add.stderr || add.stdout}`;
+    const files = (await workingTreeFiles(root)).sort();
+    const expected = [".gitignore", "tracked.txt", "untracked.txt"];
+    if (files.join(",") !== expected.join(",")) {
+      return `working-tree discovery = [${files.join(", ")}], want [${expected.join(", ")}]`;
+    }
+    return null;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 function brokenCases(): BrokenCase[] {
@@ -287,6 +311,14 @@ function brokenCases(): BrokenCase[] {
         "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
       },
     },
+    {
+      gate: tutorSmoke,
+      label: "CLI whose tutor output is not the protocol",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
+      },
+    },
   ];
 }
 
@@ -323,6 +355,8 @@ export const selfTest: Gate = {
     const { gates } = await import("./index.ts");
     const cases = brokenCases();
     const problems: string[] = [];
+    const discovery = await workingTreeDiscoveryProblem();
+    if (discovery) problems.push(discovery);
     for (const testCase of cases) {
       const problem = await runCase(testCase);
       if (problem) problems.push(problem);
