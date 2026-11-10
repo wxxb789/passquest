@@ -7,7 +7,6 @@ package adaptive
 import (
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/wxxb789/passquest/internal/attempt"
 )
@@ -61,7 +60,6 @@ type Record struct {
 	Assistance      attempt.Assistance
 	Status          attempt.Status
 	ElapsedMS       int64
-	AnsweredAt      time.Time
 	Skills          []string
 	FromCurrentTags bool
 }
@@ -69,11 +67,10 @@ type Record struct {
 // Material is one practiceable tagged question in the current catalog. SourceID
 // is empty for embedded first-party content.
 type Material struct {
-	SkillID      string
-	ContentID    string
-	QuestionID   string
-	ContentTitle string
-	SourceID     string
+	SkillID    string
+	ContentID  string
+	QuestionID string
+	SourceID   string
 }
 
 // Input is the complete policy input.
@@ -176,7 +173,6 @@ func Recommend(input Input) Result {
 
 	materialsBySkill := make(map[string][]Material, len(skills))
 	materialByKey := make(map[attempt.QuestionKey]map[string]Material)
-	seenMaterial := make(map[attempt.QuestionKey]map[string]bool)
 	for _, material := range input.Materials {
 		if byID[material.SkillID].ID == "" {
 			continue
@@ -184,12 +180,10 @@ func Recommend(input Input) Result {
 		key := attempt.QuestionKey{ContentID: material.ContentID, QuestionID: material.QuestionID}
 		if materialByKey[key] == nil {
 			materialByKey[key] = make(map[string]Material)
-			seenMaterial[key] = make(map[string]bool)
 		}
-		if seenMaterial[key][material.SkillID] {
+		if _, seen := materialByKey[key][material.SkillID]; seen {
 			continue
 		}
-		seenMaterial[key][material.SkillID] = true
 		materialByKey[key][material.SkillID] = material
 		materialsBySkill[material.SkillID] = append(materialsBySkill[material.SkillID], material)
 	}

@@ -109,7 +109,7 @@ func TestValidateContent(t *testing.T) {
 		t.Fatalf("PracticeContent: %v", err)
 	}
 	if len(contents) != 7 {
-		t.Fatalf("contents = %d, want the tactic exercise plus six language passages", len(contents))
+		t.Fatalf("contents = %d, want the tactic exercise plus five language passages and one scoring passage", len(contents))
 	}
 	for _, id := range Registered() {
 		tagged, err := Tagged(id)

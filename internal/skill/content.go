@@ -9,16 +9,17 @@ import (
 	"github.com/wxxb789/passquest/internal/tactic"
 )
 
-// The language exercises are embedded so the CLI needs no external content
+// The first-party exercises are embedded so the CLI needs no external content
 // file and no private source. Every passage is first-party and redistributable.
 //
 //go:embed content/*.json
 var contentFS embed.FS
 
-// languageFiles fixes the practice order instead of relying on embed's sorted
+// practiceFiles fixes the practice order instead of relying on embed's sorted
 // directory order. Vocabulary comes before sentence structure because the
-// vocabulary question is the shortest first measurement.
-var languageFiles = []string{
+// vocabulary question is the shortest first measurement; the scoring library
+// passage comes last.
+var practiceFiles = []string{
 	"content/skill-first-party-vocab-notice.json",
 	"content/skill-first-party-vocab-library.json",
 	"content/skill-first-party-vocab-market.json",
@@ -29,14 +30,14 @@ var languageFiles = []string{
 
 var (
 	contentOnce sync.Once
-	language    []exam.Exam
+	firstParty  []exam.Exam
 	contentErr  error
 )
 
 func loadContent() ([]exam.Exam, error) {
 	contentOnce.Do(func() {
-		out := make([]exam.Exam, 0, len(languageFiles))
-		for _, name := range languageFiles {
+		out := make([]exam.Exam, 0, len(practiceFiles))
+		for _, name := range practiceFiles {
 			data, err := contentFS.ReadFile(name)
 			if err != nil {
 				contentErr = fmt.Errorf("skill: read %s: %w", name, err)
@@ -49,17 +50,17 @@ func loadContent() ([]exam.Exam, error) {
 			}
 			out = append(out, parsed)
 		}
-		language = out
+		firstParty = out
 	})
-	return language, contentErr
+	return firstParty, contentErr
 }
 
 // PracticeContent returns every first-party exercise that can supply a skill
-// practice question: the goal-0003 tactic exercise first, then the language
-// exercises in practice order. Returned values are shared and must not be
-// mutated by callers.
+// practice question: the goal-0003 tactic exercise first, then the embedded
+// first-party exercises in practice order. Returned values are shared and must
+// not be mutated by callers.
 func PracticeContent() ([]exam.Exam, error) {
-	languages, err := loadContent()
+	contents, err := loadContent()
 	if err != nil {
 		return nil, err
 	}
@@ -67,9 +68,9 @@ func PracticeContent() ([]exam.Exam, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]exam.Exam, 0, 1+len(languages))
+	out := make([]exam.Exam, 0, 1+len(contents))
 	out = append(out, tacticExam)
-	out = append(out, languages...)
+	out = append(out, contents...)
 	return out, nil
 }
 

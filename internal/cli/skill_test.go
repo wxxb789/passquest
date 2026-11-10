@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wxxb789/passquest/internal/attempt"
 )
 
 type sequenceClock struct {
@@ -119,6 +121,23 @@ func assertAwaitingHidesKey(t *testing.T, raw string) {
 			t.Errorf("awaiting JSON exposes key %q", key)
 		}
 	}
+}
+
+// slowVocabClock practices the two vocabulary questions 1 s and 2.5 s apart, so
+// the latest correct answer is slow against the 1 s fastest answer. It returns
+// the clock the two commands consumed.
+func slowVocabClock(t *testing.T, db string) *sequenceClock {
+	t.Helper()
+	base := goldenBase
+	clock := &sequenceClock{times: []time.Time{
+		base,
+		base.Add(time.Second),
+		base.Add(10 * time.Second),
+		base.Add(12*time.Second + 500*time.Millisecond),
+	}}
+	mustRunWithNow(t, db, clock, "", "skill", "practice", "vocabulary-in-context", "--answer", "A", "--json")
+	mustRunWithNow(t, db, clock, "", "skill", "practice", "vocabulary-in-context", "--answer", "B", "--json")
+	return clock
 }
 
 func TestSkillLessons(t *testing.T) {
@@ -300,6 +319,27 @@ func TestSkillPracticeSourcePath(t *testing.T) {
 	}
 }
 
+func TestNextIncludesImportedSourceWithoutScope(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	imported := importFixture(t, db, clock)
+	sourceID := imported.Source.ID
+	reviewedTaggedFixtureQuestion(t, db, clock, sourceID)
+	mustRun(t, db, clock, "", "skill", "practice", "not-except-polarity", "--source", sourceID, "--answer", "C", "--json")
+
+	doc := decodeNext(t, mustRun(t, db, clock, "", "next", "--json"))
+	if doc.SourceScope != "" {
+		t.Fatalf("source scope = %q, want the unscoped catalog", doc.SourceScope)
+	}
+	scoring := nextSkill(t, doc, "not-except-polarity")
+	if scoring.Evidence.Attempts != 1 || scoring.Evidence.IndependentAttempts != 1 || scoring.Evidence.IndependentCorrect != 1 {
+		t.Fatalf("imported source attempt is not included by default: %+v", scoring.Evidence)
+	}
+	if len(doc.UnclassifiedAttempts) != 0 {
+		t.Fatalf("imported source attempt is unclassified: %+v", doc.UnclassifiedAttempts)
+	}
+}
+
 func TestSkillPracticeRejectsBadInput(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
@@ -413,15 +453,8 @@ func TestNextTimeChangesAction(t *testing.T) {
 		t.Fatalf("fast elapsed = %+v", fastVocab.Evidence)
 	}
 
-	slow := &sequenceClock{times: []time.Time{
-		base,
-		base.Add(time.Second),
-		base.Add(10 * time.Second),
-		base.Add(12*time.Second + 500*time.Millisecond),
-	}}
 	slowDB := newDB(t)
-	mustRunWithNow(t, slowDB, slow, "", "skill", "practice", "vocabulary-in-context", "--answer", "A", "--json")
-	mustRunWithNow(t, slowDB, slow, "", "skill", "practice", "vocabulary-in-context", "--answer", "B", "--json")
+	slow := slowVocabClock(t, slowDB)
 	slowDoc := decodeNext(t, mustRunWithNow(t, slowDB, slow, "", "next", "--json"))
 	slowVocab := nextSkill(t, slowDoc, "vocabulary-in-context")
 	if slowVocab.Inference.State != "supported" || slowVocab.Inference.Action != "review" {
@@ -483,6 +516,50 @@ func TestNextUnclassifiedAttempt(t *testing.T) {
 	scoring := nextSkill(t, doc, "not-except-polarity")
 	if scoring.Evidence.Attempts != 0 {
 		t.Fatalf("untagged attempt counted for the scoring skill: %+v", scoring.Evidence)
+	}
+}
+
+func TestNextRecordClassification(t *testing.T) {
+	key := attempt.QuestionKey{ContentID: "content", QuestionID: "q1"}
+	record := attempt.Attempt{ID: 7, ContentID: key.ContentID, QuestionID: key.QuestionID, AttemptNumber: 1}
+	tests := []struct {
+		name   string
+		record attempt.Attempt
+		tags   map[attempt.QuestionKey][]string
+		reason string
+	}{
+		{
+			name:   "known question without a registered tag",
+			record: record,
+			tags:   map[attempt.QuestionKey][]string{key: {}},
+			reason: "question has no registered skill tag",
+		},
+		{
+			name:   "content or question unavailable",
+			record: record,
+			tags:   map[attempt.QuestionKey][]string{},
+			reason: "content or question is unavailable in the current material",
+		},
+		{
+			name:   "snapshot names an unregistered skill",
+			record: attempt.Attempt{ID: 8, ContentID: "content", QuestionID: "q2", AttemptNumber: 1, Skills: []string{"retired-skill"}},
+			tags:   map[attempt.QuestionKey][]string{},
+			reason: `recorded skill tags include "retired-skill", which is not registered in this build`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adapted, reason := nextRecord(tt.record, tt.tags)
+			if reason != tt.reason {
+				t.Fatalf("reason = %q, want %q", reason, tt.reason)
+			}
+			if adapted.AttemptID != tt.record.ID {
+				t.Fatalf("attempt id = %d, want %d", adapted.AttemptID, tt.record.ID)
+			}
+			if len(adapted.Skills) != 0 || adapted.FromCurrentTags {
+				t.Fatalf("record = %+v, want no skills and no current-tag fallback", adapted)
+			}
+		})
 	}
 }
 
@@ -559,15 +636,7 @@ func TestGoldenNextAfterVocab(t *testing.T) {
 
 func TestGoldenNextSlow(t *testing.T) {
 	db := newDB(t)
-	base := goldenBase
-	clock := &sequenceClock{times: []time.Time{
-		base,
-		base.Add(time.Second),
-		base.Add(10 * time.Second),
-		base.Add(12*time.Second + 500*time.Millisecond),
-	}}
-	mustRunWithNow(t, db, clock, "", "skill", "practice", "vocabulary-in-context", "--answer", "A", "--json")
-	mustRunWithNow(t, db, clock, "", "skill", "practice", "vocabulary-in-context", "--answer", "B", "--json")
+	clock := slowVocabClock(t, db)
 	out := mustRunWithNow(t, db, clock, "", "next", "--json")
 	checkGolden(t, filepath.Join("testdata", "next-slow.golden.json"), []byte(out))
 }

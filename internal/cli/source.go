@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -638,6 +639,57 @@ type practiceSelection struct {
 	Review   *source.Question
 	Tactic   *tacticRun
 	Skill    *skillRun
+}
+
+// practiceCandidate is one practiceable question selected by skill tag. Page
+// and Review are nil for embedded first-party content.
+type practiceCandidate struct {
+	Content  exam.Exam
+	Question exam.Question
+	Number   int
+	Page     *source.Page
+	Review   *source.Question
+}
+
+func (c practiceCandidate) key() attempt.QuestionKey {
+	return attempt.QuestionKey{ContentID: c.Content.ID, QuestionID: c.Question.ID}
+}
+
+// sourceCandidates scans a reviewed source for every question tagged with the
+// skill id. A source without one is a refusal, never a silent fallback to
+// embedded material.
+func sourceCandidates(st *store.Store, sourceID, skillID string) ([]practiceCandidate, error) {
+	src, questions, err := loadSourceBundle(st, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	var out []practiceCandidate
+	for _, page := range src.Pages {
+		content, _, buildErr := source.BuildPracticeExam(src, page, questions)
+		if buildErr != nil {
+			continue
+		}
+		for i, question := range content.Questions {
+			if !slices.Contains(question.Tactics, skillID) {
+				continue
+			}
+			meta, ok := findQuestion(questions, question.ID)
+			if !ok {
+				continue
+			}
+			pageCopy := page
+			metaCopy := meta
+			out = append(out, practiceCandidate{
+				Content: content, Question: question, Number: i, Page: &pageCopy, Review: &metaCopy,
+			})
+		}
+	}
+	if len(out) == 0 {
+		return nil, refuse("not_practiceable",
+			"source %s has no reviewed question tagged %q; add a tagged question with `question add`, then review the page and its answer (see `passquest questions %s`)",
+			sourceID, skillID, sourceID)
+	}
+	return out, nil
 }
 
 func selectSourcePractice(st *store.Store, sourceID string, pageNumber int, questionID string, records []attempt.Attempt) (practiceSelection, error) {

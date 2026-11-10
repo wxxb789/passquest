@@ -145,10 +145,11 @@ export const adaptiveSmoke: Gate = {
       check(stringField(field(field(weak, "recommendation"), "skill"), "id") === "sentence-structure", "weak recommendation skill");
       check(stringField(field(weak, "recommendation"), "action") === "explain", "weak recommendation action");
 
-      const reopened = await callDB(["next", "--json"]);
-      check(reopened.code === 0, `reopened next exit = ${reopened.code}`);
-      const firstNext = (await callDB(["next", "--json"])).stdout;
-      const secondNext = (await callDB(["next", "--json"])).stdout;
+      const firstNextRun = await callDB(["next", "--json"]);
+      check(firstNextRun.code === 0, `reopened next exit = ${firstNextRun.code}`);
+      const secondNextRun = await callDB(["next", "--json"]);
+      const firstNext = firstNextRun.stdout;
+      const secondNext = secondNextRun.stdout;
       check(firstNext === secondNext, "next output changed across a process reopen");
 
       const unknownShow = await call(["skill", "show", "no-such-skill", "--json"]);

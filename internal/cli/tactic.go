@@ -5,12 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/wxxb789/passquest/internal/attempt"
-	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/tactic"
@@ -279,60 +277,14 @@ func resolveTacticStage(requested, tacticID string, records []attempt.Attempt) (
 	}
 }
 
-type tacticCandidate struct {
-	Content  exam.Exam
-	Question exam.Question
-	Number   int
-	Page     *source.Page
-	Review   *source.Question
-}
-
-func (c tacticCandidate) key() attempt.QuestionKey {
-	return attempt.QuestionKey{ContentID: c.Content.ID, QuestionID: c.Question.ID}
-}
-
-func tacticCandidates(st *store.Store, lesson tactic.Tactic, sourceID string) ([]tacticCandidate, error) {
+func tacticCandidates(st *store.Store, lesson tactic.Tactic, sourceID string) ([]practiceCandidate, error) {
 	if strings.TrimSpace(sourceID) == "" {
 		return exerciseCandidates(lesson)
 	}
-	src, questions, err := loadSourceBundle(st, sourceID)
-	if err != nil {
-		return nil, err
-	}
-	var out []tacticCandidate
-	for _, page := range src.Pages {
-		content, _, buildErr := source.BuildPracticeExam(src, page, questions)
-		if buildErr != nil {
-			continue
-		}
-		for i, question := range content.Questions {
-			if !slices.Contains(question.Tactics, lesson.ID) {
-				continue
-			}
-			meta, ok := findQuestion(questions, question.ID)
-			if !ok {
-				continue
-			}
-			pageCopy := page
-			metaCopy := meta
-			out = append(out, tacticCandidate{
-				Content:  content,
-				Question: question,
-				Number:   i,
-				Page:     &pageCopy,
-				Review:   &metaCopy,
-			})
-		}
-	}
-	if len(out) == 0 {
-		return nil, refuse("not_practiceable",
-			"source %s has no reviewed question tagged %q; add a tagged question with `question add`, then review the page and its answer (see `passquest questions %s`)",
-			sourceID, lesson.ID, sourceID)
-	}
-	return out, nil
+	return sourceCandidates(st, sourceID, lesson.ID)
 }
 
-func exerciseCandidates(lesson tactic.Tactic) ([]tacticCandidate, error) {
+func exerciseCandidates(lesson tactic.Tactic) ([]practiceCandidate, error) {
 	content, err := tactic.Exercise()
 	if err != nil {
 		return nil, err
@@ -341,13 +293,13 @@ func exerciseCandidates(lesson tactic.Tactic) ([]tacticCandidate, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]tacticCandidate, 0, len(tagged))
+	out := make([]practiceCandidate, 0, len(tagged))
 	for _, taggedQuestion := range tagged {
 		question, number, ok := content.Question(taggedQuestion.ID)
 		if !ok {
 			return nil, fmt.Errorf("tagged exercise question %s is not in the exercise", taggedQuestion.ID)
 		}
-		out = append(out, tacticCandidate{
+		out = append(out, practiceCandidate{
 			Content:  content,
 			Question: question,
 			Number:   number,
@@ -359,7 +311,7 @@ func exerciseCandidates(lesson tactic.Tactic) ([]tacticCandidate, error) {
 	return out, nil
 }
 
-func pickTacticCandidate(lesson tactic.Tactic, stage, questionID string, candidates []tacticCandidate, records []attempt.Attempt, exposures []store.Exposure) (tacticCandidate, error) {
+func pickTacticCandidate(lesson tactic.Tactic, stage, questionID string, candidates []practiceCandidate, records []attempt.Attempt, exposures []store.Exposure) (practiceCandidate, error) {
 	prior := make(map[attempt.QuestionKey]int, len(records))
 	guided := make(map[attempt.QuestionKey]bool, len(records))
 	for _, record := range records {
@@ -379,12 +331,12 @@ func pickTacticCandidate(lesson tactic.Tactic, stage, questionID string, candida
 		for _, candidate := range candidates {
 			if candidate.Question.ID == questionID {
 				if err := checkIndependent(stage, candidate, prior, guided, exposed); err != nil {
-					return tacticCandidate{}, err
+					return practiceCandidate{}, err
 				}
 				return candidate, nil
 			}
 		}
-		return tacticCandidate{}, refuse("invalid_input",
+		return practiceCandidate{}, refuse("invalid_input",
 			"question %q is not a reviewed question tagged %q in this material", questionID, lesson.ID)
 	}
 
@@ -399,7 +351,7 @@ func pickTacticCandidate(lesson tactic.Tactic, stage, questionID string, candida
 		}
 	}
 
-	var fallback *tacticCandidate
+	var fallback *practiceCandidate
 	for i := range candidates {
 		candidate := candidates[i]
 		if fallback == nil {
@@ -425,14 +377,14 @@ func pickTacticCandidate(lesson tactic.Tactic, stage, questionID string, candida
 				helped++
 			}
 		}
-		return tacticCandidate{}, refuse("not_practiceable",
+		return practiceCandidate{}, refuse("not_practiceable",
 			"no unattempted question tagged %q remains distinct from the guided example (%d candidate(s), %d shown with guidance); add and review another tagged question, or repeat the guided example with --stage guided",
 			lesson.ID, len(candidates), helped)
 	}
-	return tacticCandidate{}, refuse("not_practiceable", "no practiceable question tagged %q", lesson.ID)
+	return practiceCandidate{}, refuse("not_practiceable", "no practiceable question tagged %q", lesson.ID)
 }
 
-func checkIndependent(stage string, candidate tacticCandidate, prior map[attempt.QuestionKey]int, guided, exposed map[attempt.QuestionKey]bool) error {
+func checkIndependent(stage string, candidate practiceCandidate, prior map[attempt.QuestionKey]int, guided, exposed map[attempt.QuestionKey]bool) error {
 	if stage != stageIndependent {
 		return nil
 	}

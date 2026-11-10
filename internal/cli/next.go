@@ -107,11 +107,10 @@ func buildNextCatalog(st *store.Store, sourceID string) (nextCatalog, error) {
 				seen[key][tag] = true
 				catalog.tagsByKey[key] = append(catalog.tagsByKey[key], tag)
 				catalog.materials = append(catalog.materials, adaptive.Material{
-					SkillID:      tag,
-					ContentID:    content.ID,
-					QuestionID:   question.ID,
-					ContentTitle: content.Title,
-					SourceID:     sourceID,
+					SkillID:    tag,
+					ContentID:  content.ID,
+					QuestionID: question.ID,
+					SourceID:   sourceID,
 				})
 				registered++
 			}
@@ -199,7 +198,6 @@ func nextRecord(record attempt.Attempt, tagsByKey map[attempt.QuestionKey][]stri
 		Assistance:      record.Assistance,
 		Status:          record.Status,
 		ElapsedMS:       record.ElapsedMS,
-		AnsweredAt:      record.AnsweredAt,
 		Skills:          append([]string(nil), record.Skills...),
 		FromCurrentTags: false,
 	}

@@ -4,13 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/attempt"
-	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/skill"
-	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 )
 
@@ -175,60 +172,18 @@ func runSkillPractice(args []string, opt Options) int {
 	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
 }
 
-type skillCandidate struct {
-	Content  exam.Exam
-	Question exam.Question
-	Number   int
-	Page     *source.Page
-	Review   *source.Question
-}
-
-func (c skillCandidate) key() attempt.QuestionKey {
-	return attempt.QuestionKey{ContentID: c.Content.ID, QuestionID: c.Question.ID}
-}
-
-func skillCandidates(st *store.Store, lesson skill.Skill, sourceID string) ([]skillCandidate, error) {
+func skillCandidates(st *store.Store, lesson skill.Skill, sourceID string) ([]practiceCandidate, error) {
 	if strings.TrimSpace(sourceID) != "" {
-		src, questions, err := loadSourceBundle(st, sourceID)
-		if err != nil {
-			return nil, err
-		}
-		var out []skillCandidate
-		for _, page := range src.Pages {
-			content, _, buildErr := source.BuildPracticeExam(src, page, questions)
-			if buildErr != nil {
-				continue
-			}
-			for i, question := range content.Questions {
-				if !slices.Contains(question.Tactics, lesson.ID) {
-					continue
-				}
-				meta, ok := findQuestion(questions, question.ID)
-				if !ok {
-					continue
-				}
-				pageCopy := page
-				metaCopy := meta
-				out = append(out, skillCandidate{
-					Content: content, Question: question, Number: i, Page: &pageCopy, Review: &metaCopy,
-				})
-			}
-		}
-		if len(out) == 0 {
-			return nil, refuse("not_practiceable",
-				"source %s has no reviewed question tagged %q; add a tagged question with `question add`, then review the page and its answer (see `passquest questions %s`)",
-				sourceID, lesson.ID, sourceID)
-		}
-		return out, nil
+		return sourceCandidates(st, sourceID, lesson.ID)
 	}
 
 	tagged, err := skill.Tagged(lesson.ID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]skillCandidate, 0, len(tagged))
+	out := make([]practiceCandidate, 0, len(tagged))
 	for _, exercise := range tagged {
-		out = append(out, skillCandidate{
+		out = append(out, practiceCandidate{
 			Content: exercise.Content, Question: exercise.Question, Number: exercise.Number,
 		})
 	}
@@ -242,11 +197,11 @@ func skillCandidates(st *store.Store, lesson skill.Skill, sourceID string) ([]sk
 // fresh passage first, then an unattempted question on a seen passage, then a
 // repeat. A repeat is allowed but its exposure is printed and never counted as
 // independent transfer by the adaptive policy.
-func pickSkillCandidate(lesson skill.Skill, questionID string, candidates []skillCandidate, records []attempt.Attempt) (skillCandidate, error) {
-	prior := make(map[attempt.QuestionKey]int, len(records))
+func pickSkillCandidate(lesson skill.Skill, questionID string, candidates []practiceCandidate, records []attempt.Attempt) (practiceCandidate, error) {
+	attempted := make(map[attempt.QuestionKey]bool, len(records))
 	seenContent := make(map[string]bool)
 	for _, record := range records {
-		prior[record.Key()]++
+		attempted[record.Key()] = true
 		seenContent[record.ContentID] = true
 	}
 	if strings.TrimSpace(questionID) != "" {
@@ -255,7 +210,7 @@ func pickSkillCandidate(lesson skill.Skill, questionID string, candidates []skil
 				return candidate, nil
 			}
 		}
-		return skillCandidate{}, refuse("invalid_input",
+		return practiceCandidate{}, refuse("invalid_input",
 			"question %q is not a practiceable question tagged %q in this material", questionID, lesson.ID)
 	}
 	for _, candidate := range candidates {
@@ -264,7 +219,7 @@ func pickSkillCandidate(lesson skill.Skill, questionID string, candidates []skil
 		}
 	}
 	for _, candidate := range candidates {
-		if prior[candidate.key()] == 0 {
+		if !attempted[candidate.key()] {
 			return candidate, nil
 		}
 	}

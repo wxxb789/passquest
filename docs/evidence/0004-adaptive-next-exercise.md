@@ -33,7 +33,7 @@ The policy distinguishes recorded evidence from inference: the JSON has separate
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1` | exit 0; 9 packages; 269 test runs, 269 passes, 0 skips, 0 failures (`go test -json` count) |
+| `go test ./... -count=1` | exit 0; 9 packages; 274 test runs, 274 passes, 0 skips, 0 failures (`go test -json` count) |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
 | `gofmt -l` (tracked `*.go`) | empty output, exit 0; the gate checks 33 files |
@@ -60,7 +60,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (9 packages, 269 tests, 0 skipped)
+PASS  go test (9 packages, 274 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -115,6 +115,7 @@ The tests that pin this increment's contract clauses:
 | `TestSkillPracticeHidesKeyAndSnapshotsSkill`, `TestSkillPracticeSecondPassageAndRepeat`, `TestSkillPracticeSourcePath` | Skill awaiting JSON hides the key; the attempt snapshots the skill; fresh/seen passages are labelled; source review provenance survives. |
 | `TestNextNoEvidence`, `TestNextPassageExposureAndHints`, `TestNextTimeChangesAction`, `TestNextRevisitsAndSkips` | `next` separates evidence from inference; hints and same-passage exposure are not independent; time changes the action; revisits and skips are retained. |
 | `TestNextUnclassifiedAttempt`, `TestNextReopenRecalculatesWithoutRewriting` | Untagged attempts are unclassified; reopening recomputes the same JSON and does not rewrite attempt rows. |
+| `TestNextRecordClassification`, `TestNextIncludesImportedSourceWithoutScope` | A known untagged question, unavailable content and an unregistered snapshot are classified apart with a reason; an attempt on an imported source is included by an unscoped `next` without being reported unavailable. |
 | `TestGoldenSkill*`, `TestGoldenNext*` | Raw keys/values of skill list/show/awaiting/answered and `next` empty/after-one/slow. |
 | `TestTacticProtocolGoldens` | The goal-0003 answers gain only the additive `skills` snapshot. |
 
