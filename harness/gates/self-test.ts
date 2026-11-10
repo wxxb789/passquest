@@ -270,6 +270,23 @@ function brokenCases(): BrokenCase[] {
     },
     {
       gate: portablePaths,
+      label: "a backtick rune before an unmarked path",
+      files: {
+        "go.mod": GO_MOD,
+        "internal/x/x.go": "package x\n",
+        "internal/x/x_test.go":
+          "package x\n\nimport \"testing\"\n\nconst delimiter = '`'\nconst quote = '\"'\n\nfunc TestRune(t *testing.T) {\n\topen(\"/tmp/after-rune.sqlite\")\n\t_, _ = delimiter, quote\n}\n",
+      },
+      tracked: ["internal/x/x_test.go"],
+      postFail: (failures) => {
+        if (failures.length !== 1 || !failures[0].includes("/tmp/after-rune.sqlite")) {
+          return `portable-paths: a rune holding a quote hid the next path: ${failures.join("; ") || "no failure"}`;
+        }
+        return null;
+      },
+    },
+    {
+      gate: portablePaths,
       label: "raw-string path literals",
       files: {
         "go.mod": GO_MOD,

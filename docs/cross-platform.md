@@ -15,8 +15,8 @@ turns red.
   so validation rejects it and the test then blames the product. Build fixtures with `t.TempDir()` and
   `filepath.Join`. The `portable-paths` gate enforces this: a literal that is genuinely pure string data
   must carry `// portable-paths: allow <why>` on its own line (the marker covers one line, nothing more).
-- The `portable-paths` gate reads both Go string forms, so a backticked raw string (`C:\Users\…`) is
-  caught as well as the escaped one.
+- The `portable-paths` gate asks `go/parser` for real string literals, so a backticked raw string
+  (`C:\Users\…`) and an escaped one are both caught, while prose in a comment is not.
 - Compare normalised forms: `filepath.ToSlash(filepath.Clean(p))`, and mask the temp prefix before
   comparing against a golden. Never substitute a path into serialised JSON by text replacement — the
   JSON encoder escapes separators (`C:\\Users\\…`), so the substitution silently misses. Decode, then
