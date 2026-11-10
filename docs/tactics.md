@@ -63,10 +63,14 @@ An attempt records two independent dimensions:
 - A `guided` attempt shows the tactic walkthrough and is stored as `assisted`: the pre-answer
   document carries it when one is requested, and the answered document carries it again for a
   one-shot `--answer`/`--skip`. It can succeed or fail; it is never counted as independent
-  correctness.
+  correctness. Requesting the pre-answer document records the exposure in the local database before
+  the walkthrough is emitted, so the fact that help was shown survives a quit without an answer.
 - An `independent` attempt shows no guidance, uses a question **different from every guided question
-  for the same tactic**, and requires zero earlier attempts on that content-scoped question. It is
-  stored as `independent`.
+  and every question whose walkthrough was exposed for the same tactic**, and requires zero earlier
+  attempts on that content-scoped question. It is stored as `independent`.
+- An exposed question cannot become independent evidence later, even when it was never answered.
+  The next guided request without `--question` resumes the pending exposed question instead of
+  silently choosing a different one.
 - The first tactic attempt defaults to `guided`; after one guided attempt the default becomes
   `independent`. `--stage independent` before any guided attempt exits 2 with `guided_required`.
 - If no eligible independent question remains, the command exits 2 with `not_practiceable` and names
@@ -129,8 +133,10 @@ A locally authored question file may name the tactics it exercises:
   addition needs its own authored lesson, boundary and tested material.
 - Tags are a closed vocabulary validated against the build's registry. A user cannot define a new
   tactic id without a code change.
-- "Independent" means no tactic walkthrough and no prior attempt on that question. It does not mean
-  delayed, time-limited or held-out assessment; those belong to goal 0009.
+- "Independent" means no tactic walkthrough was shown on that question and there is no prior attempt
+  on it. Exposure is permanent: a question whose guided walkthrough was requested stays ineligible
+  for the independent stage even if the learner quit without answering. It does not mean delayed,
+  time-limited or held-out assessment; those belong to goal 0009.
 - The guided attempt is still a recorded attempt with repeat exposure. Re-running a guided example is
   allowed and remains visibly assisted/repeated.
 - No automatic tactic detection, item generation or answer-key extraction is performed. A question is

@@ -302,6 +302,70 @@ func TestTacticExplicitQuestionRules(t *testing.T) {
 	}
 }
 
+func TestTacticGuidedAwaitingBlocksIndependentUse(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+
+	// One assisted attempt enables the explicit independent stage.
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--json", "--answer", "D")
+
+	exposed := decodeAwaiting(t, mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--stage", "guided", "--question", "t2", "--json"))
+	if exposed.Question.ID != "t2" || exposed.Guidance == nil {
+		t.Fatalf("exposed question/guidance = %s / %+v", exposed.Question.ID, exposed.Guidance)
+	}
+
+	code, out, errOut := runCLI(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--stage", "independent", "--question", "t2", "--json")
+	if code != 2 || out != "" {
+		t.Fatalf("independent after walkthrough = exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if got := errorCode(t, errOut); got != "invalid_input" {
+		t.Fatalf("independent after walkthrough code = %q", got)
+	}
+	if !strings.Contains(errOut, "walkthrough") {
+		t.Fatalf("independent after walkthrough message = %s", errOut)
+	}
+
+	// Showing the walkthrough is not an attempt.
+	report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
+	if report.Counts.Attempts != 1 {
+		t.Fatalf("exposure recorded %d attempts, want the one guided answer", report.Counts.Attempts)
+	}
+
+	// The pending guided condition resumes instead of switching questions.
+	resumed := decodeAwaiting(t, mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--stage", "guided", "--json"))
+	if resumed.Question.ID != "t2" {
+		t.Fatalf("resumed guided question = %q, want the exposed t2", resumed.Question.ID)
+	}
+
+	// t1 was attempted and t2 was exposed: no independent question remains.
+	code, _, errOut = runCLI(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--stage", "independent", "--json")
+	if code != 2 || errorCode(t, errOut) != "not_practiceable" {
+		t.Fatalf("independent with only an exposed question = exit %d, %s", code, errOut)
+	}
+}
+
+func TestTacticHumanPromptRecordsExposureOnQuit(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--json", "--answer", "D")
+
+	human := mustRun(t, db, clock, "quit\n", "tactic", "practice", "not-except-polarity", "--stage", "guided", "--question", "t2")
+	if !strings.Contains(human, "No attempt recorded.") {
+		t.Fatalf("human quit output = %s", human)
+	}
+
+	report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
+	if report.Counts.Attempts != 1 {
+		t.Fatalf("interactive exposure recorded %d attempts", report.Counts.Attempts)
+	}
+
+	code, _, errOut := runCLI(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--stage", "independent", "--question", "t2", "--json")
+	if code != 2 || errorCode(t, errOut) != "invalid_input" {
+		t.Fatalf("independent after interactive help = exit %d, %s", code, errOut)
+	}
+}
+
 func TestTacticHumanOutputShowsHelpAndCondition(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}

@@ -113,6 +113,38 @@ export const tacticSmoke: Gate = {
       const exhausted = await callDB(["tactic", "practice", lessonID, "--json", "--stage", "independent"]);
       check(exhausted.code === 2, `exhausted independent exit = ${exhausted.code}`);
       check(stringField(field(parse(exhausted.stderr), "error"), "code") === "not_practiceable", "exhausted independent error code");
+
+      // A guided pre-answer document is help shown even without an answer, so
+      // that question cannot become independent evidence afterwards.
+      const exposureDB = path.join(temp, "exposure.sqlite");
+      const callExposure = (args: string[]) => run(binary, [...args, "--db", exposureDB], { cwd: ctx.root });
+
+      const exposureSeed = await callExposure(["tactic", "practice", lessonID, "--json", "--answer", "D"]);
+      check(exposureSeed.code === 0, `exposure seed exit = ${exposureSeed.code}`);
+
+      const exposureAwait = await callExposure(["tactic", "practice", lessonID, "--stage", "guided", "--question", "t2", "--json"]);
+      if (!check(exposureAwait.code === 0, `exposure awaiting exit = ${exposureAwait.code}`)) return fail(checks);
+      const exposureAwaitDoc = parse(exposureAwait.stdout);
+      check(stringField(field(exposureAwaitDoc, "question"), "id") === "t2", "exposure awaiting question is not t2");
+      check(field(exposureAwaitDoc, "guidance") !== undefined, "exposure awaiting has no guidance");
+
+      const exposedIndependent = await callExposure(["tactic", "practice", lessonID, "--stage", "independent", "--question", "t2", "--json"]);
+      check(exposedIndependent.code === 2, `exposed independent exit = ${exposedIndependent.code}`);
+      const exposedError = field(parse(exposedIndependent.stderr), "error");
+      check(stringField(exposedError, "code") === "invalid_input", "exposed independent error code");
+      check((stringField(exposedError, "message") ?? "").includes("walkthrough"), "exposed independent message");
+
+      const exposureReport = await callExposure(["report", "--json"]);
+      check(exposureReport.code === 0, `exposure report exit = ${exposureReport.code}`);
+      check(numberField(field(parse(exposureReport.stdout), "counts"), "attempts") === 1, "exposure awaiting recorded an attempt");
+
+      const exposureResume = await callExposure(["tactic", "practice", lessonID, "--stage", "guided", "--json"]);
+      if (!check(exposureResume.code === 0, `exposure resume exit = ${exposureResume.code}`)) return fail(checks);
+      check(stringField(field(parse(exposureResume.stdout), "question"), "id") === "t2", "guided resume did not keep the exposed question");
+
+      const exposureExhausted = await callExposure(["tactic", "practice", lessonID, "--stage", "independent", "--json"]);
+      check(exposureExhausted.code === 2, `exposure exhausted exit = ${exposureExhausted.code}`);
+      check(stringField(field(parse(exposureExhausted.stderr), "error"), "code") === "not_practiceable", "exposure exhausted error code");
     } catch (error) {
       checks.push(error instanceof Error ? error.message : String(error));
     } finally {

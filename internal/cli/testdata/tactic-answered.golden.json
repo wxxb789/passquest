@@ -1,6 +1,6 @@
 {
   "attempt": {
-    "answered_at": "2026-11-10T09:00:02Z",
+    "answered_at": "2026-11-10T09:00:03Z",
     "assistance": "assisted",
     "attempt_number": 1,
     "content_id": "tactic-first-party-not-except",
@@ -15,7 +15,7 @@
     "selected_label": "D",
     "selected_text": "Children under twelve travel free.",
     "session_id": "sess-test",
-    "started_at": "2026-11-10T09:00:01Z",
+    "started_at": "2026-11-10T09:00:02Z",
     "status": "correct",
     "tactic_id": "not-except-polarity"
   },

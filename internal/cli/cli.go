@@ -121,10 +121,10 @@ Usage:
 
 Imported pages and questions start unreviewed; only reviewed material can be
 practiced. A tactic guided attempt shows the walkthrough and is recorded as
-assisted; the independent question is a different, first-attempt, answer-verified
-question with no hint. The shipped exercise is a self-authored sample. No exam
-score, pass threshold or readiness probability is computed. Default database:
-$PASSQUEST_DB or ./.passquest/passquest.sqlite
+assisted; the independent question is a different, never-exposed, first-attempt,
+answer-verified question with no hint. The shipped exercise is a self-authored
+sample. No exam score, pass threshold or readiness probability is computed.
+Default database: $PASSQUEST_DB or ./.passquest/passquest.sqlite
 `
 
 func newSessionID() string {
@@ -258,6 +258,9 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 	started := opt.Now()
 	if !jsonMode {
 		if selection.Tactic != nil {
+			if err := recordGuidedExposure(st, selection.Tactic, selection.Content.ID, selection.Question.ID, started); err != nil {
+				return internalError(opt, jsonMode, err)
+			}
 			writeTacticPreamble(opt.Stdout, selection.Tactic)
 		}
 		writePrompt(opt.Stdout, selection.Content, selection.Question, selection.Number)

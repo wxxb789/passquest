@@ -519,6 +519,109 @@ func TestMigrationFromVersionThreeAddsAssistanceColumns(t *testing.T) {
 	}
 }
 
+func TestRecordExposureIsIdempotentAndAppendOnly(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "exposure.sqlite"))
+	at := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	exposure := Exposure{
+		TacticID:   "not-except-polarity",
+		ContentID:  "tactic-first-party-not-except",
+		QuestionID: "t2",
+		ExposedAt:  at,
+	}
+	if err := st.RecordExposure(exposure); err != nil {
+		t.Fatalf("RecordExposure: %v", err)
+	}
+	if err := st.RecordExposure(exposure); err != nil {
+		t.Fatalf("repeated RecordExposure: %v", err)
+	}
+	list, err := st.ListExposures()
+	if err != nil {
+		t.Fatalf("ListExposures: %v", err)
+	}
+	if len(list) != 1 || list[0].Key() != exposure.Key() || !list[0].ExposedAt.Equal(at) {
+		t.Fatalf("exposures = %+v, want one observation of %+v", list, exposure)
+	}
+
+	if _, err := st.db.Exec(`UPDATE tactic_exposures SET question_id = 't1'`); err == nil || !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("UPDATE exposure error = %v, want append-only rejection", err)
+	}
+	if _, err := st.db.Exec(`DELETE FROM tactic_exposures`); err == nil || !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("DELETE exposure error = %v, want append-only rejection", err)
+	}
+
+	badTactic := exposure
+	badTactic.TacticID = "Not A Slug"
+	if err := st.RecordExposure(badTactic); err == nil || !strings.Contains(err.Error(), "tactic_id") {
+		t.Fatalf("invalid tactic error = %v", err)
+	}
+	badContent := exposure
+	badContent.ContentID = " "
+	if err := st.RecordExposure(badContent); err == nil || !strings.Contains(err.Error(), "content_id") {
+		t.Fatalf("empty content error = %v", err)
+	}
+}
+
+func TestMigrationFromVersionFourAddsGuidedExposures(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v4.sqlite")
+	db := openSQLite(t, path)
+	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3, schemaV4} {
+		for _, stmt := range statements {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("create v4 schema: %v", err)
+			}
+		}
+	}
+	at := "2026-11-10T09:00:00Z"
+	if _, err := db.Exec(`INSERT INTO attempts (
+			session_id, question_id, content_id, content_version, status,
+			selected_label, selected_text, correct_label, correct_text,
+			started_at, answered_at, elapsed_ms, assistance, tactic_id
+		) VALUES ('sess', 't1', 'tactic-first-party-not-except', '1', 'correct',
+			'D', 'option d', 'D', 'option d', ?, ?, 5, 'assisted', 'not-except-polarity')`,
+		at, at); err != nil {
+		t.Fatalf("insert v4 attempt: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 4`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := mustOpen(t, path)
+	var version int
+	if err := st.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, SchemaVersion)
+	}
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 || list[0].Assistance != attempt.AssistanceAssisted || list[0].TacticID != "not-except-polarity" {
+		t.Fatalf("v4 attempt after migration = %+v", list)
+	}
+
+	exposure := Exposure{
+		TacticID:   "not-except-polarity",
+		ContentID:  "tactic-first-party-not-except",
+		QuestionID: "t2",
+		ExposedAt:  time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC),
+	}
+	if err := st.RecordExposure(exposure); err != nil {
+		t.Fatalf("RecordExposure after migration: %v", err)
+	}
+	exposures, err := st.ListExposures()
+	if err != nil {
+		t.Fatalf("ListExposures: %v", err)
+	}
+	if len(exposures) != 1 || exposures[0].QuestionID != "t2" {
+		t.Fatalf("exposures after migration = %+v", exposures)
+	}
+}
+
 func TestOpenRejectsNewerSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "future.sqlite")
 	db := openSQLite(t, path)

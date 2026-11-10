@@ -51,7 +51,7 @@ accepted; PDF extraction uses a local `pdftotext` and no OCR. Full commands, sta
 ## Practice a scoring tactic
 
 Goal 0003 adds a guided-then-independent NOT/EXCEPT tactic. The guided attempt shows the walkthrough
-and is recorded as **assisted**; the independent question is a different, unattempted,
+and is recorded as **assisted**; the independent question is a different, never-exposed, unattempted,
 answer-verified question with no hint, and its correctness is counted separately.
 
 ```bash
