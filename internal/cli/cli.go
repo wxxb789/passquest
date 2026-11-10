@@ -21,6 +21,7 @@ import (
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/tactic"
 )
 
 // ProtocolVersion is the JSON protocol emitted by --json.
@@ -83,6 +84,8 @@ func Run(args []string, options Options) int {
 		return runPage(args[1:], opt)
 	case "question":
 		return runQuestion(args[1:], opt)
+	case "tactic":
+		return runTactic(args[1:], opt)
 	case "version":
 		return runVersion(opt)
 	case "help", "-h", "--help":
@@ -108,13 +111,19 @@ Usage:
   passquest question review SOURCE QUESTION --answer LABEL --reviewer NAME [--db PATH] [--json]
   passquest practice [--db PATH] [--source SOURCE] [--page N] [--question ID]
                      [--answer LABEL | --skip] [--json]
+  passquest tactic list [--json]
+  passquest tactic show TACTIC [--json]
+  passquest tactic practice TACTIC [--source SOURCE] [--stage guided|independent]
+                     [--question ID] [--answer LABEL | --skip] [--db PATH] [--json]
   passquest report   [--db PATH] [--json]
   passquest version
   passquest help
 
 Imported pages and questions start unreviewed; only reviewed material can be
-practiced. The shipped exercise is a self-authored sample. No exam score, pass
-threshold or readiness probability is computed. Default database:
+practiced. A tactic guided attempt shows the walkthrough and is recorded as
+assisted; the independent question is a different, first-attempt, answer-verified
+question with no hint. The shipped exercise is a self-authored sample. No exam
+score, pass threshold or readiness probability is computed. Default database:
 $PASSQUEST_DB or ./.passquest/passquest.sqlite
 `
 
@@ -248,6 +257,9 @@ func runPractice(args []string, opt Options) int {
 func answerQuestion(opt Options, selection practiceSelection, st *store.Store, answerFlag *string, answerSet, skip, jsonMode bool) int {
 	started := opt.Now()
 	if !jsonMode {
+		if selection.Tactic != nil {
+			writeTacticPreamble(opt.Stdout, selection.Tactic)
+		}
 		writePrompt(opt.Stdout, selection.Content, selection.Question, selection.Number)
 	}
 
@@ -278,6 +290,12 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 	if err != nil {
 		return internalError(opt, jsonMode, err)
 	}
+	if selection.Tactic != nil {
+		record, err = record.WithTactic(selection.Tactic.ID, selection.Tactic.assistance())
+		if err != nil {
+			return internalError(opt, jsonMode, err)
+		}
+	}
 	record, err = st.Append(record)
 	if err != nil {
 		return internalError(opt, jsonMode, err)
@@ -288,6 +306,7 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 		return writeJSON(opt, answeredDoc{
 			SchemaVersion: ProtocolVersion,
 			State:         "answered",
+			Tactic:        tacticRunViewOf(selection.Tactic),
 			Content:       contentViewOf(selection.Content),
 			Question:      questionViewOf(selection),
 			Attempt:       attemptViewOf(record),
@@ -368,8 +387,20 @@ func writeFeedback(w io.Writer, record attempt.Attempt, feedback attempt.Feedbac
 	} else {
 		fmt.Fprintln(w, "First attempt on this question; no earlier answer or evidence was shown.")
 	}
-	fmt.Fprintf(w, "Recorded attempt #%d (question %s, attempt %d on this question, %d ms).\n",
-		record.ID, record.QuestionID, record.AttemptNumber, record.ElapsedMS)
+	switch record.Assistance {
+	case attempt.AssistanceAssisted:
+		fmt.Fprintln(w, "Assisted attempt: a tactic walkthrough was shown before this answer, so it is not independent evidence.")
+	case attempt.AssistanceIndependent:
+		if record.TacticID != "" {
+			fmt.Fprintln(w, "Independent attempt: no hint was shown and this question had no earlier attempt.")
+		}
+	}
+	condition := fmt.Sprintf("assistance %s", record.Assistance)
+	if record.TacticID != "" {
+		condition += ", tactic " + record.TacticID
+	}
+	fmt.Fprintf(w, "Recorded attempt #%d (question %s, attempt %d on this question, %d ms, %s).\n",
+		record.ID, record.QuestionID, record.AttemptNumber, record.ElapsedMS, condition)
 	fmt.Fprintf(w, "Database: %s\n", dbPath)
 }
 
@@ -460,6 +491,9 @@ func reportContentView(st *store.Store, sample exam.Exam, id string, sources map
 	if id == sample.ID {
 		return contentViewOf(sample), sample.Questions
 	}
+	if exercise, err := tactic.Exercise(); err == nil && id == exercise.ID {
+		return contentViewOf(exercise), exercise.Questions
+	}
 	sourceID, page, ok := source.ParseContentID(id)
 	if !ok {
 		return unavailableContentView(id, "unrecognised content id"), nil
@@ -534,6 +568,27 @@ func summarize(records []attempt.Attempt, seeds []questionReport) (countsView, [
 		case attempt.StatusSkipped:
 			counts.Skipped++
 		}
+		if record.Assistance == attempt.AssistanceAssisted {
+			counts.AssistedAttempts++
+			switch record.Status {
+			case attempt.StatusCorrect:
+				counts.AssistedCorrect++
+			case attempt.StatusIncorrect:
+				counts.AssistedIncorrect++
+			case attempt.StatusSkipped:
+				counts.AssistedSkipped++
+			}
+		} else {
+			counts.IndependentAttempts++
+			switch record.Status {
+			case attempt.StatusCorrect:
+				counts.IndependentCorrect++
+			case attempt.StatusIncorrect:
+				counts.IndependentIncorrect++
+			case attempt.StatusSkipped:
+				counts.IndependentSkipped++
+			}
+		}
 		if record.AttemptNumber == 1 {
 			counts.FirstAttempts++
 			switch record.Status {
@@ -565,6 +620,11 @@ func summarize(records []attempt.Attempt, seeds []questionReport) (countsView, [
 		}
 		questions[i].Attempts++
 		questions[i].LatestStatus = string(record.Status)
+		if record.Assistance == attempt.AssistanceAssisted {
+			questions[i].Assisted++
+		} else {
+			questions[i].Independent++
+		}
 		if record.AttemptNumber == 1 {
 			questions[i].FirstStatus = string(record.Status)
 		} else {
@@ -577,6 +637,7 @@ func summarize(records []attempt.Attempt, seeds []questionReport) (countsView, [
 var limitations = []string{
 	"Counts cover only the locally stored practice attempts shown above; they are not an exam score, pass estimate or readiness claim.",
 	"Repeated attempts come after the correct answer and evidence were shown and are not independent evidence.",
+	"Assisted attempts were made with a tactic walkthrough or other help visible; only independent first attempts without prior answer exposure count as independent correctness.",
 	"The exam blueprint, time limit and pass threshold are unknown, so no pass probability is computed.",
 	"Imported source content is private local material; page and answer reviews are user-attested and are not an external verification.",
 }
@@ -605,7 +666,9 @@ func writeReport(w io.Writer, doc reportDoc, dbPath string) {
 	c := doc.Counts
 	fmt.Fprintf(w, "Attempts: %d (correct %d, incorrect %d, skipped %d)\n", c.Attempts, c.Correct, c.Incorrect, c.Skipped)
 	fmt.Fprintf(w, "First attempts: %d (correct %d, incorrect %d, skipped %d)\n", c.FirstAttempts, c.FirstCorrect, c.FirstIncorrect, c.FirstSkipped)
-	fmt.Fprintf(w, "Repeated attempts (answer already shown): %d (correct %d, incorrect %d, skipped %d)\n\n", c.RepeatedAttempts, c.RepeatedCorrect, c.RepeatedIncorrect, c.RepeatedSkipped)
+	fmt.Fprintf(w, "Repeated attempts (answer already shown): %d (correct %d, incorrect %d, skipped %d)\n", c.RepeatedAttempts, c.RepeatedCorrect, c.RepeatedIncorrect, c.RepeatedSkipped)
+	fmt.Fprintf(w, "Independent attempts (no hint): %d (correct %d, incorrect %d, skipped %d)\n", c.IndependentAttempts, c.IndependentCorrect, c.IndependentIncorrect, c.IndependentSkipped)
+	fmt.Fprintf(w, "Assisted attempts (help shown): %d (correct %d, incorrect %d, skipped %d)\n\n", c.AssistedAttempts, c.AssistedCorrect, c.AssistedIncorrect, c.AssistedSkipped)
 
 	qualify := func(contentID, id string) string {
 		if contentID != primary {
@@ -623,8 +686,8 @@ func writeReport(w io.Writer, doc reportDoc, dbPath string) {
 		if latest == "" {
 			latest = "—"
 		}
-		fmt.Fprintf(w, "  %s  attempts %d  first %s  latest %s  repeated %d\n",
-			qualify(q.ContentID, q.ID), q.Attempts, first, latest, q.Repeated)
+		fmt.Fprintf(w, "  %s  attempts %d  first %s  latest %s  repeated %d  assisted %d  independent %d\n",
+			qualify(q.ContentID, q.ID), q.Attempts, first, latest, q.Repeated, q.Assisted, q.Independent)
 	}
 
 	fmt.Fprintln(w, "\nAttempts")
@@ -640,8 +703,12 @@ func writeReport(w io.Writer, doc reportDoc, dbPath string) {
 		if a.Repeat {
 			kind = "repeat"
 		}
-		fmt.Fprintf(w, "  #%d  %s  %s  %s  selected %s  %d ms  session %s\n",
-			a.ID, qualify(a.ContentID, a.QuestionID), a.Status, kind, selected, a.ElapsedMS, a.SessionID)
+		condition := a.Assistance
+		if a.TacticID != "" {
+			condition += " (" + a.TacticID + ")"
+		}
+		fmt.Fprintf(w, "  #%d  %s  %s  %s  %s  selected %s  %d ms  session %s\n",
+			a.ID, qualify(a.ContentID, a.QuestionID), a.Status, kind, condition, selected, a.ElapsedMS, a.SessionID)
 	}
 
 	fmt.Fprintln(w, "\nLimitations")
@@ -763,6 +830,8 @@ func attemptViewOf(record attempt.Attempt) attemptView {
 		AttemptNumber:  record.AttemptNumber,
 		PriorAttempts:  record.PriorAttempts,
 		Repeat:         record.Repeat(),
+		Assistance:     string(record.Assistance),
+		TacticID:       record.TacticID,
 		Status:         string(record.Status),
 		SelectedLabel:  selectedLabel,
 		SelectedText:   selectedText,
@@ -785,6 +854,7 @@ func feedbackViewOf(feedback attempt.Feedback) feedbackView {
 		Reasoning:         feedback.Reasoning,
 		SelectedReasoning: feedback.SelectedReasoning,
 		Exposure:          feedback.Exposure,
+		Assistance:        string(feedback.Assistance),
 	}
 }
 
@@ -835,10 +905,12 @@ type reviewView struct {
 }
 
 type awaitingDoc struct {
-	SchemaVersion int          `json:"schema_version"`
-	State         string       `json:"state"`
-	Content       contentView  `json:"content"`
-	Question      questionView `json:"question"`
+	SchemaVersion int            `json:"schema_version"`
+	State         string         `json:"state"`
+	Tactic        *tacticRunView `json:"tactic,omitempty"`
+	Guidance      *guidanceView  `json:"guidance,omitempty"`
+	Content       contentView    `json:"content"`
+	Question      questionView   `json:"question"`
 }
 
 type attemptView struct {
@@ -848,6 +920,8 @@ type attemptView struct {
 	AttemptNumber  int     `json:"attempt_number"`
 	PriorAttempts  int     `json:"prior_attempts"`
 	Repeat         bool    `json:"repeat"`
+	Assistance     string  `json:"assistance"`
+	TacticID       string  `json:"tactic_id,omitempty"`
 	Status         string  `json:"status"`
 	SelectedLabel  *string `json:"selected_label"`
 	SelectedText   *string `json:"selected_text"`
@@ -868,30 +942,40 @@ type feedbackView struct {
 	Reasoning         string `json:"reasoning"`
 	SelectedReasoning string `json:"selected_reasoning,omitempty"`
 	Exposure          string `json:"exposure"`
+	Assistance        string `json:"assistance"`
 }
 
 type answeredDoc struct {
-	SchemaVersion int          `json:"schema_version"`
-	State         string       `json:"state"`
-	Content       contentView  `json:"content"`
-	Question      questionView `json:"question"`
-	Attempt       attemptView  `json:"attempt"`
-	Feedback      feedbackView `json:"feedback"`
+	SchemaVersion int            `json:"schema_version"`
+	State         string         `json:"state"`
+	Tactic        *tacticRunView `json:"tactic,omitempty"`
+	Content       contentView    `json:"content"`
+	Question      questionView   `json:"question"`
+	Attempt       attemptView    `json:"attempt"`
+	Feedback      feedbackView   `json:"feedback"`
 }
 
 type countsView struct {
-	Attempts          int `json:"attempts"`
-	Correct           int `json:"correct"`
-	Incorrect         int `json:"incorrect"`
-	Skipped           int `json:"skipped"`
-	FirstAttempts     int `json:"first_attempts"`
-	FirstCorrect      int `json:"first_correct"`
-	FirstIncorrect    int `json:"first_incorrect"`
-	FirstSkipped      int `json:"first_skipped"`
-	RepeatedAttempts  int `json:"repeated_attempts"`
-	RepeatedCorrect   int `json:"repeated_correct"`
-	RepeatedIncorrect int `json:"repeated_incorrect"`
-	RepeatedSkipped   int `json:"repeated_skipped"`
+	Attempts             int `json:"attempts"`
+	Correct              int `json:"correct"`
+	Incorrect            int `json:"incorrect"`
+	Skipped              int `json:"skipped"`
+	FirstAttempts        int `json:"first_attempts"`
+	FirstCorrect         int `json:"first_correct"`
+	FirstIncorrect       int `json:"first_incorrect"`
+	FirstSkipped         int `json:"first_skipped"`
+	RepeatedAttempts     int `json:"repeated_attempts"`
+	RepeatedCorrect      int `json:"repeated_correct"`
+	RepeatedIncorrect    int `json:"repeated_incorrect"`
+	RepeatedSkipped      int `json:"repeated_skipped"`
+	AssistedAttempts     int `json:"assisted_attempts"`
+	AssistedCorrect      int `json:"assisted_correct"`
+	AssistedIncorrect    int `json:"assisted_incorrect"`
+	AssistedSkipped      int `json:"assisted_skipped"`
+	IndependentAttempts  int `json:"independent_attempts"`
+	IndependentCorrect   int `json:"independent_correct"`
+	IndependentIncorrect int `json:"independent_incorrect"`
+	IndependentSkipped   int `json:"independent_skipped"`
 }
 
 type questionReport struct {
@@ -901,6 +985,8 @@ type questionReport struct {
 	FirstStatus  string `json:"first_status"`
 	LatestStatus string `json:"latest_status"`
 	Repeated     int    `json:"repeated"`
+	Assisted     int    `json:"assisted"`
+	Independent  int    `json:"independent"`
 }
 
 type reportDoc struct {

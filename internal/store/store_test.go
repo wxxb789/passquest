@@ -312,6 +312,63 @@ func TestAppendRejectsInconsistentRecords(t *testing.T) {
 	}
 }
 
+func TestAppendPersistsAssistanceAndTactic(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "assistance.sqlite"))
+
+	assisted := sampleAttempt("q1")
+	assisted, err := assisted.WithTactic("not-except-polarity", attempt.AssistanceAssisted)
+	if err != nil {
+		t.Fatalf("WithTactic assisted: %v", err)
+	}
+	got := mustAppend(t, st, assisted)
+	if got.Assistance != attempt.AssistanceAssisted || got.TacticID != "not-except-polarity" {
+		t.Fatalf("assisted record = %+v", got)
+	}
+
+	independent := sampleAttempt("q2")
+	independent, err = independent.WithTactic("not-except-polarity", attempt.AssistanceIndependent)
+	if err != nil {
+		t.Fatalf("WithTactic independent: %v", err)
+	}
+	if _, err := st.Append(independent); err != nil {
+		t.Fatalf("Append independent tactic: %v", err)
+	}
+
+	ordinary := sampleAttempt("q3")
+	ordinary.Assistance = ""
+	if _, err := st.Append(ordinary); err != nil {
+		t.Fatalf("Append ordinary: %v", err)
+	}
+
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("attempts = %d, want 3", len(list))
+	}
+	if list[0].Assistance != attempt.AssistanceAssisted || list[0].TacticID != "not-except-polarity" {
+		t.Fatalf("stored assisted = %+v", list[0])
+	}
+	if list[1].Assistance != attempt.AssistanceIndependent || list[1].TacticID != "not-except-polarity" {
+		t.Fatalf("stored independent = %+v", list[1])
+	}
+	if list[2].Assistance != attempt.AssistanceIndependent || list[2].TacticID != "" {
+		t.Fatalf("stored ordinary = %+v", list[2])
+	}
+
+	assistedNoTactic := sampleAttempt("q4")
+	assistedNoTactic.Assistance = attempt.AssistanceAssisted
+	if _, err := st.Append(assistedNoTactic); err == nil || !strings.Contains(err.Error(), "no tactic id") {
+		t.Fatalf("assisted attempt without a tactic error = %v", err)
+	}
+	badAssistance := sampleAttempt("q5")
+	badAssistance.Assistance = "guessed"
+	if _, err := st.Append(badAssistance); err == nil || !strings.Contains(err.Error(), "assistance") {
+		t.Fatalf("invalid assistance error = %v", err)
+	}
+}
+
 func TestMigrationKeepsOlderDatabaseAndIsIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.sqlite")
 	db := openSQLite(t, path)
@@ -403,6 +460,62 @@ func TestMigrationAddsInsertGuardToVersionOne(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].Status != attempt.StatusCorrect {
 		t.Fatalf("attempt after rejected replace = %+v", list)
+	}
+}
+
+func TestMigrationFromVersionThreeAddsAssistanceColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v3.sqlite")
+	db := openSQLite(t, path)
+	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3} {
+		for _, stmt := range statements {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("create v3 schema: %v", err)
+			}
+		}
+	}
+	started := "2026-11-10T09:00:00Z"
+	if _, err := db.Exec(`INSERT INTO attempts (
+			session_id, question_id, content_id, content_version, status,
+			selected_label, selected_text, correct_label, correct_text,
+			started_at, answered_at, elapsed_ms
+		) VALUES ('sess', 'q1', 'sample-0001', '1', 'correct', 'B', 'At 4 p.m.', 'B', 'At 4 p.m.', ?, ?, 5)`,
+		started, started); err != nil {
+		t.Fatalf("insert v3 attempt: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 3`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := mustOpen(t, path)
+	var version int
+	if err := st.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, SchemaVersion)
+	}
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(list))
+	}
+	if list[0].Assistance != attempt.AssistanceIndependent || list[0].TacticID != "" {
+		t.Fatalf("pre-v4 attempt = %+v, want independent with no tactic", list[0])
+	}
+
+	// The database enforces the assistance vocabulary even for direct writes.
+	if _, err := st.db.Exec(`INSERT INTO attempts (
+			session_id, question_id, content_id, content_version, status,
+			selected_label, selected_text, correct_label, correct_text,
+			started_at, answered_at, elapsed_ms, assistance
+		) VALUES ('sess', 'q2', 'sample-0001', '1', 'correct', 'B', 'At 4 p.m.', 'B', 'At 4 p.m.', ?, ?, 5, 'guessed')`,
+		started, started); err == nil || !strings.Contains(err.Error(), "CHECK") {
+		t.Fatalf("invalid assistance insert error = %v, want CHECK failure", err)
 	}
 }
 

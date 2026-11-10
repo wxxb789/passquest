@@ -1,0 +1,16 @@
+{
+  "id": "q1",
+  "stem": "When does the library close on Saturdays?",
+  "options": [
+    {"label": "A", "text": "At 7 p.m."},
+    {"label": "B", "text": "At 4 p.m."}
+  ],
+  "answer": "B",
+  "evidence": "closes at 4 p.m. on Saturdays",
+  "reasoning": "The notice gives the Saturday closing time directly.",
+  "option_reasoning": {
+    "A": "The notice does not say 7 p.m. for Saturdays.",
+    "B": "The notice states 4 p.m. on Saturdays."
+  },
+  "tactics": ["not-except-polarity"]
+}

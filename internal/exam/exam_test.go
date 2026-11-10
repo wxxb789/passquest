@@ -135,6 +135,8 @@ func TestValidateRejects(t *testing.T) {
 		{"empty reasoning", func(e *Exam) { e.Questions[0].Reasoning = "" }, "reasoning is empty"},
 		{"missing option explanation", func(e *Exam) { delete(e.Questions[0].OptionReasoning, "B") }, "option B has no explanation"},
 		{"extra option explanation", func(e *Exam) { e.Questions[0].OptionReasoning["C"] = "extra" }, "explains unknown option"},
+		{"malformed tactic tag", func(e *Exam) { e.Questions[0].Tactics = []string{"Not Except"} }, "not a lowercase slug"},
+		{"duplicate tactic tag", func(e *Exam) { e.Questions[0].Tactics = []string{"not-except-polarity", "not-except-polarity"} }, "repeats tactic tag"},
 		{"too few options", func(e *Exam) { e.Questions[0].Options = e.Questions[0].Options[:1] }, "want 2..8"},
 		{"too many options", func(e *Exam) {
 			q := &e.Questions[0]
@@ -156,6 +158,26 @@ func TestValidateRejects(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidSkillTag(t *testing.T) {
+	accepted := []string{"a", "not-except-polarity", "evidence2", "x-y-z"}
+	rejected := []string{"", "Not-Except", "2fast", "-leading", "trailing-", "with space", "under_score", strings.Repeat("a", 65)}
+	for _, tag := range accepted {
+		if !ValidSkillTag(tag) {
+			t.Errorf("ValidSkillTag(%q) = false, want true", tag)
+		}
+	}
+	for _, tag := range rejected {
+		if ValidSkillTag(tag) {
+			t.Errorf("ValidSkillTag(%q) = true, want false", tag)
+		}
+	}
+	e := validExam()
+	e.Questions[0].Tactics = []string{"not-except-polarity"}
+	if err := e.Validate(); err != nil {
+		t.Fatalf("exam with a valid tactic tag: %v", err)
 	}
 }
 

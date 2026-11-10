@@ -78,6 +78,9 @@ func TestBuildRecord(t *testing.T) {
 	if rec.ElapsedMS != 1500 {
 		t.Fatalf("elapsed = %d, want 1500", rec.ElapsedMS)
 	}
+	if rec.Assistance != AssistanceIndependent || rec.TacticID != "" {
+		t.Fatalf("default condition = %q/%q, want independent with no tactic", rec.Assistance, rec.TacticID)
+	}
 
 	wrong := Selection{Option: &exam.Option{Label: "B", Text: "At five."}}
 	rec, err = BuildRecord("c", "1", q, wrong, "sess", started, started.Add(time.Second))
@@ -139,6 +142,51 @@ func TestBuildRecordRejectsBadInput(t *testing.T) {
 	}
 }
 
+func TestWithTactic(t *testing.T) {
+	q := testQuestion()
+	started := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	rec, err := BuildRecord("c", "1", q, Selection{Option: &exam.Option{Label: "A", Text: "At four."}}, "sess", started, started.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assisted, err := rec.WithTactic("not-except-polarity", AssistanceAssisted)
+	if err != nil {
+		t.Fatalf("WithTactic assisted: %v", err)
+	}
+	if assisted.TacticID != "not-except-polarity" || assisted.Assistance != AssistanceAssisted {
+		t.Fatalf("assisted = %+v", assisted)
+	}
+	independent, err := rec.WithTactic("not-except-polarity", AssistanceIndependent)
+	if err != nil {
+		t.Fatalf("WithTactic independent: %v", err)
+	}
+	if independent.Assistance != AssistanceIndependent {
+		t.Fatalf("independent assistance = %q", independent.Assistance)
+	}
+	if rec.TacticID != "" || rec.Assistance != AssistanceIndependent {
+		t.Fatalf("WithTactic mutated the receiver: %+v", rec)
+	}
+
+	bad := []struct {
+		name       string
+		tacticID   string
+		assistance Assistance
+		want       string
+	}{
+		{"empty tactic", "", AssistanceAssisted, "empty tactic id"},
+		{"bad tactic", "Not Except", AssistanceAssisted, "lowercase slug"},
+		{"bad assistance", "not-except-polarity", "guessed", "invalid assistance"},
+	}
+	for _, tc := range bad {
+		if _, err := rec.WithTactic(tc.tacticID, tc.assistance); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: error = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+	if _, err := (Attempt{}).WithTactic("not-except-polarity", AssistanceAssisted); err == nil {
+		t.Fatal("WithTactic accepted an ungraded record")
+	}
+}
+
 func TestExplain(t *testing.T) {
 	q := testQuestion()
 	rec := Attempt{Status: StatusIncorrect, SelectedLabel: "B", AttemptNumber: 1, CorrectLabel: "A", CorrectText: "At four."}
@@ -164,5 +212,11 @@ func TestExplain(t *testing.T) {
 	fb = Explain(q, rec)
 	if fb.SelectedReasoning != "" {
 		t.Fatalf("correct feedback has selected reasoning %q", fb.SelectedReasoning)
+	}
+
+	rec.Assistance = AssistanceAssisted
+	fb = Explain(q, rec)
+	if fb.Assistance != AssistanceAssisted {
+		t.Fatalf("feedback assistance = %q, want assisted", fb.Assistance)
 	}
 }

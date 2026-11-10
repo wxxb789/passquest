@@ -137,3 +137,54 @@ Entry format:
   the natural passage boundary for this material. Goal 0003 can group pages into a tactic exercise
   without rewriting attempts. Reverse by adding a grouping layer; stored attempts keep their ids.
 - Revisit when: goal 0003 needs multi-page passages, or goal 0009 needs whole-set holdout scoping.
+
+### Q-0003-01 — Which scoring tactic is demonstrated, and is one enough?
+- Status: decided(default taken)
+- Context: goal 0003 names NOT/EXCEPT polarity, evidence location and distractor paraphrases as
+  examples and requires a counterexample or boundary. A concrete tactic must be chosen before lesson
+  content, item tags and the smoke gate can be designed.
+- Options considered: (A) NOT/EXCEPT polarity, with a keyword-overlap counterexample; (B) locating
+  textual evidence; (C) avoiding distractor paraphrases; (D) several tactics at once.
+- Default taken: (A). NOT/EXCEPT polarity has a deterministic odd-statement rule, a crisp
+  counterexample against both "repeat the most words" and "pick the longest option", and it does not
+  require source text in the repository. The registry and the question `tactics` field accept more
+  tactics; adding one needs its own lesson, boundary and tested exercise, so (D) was deferred rather
+  than shipped untested. Reverse by registering another tactic and tagging questions with it; stored
+  attempts keep their `tactic_id`.
+- Revisit when: goal 0004 selects practice from evidence, or the learner's observed errors point at a
+  different tactic than polarity.
+
+### Q-0003-02 — What separates an assisted attempt from independent correctness?
+- Status: decided(default taken)
+- Context: the contract requires an assisted success and an independent correctness to stay
+  separately visible, and goal 0001 already records first/repeat exposure. "Help shown" and "answer
+  already shown" are different facts, but the contract does not define the boundary.
+- Options considered: (A) store assistance as a separate append-only field and require independence
+  to be a first attempt on a different question; (B) treat any first attempt as independent, even
+  after a walkthrough; (C) treat a repeat without help as independent.
+- Default taken: (A). `assistance` (`assisted`/`independent`) and `tactic_id` are stored per attempt;
+  a guided attempt shows the walkthrough and is assisted; an independent attempt shows no guidance,
+  must be a different question from every guided example for that tactic, and must have zero earlier
+  attempts on that content-scoped question. The first tactic call defaults to guided and later calls
+  default to independent; an independent call before any guided attempt is refused with exit 2. If no
+  eligible question remains, the command refuses rather than substituting. Existing rows and ordinary
+  practice default to independent. Reverse by changing the selection policy and report grouping; the
+  stored fields remain.
+- Revisit when: goal 0009 defines delayed or held-out assessment, or the learner needs a second
+  independent transfer item after the first one is used.
+
+### Q-0003-03 — Are tactic tags on local questions a closed registry or free text?
+- Status: decided(default taken)
+- Context: imported questions are authored locally as JSON. A tactic can only select questions that
+  declare they exercise it, but a typo or an unknown tag could silently remove a question from every
+  tactic.
+- Options considered: (A) require a tag to name a registered tactic and reject unknown tags at
+  `question add`/`edit`; (B) accept any lowercase tag and let selection ignore unknown ones;
+  (C) infer the tactic from the question stem automatically.
+- Default taken: (A). Tags share the lowercase-slug grammar with tactic ids and are checked against
+  the build's registry; an unknown tag is an exit-2 invalid-input error naming the registered ids.
+  This keeps a typo visible and prevents silent ineligibility. The cost is that adding a tactic needs
+  a code change, which is acceptable while tactics are authored, reviewed content. Reverse by
+  relaxing validation and adding a separate tag-vocabulary table.
+- Revisit when: users need to author their own tactic vocabularies, or goal 0004 introduces a larger
+  skill taxonomy that should not be a compiled list.

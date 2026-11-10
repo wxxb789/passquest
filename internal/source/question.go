@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/wxxb789/passquest/internal/exam"
+	"github.com/wxxb789/passquest/internal/tactic"
 )
 
 // ErrNotPracticeable means a page or question has not reached the reviewed
@@ -29,6 +30,7 @@ type questionFile struct {
 	Evidence        string            `json:"evidence"`
 	Reasoning       string            `json:"reasoning"`
 	OptionReasoning map[string]string `json:"option_reasoning"`
+	Tactics         []string          `json:"tactics"`
 }
 
 // ParseQuestionJSON decodes a locally authored question file. The question is
@@ -61,6 +63,7 @@ func ParseQuestionJSON(data []byte, sourceID string, page int, now time.Time, ex
 		Evidence:        file.Evidence,
 		Reasoning:       file.Reasoning,
 		OptionReasoning: file.OptionReasoning,
+		Tactics:         append([]string(nil), file.Tactics...),
 		AnswerStatus:    AnswerUnmapped,
 		Review:          Unreviewed,
 		CreatedAt:       nowUTC(now),
@@ -93,6 +96,18 @@ func (q Question) Validate() error {
 	}
 	if strings.TrimSpace(q.Reasoning) == "" {
 		add("reasoning is empty")
+	}
+	seenTag := make(map[string]bool, len(q.Tactics))
+	for _, tag := range q.Tactics {
+		if !exam.ValidSkillTag(tag) {
+			add("tactic tag %q is not a lowercase slug", tag)
+		} else if !tactic.IsRegistered(tag) {
+			add("tactic tag %q is not registered; registered: %s", tag, strings.Join(tactic.Registered(), ", "))
+		}
+		if seenTag[tag] {
+			add("tactic tag %q is repeated", tag)
+		}
+		seenTag[tag] = true
 	}
 	for _, problem := range exam.OptionProblems(q.Options, q.OptionReasoning) {
 		problems = append(problems, problem)
@@ -222,6 +237,7 @@ func BuildPracticeExam(src Source, page Page, questions []Question) (exam.Exam, 
 			Evidence:        q.Evidence,
 			Reasoning:       q.Reasoning,
 			OptionReasoning: copyReasoning(q.OptionReasoning),
+			Tactics:         append([]string(nil), q.Tactics...),
 		})
 		readyMeta = append(readyMeta, q)
 	}
@@ -311,6 +327,9 @@ func materialVersion(page Page, questions []exam.Question) string {
 		for _, label := range labels {
 			writeHashField(h, label)
 			writeHashField(h, q.OptionReasoning[label])
+		}
+		if len(q.Tactics) > 0 {
+			writeHashField(h, strings.Join(q.Tactics, ","))
 		}
 	}
 	return "1-" + hex.EncodeToString(h.Sum(nil))[:8]

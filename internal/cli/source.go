@@ -636,6 +636,7 @@ type practiceSelection struct {
 	Number   int
 	Page     *source.Page
 	Review   *source.Question
+	Tactic   *tacticRun
 }
 
 func selectSourcePractice(st *store.Store, sourceID string, pageNumber int, questionID string, records []attempt.Attempt) (practiceSelection, error) {
@@ -832,6 +833,10 @@ func questionLine(q source.Question, page source.Page) string {
 		reviewed += " by " + q.ReviewedBy
 	}
 	flags := q.Flags(page)
-	return fmt.Sprintf("%s  page %03d  answer %-14s  review %-10s  flags %s  %s",
+	line := fmt.Sprintf("%s  page %03d  answer %-14s  review %-10s  flags %s  %s",
 		q.ID, q.Page, answer, reviewed, displayFlags(flags), q.Stem)
+	if len(q.Tactics) > 0 {
+		line += "  tactics " + strings.Join(q.Tactics, ",")
+	}
+	return line
 }

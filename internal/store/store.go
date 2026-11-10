@@ -20,7 +20,7 @@ import (
 )
 
 // SchemaVersion is the persisted schema this build understands.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // schemaV1 is the original version-1 shape. Migrations apply each version in
 // order, so a version-0 database gets both steps and a version-1 database gets
@@ -65,6 +65,17 @@ var schemaV2 = []string{
 		BEGIN SELECT RAISE(ABORT, 'attempts are append-only'); END`,
 }
 
+// schemaV4 adds the assistance/tactic dimension to attempts and the local
+// question tags to source_questions. Existing attempts predate tactic help, so
+// they migrate as independent. SQLite ADD COLUMN supports a non-null default
+// and a CHECK constraint; the append-only triggers are unchanged.
+var schemaV4 = []string{
+	`ALTER TABLE attempts ADD COLUMN assistance TEXT NOT NULL DEFAULT 'independent'
+		CHECK (assistance IN ('independent', 'assisted'))`,
+	`ALTER TABLE attempts ADD COLUMN tactic_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE source_questions ADD COLUMN tactics_json TEXT NOT NULL DEFAULT '[]'`,
+}
+
 var migrations = []struct {
 	version    int
 	statements []string
@@ -72,6 +83,7 @@ var migrations = []struct {
 	{1, schemaV1},
 	{2, schemaV2},
 	{3, schemaV3},
+	{4, schemaV4},
 }
 
 // Store is a handle to one attempts database.
@@ -207,6 +219,12 @@ func (s *Store) Close() error { return s.db.Close() }
 // Append stores one graded attempt and returns it with its row id, prior count
 // and content-scoped question attempt number filled in.
 func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
+	// Records built before the assistance dimension existed carry no value. They
+	// predate tactic help, so independent is the truthful default rather than an
+	// unknown state.
+	if a.Assistance == "" {
+		a.Assistance = attempt.AssistanceIndependent
+	}
 	if err := validateForInsert(a); err != nil {
 		return attempt.Attempt{}, err
 	}
@@ -226,11 +244,12 @@ func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 	res, err := tx.Exec(`INSERT INTO attempts (
 			session_id, question_id, content_id, content_version, status,
 			selected_label, selected_text, correct_label, correct_text,
-			started_at, answered_at, elapsed_ms
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			started_at, answered_at, elapsed_ms, assistance, tactic_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.SessionID, a.QuestionID, a.ContentID, a.ContentVersion, string(a.Status),
 		nullIfEmpty(a.SelectedLabel), nullIfEmpty(a.SelectedText), a.CorrectLabel, a.CorrectText,
 		a.StartedAt.UTC().Format(time.RFC3339Nano), a.AnsweredAt.UTC().Format(time.RFC3339Nano), a.ElapsedMS,
+		string(a.Assistance), a.TacticID,
 	)
 	if err != nil {
 		return attempt.Attempt{}, fmt.Errorf("store: insert attempt: %w", err)
@@ -255,7 +274,7 @@ func (s *Store) List() ([]attempt.Attempt, error) {
 	rows, err := s.db.Query(`SELECT
 			id, session_id, question_id, content_id, content_version, status,
 			selected_label, selected_text, correct_label, correct_text,
-			started_at, answered_at, elapsed_ms
+			started_at, answered_at, elapsed_ms, assistance, tactic_id
 		FROM attempts ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list attempts: %w", err)
@@ -268,6 +287,7 @@ func (s *Store) List() ([]attempt.Attempt, error) {
 		var (
 			a           attempt.Attempt
 			status      string
+			assistance  string
 			selectedLbl sql.NullString
 			selectedTxt sql.NullString
 			started     string
@@ -276,11 +296,12 @@ func (s *Store) List() ([]attempt.Attempt, error) {
 		if err := rows.Scan(
 			&a.ID, &a.SessionID, &a.QuestionID, &a.ContentID, &a.ContentVersion, &status,
 			&selectedLbl, &selectedTxt, &a.CorrectLabel, &a.CorrectText,
-			&started, &answered, &a.ElapsedMS,
+			&started, &answered, &a.ElapsedMS, &assistance, &a.TacticID,
 		); err != nil {
 			return nil, fmt.Errorf("store: scan attempt: %w", err)
 		}
 		a.Status = attempt.Status(status)
+		a.Assistance = attempt.Assistance(assistance)
 		if selectedLbl.Valid {
 			a.SelectedLabel = selectedLbl.String
 		}
@@ -335,6 +356,15 @@ func validateForInsert(a attempt.Attempt) error {
 	}
 	if a.ElapsedMS < 0 {
 		add("elapsed_ms is negative")
+	}
+	if !a.Assistance.Valid() {
+		add("assistance %q is invalid", a.Assistance)
+	}
+	if a.Assistance == attempt.AssistanceAssisted && a.TacticID == "" {
+		add("assisted attempt has no tactic id")
+	}
+	if a.TacticID != "" && !attempt.ValidTacticID(a.TacticID) {
+		add("tactic_id %q is not a lowercase slug", a.TacticID)
 	}
 
 	switch a.Status {

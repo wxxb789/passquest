@@ -5,13 +5,13 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 ## Design and development
 
 - [Core Design](docs/core-design.md) — product purpose, safety, quality and architecture principles.
-- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001 and
-  0002 are done; 0003 is next.
+- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0003
+  are done; 0004 is next.
 - [Harness](docs/harness.md) — the single `bun run gate` entry point and what each gate reads.
 
-**Implementation order:** verified headless practice → private local baseline → evidence-driven
-adaptation and durable AI → Anki integration and on-demand resources → functional MyGo desktop →
-Opus-led high-fidelity UX → packaging.
+**Implementation order:** verified headless practice → private local baseline → scoring tactic
+practice → evidence-driven adaptation and durable AI → Anki integration and on-demand resources →
+functional MyGo desktop → Opus-led high-fidelity UX → packaging.
 
 ## Try the practice slice
 
@@ -26,8 +26,8 @@ go run ./cmd/passquest report
 `practice` shows a self-authored reading exercise without its answer, records the attempt in
 `.passquest/passquest.sqlite` (gitignored), and then shows the keyed option, the passage evidence and
 a short explanation. `report` reopens the same database in a new process and prints counts split
-into first and repeated attempts. The sample is **not** live exam content, and no exam score, pass
-threshold or readiness probability is computed. Evidence:
+into first/repeated attempts and assisted/independent conditions. The sample is **not** live exam
+content, and no exam score, pass threshold or readiness probability is computed. Evidence:
 [`docs/evidence/0001-first-independent-exam-attempt.md`](docs/evidence/0001-first-independent-exam-attempt.md).
 
 ## Import your private source
@@ -47,6 +47,26 @@ deterministic scoring as the sample. TXT directories, single TXT files and PDF t
 accepted; PDF extraction uses a local `pdftotext` and no OCR. Full commands, states and limits:
 [`docs/source-import.md`](docs/source-import.md). Measured evidence:
 [`docs/evidence/0002-local-text-baseline.md`](docs/evidence/0002-local-text-baseline.md).
+
+## Practice a scoring tactic
+
+Goal 0003 adds a guided-then-independent NOT/EXCEPT tactic. The guided attempt shows the walkthrough
+and is recorded as **assisted**; the independent question is a different, unattempted,
+answer-verified question with no hint, and its correctness is counted separately.
+
+```bash
+go run ./cmd/passquest tactic list
+go run ./cmd/passquest tactic show not-except-polarity
+go run ./cmd/passquest tactic practice not-except-polarity --stage guided
+go run ./cmd/passquest tactic practice not-except-polarity --stage independent
+go run ./cmd/passquest report
+```
+
+The lesson states why the tactic works, when it applies, and a counterexample showing why keyword
+matching and the "longest answer" folklore fail. Imported source questions opt into a tactic with a
+`tactics` tag in their local question file; only reviewed, tagged questions are used. Details:
+[`docs/tactics.md`](docs/tactics.md). Measured evidence:
+[`docs/evidence/0003-exam-tactic-practice.md`](docs/evidence/0003-exam-tactic-practice.md).
 
 ## Run the gates
 

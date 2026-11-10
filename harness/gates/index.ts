@@ -11,6 +11,7 @@ import { importSmoke } from "./import-smoke.ts";
 import { localOnly } from "./local-only.ts";
 import { secrets } from "./secrets.ts";
 import { selfTest } from "./self-test.ts";
+import { tacticSmoke } from "./tactic-smoke.ts";
 import { typecheck } from "./typecheck.ts";
 
 export const gates: Gate[] = [
@@ -25,5 +26,6 @@ export const gates: Gate[] = [
   localOnly,
   baseline,
   importSmoke,
+  tacticSmoke,
   selfTest,
 ];

@@ -1,0 +1,18 @@
+{
+  "id": "q2",
+  "stem": "Which of the following is NOT stated in the notice?",
+  "options": [
+    {"label": "A", "text": "The library closes at 4 p.m. on Saturdays."},
+    {"label": "B", "text": "The notice is about Saturday hours."},
+    {"label": "C", "text": "The library opens at 8 a.m. on Sundays."}
+  ],
+  "answer": "C",
+  "evidence": "The Westbridge Community Library closes at 4 p.m. on Saturdays.",
+  "reasoning": "The notice states the Saturday closing time and the page title gives Saturday hours; no Sunday opening time is stated.",
+  "option_reasoning": {
+    "A": "The notice states this closing time.",
+    "B": "The page title names Saturday hours.",
+    "C": "No Sunday opening time appears in the notice."
+  },
+  "tactics": ["not-except-polarity"]
+}

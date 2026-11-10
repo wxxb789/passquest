@@ -47,6 +47,7 @@ type sourceQuestionView struct {
 	Evidence        string            `json:"evidence"`
 	Reasoning       string            `json:"reasoning"`
 	OptionReasoning map[string]string `json:"option_reasoning"`
+	Tactics         []string          `json:"tactics,omitempty"`
 	ReviewedBy      string            `json:"reviewed_by"`
 	ReviewedAt      string            `json:"reviewed_at"`
 	Flags           []string          `json:"flags"`
@@ -148,6 +149,7 @@ func sourceQuestionViewOf(q source.Question, page source.Page) sourceQuestionVie
 		Evidence:        q.Evidence,
 		Reasoning:       q.Reasoning,
 		OptionReasoning: reasoning,
+		Tactics:         append([]string(nil), q.Tactics...),
 		ReviewedBy:      q.ReviewedBy,
 		ReviewedAt:      source.FormatTime(q.ReviewedAt),
 		Flags:           source.FlagStrings(q.Flags(page)),

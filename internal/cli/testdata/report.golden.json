@@ -38,7 +38,15 @@
     "repeated_attempts": 1,
     "repeated_correct": 1,
     "repeated_incorrect": 0,
-    "repeated_skipped": 0
+    "repeated_skipped": 0,
+    "assisted_attempts": 0,
+    "assisted_correct": 0,
+    "assisted_incorrect": 0,
+    "assisted_skipped": 0,
+    "independent_attempts": 4,
+    "independent_correct": 2,
+    "independent_incorrect": 1,
+    "independent_skipped": 1
   },
   "questions": [
     {
@@ -47,7 +55,9 @@
       "attempts": 2,
       "first_status": "correct",
       "latest_status": "correct",
-      "repeated": 1
+      "repeated": 1,
+      "assisted": 0,
+      "independent": 2
     },
     {
       "id": "q2",
@@ -55,7 +65,9 @@
       "attempts": 1,
       "first_status": "incorrect",
       "latest_status": "incorrect",
-      "repeated": 0
+      "repeated": 0,
+      "assisted": 0,
+      "independent": 1
     },
     {
       "id": "q3",
@@ -63,7 +75,9 @@
       "attempts": 1,
       "first_status": "skipped",
       "latest_status": "skipped",
-      "repeated": 0
+      "repeated": 0,
+      "assisted": 0,
+      "independent": 1
     }
   ],
   "attempts": [
@@ -74,6 +88,7 @@
       "attempt_number": 1,
       "prior_attempts": 0,
       "repeat": false,
+      "assistance": "independent",
       "status": "correct",
       "selected_label": "B",
       "selected_text": "At 4 p.m.",
@@ -92,6 +107,7 @@
       "attempt_number": 1,
       "prior_attempts": 0,
       "repeat": false,
+      "assistance": "independent",
       "status": "incorrect",
       "selected_label": "A",
       "selected_text": "The library wants to open on Sundays instead.",
@@ -110,6 +126,7 @@
       "attempt_number": 1,
       "prior_attempts": 0,
       "repeat": false,
+      "assistance": "independent",
       "status": "skipped",
       "selected_label": null,
       "selected_text": null,
@@ -128,6 +145,7 @@
       "attempt_number": 2,
       "prior_attempts": 1,
       "repeat": true,
+      "assistance": "independent",
       "status": "correct",
       "selected_label": "B",
       "selected_text": "At 4 p.m.",
@@ -143,6 +161,7 @@
   "limitations": [
     "Counts cover only the locally stored practice attempts shown above; they are not an exam score, pass estimate or readiness claim.",
     "Repeated attempts come after the correct answer and evidence were shown and are not independent evidence.",
+    "Assisted attempts were made with a tactic walkthrough or other help visible; only independent first attempts without prior answer exposure count as independent correctness.",
     "The exam blueprint, time limit and pass threshold are unknown, so no pass probability is computed.",
     "Imported source content is private local material; page and answer reviews are user-attested and are not an external verification."
   ]
