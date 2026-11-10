@@ -318,3 +318,67 @@ Entry format:
   per-skill inference are unaffected.
 - Revisit when: goal 0009 needs a consolidation signal to outrank fresh material, or the owner wants
   an exhausted repeated-error lesson to keep the top slot.
+
+### Q-0005-01 — Where does a BYOK provider credential live before the desktop secret store?
+- Status: decided(default taken)
+- Context: goal 0005 requires a user-supplied text endpoint, while the contract also says credentials
+  must not be written into learning data, exports, logs or public artifacts. The OS secret store
+  named by the core design does not exist until the desktop workspace (goal 0011), and this build is
+  a CLI.
+- Options considered: (A) environment variable only (`PASSQUEST_TUTOR_API_KEY`), inherited by the
+  host process and never persisted; (B) a `0600` local secret file next to the database; (C) a
+  passphrase-encrypted database column or a new local key service.
+- Default taken: (A). `tutor config` stores only endpoint, model, timeout, output bound and daily
+  budget; the key is read by `agent/tutor-host.mjs` from the environment, placed only in the
+  Authorization header and redacted from stored/printed error and model text. Reverse by adding a
+  keychain/file provider behind the same host request; no stored data changes.
+- Revisit when: goal 0011 provides an OS secret store, or a real learner needs a persisted credential
+  without exporting an environment variable each session.
+
+### Q-0005-02 — Which process may contact the provider?
+- Status: decided(default taken)
+- Context: the local-only gate forbids `net`, `net/http`, `net/rpc` and `net/smtp` in first-party Go
+  packages, and the core design names a private local Node process for the Pi agent. Goal 0006 is the
+  durable Pi runtime; goal 0005 only needs one bounded text call.
+- Options considered: (A) a single-shot Node host (`agent/tutor-host.mjs`) invoked by the Go CLI over
+  a versioned stdin/stdout JSON protocol, with the host as the only network egress; (B) relax the Go
+  network rule and use `net/http` in the core; (C) defer the provider path until Pi Durable lands.
+- Default taken: (A). Ordinary practice, review, `next`, `report`, `config`, `preview`, `history`
+  and consent commands need only Go; `ask` requires Node and fails with exit 3 `agent_unavailable`
+  otherwise. The host has no database, filesystem or tool access. Reverse by moving the transport
+  into the Pi runtime behind the same request shape (goal 0006) or by changing the local-only gate
+  with a recorded decision.
+- Revisit when: goal 0006 integrates Pi Durable, or a supported provider requires a transport that
+  the single-shot host cannot express.
+
+### Q-0005-03 — Is imported source text sent to the provider by default?
+- Status: decided(default taken)
+- Context: the contract requires the learner to inspect, avoid or authorize any private source
+  material sent to the provider, and the owner's source is restricted. The embedded first-party
+  exercises are redistributable; imported pages, questions and evidence are private.
+- Options considered: (A) withhold imported text by default, show the exact payload in `preview`,
+  and require an append-only per-source `tutor consent` event; (B) send the attempted question and
+  passage by default with an opt-out; (C) never send imported source text, even with consent.
+- Default taken: (A). Without a grant the provider receives attempt facts (status, selected/correct
+  labels, elapsed, assistance, attempt number, repeat, skill ids), registered first-party skill
+  lessons and an explicit “question content withheld” marker. A grant adds a bounded passage window
+  and the question fields; `revoke` appends a withholding event. The source title and path are never
+  sent. Reverse by changing the privacy classification in `internal/tutor.Build`; the consent trail
+  remains.
+- Revisit when: the owner records a rights decision for a specific source, or learners need
+  per-excerpt rather than per-source control.
+
+### Q-0005-04 — Which request shape is the one supported BYOK endpoint?
+- Status: decided(default taken)
+- Context: goal 0010 later covers OpenAI, Qwen, Doubao, DeepSeek, Gemini, a custom endpoint and
+  optional capabilities. Goal 0005 needs one honest, testable text path now; provider-specific
+  marketing claims are not acceptance criteria.
+- Options considered: (A) OpenAI-compatible `chat/completions` with a full URL, bearer auth,
+  `max_tokens`, `temperature: 0`, no streaming and no redirects; (B) add the OpenAI SDK or several
+  provider SDKs; (C) build a vendor-capability matrix now.
+- Default taken: (A). `https` is required except on loopback; URLs with userinfo, query or fragment
+  are rejected. One request per call, no retry, no streaming. The host validates the response shape,
+  bounds and usage; unknown provider capabilities are not inferred. Reverse by adding a provider
+  adapter under the same host protocol in goal 0010.
+- Revisit when: goal 0010 starts provider choice, or the owner's authorized endpoint is not
+  chat-completions compatible.

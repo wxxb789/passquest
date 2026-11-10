@@ -5,13 +5,16 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 ## Design and development
 
 - [Core Design](docs/core-design.md) — product purpose, safety, quality and architecture principles.
-- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0004
-  are done; 0005 is next.
+- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0005
+  are done; 0006 is next.
 - [Harness](docs/harness.md) — the single `bun run gate` entry point and what each gate reads.
+- [BYOK text tutor](docs/tutor.md) — one user-supplied text endpoint, advisory coaching, private
+  source consent and credential handling.
 
 **Implementation order:** verified headless practice → private local baseline → scoring tactic
-practice → evidence-driven adaptation and durable AI → Anki integration and on-demand resources →
-functional MyGo desktop → Opus-led high-fidelity UX → packaging.
+practice → evidence-driven adaptation → user-supplied text coaching and durable agent work → Anki
+integration and on-demand resources → functional MyGo desktop → Opus-led high-fidelity UX →
+packaging.
 
 ## Try the practice slice
 
@@ -87,6 +90,28 @@ recommended action between `explain`, `practice_new` and `review`, and the reaso
 Recommendations are recomputed from attempts; nothing derived is stored. Details:
 [`docs/adaptive.md`](docs/adaptive.md). Measured evidence:
 [`docs/evidence/0004-adaptive-next-exercise.md`](docs/evidence/0004-adaptive-next-exercise.md).
+
+## Ask your own text model for coaching
+
+Goal 0005 adds one optional BYOK text endpoint. The model can explain a verified answer, probe a
+misconception or give a tactical micro-lesson for one recorded attempt. Its text is labelled
+advisory and never changes an attempt, grade or answer key. Node is used only by the narrow host that
+makes the HTTPS call; practice, review, `next`, `report`, configuration, preview and history work
+without it.
+
+```bash
+export PASSQUEST_TUTOR_API_KEY=...   # never stored by Pass Quest
+go run ./cmd/passquest tutor config --endpoint https://api.example.com/v1/chat/completions --model MODEL
+go run ./cmd/passquest tutor preview --attempt 1
+go run ./cmd/passquest tutor ask --attempt 1
+go run ./cmd/passquest tutor history
+```
+
+Imported private source text is withheld from the provider until the learner inspects the preview
+and records `tutor consent SOURCE --reviewer NAME`; first-party exercises need no consent.
+`revoke` appends a withholding event. Credentials are read only from `PASSQUEST_TUTOR_API_KEY` and
+are redacted from output and stored call records. Details: [`docs/tutor.md`](docs/tutor.md).
+Measured evidence: [`docs/evidence/0005-bring-your-own-text-tutor.md`](docs/evidence/0005-bring-your-own-text-tutor.md).
 
 ## Run the gates
 

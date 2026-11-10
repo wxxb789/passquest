@@ -16,6 +16,7 @@ const SOURCE_EXTENSIONS: Record<string, true> = {
   ".go": true,
   ".ts": true,
   ".js": true,
+  ".mjs": true,
   ".json": true,
   ".yaml": true,
   ".yml": true,
@@ -86,6 +87,6 @@ export const secrets: Gate = {
     const tracked = await ctx.trackedFiles();
     const problems = await scanTracked(ctx.root, tracked);
     if (problems.length > 0) return fail(problems);
-    return pass(`${tracked.length} tracked files, 0 findings`);
+    return pass(`${tracked.length} files, 0 findings`);
   },
 };
