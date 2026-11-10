@@ -144,6 +144,10 @@ func newSessionID() string {
 	return hex.EncodeToString(b[:])
 }
 
+// defaultDatabasePath is the app-owned relative path resolved when neither
+// --db nor PASSQUEST_DB selects a database.
+var defaultDatabasePath = filepath.Join(".passquest", "passquest.sqlite")
+
 func databasePath(flagValue string, getenv func(string) string) string {
 	if strings.TrimSpace(flagValue) != "" {
 		return flagValue
@@ -151,7 +155,7 @@ func databasePath(flagValue string, getenv func(string) string) string {
 	if v := strings.TrimSpace(getenv("PASSQUEST_DB")); v != "" {
 		return v
 	}
-	return filepath.Join(".passquest", "passquest.sqlite")
+	return defaultDatabasePath
 }
 
 // openDatabase opens the resolved database path. The app-owned default state

@@ -313,8 +313,9 @@ func TestNextSendsUnGuidedScoringToTacticWalkthrough(t *testing.T) {
 	if scoring.Inference.State != "insufficient" || scoring.Inference.Action != "explain" {
 		t.Fatalf("scoring inference = %+v", scoring.Inference)
 	}
-	if doc.Recommendation == nil || doc.Recommendation.Command != "passquest tactic practice not-except-polarity --stage guided" {
-		t.Fatalf("recommendation = %+v", doc.Recommendation)
+	wantCommand := "passquest tactic practice not-except-polarity --stage guided --db " + quoteCommandArgument(db)
+	if doc.Recommendation == nil || doc.Recommendation.Command != wantCommand {
+		t.Fatalf("recommendation = %+v, want command %q", doc.Recommendation, wantCommand)
 	}
 
 	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
@@ -552,8 +553,9 @@ func TestNextPassageExposureAndHints(t *testing.T) {
 	if scoring.Inference.State != "familiarity_only" || scoring.Inference.Action != "practice_new" {
 		t.Fatalf("scoring inference = %+v", scoring.Inference)
 	}
-	if doc.Recommendation == nil || doc.Recommendation.Skill.ID != "not-except-polarity" || doc.Recommendation.Command != "passquest skill practice not-except-polarity" {
-		t.Fatalf("recommendation = %+v", doc.Recommendation)
+	wantCommand := "passquest skill practice not-except-polarity --db " + quoteCommandArgument(db)
+	if doc.Recommendation == nil || doc.Recommendation.Skill.ID != "not-except-polarity" || doc.Recommendation.Command != wantCommand {
+		t.Fatalf("recommendation = %+v, want command %q", doc.Recommendation, wantCommand)
 	}
 }
 
@@ -582,11 +584,122 @@ func TestNextTimeChangesAction(t *testing.T) {
 	if !strings.Contains(slowVocab.Inference.Reason, "2500 ms") || !strings.Contains(slowVocab.Inference.Reason, "1000 ms") {
 		t.Fatalf("slow reason does not quote elapsed values: %s", slowVocab.Inference.Reason)
 	}
-	if slowDoc.Recommendation == nil || slowDoc.Recommendation.Skill.ID != "vocabulary-in-context" || slowDoc.Recommendation.Action != "review" {
-		t.Fatalf("slow recommendation = %+v", slowDoc.Recommendation)
+	// The slow signal changes the vocabulary skill's action to review, but a
+	// review cannot add evidence. The untouched scoring skill can, so the top
+	// recommendation yields to it rather than staying on vocabulary forever.
+	if slowDoc.Recommendation == nil || slowDoc.Recommendation.Skill.ID != "not-except-polarity" || slowDoc.Recommendation.Action != "explain" {
+		t.Fatalf("slow recommendation = %+v, want the unpracticed scoring explanation", slowDoc.Recommendation)
 	}
-	if !strings.Contains(slowDoc.Recommendation.Command, "--question v2") {
-		t.Fatalf("review command = %q", slowDoc.Recommendation.Command)
+}
+
+func TestNextExhaustedScoringYieldsToLanguage(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
+	mustRun(t, db, clock, "", "skill", "practice", "not-except-polarity", "--answer", "C", "--json")
+
+	doc := decodeNext(t, mustRun(t, db, clock, "", "next", "--json"))
+	scoring := nextSkill(t, doc, "not-except-polarity")
+	if scoring.Evidence.IndependentAttempts != 1 || scoring.Evidence.FreshPassages != 0 {
+		t.Fatalf("exhausted scoring evidence = %+v", scoring.Evidence)
+	}
+	if scoring.Inference.State != "insufficient" || scoring.Inference.Action != "review" {
+		t.Fatalf("exhausted scoring inference = %+v", scoring.Inference)
+	}
+	if doc.Recommendation == nil || doc.Recommendation.Skill.ID != "vocabulary-in-context" || doc.Recommendation.Action != "practice_new" {
+		t.Fatalf("recommendation = %+v, want fresh vocabulary practice", doc.Recommendation)
+	}
+	if !strings.Contains(doc.Recommendation.Command, "--db "+quoteCommandArgument(db)) {
+		t.Fatalf("vocabulary command does not preserve the database: %q", doc.Recommendation.Command)
+	}
+}
+
+func TestNextReviewCommandWhenEverySkillIsExhausted(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
+	mustRun(t, db, clock, "", "skill", "practice", "not-except-polarity", "--answer", "C", "--json")
+	for _, answer := range []struct {
+		skill  string
+		option string
+	}{
+		{"vocabulary-in-context", "A"},
+		{"vocabulary-in-context", "B"},
+		{"vocabulary-in-context", "A"},
+		{"sentence-structure", "C"},
+		{"sentence-structure", "D"},
+	} {
+		mustRun(t, db, clock, "", "skill", "practice", answer.skill, "--answer", answer.option, "--json")
+	}
+
+	doc := decodeNext(t, mustRun(t, db, clock, "", "next", "--json"))
+	if doc.Recommendation == nil || doc.Recommendation.Skill.ID != "not-except-polarity" || doc.Recommendation.Action != "review" {
+		t.Fatalf("recommendation = %+v, want the scoring review", doc.Recommendation)
+	}
+	if !strings.Contains(doc.Recommendation.Command, "--question x1") {
+		t.Fatalf("review command does not name a seen question: %q", doc.Recommendation.Command)
+	}
+	if !strings.Contains(doc.Recommendation.Command, "--db "+quoteCommandArgument(db)) {
+		t.Fatalf("review command does not preserve the database: %q", doc.Recommendation.Command)
+	}
+}
+
+func TestNextCommandPreservesSelectedDatabase(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "learner data", "attempts.sqlite")
+	if err := os.MkdirAll(filepath.Dir(db), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	clock := &stepClock{base: goldenBase}
+	doc := decodeNext(t, mustRun(t, db, clock, "", "next", "--json"))
+	if doc.Recommendation == nil {
+		t.Fatal("no recommendation")
+	}
+	want := "--db " + quoteCommandArgument(db)
+	for name, command := range map[string]string{
+		"command":   doc.Recommendation.Command,
+		"follow-up": doc.Recommendation.FollowUpCommand,
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("%s does not preserve the selected database: %q", name, command)
+		}
+	}
+}
+
+func TestNextCommandOmitsDefaultDatabase(t *testing.T) {
+	t.Chdir(t.TempDir())
+	clock := &stepClock{base: goldenBase}
+	doc := decodeNext(t, mustRunNoDB(t, clock, "next", "--json"))
+	if doc.Recommendation == nil {
+		t.Fatal("no recommendation")
+	}
+	for name, command := range map[string]string{
+		"command":   doc.Recommendation.Command,
+		"follow-up": doc.Recommendation.FollowUpCommand,
+	} {
+		if strings.Contains(command, "--db") {
+			t.Fatalf("%s repeats the default database: %q", name, command)
+		}
+	}
+}
+
+func TestQuoteCommandArgument(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "attempts.sqlite", "attempts.sqlite"},
+		{"path with space", "/tmp/learner data/attempts.sqlite", `"/tmp/learner data/attempts.sqlite"`},
+		{"windows path with space", `C:\Users\A Name\attempts.sqlite`, `"C:\Users\A Name\attempts.sqlite"`},
+		{"dollar", "$HOME/attempts.sqlite", `"\$HOME/attempts.sqlite"`},
+		{"double quote", `a"b.sqlite`, `"a\"b.sqlite"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := quoteCommandArgument(tt.in); got != tt.want {
+				t.Fatalf("quoteCommandArgument(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -801,23 +914,38 @@ func TestGoldenSkillAnswered(t *testing.T) {
 }
 
 func TestGoldenNextEmpty(t *testing.T) {
-	db := newDB(t)
+	golden := goldenPath(t, "next-empty.golden.json")
+	t.Chdir(t.TempDir())
+	db := "attempts.sqlite"
 	clock := &stepClock{base: goldenBase}
 	out := mustRun(t, db, clock, "", "next", "--json")
-	checkGolden(t, filepath.Join("testdata", "next-empty.golden.json"), []byte(out))
+	checkGolden(t, golden, []byte(out))
 }
 
 func TestGoldenNextAfterVocab(t *testing.T) {
-	db := newDB(t)
+	golden := goldenPath(t, "next-after-vocab.golden.json")
+	t.Chdir(t.TempDir())
+	db := "attempts.sqlite"
 	clock := &stepClock{base: goldenBase}
 	mustRun(t, db, clock, "", "skill", "practice", "vocabulary-in-context", "--answer", "A", "--json")
 	out := mustRun(t, db, clock, "", "next", "--json")
-	checkGolden(t, filepath.Join("testdata", "next-after-vocab.golden.json"), []byte(out))
+	checkGolden(t, golden, []byte(out))
 }
 
 func TestGoldenNextSlow(t *testing.T) {
-	db := newDB(t)
+	golden := goldenPath(t, "next-slow.golden.json")
+	t.Chdir(t.TempDir())
+	db := "attempts.sqlite"
 	clock := slowVocabClock(t, db)
 	out := mustRunWithNow(t, db, clock, "", "next", "--json")
-	checkGolden(t, filepath.Join("testdata", "next-slow.golden.json"), []byte(out))
+	checkGolden(t, golden, []byte(out))
+}
+
+func goldenPath(t *testing.T, name string) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

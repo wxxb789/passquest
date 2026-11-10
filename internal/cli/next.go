@@ -60,12 +60,25 @@ func runNext(args []string, opt Options) int {
 	}
 
 	result := adaptive.Recommend(input)
-	doc := nextDocOf(result, unclassified, *sourceFlag, catalog.sourceTaggedQuestions)
+	doc := nextDocOf(result, unclassified, *sourceFlag, catalog.sourceTaggedQuestions, nextDatabaseArgument(*dbFlag, opt))
 	if *jsonFlag {
 		return writeJSON(opt, doc)
 	}
 	writeNext(opt.Stdout, doc, st.Path())
 	return 0
+}
+
+// nextDatabaseArgument is the database selection repeated in generated
+// commands that open learner history. It is empty for the app-owned default
+// path, which a copied command resolves the same way, and non-empty for any
+// other path chosen with --db or PASSQUEST_DB so the command does not silently
+// fall back to the default store.
+func nextDatabaseArgument(flagValue string, opt Options) string {
+	selected := databasePath(flagValue, opt.Getenv)
+	if selected == defaultDatabasePath {
+		return ""
+	}
+	return selected
 }
 
 func nextSkills() []adaptive.Skill {
@@ -229,7 +242,7 @@ func nextRecord(record attempt.Attempt, tagsByKey map[attempt.QuestionKey][]stri
 	return adapted, "content or question is unavailable in the current material"
 }
 
-func nextDocOf(result adaptive.Result, unclassified []unclassifiedAttemptView, sourceScope string, sourceTagged int) nextDoc {
+func nextDocOf(result adaptive.Result, unclassified []unclassifiedAttemptView, sourceScope string, sourceTagged int, dbArg string) nextDoc {
 	doc := nextDoc{
 		SchemaVersion:         ProtocolVersion,
 		State:                 "recommendation",
@@ -250,7 +263,7 @@ func nextDocOf(result adaptive.Result, unclassified []unclassifiedAttemptView, s
 		})
 	}
 	if result.Recommendation != nil {
-		command, followUp := nextCommands(result.Recommendation)
+		command, followUp := nextCommands(result.Recommendation, dbArg)
 		doc.Recommendation = &nextRecommendationView{
 			Action:             string(result.Recommendation.Action),
 			Skill:              skillRefOf(result.Recommendation.Skill),
@@ -264,27 +277,27 @@ func nextDocOf(result adaptive.Result, unclassified []unclassifiedAttemptView, s
 	return doc
 }
 
-func nextCommands(rec *adaptive.Recommendation) (string, string) {
+func nextCommands(rec *adaptive.Recommendation, dbArg string) (string, string) {
 	switch rec.Action {
 	case adaptive.ActionExplain:
 		followUp := ""
 		if rec.FreshMaterial != nil {
-			followUp = skillPracticeCommand(rec.Skill.ID, rec.FreshMaterial, false)
+			followUp = skillPracticeCommand(rec.Skill.ID, rec.FreshMaterial, false, dbArg)
 		} else if rec.ReviewMaterial != nil {
-			followUp = skillPracticeCommand(rec.Skill.ID, rec.ReviewMaterial, true)
+			followUp = skillPracticeCommand(rec.Skill.ID, rec.ReviewMaterial, true, dbArg)
 		}
 		if rec.Skill.Kind == adaptive.KindScoring {
-			return fmt.Sprintf("passquest tactic practice %s --stage guided", rec.Skill.ID), followUp
+			return tacticPracticeCommand(rec.Skill.ID, dbArg), followUp
 		}
 		return fmt.Sprintf("passquest skill show %s", rec.Skill.ID), followUp
 	case adaptive.ActionPracticeNew:
 		if rec.FreshMaterial != nil {
-			return skillPracticeCommand(rec.Skill.ID, rec.FreshMaterial, false), ""
+			return skillPracticeCommand(rec.Skill.ID, rec.FreshMaterial, false, dbArg), ""
 		}
-		return fmt.Sprintf("passquest skill practice %s", rec.Skill.ID), ""
+		return withDatabaseArgument(fmt.Sprintf("passquest skill practice %s", rec.Skill.ID), dbArg), ""
 	case adaptive.ActionReview:
 		if rec.ReviewMaterial != nil {
-			return skillPracticeCommand(rec.Skill.ID, rec.ReviewMaterial, true), ""
+			return skillPracticeCommand(rec.Skill.ID, rec.ReviewMaterial, true, dbArg), ""
 		}
 		return fmt.Sprintf("passquest skill show %s", rec.Skill.ID), ""
 	default:
@@ -292,7 +305,22 @@ func nextCommands(rec *adaptive.Recommendation) (string, string) {
 	}
 }
 
-func skillPracticeCommand(skillID string, material *adaptive.Material, includeQuestion bool) string {
+func tacticPracticeCommand(skillID, dbArg string) string {
+	command := fmt.Sprintf("passquest tactic practice %s --stage guided", skillID)
+	return withDatabaseArgument(command, dbArg)
+}
+
+// withDatabaseArgument appends the selected database to a command that opens
+// learner history. Callers do not use it for read-only lesson commands such as
+// `skill show`, which never open the store.
+func withDatabaseArgument(command, dbArg string) string {
+	if dbArg == "" {
+		return command
+	}
+	return command + " --db " + quoteCommandArgument(dbArg)
+}
+
+func skillPracticeCommand(skillID string, material *adaptive.Material, includeQuestion bool, dbArg string) string {
 	parts := []string{"passquest", "skill", "practice", skillID}
 	if material != nil && material.SourceID != "" {
 		parts = append(parts, "--source", material.SourceID)
@@ -300,7 +328,35 @@ func skillPracticeCommand(skillID string, material *adaptive.Material, includeQu
 	if material != nil && includeQuestion {
 		parts = append(parts, "--question", material.QuestionID)
 	}
+	if dbArg != "" {
+		parts = append(parts, "--db", quoteCommandArgument(dbArg))
+	}
 	return strings.Join(parts, " ")
+}
+
+// quoteCommandArgument quotes one generated shell argument when it contains a
+// character a shell would split or expand. Double quotes are used because both
+// POSIX shells and cmd.exe accept them around a path with spaces; backslashes
+// stay intact so a Windows path remains readable. The command is a convenience
+// for a local copy, not a protocol that Pass Quest executes itself.
+func quoteCommandArgument(value string) string {
+	if commandArgumentIsSafe(value) {
+		return value
+	}
+	replacer := strings.NewReplacer(`"`, `\"`, `$`, `\$`, "`", "\\`")
+	return `"` + replacer.Replace(value) + `"`
+}
+
+func commandArgumentIsSafe(value string) bool {
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_', r == '-', r == '.', r == '/', r == '\\', r == ':', r == '@', r == '+', r == '=', r == ',':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func skillRefOf(candidate adaptive.Skill) skillRefView {

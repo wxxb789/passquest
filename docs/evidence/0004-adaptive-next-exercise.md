@@ -1,8 +1,8 @@
 # 0004 — Choose practice based on learner evidence: evidence
 
-- Tree: working tree on top of `2d0cb4a39fe7a1ab8480febb2125adb1ba92f89f` (the reviewed goal-0004
-  head), branch `feat/0004-adaptive-next-exercise`; the fixes below are uncommitted and the operator
-  owns the commit. The final gate ran on this tree, not on a staged snapshot.
+- Tree: working tree on top of `884332f706620e894df327203bfca9c6c90202a4` (the reviewed goal-0004
+  head), branch `feat/0004-adaptive-next-exercise`; the round-1 review fixes below are uncommitted and
+  the operator owns the commit. The final gate ran on this tree, not on a staged snapshot.
 - Date: 2026-11-10. Host: Linux 7.0.0-1017-azure x64.
 - Toolchain: Go 1.27.3 via mise; Bun 1.4.4; `modernc.org/sqlite` v1.62.0 (pure Go). No OCR engine was
   invoked and no PDF was read in this increment.
@@ -19,12 +19,12 @@ document; the raw protocol is pinned by the golden tests and `adaptive-smoke`.
 | Package / area | Truth it owns |
 |---|---|
 | `internal/skill` | The small registry (`not-except-polarity` scoring, `vocabulary-in-context` and `sentence-structure` language), authored lessons, and six first-party exercise passages. Validation requires at least two distinct passages per skill; vocabulary has three so a supported state can still have a fresh passage. |
-| `internal/adaptive` | Pure evidence classifier and policy. It classifies independent transfer, passage re-exposure, assisted attempts and revisits; infers `no_evidence`/`familiarity_only`/`insufficient`/`weak`/`mixed`/`supported`; selects `explain`, `practice_new` or `review`; states uncertainty. It writes nothing. |
+| `internal/adaptive` | Pure evidence classifier and policy. It classifies independent transfer, passage re-exposure, assisted attempts and revisits; infers `no_evidence`/`familiarity_only`/`insufficient`/`weak`/`mixed`/`supported`; selects `explain`, `practice_new` or `review`; ranks a review after every action that can add evidence; states uncertainty. It writes nothing. |
 | `internal/attempt` | `Skills` snapshot on the graded record; `WithTactic` adds the tactic id to the snapshot without duplicating it. Existing assistance/tactic/repeat fields are unchanged. |
 | `internal/store` | Schema v6 adds a nullable `attempts.skills_json`; `NULL` marks a pre-v6 row, while a recorded array (including `[]`) is authoritative. Migration keeps rows; append-only triggers unchanged; invalid or duplicate skill slugs are rejected. |
 | `internal/source` | Question tags validate against the skill registry (the `tactics` field keeps its name). Review gates unchanged. |
-| `internal/cli` | `skill list/show/practice`, `next`, passage-exposure labels, key-hiding documents, and additive `skills` on attempt JSON. |
-| `harness/` | New `adaptive-smoke` gate (80 assertions) and a 20th self-test case over 13/13 gates. |
+| `internal/cli` | `skill list/show/practice`, `next`, passage-exposure labels, key-hiding documents, additive `skills` on attempt JSON, and generated commands that repeat the selected database. |
+| `harness/` | New `adaptive-smoke` gate (103 assertions) and a 20th self-test case over 13/13 gates. |
 
 The policy distinguishes recorded evidence from inference: the JSON has separate `evidence` and
 `inference` objects, and the human output has `Evidence (recorded attempts)` and `Inference
@@ -34,15 +34,15 @@ The policy distinguishes recorded evidence from inference: the JSON has separate
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1` | exit 0; 9 packages; 283 test runs, 283 passes, 0 skips, 0 failures (`go test -json` count) |
+| `go test ./... -count=1` | exit 0; 9 packages; 295 test runs, 295 passes, 0 skips, 0 failures (`go test -json` count) |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
 | `gofmt -l` (tracked `*.go`) | empty output, exit 0; the gate checks 33 files |
 | `./node_modules/.bin/tsc --noEmit` | exit 0, 0 type errors |
 | `bash scripts/gate.sh` | exit 0; 14 passed, 0 failed, 0 skipped (final output below) |
 
-The final gate output, run on the working tree at `2d0cb4a` plus the review fixes (nothing staged or
-committed):
+The final gate output, run on the working tree at `884332f` plus the round-1 review fixes (nothing
+staged or committed):
 
 ```text
 $ bash scripts/gate.sh
@@ -61,7 +61,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (9 packages, 283 tests, 0 skipped)
+PASS  go test (9 packages, 295 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -85,7 +85,7 @@ PASS  import smoke (35 assertions)
 PASS  tactic smoke (70 assertions)
 
 == adaptive smoke
-PASS  adaptive smoke (80 assertions)
+PASS  adaptive smoke (103 assertions)
 
 == harness self-test
 PASS  harness self-test (20 cases, 13/13 gates)
@@ -111,11 +111,12 @@ The tests that pin this increment's contract clauses:
 | `TestSupportedEvidenceUsesTime` | Two correct observations select `practice_new` when fast, `review` when the latest is at least twice the fastest, and `practice_new` when the latest is faster. |
 | `TestPassageExposureIsNotIndependentTransfer`, `TestAssistedFirstAttemptExposesThePassage` | A second question on a seen passage is a passage re-exposure; an assisted first attempt exposes the passage for later attempts. |
 | `TestRevisitsAreNotIndependentTransfer`, `TestSkipsRecordNoAnswerEvidence` | A repeat is a revisit, not independent correctness; a skip records no answer evidence. |
-| `TestNoFreshPassageSelectsReview`, `TestPriorityOrder`, `TestTiesFollowRegistryOrder` | No fresh passage selects review; weak/familiarity/insufficient evidence outranks no-evidence material; ties follow registry order. |
+| `TestNoFreshPassageReviewYieldsToFreshMaterial`, `TestExhaustedReviewYieldsToFreshMaterial`, `TestReviewSelectedOnlyWhenEverySkillIsExhausted`, `TestPriorityOrder`, `TestTiesFollowRegistryOrder` | An exhausted skill's review yields to fresh material for another skill; review is selected only when every skill is exhausted; weak/familiarity/insufficient evidence outranks no-evidence material; ties follow registry order. |
 | `TestCurrentTagFallbackIsDisclosed`, `TestMultiSkillRecordCountsForEachAndExposesContent`, `TestNoMaterialSkill` | Pre-v6 tags disclose the fallback; one attempt counts for each tagged skill but exposes the passage once; no material produces no recommendation. |
 | `TestSkillPracticeHidesKeyAndSnapshotsSkill`, `TestSkillPracticeSecondPassageAndRepeat`, `TestSkillPracticeSourcePath` | Skill awaiting JSON hides the key; the attempt snapshots the skill; fresh/seen passages are labelled; source review provenance survives. |
 | `TestSkillPracticeScoringRequiresGuidedAttempt`, `TestNextSendsUnGuidedScoringToTacticWalkthrough`, `TestSkillPracticeSkipsGuidedExposure`, `TestSkillPracticeAssistedFreshPreambleIsTruthful`, `TestNextRecordedEmptySnapshotDoesNotRegroupAfterTagEdit` | Scoring skill practice refuses without a guided attempt and records no attempt; `next` sends unguided scoring evidence to the tactic walkthrough and then offers a runnable scoring practice; an already-shown walkthrough is skipped when a fresh alternative exists; assisted-fresh output never claims independent transfer; a recorded empty snapshot survives a later tag edit without being regrouped. |
-| `TestNextNoEvidence`, `TestNextPassageExposureAndHints`, `TestNextTimeChangesAction`, `TestNextRevisitsAndSkips` | `next` separates evidence from inference; hints and same-passage exposure are not independent; time changes the action; revisits and skips are retained. |
+| `TestNextNoEvidence`, `TestNextPassageExposureAndHints`, `TestNextTimeChangesAction`, `TestNextRevisitsAndSkips` | `next` separates evidence from inference; hints and same-passage exposure are not independent; time changes the skill's inferred action to `review` while the recommendation yields to an action that can add evidence; revisits and skips are retained. |
+| `TestNextExhaustedScoringYieldsToLanguage`, `TestNextReviewCommandWhenEverySkillIsExhausted`, `TestNextCommandPreservesSelectedDatabase`, `TestNextCommandOmitsDefaultDatabase`, `TestQuoteCommandArgument` | An exhausted scoring skill yields to fresh language material; review is selected only when every skill is exhausted and its command names a seen question; generated commands preserve a space-containing `--db` path, omit the app-owned default, and quote only when needed. |
 | `TestNextUnclassifiedAttempt`, `TestNextReopenRecalculatesWithoutRewriting` | Untagged attempts are unclassified; reopening recomputes the same JSON and does not rewrite attempt rows. |
 | `TestNextRecordClassification`, `TestNextIncludesImportedSourceWithoutScope` | A known untagged question, unavailable content and an unregistered snapshot are classified apart with a reason; an attempt on an imported source is included by an unscoped `next` without being reported unavailable. |
 | `TestGoldenSkill*`, `TestGoldenNext*` | Raw keys/values of skill list/show/awaiting/answered and `next` empty/after-one/slow. |
@@ -125,7 +126,7 @@ The test count is not the evidence that the product works; the Tier 2 transcript
 
 ## Tier 2 — real CLI transcripts
 
-Binary: `/tmp/passquest-0004-demo/passquest`; all databases are fresh files under that directory.
+Binary: `/tmp/passquest-0004-r1/passquest`; all databases are fresh files under that directory.
 
 ### Empty evidence
 
@@ -135,8 +136,8 @@ state: recommendation
 recommendation: explain — not-except-polarity (scoring)
 state: no_evidence
 reason: "No attempt is recorded for not-except-polarity. The scoring tactic starts with a guided walkthrough, ..."
-command: passquest tactic practice not-except-polarity --stage guided
-follow_up_command: passquest skill practice not-except-polarity
+command: passquest tactic practice not-except-polarity --stage guided --db empty.sqlite
+follow_up_command: passquest skill practice not-except-polarity --db empty.sqlite
 skills:
   not-except-polarity    no_evidence      explain       fresh passages 2
   vocabulary-in-context  no_evidence      practice_new  fresh passages 3
@@ -145,7 +146,8 @@ unclassified attempts: 0
 ```
 
 The scoring skill starts with the explanation because goal 0003 requires a guided walkthrough before
-its independent stage. Language skills start with a fresh measurement.
+its independent stage. Language skills start with a fresh measurement. Both generated commands repeat
+`--db empty.sqlite`; without it a copied command would read and record in the default store.
 
 ### Same passage, hints and a new question
 
@@ -158,7 +160,7 @@ state: familiarity_only
 reason: "2 attempt(s) are recorded for not-except-polarity but none is independent transfer
          (assisted 1, revisits 0, passage re-exposures 1). A fresh passage is selected; help and
          repeat exposure cannot show transfer."
-command: passquest skill practice not-except-polarity
+command: passquest skill practice not-except-polarity --db tactic.sqlite
 evidence:
   attempts 2
   assisted_attempts 1, assisted_correct 1
@@ -175,7 +177,7 @@ This is the key boundary: both goal-0003 attempts are recorded (one assisted, on
 the adaptive view does not call the second question independent transfer because it shares the
 passage. The report still shows the stored assistance values; the policy is stricter, not a rewrite.
 
-### Time changes a supported-skill action
+### Time changes a supported-skill action, then review yields
 
 Two correct vocabulary attempts on fresh passages with real interactive delays:
 
@@ -183,24 +185,28 @@ Two correct vocabulary attempts on fresh passages with real interactive delays:
 $ { sleep 0.15; printf 'A\n'; } | passquest skill practice vocabulary-in-context --db time.sqlite
 $ { sleep 0.9;  printf 'B\n'; } | passquest skill practice vocabulary-in-context --db time.sqlite
 $ passquest next --json --db time.sqlite
-recommendation: review — vocabulary-in-context
-state: supported
+recommendation: explain — not-except-polarity
+state: no_evidence
+command: passquest tactic practice not-except-polarity --stage guided --db time.sqlite
+vocabulary-in-context: supported -> review
 reason: "All 2 answered independent transfer(s) for vocabulary-in-context are correct, but the latest
-         correct independent answer took 897 ms against your fastest 134 ms (at least twice as slow).
+         correct independent answer took 897 ms against your fastest 133 ms (at least twice as slow).
          A seen question is selected for review; a repeat is not independent transfer."
-command: passquest skill practice vocabulary-in-context --question v2
 evidence:
   independent_attempts 2, independent_correct 2
-  fastest_independent_ms 134
+  fastest_independent_ms 133
   latest_independent_ms 897
   fresh_passages 1
 uncertainty:
   - "Elapsed time is local prompt-to-answer time, not an exam time limit."
 ```
 
-With the same two correct attempts and no slow flag, the action is `practice_new` (pinned by
-`TestSupportedEvidenceUsesTime` and the `adaptive-smoke` two-correct stage). The time rule only
-compares the learner with their own fastest correct answer for the same skill.
+With the same two correct attempts and no slow flag, the vocabulary action is `practice_new` (pinned
+by `TestSupportedEvidenceUsesTime` and the `adaptive-smoke` two-correct stage). The time rule only
+compares the learner with their own fastest correct answer for the same skill. The top recommendation
+is the untouched scoring explanation because a review cannot add evidence: the vocabulary review and
+its time reason stay visible in the skill list, but fresh material that can add an observation is
+preferred. `TestNextTimeChangesAction` pins that split.
 
 ### Revisits are retained, not transfer
 
@@ -212,8 +218,9 @@ $ passquest skill practice vocabulary-in-context --question v1 --answer A --db r
 attempt: {id: 4, question_id: v1, attempt_number: 2, repeat: true, assistance: independent,
           skills: [vocabulary-in-context]}
 $ passquest next --json --db revisit.sqlite
-recommendation: review — vocabulary-in-context
-state: supported
+recommendation: explain — not-except-polarity
+state: no_evidence
+vocabulary-in-context: supported -> review
 evidence: attempts 4, independent_attempts 3, independent_correct 3, revisits 1,
           distinct_passages 3, questions_seen 3, fresh_passages 0
 reason: "All 3 answered independent transfer(s) ... are correct, but no fresh passage remains. A seen
@@ -221,7 +228,9 @@ reason: "All 3 answered independent transfer(s) ... are correct, but no fresh pa
 ```
 
 The report still has 4 rows; the fourth is a repeat and does not become a fourth independent
-observation.
+observation. The exhausted vocabulary review yields to the untouched scoring explanation for the same
+reason as the time example; `TestNextReviewCommandWhenEverySkillIsExhausted` shows review selected
+once every skill is exhausted.
 
 ### Repeated errors select an explanation, not a cause claim
 
@@ -236,7 +245,7 @@ reason: "All 2 answered independent transfer(s) for sentence-structure are incor
          the skill, vocabulary, time or a misread stem."
 causal_diagnosis: unresolved
 command: passquest skill show sentence-structure
-follow_up_command: passquest skill practice sentence-structure --question s2
+follow_up_command: passquest skill practice sentence-structure --question s2 --db weak.sqlite
 ```
 
 The second wrong answer repeated the gap; it did not prove a misconception. The uncertainty list says
@@ -268,6 +277,7 @@ recommendation: practice_new — not-except-polarity
 state: insufficient
 reason: "Only 1 answered independent transfer observation(s) exist ... A single observation cannot
          distinguish a skill pattern from luck; a fresh passage is selected."
+command: passquest skill practice not-except-polarity --db source.sqlite
 scoring evidence: attempts 2, assisted_attempts 1, assisted_correct 1, guided_attempts 1,
                   independent_attempts 1, independent_correct 1,
                   distinct_passages 2, fresh_passages 1
@@ -285,7 +295,8 @@ The review is a workflow demonstration by the agent, not an owner verification.
 $ passquest practice --question q1 --answer B --json --db unclassified.sqlite
 $ passquest next --json --db unclassified.sqlite
 unclassified_attempts:
-  [{id: 1, content_id: sample-0001, question_id: q1, reason: "question has no registered skill tag"}]
+  [{id: 1, content_id: "sample-0001", question_id: "q1",
+    reason: "question had no registered skill tag when the attempt was recorded"}]
 scoring evidence: attempts 0
 ```
 
@@ -339,7 +350,7 @@ committed or pushed. The evidence and report state that the operator owns the co
 
 | "Done when" clause | Evidence |
 |---|---|
-| Independently recorded attempts, time, hints and revisits change the recommendation, and the reason is inspectable. | Assisted-only tactic evidence selects `practice_new` and says 1 assisted, 0 independent; two correct fresh vocabulary attempts select `supported`; 134 ms vs 897 ms changes the action to `review` and the reason quotes both values; a revisit adds `revisits=1` but independent correctness stays 3; two wrong sentence attempts select `explain`. `next --json` exposes `evidence`, `inference`, `reason`, `uncertainty` and the exact command. |
+| Independently recorded attempts, time, hints and revisits change the recommendation, and the reason is inspectable. | Assisted-only tactic evidence selects `practice_new` and says 1 assisted, 0 independent; two correct fresh vocabulary attempts select `supported`; 133 ms vs 897 ms changes the vocabulary action to `review` and the reason quotes both values, while the top recommendation yields to fresh scoring material because a review cannot add evidence; a revisit adds `revisits=1` but independent correctness stays 3; two wrong sentence attempts select `explain`. `next --json` exposes `evidence`, `inference`, `reason`, `uncertainty` and the exact command, including the selected database. |
 | Same question or passage exposure does not masquerade as independent transfer; repeat exposure and uncertain causal diagnosis are retained. | Goal-0003 `t1`/`t2` on one passage: 1 assisted, 0 independent, 1 passage re-exposure, `familiarity_only`; the report still has both stored attempts. `revisits` and `passage_repeats` are separate fields. A repeated wrong answer yields `causal_diagnosis: unresolved` and the reason says the wrong option does not identify the cause. |
 | The user can see what evidence supports a gap, what is uncertain, and why an explanation, new question or review was selected. | Human `next` prints `Evidence (recorded attempts)` and `Inference (recomputed from evidence)`; JSON has per-skill `evidence` counts/attempt ids and `inference.state/action/reason/causal_diagnosis/uncertainty`; the selected recommendation repeats its reason and follow-up command. |
 | Reopening keeps historical evidence intact and recalculates recommendations without rewriting attempts. | Schema v6 snapshot migration test (a v5 row has no snapshot; a new untagged row has a recorded empty one); a recorded empty snapshot is not regrouped by a later tag edit; `next` is read-only; two separate `next` processes produced byte-identical JSON (`cmp` exit 0); `report` after the reopen still shows 4 attempts with ids 1–4; `mapped_from_current_tags` records the pre-v6 fallback. |
@@ -348,7 +359,7 @@ committed or pushed. The evidence and report state that the operator owns the co
 ## Harness growth
 
 Goal 0004 adds a new CLI protocol and an evidence dimension, so it adds
-`harness/gates/adaptive-smoke.ts` (80 assertions) and a self-test input that makes it fail when the CLI
+`harness/gates/adaptive-smoke.ts` (103 assertions) and a self-test input that makes it fail when the CLI
 prints `{}` instead of the skill/next protocol. The tick comes from the real CLI, the real database and
 the real report; the gate does not re-implement scoring or the policy. The self-test now reports 20
 cases over 13/13 gates. `harness.md` lists the new gate and the updated counts.
@@ -374,13 +385,17 @@ cases over 13/13 gates. `harness.md` lists the new gate and the updated counts.
   cannot distinguish its migrated pre-v6 rows after the column becomes nullable. No released v6
   database existed because goal 0004 was uncommitted; a fresh v5→v6 migration is correct.
 - The time rule is relative to the learner's own fastest correct answer for the same skill. The demo
-  used interactive sleeps (134 ms and 897 ms); it is not an exam clock and says so.
+  used interactive sleeps (133 ms and 897 ms); it is not an exam clock and says so.
+- A review is selected only when every skill with material is also on review. With the three embedded
+  skills, a slow vocabulary review can remain unselected while the scoring skill still has an
+  evidence-adding action; the skill list keeps the vocabulary `review` and its reason visible. This is
+  the trade that prevents an exhausted skill from blocking an unpracticed one forever.
 - `next` loads embedded material plus every imported source by default, which reads all source pages
   to build the catalog. It is a local read-only pass; no page text is printed.
 - The source demonstration reviewed a first-party fixture page under the agent label `demo-operator`.
   The private CRSC baseline was not read or imported; no claim is made about its pages.
 - Windows has no POSIX mode, so the database-mode assertion remains skipped there. The adaptive smoke
   is platform-neutral apart from the binary name.
-- The fixes are uncommitted on top of `2d0cb4a` for operator verification. The final gate ran on
+- The fixes are uncommitted on top of `884332f` for operator verification. The final gate ran on
   that working tree; a commit would let CI reproduce the same tracked-file scan from a clean
   checkout.

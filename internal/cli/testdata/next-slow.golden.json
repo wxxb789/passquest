@@ -3,19 +3,17 @@
   "state": "recommendation",
   "source_tagged_questions": 0,
   "recommendation": {
-    "action": "review",
+    "action": "explain",
     "skill": {
-      "id": "vocabulary-in-context",
-      "kind": "language",
-      "title": "Vocabulary in context"
+      "id": "not-except-polarity",
+      "kind": "scoring",
+      "title": "NOT/EXCEPT polarity"
     },
-    "state": "supported",
-    "reason": "All 2 answered independent transfer(s) for vocabulary-in-context are correct, but the latest correct independent answer took 2500 ms against your fastest 1000 ms (at least twice as slow). A seen question is selected for review; a repeat is not independent transfer.",
-    "command": "passquest skill practice vocabulary-in-context --question v2",
-    "evidence_attempt_ids": [
-      1,
-      2
-    ]
+    "state": "no_evidence",
+    "reason": "No attempt is recorded for not-except-polarity. The scoring tactic starts with a guided walkthrough, so the explanation is selected before independent evidence; the guided attempt is recorded as assisted.",
+    "command": "passquest tactic practice not-except-polarity --stage guided --db attempts.sqlite",
+    "follow_up_command": "passquest skill practice not-except-polarity --db attempts.sqlite",
+    "evidence_attempt_ids": []
   },
   "skills": [
     {

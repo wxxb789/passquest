@@ -309,16 +309,29 @@ func Recommend(input Input) Result {
 		result.Skills = append(result.Skills, skillResult)
 	}
 
+	// A review repeats seen material, so it cannot add independent transfer
+	// evidence or change the skill's state. It is selected only when every
+	// skill with material is also on review; otherwise any action that can add
+	// evidence is preferred. Without this rule an exhausted skill whose
+	// under-sampled state needs another observation would outrank fresh
+	// material for an unpracticed skill forever. Among candidates of the same
+	// class the state priority above decides, and ties follow registry order.
 	var best *SkillResult
 	bestRank := 0
+	bestReview := false
 	for i := range result.Skills {
 		candidate := &result.Skills[i]
 		if candidate.Inference.State == StateNoMaterial {
 			continue
 		}
-		if best == nil || candidate.priority < bestRank {
+		review := candidate.Inference.Action == ActionReview
+		better := best == nil ||
+			(bestReview && !review) ||
+			(bestReview == review && candidate.priority < bestRank)
+		if better {
 			best = candidate
 			bestRank = candidate.priority
+			bestReview = review
 		}
 	}
 	if best != nil {

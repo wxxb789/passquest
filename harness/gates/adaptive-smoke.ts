@@ -98,9 +98,50 @@ export const adaptiveSmoke: Gate = {
       const afterThreeVocab = skillEntry(afterThree, "vocabulary-in-context");
       check(numberField(field(afterThreeVocab, "evidence"), "independent_attempts") === 3, "next did not count three independent attempts");
       check(numberField(field(afterThreeVocab, "evidence"), "fresh_passages") === 0, "next fresh passage count after three attempts");
-      check(stringField(field(field(afterThree, "recommendation"), "skill"), "id") === "vocabulary-in-context", "next recommendation after three attempts");
-      check(stringField(field(afterThree, "recommendation"), "action") === "review", "next did not select review without a fresh passage");
-      check((stringField(field(afterThree, "recommendation"), "command") ?? "").includes("--question"), "review command does not name a seen question");
+      check(stringField(field(afterThreeVocab, "inference"), "action") === "review", "exhausted vocabulary inference is not review");
+      check(stringField(field(field(afterThree, "recommendation"), "skill"), "id") === "not-except-polarity", "exhausted vocabulary review blocks the untouched scoring skill");
+      check(stringField(field(afterThree, "recommendation"), "action") === "explain", "next did not select the untouched scoring explanation over review");
+      check((stringField(field(afterThree, "recommendation"), "command") ?? "").includes("--db"), "untouched scoring command omits the selected database");
+
+      const exhaustedDB = path.join(temp, "exhausted.sqlite");
+      const exhaustedAwaiting = await callDB(["tactic", "practice", "not-except-polarity", "--json"], exhaustedDB);
+      check(exhaustedAwaiting.code === 0, `exhausted guided awaiting exit = ${exhaustedAwaiting.code}`);
+      const exhaustedAnswer = await callDB(["tactic", "practice", "not-except-polarity", "--json", "--answer", "D"], exhaustedDB);
+      check(exhaustedAnswer.code === 0, `exhausted guided answer exit = ${exhaustedAnswer.code}`);
+      const exhaustedPractice = await callDB(["skill", "practice", "not-except-polarity", "--json", "--answer", "C"], exhaustedDB);
+      check(exhaustedPractice.code === 0, `exhausted independent practice exit = ${exhaustedPractice.code}`);
+      const exhaustedNext = parse((await callDB(["next", "--json"], exhaustedDB)).stdout);
+      const exhaustedScoring = skillEntry(exhaustedNext, "not-except-polarity");
+      check(numberField(field(exhaustedScoring, "evidence"), "independent_attempts") === 1, "exhausted scoring independent attempts");
+      check(numberField(field(exhaustedScoring, "evidence"), "fresh_passages") === 0, "exhausted scoring fresh passages");
+      check(stringField(field(exhaustedScoring, "inference"), "state") === "insufficient", "exhausted scoring state");
+      check(stringField(field(exhaustedScoring, "inference"), "action") === "review", "exhausted scoring action");
+      check(stringField(field(field(exhaustedNext, "recommendation"), "skill"), "id") === "vocabulary-in-context", "exhausted scoring blocks fresh language material");
+      check(stringField(field(exhaustedNext, "recommendation"), "action") === "practice_new", "exhausted scoring recommendation action");
+      const exhaustedCommand = stringField(field(exhaustedNext, "recommendation"), "command") ?? "";
+      check(exhaustedCommand.includes("--db"), "exhausted recommendation omits --db");
+      check(exhaustedCommand.includes(exhaustedDB), "exhausted recommendation does not name the selected database");
+
+      const reviewDB = path.join(temp, "review.sqlite");
+      const reviewGuided = await callDB(["tactic", "practice", "not-except-polarity", "--json"], reviewDB);
+      check(reviewGuided.code === 0, `review guided awaiting exit = ${reviewGuided.code}`);
+      await callDB(["tactic", "practice", "not-except-polarity", "--json", "--answer", "D"], reviewDB);
+      await callDB(["skill", "practice", "not-except-polarity", "--json", "--answer", "C"], reviewDB);
+      for (const [skillId, answer] of [
+        ["vocabulary-in-context", "A"],
+        ["vocabulary-in-context", "B"],
+        ["vocabulary-in-context", "A"],
+        ["sentence-structure", "C"],
+        ["sentence-structure", "D"],
+      ]) {
+        const attempt = await callDB(["skill", "practice", skillId, "--json", "--answer", answer], reviewDB);
+        check(attempt.code === 0, `review seed ${skillId} exit = ${attempt.code}`);
+      }
+      const reviewNext = parse((await callDB(["next", "--json"], reviewDB)).stdout);
+      check(stringField(field(reviewNext, "recommendation"), "action") === "review", "exhausted registry does not select review");
+      const reviewCommand = stringField(field(reviewNext, "recommendation"), "command") ?? "";
+      check(reviewCommand.includes("--question"), "review command does not name a seen question");
+      check(reviewCommand.includes("--db") && reviewCommand.includes(reviewDB), "review command does not preserve the selected database");
 
       const revisit = await callDB(["skill", "practice", "vocabulary-in-context", "--question", "v1", "--answer", "A", "--json"]);
       if (!check(revisit.code === 0, `skill revisit exit = ${revisit.code}`)) return fail(checks);
@@ -134,7 +175,9 @@ export const adaptiveSmoke: Gate = {
       check(stringField(field(scoring, "inference"), "state") === "familiarity_only", "same-passage tactic state is not familiarity_only");
       check(stringField(field(scoring, "inference"), "action") === "practice_new", "same-passage tactic action is not practice_new");
       check(stringField(field(field(passageNext, "recommendation"), "skill"), "id") === "not-except-polarity", "same-passage recommendation skill");
-      check(stringField(field(passageNext, "recommendation"), "command") === "passquest skill practice not-except-polarity", "same-passage recommendation command");
+      const passageCommand = stringField(field(passageNext, "recommendation"), "command") ?? "";
+      check(passageCommand.startsWith("passquest skill practice not-except-polarity"), "same-passage recommendation command");
+      check(passageCommand.includes("--db") && passageCommand.includes(passageDB), "same-passage recommendation does not preserve the database");
 
       const weakDB = path.join(temp, "weak.sqlite");
       await callDB(["skill", "practice", "sentence-structure", "--json", "--answer", "A"], weakDB);
@@ -149,7 +192,9 @@ export const adaptiveSmoke: Gate = {
       check(stringField(field(field(weak, "recommendation"), "skill"), "id") === "sentence-structure", "weak recommendation skill");
       check(stringField(field(weak, "recommendation"), "action") === "explain", "weak recommendation action");
       check(stringField(field(weak, "recommendation"), "command") === "passquest skill show sentence-structure", "weak recommendation command");
-      check(stringField(field(weak, "recommendation"), "follow_up_command") === "passquest skill practice sentence-structure --question s2", "weak recommendation follow-up command");
+      const weakFollowUp = stringField(field(weak, "recommendation"), "follow_up_command") ?? "";
+      check(weakFollowUp.startsWith("passquest skill practice sentence-structure --question s2"), "weak recommendation follow-up command");
+      check(weakFollowUp.includes("--db") && weakFollowUp.includes(weakDB), "weak recommendation follow-up does not preserve the database");
 
       const firstNextRun = await callDB(["next", "--json"]);
       check(firstNextRun.code === 0, `reopened next exit = ${firstNextRun.code}`);

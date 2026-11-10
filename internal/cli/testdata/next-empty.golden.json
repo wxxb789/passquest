@@ -11,8 +11,8 @@
     },
     "state": "no_evidence",
     "reason": "No attempt is recorded for not-except-polarity. The scoring tactic starts with a guided walkthrough, so the explanation is selected before independent evidence; the guided attempt is recorded as assisted.",
-    "command": "passquest tactic practice not-except-polarity --stage guided",
-    "follow_up_command": "passquest skill practice not-except-polarity",
+    "command": "passquest tactic practice not-except-polarity --stage guided --db attempts.sqlite",
+    "follow_up_command": "passquest skill practice not-except-polarity --db attempts.sqlite",
     "evidence_attempt_ids": []
   },
   "skills": [

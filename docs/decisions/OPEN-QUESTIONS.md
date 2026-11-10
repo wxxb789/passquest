@@ -278,3 +278,23 @@ Entry format:
   `internal/cli/skill.go`; stored attempts are unaffected.
 - Revisit when: the owner wants a separate unassisted scoring surface that does not feed adaptive
   transfer evidence, or goal 0009 defines a held-out assessment with different help rules.
+
+### Q-0004-06 — Does an exhausted review always yield to another skill's evidence-adding action?
+- Status: decided(default taken)
+- Context: round-1 review found that with only embedded material the scoring skill reaches
+  `insufficient`, has no fresh passage, and selects `review` at priority 2 forever. A review cannot
+  add an independent observation, so the untouched language skills at priority 5 were never
+  recommended. The same logic applies to any review-only skill, including a `supported` slow review.
+- Options considered: (A) every `review` action ranks after every action that can add independent
+  evidence, and reviews compete only when every material-bearing skill is on review; (B) only
+  under-sampled reviews (`familiarity_only`, `insufficient`) yield, preserving the slow-time review
+  above `no_evidence`; (C) change the review action to `explain` when no fresh passage remains.
+- Default taken: (A). `internal/adaptive.Recommend` selects a non-review candidate before a review
+  candidate; among reviews the existing state priority and registry order still decide. This removes
+  the permanent stall. The disclosed trade is that a slow `supported` review changes the skill's
+  inferred action and reason but does not become the top recommendation while another skill has an
+  action that can add evidence; the skill list still shows it. Reverse by changing the candidate
+  comparison in `Recommend`; stored attempts and the per-skill inference are unaffected.
+- Revisit when: goal 0009 defines a delayed or held-out assessment whose consolidation signal should
+  outrank fresh material, or real learner evidence shows the top recommendation should prefer a
+  review over an unpracticed skill.

@@ -363,7 +363,7 @@ func TestSkipAfterAnswersKeepsAnsweredEvidence(t *testing.T) {
 	}
 }
 
-func TestNoFreshPassageSelectsReview(t *testing.T) {
+func TestNoFreshPassageReviewYieldsToFreshMaterial(t *testing.T) {
 	input := testInput()
 	input.Records = []Record{
 		record(1, "vocab-a", "v1", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "vocabulary-in-context"),
@@ -380,8 +380,52 @@ func TestNoFreshPassageSelectsReview(t *testing.T) {
 		record(2, "vocab-b", "v2", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "vocabulary-in-context"),
 		record(3, "vocab-c", "v3", 1, attempt.AssistanceAssisted, attempt.StatusCorrect, 1000, "vocabulary-in-context"),
 	}
+	// The vocabulary skill is exhausted, but a review cannot add an independent
+	// observation. The untouched scoring skill can, so it is recommended first.
 	result = Recommend(input)
-	requireRecommendation(t, result, "vocabulary-in-context", ActionReview)
+	requireRecommendation(t, result, "not-except-polarity", ActionExplain)
+	vocab := findSkill(t, result, "vocabulary-in-context")
+	if vocab.Inference.State != StateSupported || vocab.Inference.Action != ActionReview {
+		t.Fatalf("exhausted vocabulary inference = %+v", vocab.Inference)
+	}
+}
+
+func TestExhaustedReviewYieldsToFreshMaterial(t *testing.T) {
+	input := testInput()
+	input.Records = []Record{
+		guidedRecord(1, "score-a", "x1", 1, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		record(2, "score-b", "x2", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "not-except-polarity"),
+	}
+	result := Recommend(input)
+	scoring := findSkill(t, result, "not-except-polarity")
+	if scoring.Inference.State != StateInsufficient || scoring.Inference.Action != ActionReview {
+		t.Fatalf("exhausted scoring inference = %+v", scoring.Inference)
+	}
+	if scoring.Evidence.FreshPassages != 0 {
+		t.Fatalf("exhausted scoring fresh passages = %d", scoring.Evidence.FreshPassages)
+	}
+	requireRecommendation(t, result, "vocabulary-in-context", ActionPracticeNew)
+}
+
+func TestReviewSelectedOnlyWhenEverySkillIsExhausted(t *testing.T) {
+	input := testInput()
+	input.Records = []Record{
+		guidedRecord(1, "score-a", "x1", 1, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		record(2, "score-b", "x2", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		record(3, "vocab-a", "v1", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "vocabulary-in-context"),
+		record(4, "vocab-b", "v2", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "vocabulary-in-context"),
+		record(5, "vocab-c", "v3", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "vocabulary-in-context"),
+		record(6, "sent-a", "s1", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "sentence-structure"),
+		record(7, "sent-b", "s2", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "sentence-structure"),
+	}
+	result := Recommend(input)
+	for _, id := range []string{"not-except-polarity", "vocabulary-in-context", "sentence-structure"} {
+		candidate := findSkill(t, result, id)
+		if candidate.Inference.Action != ActionReview {
+			t.Fatalf("%s action = %s, want review", id, candidate.Inference.Action)
+		}
+	}
+	requireRecommendation(t, result, "not-except-polarity", ActionReview)
 	if result.Recommendation.ReviewMaterial == nil {
 		t.Fatal("review has no seen material")
 	}

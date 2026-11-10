@@ -97,12 +97,19 @@ tactic attempt.
 **Slow** means at least two independent correct attempts, the latest independent status is correct,
 and the latest elapsed time is at least twice the learner's fastest correct independent time for that
 skill. It changes only the `supported` action, from `practice_new` to `review`. This is a relative
-pace signal, not an exam clock.
+pace signal, not an exam clock. The top recommendation still prefers an action that can add evidence
+over this review (see below); the vocabulary skill's own inference stays `review` and its reason
+quotes both times.
 
-Recommendation priority is: `weak` / `mixed` with latest incorrect, then `familiarity_only`, then
-`insufficient`, then `mixed` with latest correct, then `supported` slow or without a fresh passage,
-then `no_evidence`, then `supported` fresh. Ties follow registry order, so the output is
-deterministic.
+Recommendation priority among actions that can add evidence is: `weak` / `mixed` with latest
+incorrect, then `familiarity_only`, then `insufficient`, then `mixed` with latest correct, then
+`no_evidence`, then `supported` fresh. A `review` action repeats seen material and cannot change the
+skill's state, so it is ranked after every action that can add evidence; it is selected only when
+every skill with material is also on review. Among review actions the existing state priority still
+decides (`familiarity_only`, `insufficient`, `mixed`, `supported`). This is what moves the learner
+off an exhausted skill: with only embedded material, the scoring skill can run out of fresh passages
+while a language skill is untouched, and review must yield to that first measurement. Ties follow
+registry order, so the output is deterministic.
 
 ## Inspecting the evidence
 
@@ -127,7 +134,10 @@ A recommendation carries an exact follow-up command:
 
 Every `explain` recommendation also carries a `follow_up_command` for the next practice step when
 material exists: `skill practice <id>` after the guided tactic walkthrough, or after the language
-lesson. Source material adds `--source SOURCE` to the command.
+lesson. Source material adds `--source SOURCE` to the command. Any command that opens learner
+history repeats the database selected with `--db` or `PASSQUEST_DB` as a quoted `--db PATH` argument,
+so copying it reads and records in the same store. The app-owned default path is omitted because the
+command resolves it the same way; `skill show` never opens the store and never carries `--db`.
 
 ## Question tags
 

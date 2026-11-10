@@ -11,7 +11,7 @@
     },
     "state": "insufficient",
     "reason": "Only 1 answered independent transfer observation(s) exist for vocabulary-in-context (1 correct, 0 incorrect). A single observation cannot distinguish a skill pattern from luck; a fresh passage is selected.",
-    "command": "passquest skill practice vocabulary-in-context",
+    "command": "passquest skill practice vocabulary-in-context --db attempts.sqlite",
     "evidence_attempt_ids": [
       1
     ]
