@@ -306,6 +306,26 @@ func TestExportBytesAndAtomicWrite(t *testing.T) {
 	if err != nil || string(got) != text {
 		t.Fatalf("export content = %q, %v", got, err)
 	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("export mode = %04o, want 0600", perm)
+		}
+		nested := filepath.Join(t.TempDir(), "private")
+		if _, err := WriteExport(rows, filepath.Join(nested, "notes.tsv")); err != nil {
+			t.Fatalf("WriteExport into a new directory: %v", err)
+		}
+		info, err = os.Stat(nested)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o700 {
+			t.Fatalf("new export directory mode = %04o, want 0700", perm)
+		}
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)

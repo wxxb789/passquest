@@ -13,9 +13,9 @@ import (
 // in model order. Anki maps a header row to the note fields by name.
 const ImportHeader = "Front\tBack\tTactic\tSource"
 
-// ExportOptions are the importer directives. They declare the exact separator,
-// HTML field content, note type, deck and tag so a manual import needs no
-// guessing.
+// exportPrelude holds the importer directives. They declare the exact
+// separator, HTML field content, note type, deck and tag so a manual import
+// needs no guessing.
 const exportPrelude = "#separator:tab\n#html:true\n#notetype:" + ModelName + "\n#deck:" + Deck + "\n#tags:" + Tag + "\n"
 
 // ExportResult describes one written file.

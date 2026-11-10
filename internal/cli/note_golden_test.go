@@ -11,9 +11,7 @@ func goldenNoteDB(t *testing.T) (string, *stepClock, string) {
 	t.Helper()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
-	sourceID := noteSourceFixture(t, db, clock)
-	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
-	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	sourceID := readyNoteSource(t, db, clock)
 	return db, clock, sourceID
 }
 

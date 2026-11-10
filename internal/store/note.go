@@ -272,7 +272,6 @@ type AnkiAttempt struct {
 	AnkiState      string
 	PushedRevision int
 	Drain          bool
-	OutboxStatus   string
 }
 
 // NoteRefinement is one recorded provider refinement.
@@ -574,13 +573,11 @@ func (s *Store) Notes() ([]Note, error) {
 	defer rows.Close()
 	var out []Note
 	for rows.Next() {
-		note, found, err := scanNote(rows)
+		note, _, err := scanNote(rows)
 		if err != nil {
 			return nil, fmt.Errorf("store: scan note: %w", err)
 		}
-		if found {
-			out = append(out, note)
-		}
+		out = append(out, note)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: iterate notes: %w", err)
@@ -729,9 +726,6 @@ func (s *Store) RecordAnkiAttempt(a AnkiAttempt) error {
 	if a.NoteID == "" || a.Revision < 1 || a.At.IsZero() {
 		return errors.New("store: anki attempt requires note, revision and timestamp")
 	}
-	if a.OutboxStatus != "" && a.OutboxStatus != "pending" {
-		return fmt.Errorf("store: outbox status %q is invalid", a.OutboxStatus)
-	}
 	stamp := a.At.UTC().Format(time.RFC3339Nano)
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -763,13 +757,9 @@ func (s *Store) RecordAnkiAttempt(a AnkiAttempt) error {
 			return fmt.Errorf("store: drain note outbox: %w", err)
 		}
 	} else {
-		status := a.OutboxStatus
-		if status == "" {
-			status = "pending"
-		}
-		if _, err := tx.Exec(`UPDATE note_outbox SET status = ?, attempts = attempts + 1, last_error = ?,
+		if _, err := tx.Exec(`UPDATE note_outbox SET status = 'pending', attempts = attempts + 1, last_error = ?,
 				anki_note_id = CASE WHEN ? > 0 THEN ? ELSE anki_note_id END
-			WHERE note_id = ?`, status, a.Detail, a.AnkiNoteID, a.AnkiNoteID, a.NoteID); err != nil {
+			WHERE note_id = ?`, a.Detail, a.AnkiNoteID, a.AnkiNoteID, a.NoteID); err != nil {
 			return fmt.Errorf("store: update note outbox: %w", err)
 		}
 	}

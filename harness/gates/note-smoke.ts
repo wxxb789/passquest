@@ -224,8 +224,11 @@ export const noteSmoke: Gate = {
         "authorized preview back",
       );
       check(
-        (stringField(authorizedPreview.doc, "fields"), "Back") !== undefined,
-        "authorized preview has no back",
+        (stringField(field(authorizedPreview.doc, "fields"), "Back") ?? "").includes("pq-example") &&
+          (stringField(field(authorizedPreview.doc, "fields"), "Back") ?? "").includes(
+            "Example: The Westbridge Community Library closes at 4 p.m. on Saturdays.",
+          ),
+        "authorized preview back has no example paragraph",
       );
 
       const firstAccept = await callJSON(["note", "accept"]);

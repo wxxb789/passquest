@@ -57,8 +57,9 @@ turns red.
   returns a bracketed IPv6 address, so the host strips brackets before the loopback check. Only a
   loopback endpoint is accepted on either side.
 - A note export is written to a temporary file in the destination directory and renamed over the
-  target. The file is `0600` and the parent `0700` on POSIX; Windows has no POSIX mode, so only the
-  content and replacement are asserted there.
+  target. The file is `0600` on POSIX; a parent directory the export creates is `0700`, while an
+  existing directory keeps its mode. Windows has no POSIX mode, so only the content and replacement
+  are asserted there.
 
 ## Shell output
 

@@ -33,16 +33,8 @@ func runNoteExport(args []string, opt Options) int {
 	if len(notes) == 0 {
 		return usageError(opt, *jsonFlag, "no_notes", "no accepted note is recorded; run passquest note propose and passquest note accept first")
 	}
-	var denied []string
-	for _, n := range notes {
-		if n.Restricted && n.SourceID != "" && !noteConsentOK(st, n.SourceID) {
-			denied = appendUnique(denied, n.SourceID)
-		}
-	}
-	if len(denied) > 0 {
-		return usageError(opt, *jsonFlag, "consent_required",
-			fmt.Sprintf("restricted note text from %s cannot be exported because consent is not recorded; run passquest tutor consent SOURCE --reviewer NAME",
-				strings.Join(denied, ", ")))
+	if message, denied := noteConsentRefusal(st, notes, "exported"); denied {
+		return usageError(opt, *jsonFlag, "consent_required", message)
 	}
 	rows := make([]note.Fields, 0, len(notes))
 	for _, n := range notes {
@@ -157,16 +149,12 @@ func runNotePush(args []string, opt Options) int {
 		})
 	}
 
-	var denied []string
-	for _, item := range work {
-		if item.Note.Restricted && item.Note.SourceID != "" && !noteConsentOK(st, item.Note.SourceID) {
-			denied = appendUnique(denied, item.Note.SourceID)
-		}
+	pushNotes := make([]store.Note, 0, len(work))
+	for i := range work {
+		pushNotes = append(pushNotes, work[i].Note)
 	}
-	if len(denied) > 0 {
-		return usageError(opt, *jsonFlag, "consent_required",
-			fmt.Sprintf("restricted note text from %s cannot be pushed because consent is not recorded; run passquest tutor consent SOURCE --reviewer NAME",
-				strings.Join(denied, ", ")))
+	if message, denied := noteConsentRefusal(st, pushNotes, "pushed"); denied {
+		return usageError(opt, *jsonFlag, "consent_required", message)
 	}
 
 	timeoutMS := int64(*timeoutFlag) * 1000
@@ -180,11 +168,6 @@ func runNotePush(args []string, opt Options) int {
 		})
 	}
 	finish := func(exit int) int {
-		doc.Counts.Pushed = 0
-		doc.Counts.AlreadyPresent = 0
-		doc.Counts.Conflicts = 0
-		doc.Counts.Failed = 0
-		doc.Counts.Queued = 0
 		for _, item := range work {
 			if item.State == "" {
 				continue
@@ -400,57 +383,14 @@ func runNotePush(args []string, opt Options) int {
 		var readdIndexes []int
 		for position, ref := range writes {
 			item := &work[ref.index]
-			result := response.Results[position]
-			if result.State == "unreachable" {
-				item.State = "queued"
-				item.Outcome = "unreachable"
-				item.Detail = result.Error
+			if position >= len(response.Results) {
+				item.State = store.AnkiStateFailed
+				item.Outcome = "failed"
+				item.Detail = "AnkiConnect returned fewer results than actions"
 				continue
 			}
-			if result.State != "ok" {
-				message := strings.TrimSpace(result.Error)
-				if message == "" {
-					message = "AnkiConnect returned an error"
-				}
-				switch {
-				case ref.action == "update" && anki.IsNotFoundError(message):
-					readdIndexes = append(readdIndexes, ref.index)
-					item.Detail = "note was missing; re-adding"
-				case anki.IsDuplicateError(message) && item.Note.AnkiPushedRevision == 0 && item.Entry.Revision == 1:
-					item.State = store.AnkiStateAlreadyExists
-					item.Outcome = "duplicate"
-					item.Detail = "already present in Anki"
-					item.Drain = true
-					item.AnkiNoteID = 0
-				case anki.IsDuplicateError(message):
-					item.State = store.AnkiStateConflict
-					item.Outcome = "conflict"
-					item.Detail = "Anki already holds a note with this front; its note id is unknown"
-				default:
-					item.State = store.AnkiStateFailed
-					item.Outcome = "failed"
-					item.Detail = message
-				}
-				continue
-			}
-			switch ref.action {
-			case "update":
-				item.State = store.AnkiStatePushed
-				item.Outcome = "ok"
-				item.AnkiNoteID = item.Note.AnkiNoteID
-				item.Drain = true
-			default:
-				id, err := anki.DecodeInt(result.Result)
-				if err != nil {
-					item.State = store.AnkiStateFailed
-					item.Outcome = "failed"
-					item.Detail = err.Error()
-					continue
-				}
-				item.State = store.AnkiStatePushed
-				item.Outcome = "ok"
-				item.AnkiNoteID = id
-				item.Drain = true
+			if classifyWriteResult(item, response.Results[position], ref.action, false) {
+				readdIndexes = append(readdIndexes, ref.index)
 			}
 		}
 		// A card deleted after the read-back is re-added once; there is no
@@ -469,41 +409,14 @@ func runNotePush(args []string, opt Options) int {
 			}
 			for position, index := range readdRefs {
 				item := &work[index]
-				result := readd.Results[position]
 				item.Action = "readd"
-				if result.State == "unreachable" {
-					item.State = "queued"
-					item.Outcome = "unreachable"
-					item.Detail = result.Error
-					continue
-				}
-				if result.State != "ok" {
-					message := strings.TrimSpace(result.Error)
-					if anki.IsDuplicateError(message) {
-						item.State = store.AnkiStateConflict
-						item.Outcome = "conflict"
-						item.Detail = "Anki already holds a note with this front"
-					} else {
-						item.State = store.AnkiStateFailed
-						item.Outcome = "failed"
-						item.Detail = message
-					}
-					if item.State == store.AnkiStateFailed {
-					}
-					continue
-				}
-				id, err := anki.DecodeInt(result.Result)
-				if err != nil {
+				if position >= len(readd.Results) {
 					item.State = store.AnkiStateFailed
 					item.Outcome = "failed"
-					item.Detail = err.Error()
+					item.Detail = "AnkiConnect returned fewer results than actions"
 					continue
 				}
-				item.State = store.AnkiStatePushed
-				item.Outcome = "ok"
-				item.Detail = "note was missing in Anki; re-added"
-				item.AnkiNoteID = id
-				item.Drain = true
+				classifyWriteResult(item, readd.Results[position], "readd", true)
 			}
 		}
 	}
@@ -527,9 +440,6 @@ func runNotePush(args []string, opt Options) int {
 			outcome = "failed"
 		}
 		state := item.State
-		if state == "queued" {
-			state = store.AnkiStateQueued
-		}
 		attempt := store.AnkiAttempt{
 			NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: action, Outcome: outcome,
 			Detail: item.Detail, At: opt.Now(), AnkiNoteID: item.AnkiNoteID, AnkiState: state,
@@ -545,13 +455,94 @@ func runNotePush(args []string, opt Options) int {
 	return finish(0)
 }
 
+// classifyWriteResult applies one Anki write result to its work item. It
+// returns true when an update found the note missing and the caller should
+// retry that item once with addNote.
+func classifyWriteResult(item *notePushWork, result anki.ActionResult, action string, readded bool) bool {
+	if result.State == "unreachable" {
+		item.State = store.AnkiStateQueued
+		item.Outcome = "unreachable"
+		item.Detail = result.Error
+		return false
+	}
+	if result.State != "ok" {
+		message := strings.TrimSpace(result.Error)
+		if message == "" {
+			message = "AnkiConnect returned an error"
+		}
+		switch {
+		case !readded && action == "update" && anki.IsNotFoundError(message):
+			item.Detail = "note was missing; re-adding"
+			return true
+		case readded && anki.IsDuplicateError(message):
+			item.State = store.AnkiStateConflict
+			item.Outcome = "conflict"
+			item.Detail = "Anki already holds a note with this front"
+		case anki.IsDuplicateError(message) && item.Note.AnkiPushedRevision == 0 && item.Entry.Revision == 1:
+			item.State = store.AnkiStateAlreadyExists
+			item.Outcome = "duplicate"
+			item.Detail = "already present in Anki"
+			item.Drain = true
+			item.AnkiNoteID = 0
+		case anki.IsDuplicateError(message):
+			item.State = store.AnkiStateConflict
+			item.Outcome = "conflict"
+			item.Detail = "Anki already holds a note with this front; its note id is unknown"
+		default:
+			item.State = store.AnkiStateFailed
+			item.Outcome = "failed"
+			item.Detail = message
+		}
+		return false
+	}
+	if action == "update" {
+		item.State = store.AnkiStatePushed
+		item.Outcome = "ok"
+		item.AnkiNoteID = item.Note.AnkiNoteID
+		item.Drain = true
+		return false
+	}
+	id, err := anki.DecodeInt(result.Result)
+	if err != nil {
+		item.State = store.AnkiStateFailed
+		item.Outcome = "failed"
+		item.Detail = err.Error()
+		return false
+	}
+	item.State = store.AnkiStatePushed
+	item.Outcome = "ok"
+	if readded {
+		item.Detail = "note was missing in Anki; re-added"
+	}
+	item.AnkiNoteID = id
+	item.Drain = true
+	return false
+}
+
+// noteConsentRefusal names restricted sources without current consent. Export
+// and push share this policy; verb states what was refused.
+func noteConsentRefusal(st *store.Store, notes []store.Note, verb string) (string, bool) {
+	var denied []string
+	for _, n := range notes {
+		if n.Restricted && n.SourceID != "" && !consentGranted(st, n.SourceID) {
+			denied = appendUnique(denied, n.SourceID)
+		}
+	}
+	if len(denied) == 0 {
+		return "", false
+	}
+	return fmt.Sprintf(
+		"restricted note text from %s cannot be %s because consent is not recorded; run passquest tutor consent SOURCE --reviewer NAME",
+		strings.Join(denied, ", "), verb), true
+}
+
 func noteMarkUnreachable(work []notePushWork, st *store.Store, opt Options, detail string) {
 	for i := range work {
 		item := &work[i]
 		if item.State != "" {
 			continue
 		}
-		item.State = "queued"
+		item.State = store.AnkiStateQueued
 		item.Outcome = "unreachable"
 		item.Detail = detail
 		action := item.Action
@@ -586,6 +577,9 @@ func noteFieldsMatch(info anki.NoteInfo, expected note.Fields) bool {
 }
 
 func noteActionResultInt(resp anki.HostResponse, index int) (int64, error) {
+	if index < 0 || index >= len(resp.Results) {
+		return 0, fmt.Errorf("anki: result %d is missing", index)
+	}
 	if err := noteResultOK(resp, index, resp.Results[index].Action); err != nil {
 		return 0, err
 	}
@@ -593,7 +587,7 @@ func noteActionResultInt(resp anki.HostResponse, index int) (int64, error) {
 }
 
 func noteResultOK(resp anki.HostResponse, index int, action string) error {
-	if index >= len(resp.Results) {
+	if index < 0 || index >= len(resp.Results) {
 		return fmt.Errorf("anki: %s result is missing", action)
 	}
 	result := resp.Results[index]
@@ -631,9 +625,4 @@ func appendUnique(values []string, value string) []string {
 		values = append(values, value)
 	}
 	return values
-}
-
-func noteConsentOK(st *store.Store, sourceID string) bool {
-	event, ok, err := st.TutorConsent(sourceID)
-	return err == nil && ok && event.Granted
 }
