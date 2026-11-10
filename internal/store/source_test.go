@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -341,10 +340,7 @@ func TestQuestionAddReviewEditKeepsAudit(t *testing.T) {
 
 func TestMigrationFromVersionTwoKeepsAttemptsAndAddsSources(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v2.sqlite")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openSQLite(t, path)
 	for _, stmt := range schemaV1 {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("create v1: %v", err)

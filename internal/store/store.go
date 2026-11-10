@@ -114,15 +114,7 @@ func open(path string, privateDir bool) (*Store, error) {
 		}
 	}
 
-	u := &url.URL{Scheme: "file", Path: abs}
-	q := u.Query()
-	q.Add("_pragma", "busy_timeout(5000)")
-	// Serialize write transactions before counting prior attempts; the attempt
-	// number is assigned inside that lock.
-	q.Add("_txlock", "immediate")
-	u.RawQuery = q.Encode()
-
-	db, err := sql.Open("sqlite", u.String())
+	db, err := sql.Open("sqlite", sqliteURI(abs, runtime.GOOS))
 	if err != nil {
 		return nil, fmt.Errorf("store: open: %w", err)
 	}
@@ -142,6 +134,31 @@ func open(path string, privateDir bool) (*Store, error) {
 		return nil, fmt.Errorf("store: protect database file: %w", err)
 	}
 	return &Store{db: db, path: abs}, nil
+}
+
+// sqliteURI builds the DSN for an absolute database path, with the driver
+// options every connection needs. SQLite parses its own URI when the name
+// starts with "file:", so the path component uses forward slashes and a
+// Windows drive path needs a leading slash: "file:///C:/Users/...". A UNC path
+// stays in the path component ("file:////server/share/...") because SQLite
+// rejects every URI authority except an empty one or "localhost". goos selects
+// the Windows spelling; open passes runtime.GOOS.
+func sqliteURI(abs, goos string) string {
+	p := abs
+	if goos == "windows" {
+		p = strings.ReplaceAll(p, `\`, "/")
+		if len(p) >= 2 && p[1] == ':' {
+			p = "/" + p
+		}
+	}
+	u := &url.URL{Scheme: "file", Path: p}
+	q := u.Query()
+	q.Add("_pragma", "busy_timeout(5000)")
+	// Serialize write transactions before counting prior attempts; the attempt
+	// number is assigned inside that lock.
+	q.Add("_txlock", "immediate")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func migrate(db *sql.DB) error {
