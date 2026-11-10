@@ -3,6 +3,7 @@ package tactic
 import (
 	_ "embed"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/wxxb789/passquest/internal/exam"
@@ -11,7 +12,7 @@ import (
 // The first-party exercise is embedded so the CLI needs no external content file
 // and no private source. It is not a live exam item set.
 //
-//go:embed testdata/first-party-not-except.json
+//go:embed content/first-party-not-except.json
 var exerciseJSON []byte
 
 var (
@@ -39,11 +40,8 @@ func Tagged(id string) ([]exam.Question, error) {
 	}
 	var out []exam.Question
 	for _, q := range content.Questions {
-		for _, tag := range q.Tactics {
-			if tag == id {
-				out = append(out, q)
-				break
-			}
+		if slices.Contains(q.Tactics, id) {
+			out = append(out, q)
 		}
 	}
 	return out, nil

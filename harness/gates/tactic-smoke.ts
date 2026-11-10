@@ -3,19 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { runGo } from "../lib/go.ts";
-import { arrayField, exposedKeys, field, numberField, stringField } from "../lib/json.ts";
+import { arrayField, checkKeyHiding, field, numberField, stringField } from "../lib/json.ts";
 import { run } from "../lib/process.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
-
-const FORBIDDEN = ["answer", "correct_label", "correct_text", "evidence", "reasoning", "status", "feedback"];
-
-function checkKeyHiding(check: (condition: boolean, message: string) => boolean, doc: unknown, where: string): void {
-  const exposed = new Set(exposedKeys(doc, FORBIDDEN));
-  for (const key of FORBIDDEN) {
-    check(!exposed.has(key), `${where} exposes ${key}`);
-  }
-}
 
 export const tacticSmoke: Gate = {
   id: "tactic-smoke",
@@ -72,12 +63,13 @@ export const tacticSmoke: Gate = {
       check(guidedQuestion !== "", "guided awaiting has no question id");
       checkKeyHiding(check, guided, "guided awaiting JSON");
 
-      const guidedAnswer = await callDB(["tactic", "practice", lessonID, "--json", "--answer", "A"]);
+      const guidedAnswer = await callDB(["tactic", "practice", lessonID, "--json", "--answer", "D"]);
       if (!check(guidedAnswer.code === 0, `guided answer exit = ${guidedAnswer.code}`)) return fail(checks);
       const guidedAttempt = field(parse(guidedAnswer.stdout), "attempt");
       check(stringField(guidedAttempt, "assistance") === "assisted", "guided attempt assistance is not assisted");
       check(stringField(guidedAttempt, "tactic_id") === lessonID, "guided attempt has no tactic id");
       check(stringField(guidedAttempt, "question_id") === guidedQuestion, "guided attempt question differs from the awaiting question");
+      check(stringField(guidedAttempt, "status") === "correct", `guided attempt status = ${String(stringField(guidedAttempt, "status"))}`);
 
       const independentResult = await callDB(["tactic", "practice", lessonID, "--json"]);
       if (!check(independentResult.code === 0, `independent awaiting exit = ${independentResult.code}`)) return fail(checks);
@@ -89,17 +81,27 @@ export const tacticSmoke: Gate = {
       check(independentQuestion !== "" && independentQuestion !== guidedQuestion, "independent question is not distinct from the guided question");
       checkKeyHiding(check, independent, "independent awaiting JSON");
 
-      const independentAnswer = await callDB(["tactic", "practice", lessonID, "--json", "--answer", "A"]);
+      const independentAnswer = await callDB(["tactic", "practice", lessonID, "--json", "--answer", "C"]);
       if (!check(independentAnswer.code === 0, `independent answer exit = ${independentAnswer.code}`)) return fail(checks);
       const independentAttempt = field(parse(independentAnswer.stdout), "attempt");
       check(stringField(independentAttempt, "assistance") === "independent", "independent attempt assistance is not independent");
       check(stringField(independentAttempt, "question_id") === independentQuestion, "independent attempt question differs from the awaiting question");
+      check(
+        stringField(independentAttempt, "status") === "correct",
+        `independent attempt status = ${String(stringField(independentAttempt, "status"))}`,
+      );
 
       const report = parse((await callDB(["report", "--json"])).stdout);
       const counts = field(report, "counts");
       check(numberField(counts, "attempts") === 2, `report attempts = ${String(numberField(counts, "attempts"))}`);
+      check(numberField(counts, "correct") === 2, `report correct = ${String(numberField(counts, "correct"))}`);
       check(numberField(counts, "assisted_attempts") === 1, `report assisted_attempts = ${String(numberField(counts, "assisted_attempts"))}`);
+      check(numberField(counts, "assisted_correct") === 1, `report assisted_correct = ${String(numberField(counts, "assisted_correct"))}`);
       check(numberField(counts, "independent_attempts") === 1, `report independent_attempts = ${String(numberField(counts, "independent_attempts"))}`);
+      check(
+        numberField(counts, "independent_correct") === 1,
+        `report independent_correct = ${String(numberField(counts, "independent_correct"))}`,
+      );
       const attempts = arrayField(report, "attempts");
       check(stringField(attempts[0], "assistance") === "assisted", "report first attempt is not assisted");
       check(stringField(attempts[1], "assistance") === "independent", "report second attempt is not independent");

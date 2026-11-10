@@ -26,7 +26,7 @@ document; the raw key/value protocol is pinned by the golden tests and `tactic-s
 | `internal/attempt` | `Assistance` (`assisted`/`independent`) and `TacticID` on the immutable attempt; ordinary and pre-v4 records default to independent; `WithTactic` validates the condition. |
 | `internal/store` | Schema v4: `attempts.assistance`, `attempts.tactic_id`, `source_questions.tactics_json`; v0–v3 migration keeps attempts and defaults them to independent; append-only triggers unchanged. |
 | `internal/cli` | `tactic list`, `tactic show`, `tactic practice` with guided/independent gating, source or embedded material, and additive report counts/rows. Key-hiding protocols unchanged. |
-| `harness/` | New `tactic-smoke` gate (50 assertions), shared JSON readers in `harness/lib/json.ts` (used by import-smoke and tactic-smoke), and a 19th self-test case over 12/12 gates. |
+| `harness/` | New `tactic-smoke` gate (55 assertions, including the assisted/independent correctness counters), shared JSON readers and key-hiding check in `harness/lib/json.ts` (used by import-smoke and tactic-smoke), and a 19th self-test case over 12/12 gates. |
 
 The guided walkthrough is shown before a `guided` answer and is stored as `assisted`; the
 `independent` stage has no guidance, must use a question distinct from every guided example for the
@@ -36,7 +36,7 @@ tactic, and must be a first attempt. A third independent run with no eligible qu
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1 -v` | exit 0; 108 top-level tests, 88 subtests, 0 failures, 0 skips |
+| `go test ./... -count=1 -v` | exit 0; 110 top-level tests, 88 subtests, 0 failures, 0 skips |
 | `bash scripts/gate.sh` | exit 0; 13 passed, 0 failed, 0 skipped (details below) |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
@@ -60,7 +60,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (7 packages, 196 tests, 0 skipped)
+PASS  go test (7 packages, 198 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -69,7 +69,7 @@ PASS  go mod tidy
 PASS  docs links (66 checked, 0 broken)
 
 == secrets/sources
-PASS  secrets/sources (283 tracked files, 0 findings)
+PASS  secrets/sources (282 tracked files, 0 findings)
 
 == local-only CLI
 PASS  local-only CLI (7 first-party packages, 0 network imports, 0 confidential markers)
@@ -81,7 +81,7 @@ PASS  baseline integrity (165 pages (22 native, 143 OCR), 0 fixture references)
 PASS  import smoke (35 assertions)
 
 == tactic smoke
-PASS  tactic smoke (50 assertions)
+PASS  tactic smoke (55 assertions)
 
 == harness self-test
 PASS  harness self-test (19 cases, 12/12 gates)
@@ -108,7 +108,8 @@ The tests that pin this increment's contract clauses:
 | `TestQuestionTagsRoundTrip`, `TestMigrationFromVersionThreeDefaultsQuestionTags` | Tags survive add/review/restart and appear in the audit event; a pre-v4 question reads as untagged. |
 | `TestTacticLessonSurfacesWhyWhenAndBoundary` | `tactic list`/`show` expose the lesson and boundary in JSON and human form. |
 | `TestTacticGuidedThenIndependentKeepsAssistanceSeparate` | Guided is assisted and carries guidance; independent is unguided and distinct; report counts and per-question/try rows split assisted from independent; an exhausted independent request exits 2. |
-| `TestTacticIndependentRequiresGuided` | Independent before any guided attempt exits 2 with `guided_required` and records nothing. |
+| `TestTacticIndependentRequiresGuided`, `TestTacticSkipRecordsSkippedAttempt` | Independent before any guided attempt exits 2 with `guided_required` and records nothing; a guided skip satisfies the guided-required gate, records `skipped` with no selected label, and increments the assisted/independent skipped counter. |
+| `TestTacticGuidedRerunUsesFirstExample` | A third guided run returns the first example with attempt number 2, repeat exposure and assisted assistance. |
 | `TestTacticExplicitQuestionRules` | Explicit guided selection; a guided question or an untagged question cannot be the independent question. |
 | `TestTacticHumanOutputShowsHelpAndCondition` | Human output states the guided/independent condition and the recorded attempt condition. |
 | `TestTacticSourcePracticeKeepsProvenance` | Tagged, reviewed source questions are used; the content id, page/answer review provenance, private notice, and assisted/independent split survive into the report. |
@@ -378,7 +379,8 @@ it. The strace run is the runtime proof for this increment.
 ## Harness growth
 
 Goal 0003 adds a new CLI protocol and a new evidence dimension, so it adds
-`harness/gates/tactic-smoke.ts` (50 assertions) and a self-test input that makes it fail when the CLI
+`harness/gates/tactic-smoke.ts` (55 assertions, including the assisted/independent correctness
+counters) and a self-test input that makes it fail when the CLI
 prints `{}` instead of the tactic protocol. The tick comes from the real CLI, the real database and
 the real report; it does not re-implement scoring.
 

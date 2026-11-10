@@ -141,8 +141,8 @@ func IsRegistered(id string) bool {
 	return ok
 }
 
-// ValidateRegistry checks every registered tactic. A build whose authored lesson
-// violates the invariant must not ship.
+// ValidateRegistry checks every registered tactic. ValidateExercise and the test
+// suite are its only callers; no CLI or startup path guards a shipped build.
 func ValidateRegistry() error {
 	var problems []string
 	seen := make(map[string]bool)

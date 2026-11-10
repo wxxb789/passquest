@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { runGo } from "../lib/go.ts";
-import { arrayField, exposedKeys, field, numberField, stringField } from "../lib/json.ts";
+import { arrayField, checkKeyHiding, field, numberField, stringField } from "../lib/json.ts";
 import { run } from "../lib/process.ts";
 import { resolve } from "../lib/repo.ts";
 import { fail, pass, skip } from "../lib/types.ts";
@@ -87,11 +87,7 @@ export const importSmoke: Gate = {
       const review = field(field(awaiting, "question"), "review");
       check(stringField(review, "page_status") === "reviewed", "awaiting page review is not visible");
       check(stringField(review, "question_status") === "reviewed", "awaiting question review is not visible");
-      const forbiddenKeys = ["answer", "correct_label", "correct_text", "evidence", "reasoning", "status", "feedback"];
-      const exposed = new Set(exposedKeys(awaiting, forbiddenKeys));
-      for (const forbidden of forbiddenKeys) {
-        check(!exposed.has(forbidden), `awaiting JSON exposes ${forbidden}`);
-      }
+      checkKeyHiding(check, awaiting, "awaiting JSON");
 
       const answeredResult = await call([
         "practice", "--json", "--source", sourceID, "--question", "q1", "--answer", "B",

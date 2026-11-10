@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/attempt"
@@ -20,8 +21,8 @@ const (
 	stageIndependent = "independent"
 )
 
-// tacticRun is the CLI's view of one tactic attempt. The package-level lesson
-// stays in internal/tactic; this type carries only the current stage.
+// tacticRun is the CLI's view of one tactic attempt: the resolved stage plus
+// the display fields copied from the lesson.
 type tacticRun struct {
 	ID       string
 	Title    string
@@ -270,7 +271,7 @@ func tacticCandidates(st *store.Store, lesson tactic.Tactic, sourceID string) ([
 			continue
 		}
 		for i, question := range content.Questions {
-			if !hasTacticTag(question.Tactics, lesson.ID) {
+			if !slices.Contains(question.Tactics, lesson.ID) {
 				continue
 			}
 			meta, ok := findQuestion(questions, question.ID)
@@ -301,20 +302,20 @@ func exerciseCandidates(lesson tactic.Tactic) ([]tacticCandidate, error) {
 	if err != nil {
 		return nil, err
 	}
-	index := make(map[string]int, len(content.Questions))
-	for i, question := range content.Questions {
-		index[question.ID] = i
-	}
 	tagged, err := tactic.Tagged(lesson.ID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]tacticCandidate, 0, len(tagged))
-	for _, question := range tagged {
+	for _, taggedQuestion := range tagged {
+		question, number, ok := content.Question(taggedQuestion.ID)
+		if !ok {
+			return nil, fmt.Errorf("tagged exercise question %s is not in the exercise", taggedQuestion.ID)
+		}
 		out = append(out, tacticCandidate{
 			Content:  content,
 			Question: question,
-			Number:   index[question.ID],
+			Number:   number,
 		})
 	}
 	if len(out) == 0 {
@@ -394,27 +395,40 @@ func checkIndependent(stage string, candidate tacticCandidate, prior map[attempt
 	return nil
 }
 
-func hasTacticTag(tags []string, id string) bool {
-	for _, tag := range tags {
-		if tag == id {
-			return true
-		}
+func boundaryViewOf(boundary tactic.Boundary) boundaryView {
+	return boundaryView{
+		Folklore:   boundary.Folklore,
+		Example:    boundary.Example,
+		WhyItFails: boundary.WhyItFails,
 	}
-	return false
+}
+
+func guidanceViewOf(principle, whyItWorks, whenItWorks string, steps []string, boundary boundaryView) guidanceView {
+	return guidanceView{
+		Principle:   principle,
+		WhyItWorks:  whyItWorks,
+		WhenItWorks: whenItWorks,
+		Steps:       append([]string(nil), steps...),
+		Boundary:    boundary,
+	}
 }
 
 func guidanceFor(lesson tactic.Tactic) *guidanceView {
-	return &guidanceView{
-		Principle:   lesson.Principle,
-		WhyItWorks:  lesson.WhyItWorks,
-		WhenItWorks: lesson.WhenItWorks,
-		Steps:       append([]string(nil), lesson.Steps...),
-		Boundary: boundaryView{
-			Folklore:   lesson.Boundary.Folklore,
-			Example:    lesson.Boundary.Example,
-			WhyItFails: lesson.Boundary.WhyItFails,
-		},
+	view := guidanceViewOf(lesson.Principle, lesson.WhyItWorks, lesson.WhenItWorks, lesson.Steps, boundaryViewOf(lesson.Boundary))
+	return &view
+}
+
+func writeGuidance(w io.Writer, guidance guidanceView) {
+	fmt.Fprintf(w, "Principle: %s\n", guidance.Principle)
+	fmt.Fprintf(w, "Why it works: %s\n", guidance.WhyItWorks)
+	fmt.Fprintf(w, "When it works: %s\n", guidance.WhenItWorks)
+	fmt.Fprintln(w, "Steps:")
+	for i, step := range guidance.Steps {
+		fmt.Fprintf(w, "  %d. %s\n", i+1, step)
 	}
+	fmt.Fprintf(w, "Boundary — %s\n", guidance.Boundary.Folklore)
+	fmt.Fprintf(w, "  Example: %s\n", guidance.Boundary.Example)
+	fmt.Fprintf(w, "  Why it fails: %s\n", guidance.Boundary.WhyItFails)
 }
 
 func writeTacticPreamble(w io.Writer, run *tacticRun) {
@@ -429,16 +443,7 @@ func writeTacticPreamble(w io.Writer, run *tacticRun) {
 		return
 	}
 	fmt.Fprintln(w, "Help shown: this walkthrough is visible before the answer, so the attempt is recorded as assisted, not independent.")
-	fmt.Fprintf(w, "Principle: %s\n", run.Guidance.Principle)
-	fmt.Fprintf(w, "Why it works: %s\n", run.Guidance.WhyItWorks)
-	fmt.Fprintf(w, "When it works: %s\n", run.Guidance.WhenItWorks)
-	fmt.Fprintln(w, "Steps:")
-	for i, step := range run.Guidance.Steps {
-		fmt.Fprintf(w, "  %d. %s\n", i+1, step)
-	}
-	fmt.Fprintf(w, "Boundary — %s\n", run.Guidance.Boundary.Folklore)
-	fmt.Fprintf(w, "  Example: %s\n", run.Guidance.Boundary.Example)
-	fmt.Fprintf(w, "  Why it fails: %s\n", run.Guidance.Boundary.WhyItFails)
+	writeGuidance(w, *run.Guidance)
 	fmt.Fprintln(w)
 }
 
@@ -446,16 +451,7 @@ func writeLesson(w io.Writer, lesson lessonView) {
 	fmt.Fprintf(w, "Pass Quest — tactic %s\n", lesson.ID)
 	fmt.Fprintf(w, "Title: %s\n", lesson.Title)
 	fmt.Fprintf(w, "Summary: %s\n", lesson.Summary)
-	fmt.Fprintf(w, "Principle: %s\n", lesson.Principle)
-	fmt.Fprintf(w, "Why it works: %s\n", lesson.WhyItWorks)
-	fmt.Fprintf(w, "When it works: %s\n", lesson.WhenItWorks)
-	fmt.Fprintln(w, "Steps:")
-	for i, step := range lesson.Steps {
-		fmt.Fprintf(w, "  %d. %s\n", i+1, step)
-	}
-	fmt.Fprintf(w, "Boundary — %s\n", lesson.Boundary.Folklore)
-	fmt.Fprintf(w, "  Example: %s\n", lesson.Boundary.Example)
-	fmt.Fprintf(w, "  Why it fails: %s\n", lesson.Boundary.WhyItFails)
+	writeGuidance(w, guidanceViewOf(lesson.Principle, lesson.WhyItWorks, lesson.WhenItWorks, lesson.Steps, lesson.Boundary))
 }
 
 func lessonViewOf(lesson tactic.Tactic) lessonView {
@@ -467,11 +463,7 @@ func lessonViewOf(lesson tactic.Tactic) lessonView {
 		WhyItWorks:  lesson.WhyItWorks,
 		WhenItWorks: lesson.WhenItWorks,
 		Steps:       append([]string(nil), lesson.Steps...),
-		Boundary: boundaryView{
-			Folklore:   lesson.Boundary.Folklore,
-			Example:    lesson.Boundary.Example,
-			WhyItFails: lesson.Boundary.WhyItFails,
-		},
+		Boundary:    boundaryViewOf(lesson.Boundary),
 	}
 }
 

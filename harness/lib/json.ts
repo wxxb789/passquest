@@ -43,3 +43,30 @@ export function exposedKeys(value: unknown, forbidden: readonly string[]): strin
   collectKeys(value, keys);
   return forbidden.filter((key) => keys.has(key));
 }
+
+/** Protocol keys that must never appear before an answer is recorded. */
+export const FORBIDDEN_ANSWER_KEYS = [
+  "answer",
+  "correct_label",
+  "correct_text",
+  "evidence",
+  "reasoning",
+  "status",
+  "feedback",
+] as const;
+
+/**
+ * Reports one assertion per forbidden key. Gates share the key list so their
+ * key-hiding checks cannot drift apart.
+ */
+export function checkKeyHiding(
+  check: (condition: boolean, message: string) => boolean,
+  doc: unknown,
+  where: string,
+  forbidden: readonly string[] = FORBIDDEN_ANSWER_KEYS,
+): void {
+  const exposed = exposedKeys(doc, forbidden);
+  for (const key of forbidden) {
+    check(!exposed.includes(key), `${where} exposes ${key}`);
+  }
+}

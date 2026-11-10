@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,6 +43,30 @@ func errorCode(t *testing.T, raw string) string {
 		t.Fatalf("decode error doc: %v\n%s", err, raw)
 	}
 	return doc.Error.Code
+}
+
+// taggedQuestionFile writes the base q1 fixture with a tactic tag into a temp
+// directory, so the tag variant does not need a second copy of the fixture.
+func taggedQuestionFile(t *testing.T, tacticID string) string {
+	t.Helper()
+	raw, err := os.ReadFile(fixtureFile(t, "question-q1.json"))
+	if err != nil {
+		t.Fatalf("read q1 fixture: %v", err)
+	}
+	var question map[string]any
+	if err := json.Unmarshal(raw, &question); err != nil {
+		t.Fatalf("decode q1 fixture: %v", err)
+	}
+	question["tactics"] = []string{tacticID}
+	tagged, err := json.Marshal(question)
+	if err != nil {
+		t.Fatalf("encode tagged q1: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "question-q1-tagged.json")
+	if err := os.WriteFile(path, tagged, 0o600); err != nil {
+		t.Fatalf("write tagged q1: %v", err)
+	}
+	return path
 }
 
 func TestTacticLessonSurfacesWhyWhenAndBoundary(t *testing.T) {
@@ -309,9 +334,8 @@ func TestTacticSourcePracticeKeepsProvenance(t *testing.T) {
 	fixture := fixtureDir(t)
 	imported := decodeImport(t, mustRun(t, db, clock, "", "import", "--path", fixture, "--json"))
 	sourceID := imported.Source.ID
-	for _, file := range []string{"question-q1-tagged.json", "question-q2-tagged.json"} {
-		mustRun(t, db, clock, "", "question", "add", sourceID, "1", "--file", fixtureFile(t, file))
-	}
+	mustRun(t, db, clock, "", "question", "add", sourceID, "1", "--file", taggedQuestionFile(t, "not-except-polarity"))
+	mustRun(t, db, clock, "", "question", "add", sourceID, "1", "--file", fixtureFile(t, "question-q2-tagged.json"))
 	mustRun(t, db, clock, "", "page", "review", sourceID, "1", "--reviewer", "fixture-reviewer")
 	mustRun(t, db, clock, "", "question", "review", sourceID, "q1", "--answer", "B", "--reviewer", "fixture-reviewer")
 	mustRun(t, db, clock, "", "question", "review", sourceID, "q2", "--answer", "C", "--reviewer", "fixture-reviewer")
@@ -398,9 +422,8 @@ func TestTacticSourceRejectsPreviouslyAttemptedIndependentQuestion(t *testing.T)
 	fixture := fixtureDir(t)
 	imported := decodeImport(t, mustRun(t, db, clock, "", "import", "--path", fixture, "--json"))
 	sourceID := imported.Source.ID
-	for _, file := range []string{"question-q1-tagged.json", "question-q2-tagged.json"} {
-		mustRun(t, db, clock, "", "question", "add", sourceID, "1", "--file", fixtureFile(t, file))
-	}
+	mustRun(t, db, clock, "", "question", "add", sourceID, "1", "--file", taggedQuestionFile(t, "not-except-polarity"))
+	mustRun(t, db, clock, "", "question", "add", sourceID, "1", "--file", fixtureFile(t, "question-q2-tagged.json"))
 	mustRun(t, db, clock, "", "page", "review", sourceID, "1", "--reviewer", "fixture-reviewer")
 	mustRun(t, db, clock, "", "question", "review", sourceID, "q1", "--answer", "B", "--reviewer", "fixture-reviewer")
 	mustRun(t, db, clock, "", "question", "review", sourceID, "q2", "--answer", "C", "--reviewer", "fixture-reviewer")
@@ -432,6 +455,72 @@ func TestTacticSourceRejectsPreviouslyAttemptedIndependentQuestion(t *testing.T)
 	}
 	if !strings.Contains(errOut, "no unattempted question") {
 		t.Fatalf("auto independent message = %s", errOut)
+	}
+}
+
+func TestTacticGuidedRerunUsesFirstExample(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--json", "--answer", "D")
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--stage", "guided", "--json", "--answer", "C")
+
+	rerun := decodeAwaiting(t, mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--stage", "guided", "--json"))
+	if rerun.Question.ID != "t1" {
+		t.Fatalf("third guided question = %q, want the first example t1", rerun.Question.ID)
+	}
+	if rerun.Tactic == nil || rerun.Tactic.Stage != "guided" || rerun.Tactic.Assistance != "assisted" {
+		t.Fatalf("third guided tactic = %+v", rerun.Tactic)
+	}
+
+	answered := decodeAnswered(t, mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--stage", "guided", "--json", "--answer", "D"))
+	if answered.Attempt.QuestionID != rerun.Question.ID {
+		t.Fatalf("answered question = %q, awaiting question = %q", answered.Attempt.QuestionID, rerun.Question.ID)
+	}
+	if answered.Attempt.AttemptNumber != 2 || !answered.Attempt.Repeat {
+		t.Fatalf("third guided attempt = %+v, want attempt 2 and repeat", answered.Attempt)
+	}
+	if answered.Attempt.Assistance != "assisted" {
+		t.Fatalf("third guided assistance = %q, want assisted", answered.Attempt.Assistance)
+	}
+}
+
+func TestTacticSkipRecordsSkippedAttempt(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--json")
+	guidedSkip := decodeAnswered(t, mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--json", "--skip"))
+	if guidedSkip.Attempt.Status != "skipped" {
+		t.Fatalf("guided skip status = %q", guidedSkip.Attempt.Status)
+	}
+	if guidedSkip.Attempt.SelectedLabel != nil || guidedSkip.Attempt.SelectedText != nil {
+		t.Fatalf("guided skip selected = %v / %v", guidedSkip.Attempt.SelectedLabel, guidedSkip.Attempt.SelectedText)
+	}
+	if guidedSkip.Attempt.Assistance != "assisted" || guidedSkip.Attempt.TacticID != "not-except-polarity" {
+		t.Fatalf("guided skip attempt = %+v", guidedSkip.Attempt)
+	}
+
+	report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
+	if report.Counts.AssistedAttempts != 1 || report.Counts.AssistedSkipped != 1 {
+		t.Fatalf("guided skip counts = %+v", report.Counts)
+	}
+
+	independent := decodeAwaiting(t, mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--json"))
+	if independent.Tactic == nil || independent.Tactic.Stage != "independent" {
+		t.Fatalf("stage after guided skip = %+v", independent.Tactic)
+	}
+	independentSkip := decodeAnswered(t, mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--json", "--skip"))
+	if independentSkip.Attempt.Status != "skipped" || independentSkip.Attempt.Assistance != "independent" {
+		t.Fatalf("independent skip attempt = %+v", independentSkip.Attempt)
+	}
+	if independentSkip.Attempt.SelectedLabel != nil || independentSkip.Attempt.SelectedText != nil {
+		t.Fatalf("independent skip selected = %v / %v", independentSkip.Attempt.SelectedLabel, independentSkip.Attempt.SelectedText)
+	}
+
+	report = decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
+	if report.Counts.IndependentAttempts != 1 || report.Counts.IndependentSkipped != 1 {
+		t.Fatalf("independent skip counts = %+v", report.Counts)
 	}
 }
 
