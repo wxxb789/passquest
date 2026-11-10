@@ -77,10 +77,17 @@ function literalsOnLine(text: string): string[] {
  * Removes comments without touching string contents: a line beginning with `*` is a
  * pointer assignment, not a doc comment, and a path inside a block comment is prose.
  */
-function stripComments(line: string, state: { inBlock: boolean }): string {
+function stripComments(line: string, state: { inBlock: boolean; inRaw: boolean }): string {
   let out = "";
   let i = 0;
   while (i < line.length) {
+    if (state.inRaw) {
+      const end = line.indexOf("`", i);
+      if (end < 0) return out;
+      state.inRaw = false;
+      i = end + 1;
+      continue;
+    }
     if (state.inBlock) {
       const end = line.indexOf("*/", i);
       if (end < 0) return out;
@@ -89,14 +96,26 @@ function stripComments(line: string, state: { inBlock: boolean }): string {
       continue;
     }
     const ch = line[i];
-    if (ch === '"' || ch === "`") {
+    if (ch === "`") {
+      const end = line.indexOf("`", i + 1);
+      if (end < 0) {
+        // A raw string that continues on the next line: its content is prose, not a path.
+        state.inRaw = true;
+        i = line.length;
+        continue;
+      }
+      out += line.slice(i, end + 1);
+      i = end + 1;
+      continue;
+    }
+    if (ch === '"') {
       let j = i + 1;
       while (j < line.length) {
-        if (ch === '"' && line[j] === "\\") {
+        if (line[j] === "\\") {
           j += 2;
           continue;
         }
-        if (line[j] === ch) {
+        if (line[j] === '"') {
           j += 1;
           break;
         }
@@ -121,7 +140,7 @@ function stripComments(line: string, state: { inBlock: boolean }): string {
 export function scanGoSource(file: string, content: string): Hit[] {
   const hits: Hit[] = [];
   const lines = content.split(/\r?\n/);
-  const state = { inBlock: false };
+  const state = { inBlock: false, inRaw: false };
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
     const code = stripComments(line, state);

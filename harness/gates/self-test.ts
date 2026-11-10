@@ -253,6 +253,23 @@ function brokenCases(): BrokenCase[] {
     },
     {
       gate: portablePaths,
+      label: "comment syntax inside a multiline raw string",
+      files: {
+        "go.mod": GO_MOD,
+        "internal/x/x.go": "package x\n",
+        "internal/x/x_test.go":
+          'package x\n\nimport "testing"\n\nconst example = `\nselect /*\nfrom t\n`\n\nfunc TestAfterRaw(t *testing.T) {\n\topen("/tmp/after-raw.sqlite")\n}\n',
+      },
+      tracked: ["internal/x/x_test.go"],
+      postFail: (failures) => {
+        if (failures.length !== 1 || !failures[0].includes("/tmp/after-raw.sqlite")) {
+          return `portable-paths: a raw string opened a block comment and hid the next path: ${failures.join("; ") || "no failure"}`;
+        }
+        return null;
+      },
+    },
+    {
+      gate: portablePaths,
       label: "raw-string path literals",
       files: {
         "go.mod": GO_MOD,
