@@ -43,8 +43,8 @@
     "assisted_correct": 0,
     "assisted_incorrect": 0,
     "assisted_skipped": 0,
-    "independent_attempts": 4,
-    "independent_correct": 2,
+    "independent_attempts": 3,
+    "independent_correct": 1,
     "independent_incorrect": 1,
     "independent_skipped": 1
   },
@@ -57,7 +57,7 @@
       "latest_status": "correct",
       "repeated": 1,
       "assisted": 0,
-      "independent": 2
+      "independent": 1
     },
     {
       "id": "q2",

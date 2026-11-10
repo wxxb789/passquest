@@ -1,8 +1,7 @@
 # 0003 — A scoring tactic applied on independent questions: evidence
 
-- Tree: working tree over `1a31dacf62c95d2d3bdbf84b3ccdbf43db9da339` with the goal-0003 increment
-  staged (index updated, not committed), branch `feat/0003-exam-tactic-practice`; the operator
-  commits.
+- Tree: uncommitted review fixes over `7bf87e010b632970f7f28eb6d878fbbcb5273ba9` (goal-0003
+  commits `c6c6c67`, `7bf87e0`), branch `feat/0003-exam-tactic-practice`; the operator commits.
 - Date: 2026-11-10. Host: Linux 7.0.0-1017-azure x64.
 - Toolchain: Go 1.27.3 via mise; Bun 1.4.4; `modernc.org/sqlite` v1.62.0 (pure Go); no OCR engine was
   invoked and no PDF was read in this increment.
@@ -26,11 +25,12 @@ document; the raw key/value protocol is pinned by the golden tests and `tactic-s
 | `internal/attempt` | `Assistance` (`assisted`/`independent`) and `TacticID` on the immutable attempt; ordinary and pre-v4 records default to independent; `WithTactic` validates the condition. |
 | `internal/store` | Schema v4: `attempts.assistance`, `attempts.tactic_id`, `source_questions.tactics_json`; v0–v3 migration keeps attempts and defaults them to independent; append-only triggers unchanged. |
 | `internal/cli` | `tactic list`, `tactic show`, `tactic practice` with guided/independent gating, source or embedded material, and additive report counts/rows. Key-hiding protocols unchanged. |
-| `harness/` | New `tactic-smoke` gate (55 assertions, including the assisted/independent correctness counters), shared JSON readers and key-hiding check in `harness/lib/json.ts` (used by import-smoke and tactic-smoke), and a 19th self-test case over 12/12 gates. |
+| `harness/` | New `tactic-smoke` gate (57 assertions, including the assisted/independent correctness counters and the answered-document guidance), shared JSON readers and key-hiding check in `harness/lib/json.ts` (used by import-smoke and tactic-smoke), and a 19th self-test case over 12/12 gates. |
 
-The guided walkthrough is shown before a `guided` answer and is stored as `assisted`; the
-`independent` stage has no guidance, must use a question distinct from every guided example for the
-tactic, and must be a first attempt. A third independent run with no eligible question is refused.
+The guided response carries the walkthrough — in the pre-answer document when the client asks for it,
+and again in the answered document — and is stored as `assisted`; the `independent` stage has no
+guidance, must use a question distinct from every guided example for the tactic, and must be a first
+attempt. A third independent run with no eligible question is refused.
 
 ## Tier 1 — automated checks
 
@@ -81,7 +81,7 @@ PASS  baseline integrity (165 pages (22 native, 143 OCR), 0 fixture references)
 PASS  import smoke (35 assertions)
 
 == tactic smoke
-PASS  tactic smoke (55 assertions)
+PASS  tactic smoke (57 assertions)
 
 == harness self-test
 PASS  harness self-test (19 cases, 12/12 gates)
@@ -107,16 +107,16 @@ The tests that pin this increment's contract clauses:
 | `TestMigrationFromVersionThreeAddsAssistanceColumns` | v3 attempts migrate to v4 as independent with no tactic; the database CHECK rejects an unknown assistance value. |
 | `TestQuestionTagsRoundTrip`, `TestMigrationFromVersionThreeDefaultsQuestionTags` | Tags survive add/review/restart and appear in the audit event; a pre-v4 question reads as untagged. |
 | `TestTacticLessonSurfacesWhyWhenAndBoundary` | `tactic list`/`show` expose the lesson and boundary in JSON and human form. |
-| `TestTacticGuidedThenIndependentKeepsAssistanceSeparate` | Guided is assisted and carries guidance; independent is unguided and distinct; report counts and per-question/try rows split assisted from independent; an exhausted independent request exits 2. |
+| `TestTacticGuidedThenIndependentKeepsAssistanceSeparate` | Guided is assisted and both guided documents carry guidance; independent is unguided, its awaiting and answered documents carry none, and it is a distinct first attempt; report counts and per-question/try rows split assisted from independent; an exhausted independent request exits 2. |
 | `TestTacticIndependentRequiresGuided`, `TestTacticSkipRecordsSkippedAttempt` | Independent before any guided attempt exits 2 with `guided_required` and records nothing; a guided skip satisfies the guided-required gate, records `skipped` with no selected label, and increments the assisted/independent skipped counter. |
-| `TestTacticGuidedRerunUsesFirstExample` | A third guided run returns the first example with attempt number 2, repeat exposure and assisted assistance. |
+| `TestTacticGuidedRerunUsesFirstExample` | A first one-shot guided JSON answer still carries the walkthrough; a third guided run returns the first example with attempt number 2, repeat exposure and assisted assistance. |
 | `TestTacticExplicitQuestionRules` | Explicit guided selection; a guided question or an untagged question cannot be the independent question. |
 | `TestTacticHumanOutputShowsHelpAndCondition` | Human output states the guided/independent condition and the recorded attempt condition. |
 | `TestTacticSourcePracticeKeepsProvenance` | Tagged, reviewed source questions are used; the content id, page/answer review provenance, private notice, and assisted/independent split survive into the report. |
 | `TestTacticSourceRefusesUntaggedMaterial`, `TestTacticSourceRejectsPreviouslyAttemptedIndependentQuestion` | Untagged material is refused; an ordinary earlier attempt on a tagged question makes it ineligible for independent selection. |
 | `TestTacticRejectsBadInput` | Unknown tactic, bad stage, conflicting flags, missing tactic and unknown source exit 2 and record nothing. |
 | `TestTacticProtocolGoldens` | Raw keys/values of `tactic list`, `show`, guided awaiting and guided answered. |
-| `TestGoldenReportJSON`, `TestCorrectIncorrectSkipAndRepeat` | Additive report fields; existing first/repeated semantics are unchanged and all ordinary attempts are independent. |
+| `TestGoldenReportJSON`, `TestCorrectIncorrectSkipAndRepeat`, `TestReportRepeatedIncorrectAndSkipped` | Additive report fields; first/repeated semantics are unchanged; ordinary attempts carry `assistance=independent`, but the independent counters count first attempts only, so a repeated attempt is not independent correctness. |
 
 The test count is not the evidence that the product works; the Tier 2 transcripts are.
 
@@ -173,9 +173,13 @@ reported **0** matches for `answer`, `correct_label`, `correct_text`, `evidence`
 $ passquest tactic practice not-except-polarity --answer D --json --db demo.sqlite
 state: answered
 tactic: {id: not-except-polarity, stage: guided, assistance: assisted}
+has_guidance: true
 attempt: {id: 1, question_id: t1, status: correct, assistance: assisted, tactic_id: not-except-polarity, repeat: false}
 feedback: {assistance: assisted, exposure: first_attempt}
 ```
+
+The answered document carries the same guidance block as the pre-answer document, so the one-shot
+form of the guided command still shows the walkthrough that makes the attempt assisted.
 
 ### Independent attempt (no hint, different question)
 
@@ -190,12 +194,14 @@ question: t2 — "All of the following are true EXCEPT:"
 $ passquest tactic practice not-except-polarity --answer C --json --db demo.sqlite
 state: answered
 tactic: {id: not-except-polarity, stage: independent, assistance: independent}
+has_guidance: false
 attempt: {id: 2, question_id: t2, status: correct, assistance: independent, tactic_id: not-except-polarity, repeat: false}
 feedback: {assistance: independent}
 ```
 
 The independent awaiting document also had **0** forbidden-key matches. The question id differs from
-the guided example (`t2` vs `t1`), and `guidance` is absent rather than empty.
+the guided example (`t2` vs `t1`), and `guidance` is absent from both independent documents rather
+than empty.
 
 ### Human feedback condition
 
@@ -232,9 +238,12 @@ Questions
   t3  attempts 0  first not attempted  latest —  repeated 0  assisted 0  independent 0
 
 Attempts
-  #1  t1  correct  first  assisted (not-except-polarity)  selected D  0 ms  session 5016ac923caad2f2
-  #2  t2  correct  first  independent (not-except-polarity)  selected C  0 ms  session 978a76cf60425dc6
+  #1  t1  correct  first  assisted (not-except-polarity)  selected D  0 ms  session 197d0ced44feb868
+  #2  t2  correct  first  independent (not-except-polarity)  selected C  0 ms  session 29cfeccb2aaa6536
 ```
+
+`Independent attempts` counts first attempts only: a no-hint repeat carries `assistance=independent`
+and is counted under `Repeated attempts`, not independent correctness.
 
 `report --json` carried `assisted_attempts: 1`, `independent_attempts: 1`,
 `assisted_correct: 1`, `independent_correct: 1`, per-question `assisted`/`independent`, and
@@ -305,6 +314,7 @@ The pre-answer recursive key check again reported **0** forbidden-key matches.
 ```text
 $ passquest tactic practice not-except-polarity --source src-029b9408ceddd473 --answer D --json --db source.sqlite
 tactic: {stage: guided, assistance: assisted}
+has_guidance: true
 attempt: {question_id: q001, content_id: src-029b9408ceddd473-p021, content_version: 1-6edbc6d1,
           status: correct, assistance: assisted, tactic_id: not-except-polarity}
 
@@ -320,6 +330,7 @@ The second awaiting document had 0 forbidden-key matches. `q002` is distinct fro
 ```text
 $ passquest tactic practice not-except-polarity --source src-029b9408ceddd473 --answer C --json --db source.sqlite
 tactic: {stage: independent, assistance: independent}
+has_guidance: false
 attempt: {question_id: q002, content_id: src-029b9408ceddd473-p021,
           status: correct, assistance: independent, tactic_id: not-except-polarity}
 
@@ -338,8 +349,8 @@ Questions
   q002  attempts 1  first correct  latest correct  repeated 0  assisted 0  independent 1
 
 Attempts
-  #1  q001  correct  first  assisted (not-except-polarity)  selected D  0 ms  session 64cc9d7e682fa075
-  #2  q002  correct  first  independent (not-except-polarity)  selected C  0 ms  session dbde244a5248ddac
+  #1  q001  correct  first  assisted (not-except-polarity)  selected D  0 ms  session 4c3589f791cae6ea
+  #2  q002  correct  first  independent (not-except-polarity)  selected C  0 ms  session 6d6769c90a41b3b4
 ```
 
 The page text was stored only in the local SQLite database. The source content notice names the page
@@ -354,7 +365,7 @@ The source DB was `0600`; the embedded DB was `0600`.
 
 | Check | Command | Result |
 |---|---|---|
-| Runtime network syscalls | `strace -f -e trace=network -o network-guided.log passquest tactic practice … --answer D --json` | exit 0; 8 log lines; **0** `socket`/`connect`/`bind`/`sendto`/`recvfrom`/`getaddrinfo` matches |
+| Runtime network syscalls | `strace -f -e trace=network -o network-guided.log passquest tactic practice … --answer D --json` | exit 0; 7 log lines; **0** `socket`/`connect`/`bind`/`sendto`/`recvfrom`/`getaddrinfo` matches |
 | Default state directory | run without `--db` / `PASSQUEST_DB` | `.passquest/` mode `0700`; database mode `0600` |
 | Tracked private files | `git ls-files` filtered for `.pdf`, `.sqlite*`, `.db`, `data/private/`, `data/local/`, `local-data/`, `.passquest/` | no matches |
 | Private PDF ignored | `git check-ignore -v data/private/source/2025-crsc-english-review.pdf` | `.gitignore:2:/data/private/` |
@@ -379,8 +390,8 @@ it. The strace run is the runtime proof for this increment.
 ## Harness growth
 
 Goal 0003 adds a new CLI protocol and a new evidence dimension, so it adds
-`harness/gates/tactic-smoke.ts` (55 assertions, including the assisted/independent correctness
-counters) and a self-test input that makes it fail when the CLI
+`harness/gates/tactic-smoke.ts` (57 assertions, including the assisted/independent correctness
+counters and the answered-document guidance) and a self-test input that makes it fail when the CLI
 prints `{}` instead of the tactic protocol. The tick comes from the real CLI, the real database and
 the real report; it does not re-implement scoring.
 
@@ -401,8 +412,9 @@ the only documented shell entry point and still execs `bun run gate`.
 - The guided attempt is still an attempt and counts as repeat exposure for that question. Re-running
   the guided example is allowed and remains visibly assisted/repeated.
 - The report's overall `attempts`/`correct` counts include assisted attempts. The separate
-  `assisted_*`/`independent_*` counts are the ones that distinguish help from independent
-  correctness.
+  `assisted_*`/`independent_*` counts distinguish help from independent correctness; `independent_*`
+  counts first attempts only, so a no-hint repeat appears under `repeated_*` and is not independent
+  evidence.
 - The source demonstration reviewed page 21 with the agent label `demo-operator`. The 165-page
   baseline remains unreviewed as a whole; no claim is made about page 21's text beyond the two local
   questions' reviewed evidence.

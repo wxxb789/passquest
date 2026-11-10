@@ -261,7 +261,7 @@ func TestCorrectIncorrectSkipAndRepeat(t *testing.T) {
 		Attempts: 4, Correct: 2, Incorrect: 1, Skipped: 1,
 		FirstAttempts: 3, FirstCorrect: 1, FirstIncorrect: 1, FirstSkipped: 1,
 		RepeatedAttempts: 1, RepeatedCorrect: 1,
-		IndependentAttempts: 4, IndependentCorrect: 2, IndependentIncorrect: 1, IndependentSkipped: 1,
+		IndependentAttempts: 3, IndependentCorrect: 1, IndependentIncorrect: 1, IndependentSkipped: 1,
 	}
 	if report.Counts != want {
 		t.Fatalf("counts = %+v, want %+v", report.Counts, want)
@@ -273,7 +273,7 @@ func TestCorrectIncorrectSkipAndRepeat(t *testing.T) {
 	if q1.ID != "q1" || q1.Attempts != 2 || q1.FirstStatus != "correct" || q1.LatestStatus != "correct" || q1.Repeated != 1 {
 		t.Fatalf("q1 row = %+v", q1)
 	}
-	if q1.Assisted != 0 || q1.Independent != 2 {
+	if q1.Assisted != 0 || q1.Independent != 1 {
 		t.Fatalf("q1 assistance split = %+v", q1)
 	}
 	if len(report.Attempts) != 4 {
@@ -352,7 +352,7 @@ func TestReportRepeatedIncorrectAndSkipped(t *testing.T) {
 		Attempts: 4, Correct: 1, Incorrect: 1, Skipped: 2,
 		FirstAttempts: 2, FirstCorrect: 1, FirstSkipped: 1,
 		RepeatedAttempts: 2, RepeatedIncorrect: 1, RepeatedSkipped: 1,
-		IndependentAttempts: 4, IndependentCorrect: 1, IndependentIncorrect: 1, IndependentSkipped: 2,
+		IndependentAttempts: 2, IndependentCorrect: 1, IndependentSkipped: 1,
 	}
 	if report.Counts != want {
 		t.Fatalf("counts = %+v, want %+v", report.Counts, want)

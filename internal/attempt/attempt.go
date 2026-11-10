@@ -45,11 +45,13 @@ type QuestionKey struct {
 type Assistance string
 
 const (
-	// AssistanceIndependent means no hint or tactic walkthrough was shown before
-	// the answer. Repeat exposure is recorded separately.
+	// AssistanceIndependent means no hint or tactic walkthrough was shown with
+	// the attempt. Repeat exposure is recorded separately.
 	AssistanceIndependent Assistance = "independent"
-	// AssistanceAssisted means a tactic walkthrough or other help was visible
-	// before the answer. It is never independent evidence.
+	// AssistanceAssisted means a tactic walkthrough or other help accompanied
+	// the attempt: the guided response carries it in the pre-answer document
+	// and in the answered document, so a one-shot client still receives it. It
+	// is never independent evidence.
 	AssistanceAssisted Assistance = "assisted"
 )
 

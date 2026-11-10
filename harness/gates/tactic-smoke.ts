@@ -65,7 +65,9 @@ export const tacticSmoke: Gate = {
 
       const guidedAnswer = await callDB(["tactic", "practice", lessonID, "--json", "--answer", "D"]);
       if (!check(guidedAnswer.code === 0, `guided answer exit = ${guidedAnswer.code}`)) return fail(checks);
-      const guidedAttempt = field(parse(guidedAnswer.stdout), "attempt");
+      const guidedAnswered = parse(guidedAnswer.stdout);
+      const guidedAttempt = field(guidedAnswered, "attempt");
+      check(field(guidedAnswered, "guidance") !== undefined, "guided answered document has no guidance");
       check(stringField(guidedAttempt, "assistance") === "assisted", "guided attempt assistance is not assisted");
       check(stringField(guidedAttempt, "tactic_id") === lessonID, "guided attempt has no tactic id");
       check(stringField(guidedAttempt, "question_id") === guidedQuestion, "guided attempt question differs from the awaiting question");
@@ -83,7 +85,9 @@ export const tacticSmoke: Gate = {
 
       const independentAnswer = await callDB(["tactic", "practice", lessonID, "--json", "--answer", "C"]);
       if (!check(independentAnswer.code === 0, `independent answer exit = ${independentAnswer.code}`)) return fail(checks);
-      const independentAttempt = field(parse(independentAnswer.stdout), "attempt");
+      const independentAnswered = parse(independentAnswer.stdout);
+      const independentAttempt = field(independentAnswered, "attempt");
+      check(field(independentAnswered, "guidance") === undefined, "independent answered document still carries guidance");
       check(stringField(independentAttempt, "assistance") === "independent", "independent attempt assistance is not independent");
       check(stringField(independentAttempt, "question_id") === independentQuestion, "independent attempt question differs from the awaiting question");
       check(

@@ -37,6 +37,16 @@ func (r tacticRun) assistance() attempt.Assistance {
 	return attempt.AssistanceIndependent
 }
 
+// deliveredGuidance returns the walkthrough delivered with the attempt. It is
+// nil for an independent stage, so an answered independent document carries no
+// guidance.
+func (r *tacticRun) deliveredGuidance() *guidanceView {
+	if r == nil {
+		return nil
+	}
+	return r.Guidance
+}
+
 type tacticRefusal struct {
 	code    string
 	message string

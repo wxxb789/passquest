@@ -307,6 +307,7 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 			SchemaVersion: ProtocolVersion,
 			State:         "answered",
 			Tactic:        tacticRunViewOf(selection.Tactic),
+			Guidance:      selection.Tactic.deliveredGuidance(),
 			Content:       contentViewOf(selection.Content),
 			Question:      questionViewOf(selection),
 			Attempt:       attemptViewOf(record),
@@ -578,7 +579,9 @@ func summarize(records []attempt.Attempt, seeds []questionReport) (countsView, [
 			case attempt.StatusSkipped:
 				counts.AssistedSkipped++
 			}
-		} else {
+		} else if record.AttemptNumber == 1 {
+			// Only a first attempt can be independent evidence; a repeat follows
+			// the answer and evidence exposure.
 			counts.IndependentAttempts++
 			switch record.Status {
 			case attempt.StatusCorrect:
@@ -622,7 +625,7 @@ func summarize(records []attempt.Attempt, seeds []questionReport) (countsView, [
 		questions[i].LatestStatus = string(record.Status)
 		if record.Assistance == attempt.AssistanceAssisted {
 			questions[i].Assisted++
-		} else {
+		} else if record.AttemptNumber == 1 {
 			questions[i].Independent++
 		}
 		if record.AttemptNumber == 1 {
@@ -949,6 +952,7 @@ type answeredDoc struct {
 	SchemaVersion int            `json:"schema_version"`
 	State         string         `json:"state"`
 	Tactic        *tacticRunView `json:"tactic,omitempty"`
+	Guidance      *guidanceView  `json:"guidance,omitempty"`
 	Content       contentView    `json:"content"`
 	Question      questionView   `json:"question"`
 	Attempt       attemptView    `json:"attempt"`

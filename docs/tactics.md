@@ -27,8 +27,10 @@ passquest tactic practice not-except-polarity --source SOURCE --stage independen
 
 `--json` uses the existing `schema_version: 1` protocol. The pre-answer document carries `tactic`
 (always) and `guidance` (guided only); it never contains the answer key, evidence, reasoning, status
-or post-answer feedback. The answered document carries the tactic condition, the attempt, and the
-deterministic feedback.
+or post-answer feedback. The answered document carries the tactic condition, the attempt, the
+deterministic feedback, and — for a guided attempt — the same `guidance` block, so a one-shot
+`--answer`/`--skip` still receives the walkthrough that makes the attempt assisted. An independent
+answered document carries no `guidance`.
 
 ## NOT/EXCEPT polarity
 
@@ -55,11 +57,13 @@ An attempt records two independent dimensions:
 
 | Field | Values | Meaning |
 |---|---|---|
-| `assistance` | `assisted`, `independent` | Whether a tactic walkthrough was visible before the answer. |
+| `assistance` | `assisted`, `independent` | Whether a tactic walkthrough accompanied the attempt. The guided response always carries it; an independent response carries none. |
 | `first`/`repeat` (existing) | first, repeated | Whether that content-scoped question was answered before. |
 
-- A `guided` attempt shows the tactic walkthrough before the answer and is stored as `assisted`. It
-  can succeed or fail; it is never counted as independent correctness.
+- A `guided` attempt shows the tactic walkthrough and is stored as `assisted`: the pre-answer
+  document carries it when one is requested, and the answered document carries it again for a
+  one-shot `--answer`/`--skip`. It can succeed or fail; it is never counted as independent
+  correctness.
 - An `independent` attempt shows no guidance, uses a question **different from every guided question
   for the same tactic**, and requires zero earlier attempts on that content-scoped question. It is
   stored as `independent`.
@@ -77,9 +81,14 @@ Independent attempts (no hint): 2 (correct 1, incorrect 1, skipped 0)
 Assisted attempts (help shown): 1 (correct 1, incorrect 0, skipped 0)
 ```
 
+The independent row counts first attempts only, because a no-hint repeat still comes after the answer
+and evidence were shown. A repeated attempt carries `assistance=independent` but is counted under
+`Repeated attempts`, not independent correctness. The assisted row counts every guided attempt,
+including a repeated guided example.
+
 Each question row adds `assisted` and `independent` counts; each attempt row names its assistance and
-tactic. The same values are fields in `report --json` (`assisted_attempts`, `independent_attempts`,
-and their status splits).
+tactic. The per-question `independent` count follows the same first-attempt rule. The same values are
+fields in `report --json` (`assisted_attempts`, `independent_attempts`, and their status splits).
 
 ## Tactic tags on imported questions
 

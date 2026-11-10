@@ -147,6 +147,9 @@ func TestTacticGuidedThenIndependentKeepsAssistanceSeparate(t *testing.T) {
 	if guidedAnswer.Tactic == nil || guidedAnswer.Tactic.Stage != "guided" {
 		t.Fatalf("guided answered tactic = %+v", guidedAnswer.Tactic)
 	}
+	if guidedAnswer.Guidance == nil || guidedAnswer.Guidance.Boundary.Example == "" {
+		t.Fatalf("guided answered document lacks the walkthrough: %+v", guidedAnswer.Guidance)
+	}
 
 	independentRaw := mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--json")
 	independent := decodeAwaiting(t, independentRaw)
@@ -167,6 +170,9 @@ func TestTacticGuidedThenIndependentKeepsAssistanceSeparate(t *testing.T) {
 	}
 	if independentAnswer.Attempt.Status != "correct" {
 		t.Fatalf("independent status = %q, want correct", independentAnswer.Attempt.Status)
+	}
+	if independentAnswer.Guidance != nil {
+		t.Fatalf("independent answered document carries guidance: %+v", independentAnswer.Guidance)
 	}
 
 	report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
@@ -462,7 +468,10 @@ func TestTacticGuidedRerunUsesFirstExample(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
-	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--json", "--answer", "D")
+	first := decodeAnswered(t, mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--json", "--answer", "D"))
+	if first.Guidance == nil || first.Guidance.Boundary.Example == "" {
+		t.Fatalf("first one-shot guided answer lacks the walkthrough: %+v", first.Guidance)
+	}
 	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--stage", "guided", "--json", "--answer", "C")
 
 	rerun := decodeAwaiting(t, mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--stage", "guided", "--json"))

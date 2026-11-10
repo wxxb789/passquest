@@ -34,8 +34,9 @@ passquest tactic practice TACTIC [--source SOURCE] [--stage guided|independent]
     tactic, and that pass goal 0002's review gate (reviewed page, reviewed answer, verbatim evidence,
     every option explained). Nothing is extracted automatically from the private source.
 - The stage is explicit or derived:
-  - `--stage guided` shows the tactic walkthrough **before** the answer and records the attempt as
-    `assisted`.
+  - `--stage guided` delivers the tactic walkthrough — in the pre-answer document when one is
+    requested, and again in the answered document for a one-shot `--answer`/`--skip` — and records
+    the attempt as `assisted`.
   - `--stage independent` shows no guidance, refuses a question that has any earlier attempt, and
     refuses a question already used as a guided example for the same tactic. It also refuses until at
     least one guided attempt for the tactic exists (`guided_required`).
@@ -178,9 +179,10 @@ must fail it. `harness/gates/index.ts` registers the gate after import-smoke and
   question silently ineligible. Unknown tags are rejected at `question add`/`edit`, naming the
   registered ids. Adding a tactic is a code change, which is acceptable while tactics are authored,
   reviewed content. (Q-0003-03)
-- **Assisted means the tactic walkthrough was visible before the answer.** The walkthrough contains no
-  key, evidence or option-specific answer. Guidance is stored as a per-attempt condition, not as a
-  derived learner model.
+- **Assisted means the guided response delivered the tactic walkthrough with the attempt.** The
+  pre-answer document carries it when requested, and the answered document carries it for a one-shot
+  `--answer`/`--skip`. The walkthrough contains no key, evidence or option-specific answer. Guidance
+  is stored as a per-attempt condition, not as a derived learner model.
 - **Independent requires a first attempt and a distinct question.** A previously seen question, even
   with no help, is repeat exposure under goal 0001's own rule and cannot support independent
   correctness. A guided attempt for the tactic must exist first, so "after help" is enforced rather
