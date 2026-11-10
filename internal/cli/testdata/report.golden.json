@@ -12,6 +12,20 @@
       "exam_relation": "illustrative practice only; not drawn from a live examination"
     }
   },
+  "contents": [
+    {
+      "id": "sample-0001",
+      "version": "1",
+      "title": "Westbridge Library notice",
+      "notice": "Self-authored practice sample. Not from any live exam; not an exam blueprint or a claim about exam content, difficulty or pass threshold.",
+      "provenance": {
+        "author": "Pass Quest contributors",
+        "source": "self-authored for this repository",
+        "rights": "original text; redistributable with this repository",
+        "exam_relation": "illustrative practice only; not drawn from a live examination"
+      }
+    }
+  ],
   "counts": {
     "attempts": 4,
     "correct": 2,
@@ -129,6 +143,7 @@
   "limitations": [
     "Counts cover only the locally stored practice attempts shown above; they are not an exam score, pass estimate or readiness claim.",
     "Repeated attempts come after the correct answer and evidence were shown and are not independent evidence.",
-    "The exam blueprint, time limit and pass threshold are unknown, so no pass probability is computed."
+    "The exam blueprint, time limit and pass threshold are unknown, so no pass probability is computed.",
+    "Imported source content is private local material; page and answer reviews are user-attested and are not an external verification."
   ]
 }

@@ -44,6 +44,25 @@ reason (goal 0002 adds import/OCR gates), in the same increment, not as a separa
 Until that increment lands, `bash scripts/gate.sh` remains the honest entry point and this file is the
 binding rule for **any new harness code**: new checks are written directly as TypeScript gate modules.
 
+## Migration outcome (2026-11-10, goal 0002)
+
+The migration landed in the same increment as the import/OCR gates, as required.
+
+- `bun run gate` executes `harness/gate.ts`; 12 gates run in order (typecheck, gofmt, vet, build,
+  test, tidy, docs links, secrets/sources, local-only, baseline integrity, import smoke, harness
+  self-test).
+- `scripts/check-docs-links.py`, `scripts/check-secrets.sh` and `scripts/check-local-only.sh` were
+  deleted. `scripts/gate.sh` is a one-line compatibility shim that execs `bun run gate`; no second
+  gate definition exists.
+- `harness/gates/self-test.ts` feeds each other gate a broken input and fails if the gate does not
+  fail (11/11 at this increment). CI runs `bun install --frozen-lockfile` then `bun run gate` on
+  ubuntu, macos and windows with `oven-sh/setup-bun`; `.gitattributes` pins LF.
+- Two dev dependencies (`typescript`, `@types/bun`) exist only for the typecheck gate; `bun.lock` is
+  committed. No Bun package is a product dependency.
+- Deviation from the original expectation: the harness now needs `bun install` once for `tsc`; a
+  contributor without Bun still cannot run the gate (already accepted above). The Go toolchain
+  remains the only runtime requirement for the product.
+
 ## Consequences and risks
 
 - `bun` becomes a pinned tool alongside Go and Node in `mise.toml`; a contributor without Bun cannot

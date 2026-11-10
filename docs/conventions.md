@@ -23,8 +23,8 @@ Binding project conventions. Read this before writing code for any goal.
   scriptable CLI plus a test harness — screenshots and mock UIs are not evidence.
 - **Bun + TypeScript** is the harness runtime (`harness/`, gate modules under `harness/gates/`), not
   a product runtime. Chosen for one reason: the owner develops on Linux, macOS and Windows and the
-  harness must run on all three without Git Bash or a system Python. See
-  [`decisions/D-0001-bun-typescript-harness.md`](decisions/D-0001-bun-typescript-harness.md).
+  harness must run on all three without Git Bash or a system Python. The migration landed with goal
+  0002; see [`decisions/D-0001-bun-typescript-harness.md`](decisions/D-0001-bun-typescript-harness.md).
   Bun does not replace Go for product behaviour and does not enter `cmd/` or `internal/`.
 - Dependency policy: standard library first; a new module needs a sentence in the plan about why the
   standard library is insufficient. No cgo, no embedded browser engine, no vector database, no cloud
@@ -53,7 +53,8 @@ docs/goals/             numbered contracts; docs/goals/archive/ after close
 docs/plans/             per-increment plans
 docs/evidence/          measured evidence records
 docs/decisions/         OPEN-QUESTIONS.md and durable decisions
-scripts/                gates and harness helpers
+harness/                Bun/TypeScript gate runner, lib/ and one module per gate
+scripts/                gate.sh compatibility shim only
 testdata/               small, independently authored fixtures only
 ```
 
@@ -71,13 +72,11 @@ testdata/               small, independently authored fixtures only
 - Commits: conventional prefix (`feat:`, `fix:`, `docs:`, `test:`, `chore:`), imperative, one
   increment per branch. Agent runs do **not** commit or push — the operator does.
 - Every gate you report carries its real exit code. A gate you did not run is missing work.
-- New capability ⇒ new machine check in the same increment. Until the Bun migration lands
-  ([`decisions/D-0001-bun-typescript-harness.md`](decisions/D-0001-bun-typescript-harness.md)),
-  `scripts/gate.sh` stays the entry point and its existing bash/Python gates are grandfathered. The
-  next new check ships the Bun runner in that same increment and is written as a TypeScript gate
-  module under `harness/gates/` sharing `harness/lib/` — never another `scripts/*.sh` or
-  `scripts/*.py` one-off. `scripts/check-local-only.sh` is grandfathered and migrates with the
-  goal-0002 Bun increment.
+- New capability ⇒ new machine check in the same increment. New checks are TypeScript gate modules
+  under `harness/gates/` sharing `harness/lib/`, with an input in `harness/gates/self-test.ts` that
+  must fail — never another `scripts/*.sh` or `scripts/*.py` one-off. `bun run gate` is the single
+  definition; `bash scripts/gate.sh` only execs it. See
+  [`harness.md`](harness.md) and [`decisions/D-0001-bun-typescript-harness.md`](decisions/D-0001-bun-typescript-harness.md).
 
 ## Uncertainty protocol (binding)
 

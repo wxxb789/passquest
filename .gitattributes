@@ -1,0 +1,3 @@
+# One checkout must look the same on every platform. Gated goldens, gofmt and
+# the harness compare line-based text; CRLF would make them disagree on Windows.
+* text=auto eol=lf

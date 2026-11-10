@@ -278,11 +278,11 @@ func TestCorrectIncorrectSkipAndRepeat(t *testing.T) {
 	if report.Attempts[3].ID != 4 || !report.Attempts[3].Repeat {
 		t.Fatalf("last attempt row = %+v", report.Attempts[3])
 	}
-	if len(report.Limitations) != 3 {
+	if len(report.Limitations) != 4 {
 		t.Fatalf("limitations = %d", len(report.Limitations))
 	}
 	joined := strings.ToLower(strings.Join(report.Limitations, " "))
-	for _, want := range []string{"not an exam score", "not independent evidence", "pass probability is computed"} {
+	for _, want := range []string{"not an exam score", "not independent evidence", "pass probability is computed", "user-attested"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("limitations do not state %q: %v", want, report.Limitations)
 		}

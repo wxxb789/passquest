@@ -1,7 +1,7 @@
 # 2025 CRSC senior-title English prep — page-linked parsed text
 
 Parsed text of the owner's copy of `2025年中国通号高级职称外语考试复习资料.pdf` (165 pages), one
-file per PDF page, for private-source import work (goal 0002).
+file per PDF page, importable as private local working context by `passquest import`.
 
 **The original PDF is not in this repository.** It stays at `data/private/source/` (gitignored) —
 77,422,890 bytes, first page marked `（仅限内部使用，严禁外传）`.
@@ -36,8 +36,9 @@ file per PDF page, for private-source import work (goal 0002).
   (`\f`) that `pdftotext` emits between pages is also excluded. It is the honesty check: a page with
   a low count is a page you must look at before trusting.
 - Answer keys and answer explanations are **not verified**. Nothing here may be treated as an
-  authoritative key or used as a test fixture; goal 0002 requires user-reviewed answers with
-  provenance before that changes.
+  authoritative key or used as a test fixture. Importing this directory marks every page
+  unreviewed; a question's answer is practiceable only after a user reviews the page and the answer
+  mapping, with the reviewer and time recorded.
 - `data/baselines/2025-crsc-english-partial.txt` (the earlier 22-page extraction marked UNREVIEWED) is
   superseded by this directory and kept only as history.
 
@@ -61,5 +62,8 @@ pdftoppm -f N -l N -r 300 -gray -png -singlefile data/private/source/2025-crsc-e
 tesseract /tmp/p.png stdout -l eng+chi_sim --psm 6                                # pages 23-165
 ```
 
-This recipe is documentation, not a harness gate. When import/OCR becomes a product surface (goal
-0002) it becomes a tested Bun/TypeScript tool under `harness/`, not another ad-hoc script.
+This recipe documents how the committed text was produced; the app never runs OCR. Import is a Go
+product surface (`passquest import`) with page provenance, review state and append-only text
+revisions. The Bun harness gate `harness/gates/baseline.ts` checks these manifest counts and page
+files, and `harness/gates/import-smoke.ts` uses a separately authored redistributable fixture rather
+than this material.

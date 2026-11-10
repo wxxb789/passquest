@@ -88,3 +88,46 @@ Entry format:
   recomputed from the same evidence.
 - Revisit when: goal 0004 selects practice from evidence, or goal 0009 defines independent
   readiness and needs a stricter exposure rule.
+
+### Q-0002-01 — Is a locally installed `pdftotext` an acceptable PDF import dependency?
+- Status: decided(default taken)
+- Context: goal 0002 requires importing a locally held source PDF. Go's standard library cannot read
+  PDF, and the owner's recorded parse recipe already uses poppler `pdftotext`/`pdftoppm`. A pure-Go
+  PDF parser would be a new module with weaker CID/CJK font coverage; bundling an OCR engine is
+  explicitly out of scope.
+- Options considered: (A) call the local `pdftotext` binary when present, otherwise refuse PDF import
+  and point at the TXT path; (B) add a pure-Go PDF module; (C) require the user to pre-convert PDF to
+  TXT outside the app.
+- Default taken: (A). PDF import makes one local `pdftotext -layout -enc UTF-8` call (path
+  overridable with `PASSQUEST_PDFTOTEXT`), compares page count with `pdfinfo` when available, and
+  never downloads or OCRs anything. A missing tool is exit 2 with the TXT instructions. The extractor
+  sits behind `source.ImportOptions`, so a pure-Go implementation can replace it without changing the
+  CLI or schema. Reverse by removing the PDF branch.
+- Revisit when: a target platform cannot install poppler, or PDF import produces materially worse
+  text than a maintained pure-Go parser on the owner's source.
+
+### Q-0002-02 — Review provenance and local protection without accounts or encryption
+- Status: decided(default taken)
+- Context: the contract requires user-reviewed material and private preservation across restart, but
+  the project has one local learner, no accounts and no desktop secret storage until goal 0011.
+- Options considered: (A) free-text reviewer labels plus a `0600` unencrypted SQLite database;
+  (B) invent a local account/identity; (C) encrypt the database with a user-supplied passphrase.
+- Default taken: (A). Every page/question review records `reviewed_by` (a local label the user types)
+  and `reviewed_at`; the database stays `0600` in a `0700` directory and is gitignored. The label is
+  attribution, not authentication, and the evidence record says so. Reverse by adding an identity or
+  encryption layer later; the columns remain.
+- Revisit when: the desktop workspace (0011) stores multiple learners, or private source material
+  needs at-rest encryption.
+
+### Q-0002-03 — Is a source page or a whole document the practiceable content unit?
+- Status: decided(default taken)
+- Context: goal 0001's scoring model is one passage plus questions. A 165-page document contains many
+  unrelated passages and mock sets; treating it as one content value would make the passage and
+  attempt scoping meaningless.
+- Options considered: (A) one content per source page (`<source-id>-p<NNN>`); (B) one content per
+  source document with page references inside; (C) one content per question.
+- Default taken: (A). Attempt numbering and repeat exposure stay scoped to
+  `(content_id, question_id)`, a correction changes the content version but not its id, and a page is
+  the natural passage boundary for this material. Goal 0003 can group pages into a tactic exercise
+  without rewriting attempts. Reverse by adding a grouping layer; stored attempts keep their ids.
+- Revisit when: goal 0003 needs multi-page passages, or goal 0009 needs whole-set holdout scoping.

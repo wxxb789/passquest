@@ -6,6 +6,9 @@
 *.local.sqlite
 *.local.sqlite-wal
 *.local.sqlite-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 
 # Local secrets
 .env
