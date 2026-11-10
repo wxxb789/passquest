@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -79,6 +79,7 @@ export const agentSmoke: Gate = {
     }
 
     let mode: StubMode = "tools";
+    let slowTools = false;
     const received: ReceivedRequest[] = [];
     const server = Bun.serve({
       hostname: "127.0.0.1",
@@ -108,15 +109,19 @@ export const agentSmoke: Gate = {
         const messages = Array.isArray((body as { messages?: unknown }).messages)
           ? ((body as { messages: { role?: string; content?: unknown }[] }).messages)
           : [];
+        if (slowTools) await Bun.sleep(300);
+        const promptText = messages.map((message) => String(message.content ?? "")).join("\n");
+        const runMatch = promptText.match(/run-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}/);
+        const label = runMatch ? runMatch[0].slice(-8) : "unknown";
         const toolText = messages
           .filter((message) => message.role === "tool")
           .map((message) => String(message.content ?? ""))
           .join("\n");
         if (!/step 1/i.test(toolText)) {
-          return sseTool(1, "diagnosis", "Review the polarity cue", "The recorded outcome suggests marking the negation before comparing options.");
+          return sseTool(1, "diagnosis", `Step 1 diagnosis ${label}`, "The recorded outcome suggests marking the negation before comparing options.");
         }
         if (!/step 2/i.test(toolText)) {
-          return sseTool(2, "tactic", "Apply the NOT/EXCEPT boundary", "Mark NOT or EXCEPT first; a word match alone is not evidence.");
+          return sseTool(2, "tactic", `Step 2 tactic ${label}`, "Mark NOT or EXCEPT first; a word match alone is not evidence.");
         }
         return sseText("Two advisory steps recorded; practise the focused tactic next.");
       },
@@ -440,12 +445,149 @@ export const agentSmoke: Gate = {
         check(resumed.code === 2, `resume after a no-step answer exit ${resumed.code}`);
       }
 
+      // 9. Durable counts belong to the requested conversation: a completed
+      // run stays completed while a later run on the same store is paused.
+      {
+        const db = path.join(temp, "app9.sqlite");
+        const store = path.join(temp, "agent9.sqlite");
+        await configure(db);
+        mode = "tools";
+        const first = documentOf(await call(["agent", "start", "--db", db, "--agent-store", store, "--json"]));
+        const firstID = stringField(field(first, "run"), "run_id") ?? "";
+        check(stringField(first, "state") === "completed", "conversation-scoped status: first run did not complete");
+        mode = "delay";
+        const second = await call(["agent", "start", "--db", db, "--agent-store", store, "--timeout-seconds", "1", "--json"]);
+        const secondDoc = documentOf(second);
+        const secondID = stringField(field(secondDoc, "run"), "run_id") ?? "";
+        check(
+          second.code === 4 && stringField(secondDoc, "state") === "paused",
+          `conversation-scoped status: second run did not pause (exit ${second.code}: ${second.stderr})`,
+        );
+        const secondStatus = documentOf(await call(["agent", "status", secondID, "--db", db, "--json"]));
+        const secondSnapshot = field(field(secondStatus, "durable"), "snapshot");
+        check(stringField(secondStatus, "state") === "paused", "later run's status is not paused");
+        check(
+          (numberField(secondSnapshot, "pending_tasks") ?? 0) > 0,
+          "later run has no pending durable work to contaminate the first",
+        );
+        const firstStatus = documentOf(await call(["agent", "status", firstID, "--db", db, "--json"]));
+        const firstSnapshot = field(field(firstStatus, "durable"), "snapshot");
+        check(
+          stringField(firstStatus, "state") === "completed",
+          "completed run flipped state while another conversation was paused",
+        );
+        check(
+          numberField(firstSnapshot, "pending_tasks") === 0,
+          "completed run counted another conversation's pending task",
+        );
+        check(
+          numberField(firstSnapshot, "unsettled_submissions") === 0,
+          "completed run counted another conversation's unsettled submission",
+        );
+      }
+
+      // 10. Work recovered from a cancelled run stays bound to that run: a new
+      // run on the same store must not commit the old call under its own id.
+      {
+        const db = path.join(temp, "app10.sqlite");
+        const store = path.join(temp, "agent10.sqlite");
+        await configure(db);
+        mode = "tools";
+        const crashed = await call(
+          ["agent", "start", "--db", db, "--agent-store", store, "--json"],
+          { PASSQUEST_AGENT_FAULT: "kill-after-step" },
+        );
+        const crashedDoc = documentOf(crashed);
+        const cancelledID = stringField(field(crashedDoc, "run"), "run_id") ?? "";
+        check(
+          crashed.code === 4 && stringField(crashedDoc, "state") === "paused",
+          `recovered-work isolation: fault start did not pause (exit ${crashed.code}: ${crashed.stderr})`,
+        );
+        const cancelledRun = documentOf(await call(["agent", "show", cancelledID, "--db", db, "--json"]));
+        const cancelledSteps = arrayField(cancelledRun, "steps");
+        const cancelledTitle = stringField(cancelledSteps[0], "title") ?? "";
+        check(
+          cancelledTitle.includes(cancelledID.slice(-8)),
+          "recovered-work isolation: first run did not record its own step",
+        );
+        const cancelled = await call(["agent", "cancel", cancelledID, "--db", db, "--json"]);
+        check(
+          cancelled.code === 0,
+          `recovered-work isolation: cancel exit ${cancelled.code}: ${cancelled.stderr}`,
+        );
+        slowTools = true;
+        const started = await call(["agent", "start", "--db", db, "--agent-store", store, "--json"]);
+        slowTools = false;
+        const startedDoc = documentOf(started);
+        const startedID = stringField(field(startedDoc, "run"), "run_id") ?? "";
+        check(
+          started.code === 0 && stringField(startedDoc, "state") === "completed",
+          `recovered-work isolation: second start exit ${started.code}: ${started.stderr}`,
+        );
+        const startedSteps = arrayField(startedDoc, "steps");
+        check(startedSteps.length === 2, "recovered-work isolation: second run did not commit two steps");
+        const firstTitle = stringField(startedSteps[0], "title") ?? "";
+        check(
+          firstTitle.includes(startedID.slice(-8)),
+          `recovered-work isolation: step 1 title ${JSON.stringify(firstTitle)} came from the cancelled run`,
+        );
+        check(
+          !startedSteps.some((step) => (stringField(step, "title") ?? "").includes(cancelledID.slice(-8))),
+          "recovered-work isolation: cancelled run text leaked into the new run",
+        );
+      }
+
+      // 11. The host applies Go's loopback exception to a bracketed IPv6
+      // endpoint before contacting a provider.
+      {
+        const store = path.join(temp, "agent11.sqlite");
+        const db = path.join(temp, "app11.sqlite");
+        writeFileSync(store, "");
+        const probe = await run(executable("node"), [hostPath], {
+          cwd: ctx.root,
+          stdin: JSON.stringify({
+            protocol_version: 1,
+            mode: "start",
+            run_id: "run-20261110T100000Z-55555555",
+            task_kind: "study-brief",
+            prompt_version: "agent-study-brief-v1",
+            store_path: store,
+            heartbeat_path: `${store}.host`,
+            host_token: "5".repeat(32),
+            binary_path: binary,
+            db_path: db,
+            credential_env: "PASSQUEST_AGENT_SMOKE_UNSET",
+            model: {
+              endpoint: "http://[::1]:8080/v1/chat/completions",
+              model: MODEL,
+              timeout_ms: 30000,
+              max_output_tokens: 600,
+              max_steps: 3,
+              max_turns: 8,
+            },
+            prompt: "config probe",
+            deadline_ms: 60000,
+          }),
+          env: { PASSQUEST_AGENT_SMOKE_UNSET: "" },
+        });
+        const probeDoc = parse(probe.stdout) as Record<string, unknown>;
+        check(probe.code === 0, `bracketed endpoint exit ${probe.code}: ${probe.stderr}`);
+        check(
+          stringField(probeDoc, "state") === "needs_action",
+          `bracketed endpoint state ${stringField(probeDoc, "state")}`,
+        );
+        check(
+          stringField(field(probeDoc, "error"), "code") === "missing_credential",
+          `bracketed endpoint code ${stringField(field(probeDoc, "error"), "code")}`,
+        );
+      }
+
       check(!seenOutputs.join("\n").includes(KEY), "agent output contains the provider credential");
       if (checks.length > 0) return fail(checks);
       const permissionNote = permissionsSkipped
         ? "permissions skipped on Windows"
         : `${permissionChecks} permission checks`;
-      return pass(`${assertions} assertions, 8 scenarios, ${received.length} provider requests, ${permissionNote}`);
+      return pass(`${assertions} assertions, 11 scenarios, ${received.length} provider requests, ${permissionNote}`);
     } finally {
       server.stop(true);
       rmSync(temp, { recursive: true, force: true });

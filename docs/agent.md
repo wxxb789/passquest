@@ -30,8 +30,8 @@ step JSON document on stdin and writes one JSON document on stdout.
 `<db dir>/<db base>-agent.sqlite`; the Pi SQLite file is separate from the application database and is
 recorded in the run, so `status`, `resume` and `cancel` find it without repeating the flag. Every
 command that accepts `--agent-store` refuses a path equal to the application database, and `resume`
-refuses an override that differs from the recorded store (`store_mismatch`): a run cannot silently
-switch Pi stores or point the host at the application database.
+and `cancel` refuse an override that differs from the recorded store (`store_mismatch`): a run
+cannot silently switch Pi stores or point the host at the application database.
 
 ## The bounded task
 
@@ -66,7 +66,8 @@ and next to the application database. The provider credential is read only from
   `@earendil-works/pi-ai`, `@earendil-works/chord` and `@earendil-works/pi-schema`, all pinned exactly
   in `agent/package.json`. `bun install` at the repository root installs the workspace.
 - The provider is the goal-0005 `tutor_config`: one OpenAI-compatible endpoint, model, timeout and
-  output bound. The endpoint must end in `/chat/completions`; `https` is required except on loopback.
+  output bound. The endpoint must end in `/chat/completions`; `https` is required except on loopback
+  (`localhost`, `127.0.0.1` or `[::1]`, which the Go validator and the Node host both accept).
 - A run is bound to the model recorded at `start`. `resume` uses that model with the current endpoint,
   timeout and credential. Changing the model name needs `cancel` + `start`; a changed endpoint or fixed
   credential is picked up by `resume`.
@@ -116,14 +117,20 @@ is `interrupted` is a host failure and is `needs_action`.
   while a host holds a fresh heartbeat for the run, or while a `started`/`resumed` claim is younger
   than the 5-second heartbeat window (its host may not have written the first heartbeat yet). The
   claim is one immediate transaction that must still see the latest event the command read, so two
-  concurrent resumes cannot both start a host.
+  concurrent resumes cannot both start a host. Before resuming, the host aborts every other mapped
+  conversation in the shared Pi store, so a cancelled run's pending provider request or tool call
+  cannot recover under the new run's identity. `status` counts only the requested conversation's
+  pending tasks and unsettled submissions.
 - `agent cancel` appends `cancel_requested` **before** publishing `<agent-store>.host.control` and
   signalling. The host polls that control file every 200 ms and aborts the conversation durably on
   every OS, so signal delivery is only an optimisation: SIGINT on POSIX, no-op on Windows. It waits
   for the heartbeat to stop, escalates to SIGKILL if needed, and appends `cancelled`. If the
   heartbeat is still fresh after the bounded wait and kill, the run stays `cancel_requested`, the
   command exits 1 and status reports `cancelling`; it never records a terminal cancellation beside a
-  live process. `resume` refuses either way.
+  live process. `resume` refuses either way. Cancelling an already cancelled run returns the
+  recorded outcome without touching the shared heartbeat or control file, so a newer run on the same
+  store keeps them; cleanup deletes a file only when it names the cancelled run (and, for a control
+  request, the host token this command wrote).
 - A fresh heartbeat belongs to the run, not to the token of the latest event. When a racing host
   wrote a different token, `cancel` still treats the run as live, signals that pid and records the
   live token in the request as provenance. But a heartbeat means `running` only while the latest

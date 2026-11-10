@@ -202,16 +202,11 @@ func runAgentResume(args []string, opt Options) int {
 	if code != 0 {
 		return code
 	}
-	storePath, code := agentStoreOverride(opt, st, run, *flags.store, *flags.json)
+	storePath, code := agentRecordedStore(opt, st, run, *flags.store, *flags.json)
 	if code != 0 {
 		return code
 	}
-	recordedStore := run.StorePath
 	run.StorePath = storePath
-	if strings.TrimSpace(*flags.store) != "" && storePath != recordedStore {
-		return usageError(opt, *flags.json, "store_mismatch",
-			fmt.Sprintf("--agent-store %s is not the store recorded for run %s; resume reopens the recorded Pi store", storePath, run.RunID))
-	}
 	pending, err := st.AgentRunCancelPending(run.RunID)
 	if err != nil {
 		return internalError(opt, *flags.json, err)
@@ -464,7 +459,7 @@ func runAgentCancel(args []string, opt Options) int {
 	if code != 0 {
 		return code
 	}
-	storePath, code := agentStoreOverride(opt, st, run, *flags.store, *flags.json)
+	storePath, code := agentRecordedStore(opt, st, run, *flags.store, *flags.json)
 	if code != 0 {
 		return code
 	}
@@ -473,6 +468,16 @@ func runAgentCancel(args []string, opt Options) int {
 		return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed", run.RunID))
 	}
 	heartbeatPath := run.StorePath + ".host"
+	if latest.Kind == store.AgentEventCancelled {
+		// Cancellation is already terminal. Do not touch the shared heartbeat
+		// or control file: a newer run on the same store owns them now.
+		existing := agentCancelDocOf(run, agent.StateCancelled, 0)
+		if *flags.json {
+			return writeJSON(opt, existing)
+		}
+		writeAgentCancel(opt.Stdout, existing)
+		return 0
+	}
 	// The latest claim recorded the token given to the host before that host
 	// wrote a heartbeat. A live heartbeat is more precise when a host raced the
 	// claim. The token keeps an old control request from stopping a later
@@ -504,8 +509,8 @@ func runAgentCancel(args []string, opt Options) int {
 		}
 		if _, err := st.AppendAgentRunEvent(run.RunID, store.AgentEventCancelRequested, info, opt.Now()); err != nil {
 			if errors.Is(err, store.ErrAgentRunFinished) {
-				agent.RemoveHeartbeat(heartbeatPath)
-				agent.RemoveHostControl(heartbeatPath)
+				agent.RemoveHeartbeatForRun(heartbeatPath, run.RunID)
+				agent.RemoveHostControlForRun(heartbeatPath, run.RunID, controlToken)
 				latest, _, _ := st.LatestAgentRunEvent(run.RunID)
 				if latest.Kind == store.AgentEventCompleted {
 					return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed", run.RunID))
@@ -574,9 +579,10 @@ func runAgentCancel(args []string, opt Options) int {
 	}
 	// The host is gone in both terminal paths, including when another process
 	// recorded cancelled first. A Windows hard kill cannot remove these files
-	// itself, so this process clears them.
-	agent.RemoveHeartbeat(heartbeatPath)
-	agent.RemoveHostControl(heartbeatPath)
+	// itself, so this process clears its own run's files. It must not delete a
+	// newer run's shared heartbeat or control file.
+	agent.RemoveHeartbeatForRun(heartbeatPath, run.RunID)
+	agent.RemoveHostControlForRun(heartbeatPath, run.RunID, controlToken)
 	if !changed {
 		latest, _, _ := st.LatestAgentRunEvent(run.RunID)
 		if latest.Kind == store.AgentEventCompleted {
@@ -844,13 +850,14 @@ func agentAppendFinished(opt Options, jsonMode bool, st *store.Store, run store.
 // writes the outcome document. start and resume differ only in the request and
 // the events already on disk.
 func executeAgentRun(opt Options, jsonMode bool, st *store.Store, run store.AgentRun, request agent.HostRequest, timeout time.Duration) int {
-	agent.RemoveHeartbeat(request.HeartbeatPath)
+	agent.RemoveHeartbeatForRun(request.HeartbeatPath, request.RunID)
 	outcome, runErr := runAgentHost(opt, request, timeout)
 	// runAgentHost returns only after the host process has exited. A hard kill
 	// (Windows) cannot remove its liveness or control files itself, so the
-	// application clears both once the process is gone.
-	agent.RemoveHeartbeat(request.HeartbeatPath)
-	agent.RemoveHostControl(request.HeartbeatPath)
+	// application clears this run's files once the process is gone. Files that
+	// name another run are left for that run's host.
+	agent.RemoveHeartbeatForRun(request.HeartbeatPath, request.RunID)
+	agent.RemoveHostControlForRun(request.HeartbeatPath, request.RunID, "")
 	response := outcome.Response
 	steps, err := st.AgentSteps(run.RunID)
 	if err != nil {
@@ -1033,6 +1040,22 @@ func agentStoreOverride(opt Options, st *store.Store, run store.AgentRun, raw st
 		return "", usageError(opt, jsonMode, "invalid_input", err.Error())
 	}
 	return resolved, 0
+}
+
+// agentRecordedStore resolves --agent-store for a command that addresses one
+// recorded run. The recorded store is authoritative: a different path would
+// read or delete another store's shared heartbeat and control files. status
+// and transcript keep the exploratory override.
+func agentRecordedStore(opt Options, st *store.Store, run store.AgentRun, raw string, jsonMode bool) (string, int) {
+	storePath, code := agentStoreOverride(opt, st, run, raw, jsonMode)
+	if code != 0 {
+		return "", code
+	}
+	if strings.TrimSpace(raw) != "" && storePath != run.StorePath {
+		return "", usageError(opt, jsonMode, "store_mismatch",
+			fmt.Sprintf("--agent-store %s is not the store recorded for run %s; the recorded Pi store is authoritative", storePath, run.RunID))
+	}
+	return storePath, 0
 }
 
 // agentHeartbeatWindow is the liveness window for the host heartbeat file and

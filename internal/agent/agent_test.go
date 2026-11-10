@@ -87,6 +87,7 @@ func TestValidateEndpoint(t *testing.T) {
 		{"https://api.example.com/v1/chat/completions", true},
 		{"http://127.0.0.1:11434/v1/chat/completions", true},
 		{"http://localhost:8080/chat/completions", true},
+		{"http://[::1]:8080/v1/chat/completions", true},
 		{"http://api.example.com/v1/chat/completions", false},
 		{"https://user:pass@api.example.com/v1/chat/completions", false},
 		{"https://api.example.com/v1/chat/completions?x=1", false},
@@ -447,9 +448,44 @@ func TestHostControlRoundTrip(t *testing.T) {
 	if control.Action != HostControlPause || control.HostToken != "" {
 		t.Fatalf("rewritten control = %+v", control)
 	}
-	RemoveHostControl(heartbeatPath)
+	RemoveHostControlForRun(heartbeatPath, control.RunID, "")
 	if _, err := os.Stat(controlPath); !os.IsNotExist(err) {
 		t.Fatalf("control file survived removal: %v", err)
+	}
+}
+
+func TestRemoveHostFilesOnlyForOwnRun(t *testing.T) {
+	heartbeatPath := filepath.Join(t.TempDir(), "agent.host")
+	controlPath := HostControlPath(heartbeatPath)
+	runA := "run-20261110T100000Z-aaaaaaaa"
+	runB := "run-20261110T100000Z-bbbbbbbb"
+	token := strings.Repeat("a", 32)
+	raw, _ := json.Marshal(Heartbeat{RunID: runB, PID: 4242, Token: token, At: time.Now().UnixMilli()})
+	if err := os.WriteFile(heartbeatPath, raw, 0o600); err != nil {
+		t.Fatalf("write heartbeat: %v", err)
+	}
+	RemoveHeartbeatForRun(heartbeatPath, runA)
+	if _, err := os.Stat(heartbeatPath); err != nil {
+		t.Fatalf("another run's heartbeat was removed: %v", err)
+	}
+	if err := WriteHostControl(heartbeatPath, runB, token, HostControlPause); err != nil {
+		t.Fatalf("write control: %v", err)
+	}
+	RemoveHostControlForRun(heartbeatPath, runB, strings.Repeat("b", 32))
+	if _, err := os.Stat(controlPath); err != nil {
+		t.Fatalf("another host token's control was removed: %v", err)
+	}
+	RemoveHostControlForRun(heartbeatPath, runA, token)
+	if _, err := os.Stat(controlPath); err != nil {
+		t.Fatalf("another run's control was removed: %v", err)
+	}
+	RemoveHeartbeatForRun(heartbeatPath, runB)
+	if _, err := os.Stat(heartbeatPath); !os.IsNotExist(err) {
+		t.Fatalf("own heartbeat survived removal: %v", err)
+	}
+	RemoveHostControlForRun(heartbeatPath, runB, token)
+	if _, err := os.Stat(controlPath); !os.IsNotExist(err) {
+		t.Fatalf("own control survived removal: %v", err)
 	}
 }
 

@@ -220,7 +220,11 @@ function validateRequest(doc) {
   } catch {
     throw new Error("model endpoint is not a URL");
   }
-  const loopback = endpoint.hostname === "localhost" || endpoint.hostname === "127.0.0.1" || endpoint.hostname === "::1";
+  // Node keeps IPv6 brackets in `hostname` ("[::1]") while Go's
+  // url.Hostname() returns the bare address. Compare the unwrapped form so the
+  // host accepts exactly the loopback endpoints ValidateEndpoint accepts.
+  const hostname = endpoint.hostname.replace(/^\[|\]$/g, "");
+  const loopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
   if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && loopback)) {
     throw new Error("model endpoint must use https outside loopback");
   }
@@ -343,15 +347,20 @@ function recordStepTool() {
       const kind = String(args.kind ?? "").trim();
       const title = String(args.title ?? "").trim();
       const body = String(args.body ?? "").trim();
-      if (!Number.isInteger(index) || index < 1 || index > request.model.max_steps) {
-        throw new Error(`step index must be 1..${request.model.max_steps}`);
-      }
+      // The shared Pi store can recover a call from an earlier conversation.
+      // Resolve the run that owns this conversation instead of assuming the
+      // current process's run, so an old call can never commit into a newer run.
+      const origin = await conversationRunID(api.conversationId);
+      if (!origin) throw new Error("tool call is not bound to a recorded agent run");
+      const maxSteps = origin === request.run_id ? request.model.max_steps : 0;
+      if (!Number.isInteger(index) || index < 1) throw new Error("step index must be a positive integer");
+      if (maxSteps > 0 && index > maxSteps) throw new Error(`step index must be 1..${maxSteps}`);
       if (!STEP_KINDS.has(kind)) throw new Error("step kind must be diagnosis, tactic or practice");
       if (Array.from(title).length < 1 || Array.from(title).length > MAX_TITLE) throw new Error(`title must be 1-${MAX_TITLE} characters`);
       if (Array.from(body).length < 1 || Array.from(body).length > MAX_BODY) throw new Error(`body must be 1-${MAX_BODY} characters`);
       if (String(api.callId).length > MAX_ATTEMPT_KEY) throw new Error("tool call id is too long");
       const doc = await spawnStep(
-        { run_id: request.run_id, attempt_key: api.callId, index, kind, title, body },
+        { run_id: origin, attempt_key: api.callId, index, kind, title, body },
         context.abortSignal,
       );
       if (process.env.PASSQUEST_AGENT_FAULT === "kill-after-step") {
@@ -389,9 +398,45 @@ function buildRegistry() {
   return registry;
 }
 
-async function readMapping() {
+async function readRuns() {
   const doc = await harness.snapshot(RunsDoc, BACKGROUND_CONTEXT);
-  return doc?.runs?.[request.run_id];
+  return doc?.runs ?? {};
+}
+
+async function readMapping() {
+  return (await readRuns())[request.run_id];
+}
+
+// conversationRunID returns the run that owns one conversation. The shared Pi
+// store can recover a call from an earlier conversation, so the tool resolves
+// the originating run instead of assuming the current process's run.
+async function conversationRunID(conversationID) {
+  const runs = await readRuns();
+  for (const [runID, mapping] of Object.entries(runs)) {
+    if (mapping?.conversation_id === conversationID) return runID;
+  }
+  return "";
+}
+
+// abortForeignConversations retires work left in the shared Pi store by an
+// earlier run before resume can recover it. One application database allows
+// one unfinished run, so every other mapped conversation is terminal; aborting
+// it prevents a cancelled run's provider requests and tool calls from running
+// under the current run's process identity.
+async function abortForeignConversations() {
+  const runs = await readRuns();
+  for (const mapping of Object.values(runs)) {
+    if (!mapping || mapping.conversation_id === conversation.id) continue;
+    const foreign = await harness.conversation(mapping.conversation_id, BACKGROUND_CONTEXT);
+    if (!foreign) continue;
+    try {
+      await foreign.abort(BACKGROUND_CONTEXT);
+    } catch (error) {
+      if (reports.length < 20) {
+        reports.push({ kind: "foreign_abort", reason: redact(error?.message ?? error), extension: "", task: "" });
+      }
+    }
+  }
 }
 
 async function ensureConversation(modelsRef) {
@@ -484,6 +529,11 @@ async function usageOf(id) {
 async function snapshotFor(id) {
   const live = await harness.snapshot(LiveDoc, id, BACKGROUND_CONTEXT);
   const inspect = await harness.inspect(BACKGROUND_CONTEXT);
+  // The Pi store is shared by every run in the application database. Count
+  // only work owned by this conversation: a later run's paused task must not
+  // make this run look paused.
+  const pendingTasks = inspect.tasks.filter((task) => task.record.conversationId === id);
+  const unsettledSubmissions = inspect.submissions.filter((submission) => submission.conversationId === id);
   const page = await entries();
   const answer = lastAnswer(page);
   const activity = countActivity(page);
@@ -491,8 +541,8 @@ async function snapshotFor(id) {
     found: true,
     conversation_id: id,
     live_run: Boolean(live?.run),
-    pending_tasks: inspect.tasks.length,
-    unsettled_submissions: inspect.submissions.length,
+    pending_tasks: pendingTasks.length,
+    unsettled_submissions: unsettledSubmissions.length,
     answer_chars: Array.from(answer).length,
     entries: page.items.length,
     turns: activity.turns,
@@ -539,6 +589,15 @@ async function runTask() {
     conversation = await ensureConversation(ref);
   } catch (error) {
     return finish(hostError("storage_error", `prepare durable conversation: ${error?.message ?? error}`));
+  }
+
+  // Retire any earlier run's work before this process resumes the shared
+  // runtime, so a cancelled conversation cannot spend provider requests or
+  // execute tool calls under this run's process identity.
+  try {
+    await abortForeignConversations();
+  } catch (error) {
+    return finish(hostError("storage_error", `retire earlier durable work: ${error?.message ?? error}`));
   }
 
   const present = await taskPresent();

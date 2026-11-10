@@ -523,12 +523,27 @@ func WriteHostControl(heartbeatPath, runID, token, action string) error {
 	return os.Rename(tempPath, path)
 }
 
-// RemoveHostControl clears a consumed or abandoned control request.
-func RemoveHostControl(heartbeatPath string) {
+// RemoveHostControlForRun clears this run's consumed or abandoned control
+// request and leaves a newer run's request alone. An empty token removes the
+// request regardless of the host token it names; a non-empty token also
+// requires the request to name that host.
+func RemoveHostControlForRun(heartbeatPath, runID, token string) {
 	if heartbeatPath == "" {
 		return
 	}
-	_ = os.Remove(HostControlPath(heartbeatPath))
+	path := HostControlPath(heartbeatPath)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var control HostControl
+	if json.Unmarshal(raw, &control) != nil || control.RunID != runID {
+		return
+	}
+	if token != "" && control.HostToken != "" && control.HostToken != token {
+		return
+	}
+	_ = os.Remove(path)
 }
 
 // HeartbeatAuthority reports whether a fresh heartbeat can still describe a
@@ -574,9 +589,21 @@ func HeartbeatLive(path, runID string, now time.Time, stale time.Duration) (Hear
 	return heartbeat, age <= stale
 }
 
-// RemoveHeartbeat clears a stale or finished liveness file.
-func RemoveHeartbeat(path string) {
+// RemoveHeartbeatForRun clears a stale or finished liveness file only when it
+// names runID. Ownership is the run id: the token records which host wrote the
+// heartbeat and deliberately does not make a live host look idle (see
+// HeartbeatLive). A newer run on the same store owns the path, so deleting its
+// heartbeat would make it look paused.
+func RemoveHeartbeatForRun(path, runID string) {
 	if path == "" {
+		return
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var heartbeat Heartbeat
+	if json.Unmarshal(raw, &heartbeat) != nil || heartbeat.RunID != runID {
 		return
 	}
 	_ = os.Remove(path)
