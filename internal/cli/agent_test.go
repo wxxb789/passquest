@@ -42,6 +42,12 @@ func (f *agentFakeRunner) count() int {
 	return len(f.calls)
 }
 
+func (f *agentFakeRunner) requestAt(index int) agent.HostRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[index]
+}
+
 type agentIDSequence struct{ next int }
 
 func (s *agentIDSequence) New() (string, error) {
@@ -132,6 +138,17 @@ func completingAgentRunner(t *testing.T, db string, at time.Time) *agentFakeRunn
 	}}
 }
 
+func createAgentTestRun(t *testing.T, st *store.Store, runID string) {
+	t.Helper()
+	if err := st.CreateAgentRun(store.AgentRun{
+		RunID: runID, TaskKind: agent.TaskStudyBrief, PromptVersion: agent.PromptVersion,
+		Model: "example-model", StorePath: filepath.Join(t.TempDir(), "agent.sqlite"),
+		MaxSteps: 3, MaxTurns: 8, CreatedAt: goldenBase,
+	}, nil, goldenBase); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+}
+
 func statusAgentRunner(snapshot *agent.Snapshot) *agentFakeRunner {
 	return &agentFakeRunner{fn: func(request agent.HostRequest) (agent.RunOutcome, error) {
 		return agent.RunOutcome{Response: agent.HostResponse{
@@ -205,7 +222,7 @@ func TestAgentStartMissingCredentialRecordsNeedsAction(t *testing.T) {
 	}
 }
 
-func TestAgentStartCompletesRecordsStepsAndRefusesSecondRun(t *testing.T) {
+func TestAgentStartCompletesRecordsStepsAndKeepsAttempts(t *testing.T) {
 	temp := t.TempDir()
 	db := filepath.Join(temp, "app.sqlite")
 	configureAgentProvider(t, db)
@@ -300,7 +317,7 @@ func TestAgentPausedThenResume(t *testing.T) {
 	}}
 	clock := &stepClock{base: goldenBase}
 	code, stdout, stderr := runAgentTest(t, agentTestOptions(t, clock, interrupted, ids, agentTestKey), "",
-		"agent", "start", "--db", db, "--json")
+		"agent", "start", "--db", db, "--agent-store", filepath.Join(t.TempDir(), "agent.sqlite"), "--json")
 	if code != 4 {
 		t.Fatalf("paused code=%d stderr=%s", code, stderr)
 	}
@@ -324,6 +341,29 @@ func TestAgentPausedThenResume(t *testing.T) {
 	if code != 0 || !strings.Contains(statusRaw, `"state": "paused"`) {
 		t.Fatalf("paused status code=%d raw=%s", code, statusRaw)
 	}
+	if err := os.Remove(paused.Run.Store); err != nil {
+		t.Fatalf("remove store: %v", err)
+	}
+	code, humanStatus, _ := runAgentTest(t, agentTestOptions(t, clock, unavailable, nil, agentTestKey), "",
+		"agent", "status", paused.Run.RunID, "--db", db)
+	if code != 0 || !strings.Contains(humanStatus, "store missing") {
+		t.Fatalf("missing-store human status code=%d output=%s", code, humanStatus)
+	}
+
+	// A later configuration must not change the resumed model: the run keeps
+	// its recorded model and picks up the current endpoint (Q-0006-05).
+	newEndpoint := "https://second.example.com/v1/chat/completions"
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := st.SaveTutorConfig(tutor.Config{
+		Endpoint: newEndpoint, Model: "other-model",
+		TimeoutMS: 45000, MaxOutputTokens: 400, DailyCalls: 20,
+	}, goldenBase); err != nil {
+		t.Fatalf("save second tutor config: %v", err)
+	}
+	st.Close()
 
 	completing := completingAgentRunner(t, db, goldenBase.Add(20*time.Second))
 	code, resumeRaw, stderr := runAgentTest(t, agentTestOptions(t, clock, completing, nil, agentTestKey), "",
@@ -337,6 +377,10 @@ func TestAgentPausedThenResume(t *testing.T) {
 	}
 	if resumed.State != string(agent.StateCompleted) || len(resumed.Steps) != 2 || resumed.Run.RunID != paused.Run.RunID {
 		t.Fatalf("resumed = %+v", resumed)
+	}
+	got := completing.requestAt(0)
+	if got.Model == nil || got.Model.Model != paused.Run.Model || got.Model.Endpoint != newEndpoint {
+		t.Fatalf("resume request model = %+v, want recorded %q at %q", got.Model, paused.Run.Model, newEndpoint)
 	}
 	code, _, stderr = runAgentTest(t, agentTestOptions(t, clock, completing, nil, agentTestKey), "",
 		"agent", "resume", paused.Run.RunID, "--db", db, "--json")
@@ -405,6 +449,45 @@ func TestAgentCancelCompletedRunRefused(t *testing.T) {
 	}
 }
 
+func TestAgentLatestTokenFailsClosedOnAReadError(t *testing.T) {
+	db := newDB(t)
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	if _, err := agentLatestToken(st, "run-20261110T100000Z-aaaaaaaa"); err == nil {
+		t.Fatal("a closed store returned no error")
+	}
+}
+
+func TestAgentResumeRefusesUnconsummatedCancellation(t *testing.T) {
+	db := newDB(t)
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	runID := "run-20261110T100000Z-aaaaaaaa"
+	createAgentTestRun(t, st, runID)
+	if _, err := st.AppendAgentRunEvent(runID, store.AgentEventCancelRequested, map[string]any{"pid": 4}, goldenBase); err != nil {
+		t.Fatalf("cancel request: %v", err)
+	}
+	// A racing run process can append an interruption after the cancellation
+	// request. Resume must read the trail, not only the latest event.
+	if _, err := st.AppendAgentRunEvent(runID, store.AgentEventInterrupted,
+		map[string]any{"reason": "host_exit"}, goldenBase.Add(time.Second)); err != nil {
+		t.Fatalf("late interruption: %v", err)
+	}
+	st.Close()
+	code, _, stderr := runAgentTest(t, agentTestOptions(t, nil, &agentFakeRunner{}, nil, agentTestKey), "",
+		"agent", "resume", runID, "--db", db, "--json")
+	if code != 2 || !strings.Contains(stderr, "cancel_pending") {
+		t.Fatalf("resume with a pending cancel code=%d stderr=%s", code, stderr)
+	}
+}
+
 func TestAgentRecordStepValidationAndDuplicate(t *testing.T) {
 	db := newDB(t)
 	st, err := store.Open(db)
@@ -412,13 +495,7 @@ func TestAgentRecordStepValidationAndDuplicate(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	runID := "run-20261110T100000Z-aaaaaaaa"
-	if err := st.CreateAgentRun(store.AgentRun{
-		RunID: runID, TaskKind: agent.TaskStudyBrief, PromptVersion: agent.PromptVersion,
-		Model: "example-model", StorePath: filepath.Join(t.TempDir(), "agent.sqlite"),
-		MaxSteps: 3, MaxTurns: 8, CreatedAt: goldenBase,
-	}, nil, goldenBase); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
+	createAgentTestRun(t, st, runID)
 	st.Close()
 	opt := agentTestOptions(t, &stepClock{base: goldenBase}, &agentFakeRunner{}, nil, agentTestKey)
 	stepJSON := func(index int, title string) string {
@@ -461,6 +538,22 @@ func TestAgentRecordStepValidationAndDuplicate(t *testing.T) {
 	if code != 2 || !strings.Contains(stdout, "run_cancelled") {
 		t.Fatalf("cancelled step code=%d stdout=%s", code, stdout)
 	}
+	st, _ = store.Open(db)
+	if _, err := st.AppendAgentRunTerminal(runID, store.AgentEventCancelled, map[string]any{"confirmed": true}, goldenBase); err != nil {
+		t.Fatalf("cancel run: %v", err)
+	}
+	completedID := "run-20261110T100000Z-cccccccc"
+	createAgentTestRun(t, st, completedID)
+	if _, err := st.AppendAgentRunTerminal(completedID, store.AgentEventCompleted, map[string]any{"steps": 1}, goldenBase); err != nil {
+		t.Fatalf("complete run: %v", err)
+	}
+	st.Close()
+	code, stdout, _ = runAgentTest(t, opt,
+		fmt.Sprintf(`{"run_id":%q,"attempt_key":"call-1","index":1,"kind":"diagnosis","title":"t","body":"b"}`, completedID),
+		"agent", "record-step", "--db", db, "--json")
+	if code != 2 || !strings.Contains(stdout, "run_completed") {
+		t.Fatalf("completed step code=%d stdout=%s", code, stdout)
+	}
 }
 
 func TestAgentShowReportsReconciliation(t *testing.T) {
@@ -470,13 +563,7 @@ func TestAgentShowReportsReconciliation(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	runID := "run-20261110T100000Z-aaaaaaaa"
-	if err := st.CreateAgentRun(store.AgentRun{
-		RunID: runID, TaskKind: agent.TaskStudyBrief, PromptVersion: agent.PromptVersion,
-		Model: "example-model", StorePath: filepath.Join(t.TempDir(), "agent.sqlite"),
-		MaxSteps: 3, MaxTurns: 8, CreatedAt: goldenBase,
-	}, nil, goldenBase); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
+	createAgentTestRun(t, st, runID)
 	if _, _, _, err := st.RecordAgentStep(runID, 1, store.AgentStepDiagnosis, "Title", "Body", "call-1", goldenBase); err != nil {
 		t.Fatalf("record: %v", err)
 	}
@@ -549,10 +636,6 @@ func TestAgentHumanWriters(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, "Pass Quest — durable study brief") || !strings.Contains(stdout, "advisory") {
 		t.Fatalf("human start code=%d output=%s", code, stdout)
 	}
-	var doc agentRunDoc
-	_, jsonRaw, _ := runAgentTest(t, agentTestOptions(t, clock, runner, nil, agentTestKey), "",
-		"agent", "show", "--db", db, "--json")
-	_ = json.Unmarshal([]byte(jsonRaw), &doc)
 	code, runs, _ := runAgentTest(t, agentTestOptions(t, clock, runner, nil, agentTestKey), "",
 		"agent", "runs", "--db", db)
 	if code != 0 || !strings.Contains(runs, "RUN") || !strings.Contains(runs, "completed") {

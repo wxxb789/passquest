@@ -18,7 +18,7 @@ passquest agent status [RUN] [--db PATH] [--agent-store PATH] [--json]
 passquest agent resume [RUN] [--timeout-seconds N] [--db PATH] [--agent-store PATH] [--json]
 passquest agent cancel [RUN] [--wait-seconds N] [--db PATH] [--agent-store PATH] [--json]
 passquest agent runs   [--db PATH] [--json]
-passquest agent show   RUN [--db PATH] [--json]
+passquest agent show   [RUN] [--db PATH] [--json]
 passquest agent transcript RUN [--agent-store PATH] [--db PATH] [--json]
 ```
 
@@ -60,8 +60,8 @@ and next to the application database. The provider credential is read only from
 ## Runtime and provider
 
 - The Node host is `agent/durable-host.mjs`; it imports `@earendil-works/pi-durable`,
-  `@earendil-works/pi-ai` and `@earendil-works/chord`, pinned exactly in `agent/package.json`.
-  `bun install` at the repository root installs the workspace.
+  `@earendil-works/pi-ai`, `@earendil-works/chord` and `@earendil-works/pi-schema`, all pinned exactly
+  in `agent/package.json`. `bun install` at the repository root installs the workspace.
 - The provider is the goal-0005 `tutor_config`: one OpenAI-compatible endpoint, model, timeout and
   output bound. The endpoint must end in `/chat/completions`; `https` is required except on loopback.
 - A run is bound to the model recorded at `start`. `resume` uses that model with the current endpoint,
@@ -91,6 +91,10 @@ trail and marks `durable.available: false`; `transcript` needs the host because 
 
 `agent runs` lists the event-trail state; `agent status` adds the live heartbeat and a read-only Pi
 snapshot. A failure document carries the run, status, action hint and any steps already committed.
+
+Two different `interrupted` values are deliberately distinct: the application event `interrupted`
+recorded on a timeout or SIGTERM is `paused` and resumable, while a Pi snapshot failure whose reason
+is `interrupted` is a host failure and is `needs_action`.
 
 ## Interruption, resume and cancel
 

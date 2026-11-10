@@ -19,6 +19,7 @@ import (
 	"github.com/wxxb789/passquest/internal/skill"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/tutor"
 )
 
 func runAgent(args []string, opt Options) int {
@@ -111,16 +112,9 @@ func runAgentStart(args []string, opt Options) int {
 	}
 	defer st.Close()
 
-	cfg, configured, err := st.TutorConfig()
-	if err != nil {
-		return internalError(opt, *flags.json, err)
-	}
-	if !configured {
-		return usageError(opt, *flags.json, "not_configured",
-			"no provider is configured; run passquest tutor config --endpoint URL --model NAME")
-	}
-	if err := agent.ValidateEndpoint(cfg.Endpoint); err != nil {
-		return usageError(opt, *flags.json, "invalid_config", err.Error())
+	cfg, code := agentProviderConfig(st, opt, *flags.json)
+	if code != 0 {
+		return code
 	}
 	if existing, ok, err := st.LatestAgentRun(true); err != nil {
 		return internalError(opt, *flags.json, err)
@@ -179,32 +173,11 @@ func runAgentStart(args []string, opt Options) int {
 		return writeAgentFailure(opt, *flags.json, run, agent.StateNeedsAction, failure, nil)
 	}
 
-	executable, err := os.Executable()
+	// start binds the model recorded with the run; a model rename needs
+	// cancel + start, while endpoint, timeout and credential stay current.
+	request, err := agentHostRequest(st, run, agent.ModeStart, cfg.Model, prompt, token, cfg, *timeoutFlag)
 	if err != nil {
 		return internalError(opt, *flags.json, err)
-	}
-	request := agent.HostRequest{
-		ProtocolVersion: agent.ProtocolVersion,
-		Mode:            agent.ModeStart,
-		RunID:           runID,
-		TaskKind:        run.TaskKind,
-		PromptVersion:   run.PromptVersion,
-		StorePath:       storePath,
-		HeartbeatPath:   storePath + ".host",
-		HostToken:       token,
-		BinaryPath:      executable,
-		DBPath:          st.Path(),
-		CredentialEnv:   agent.CredentialEnv,
-		Model: &agent.ModelConfig{
-			Endpoint:        cfg.Endpoint,
-			Model:           cfg.Model,
-			TimeoutMS:       cfg.TimeoutMS,
-			MaxOutputTokens: cfg.MaxOutputTokens,
-			MaxSteps:        run.MaxSteps,
-			MaxTurns:        run.MaxTurns,
-		},
-		Prompt:     prompt,
-		DeadlineMS: int64(*timeoutFlag)*1000 + 10000,
 	}
 	return executeAgentRun(opt, *flags.json, st, run, request, time.Duration(*timeoutFlag)*time.Second)
 }
@@ -235,28 +208,27 @@ func runAgentResume(args []string, opt Options) int {
 		return code
 	}
 	run.StorePath = storePath
+	pending, err := st.AgentRunCancelPending(run.RunID)
+	if err != nil {
+		return internalError(opt, *flags.json, err)
+	}
+	if pending {
+		return usageError(opt, *flags.json, "cancel_pending",
+			fmt.Sprintf("cancellation was requested for run %s; run agent cancel to confirm it", run.RunID))
+	}
 	switch latest.Kind {
 	case store.AgentEventCompleted:
 		return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed; use agent show or start a new run", run.RunID))
 	case store.AgentEventCancelled:
 		return usageError(opt, *flags.json, "run_cancelled", fmt.Sprintf("run %s was cancelled; start a new run", run.RunID))
-	case store.AgentEventCancelRequested:
-		return usageError(opt, *flags.json, "cancel_pending", fmt.Sprintf("cancellation was requested for run %s; run agent cancel to confirm it", run.RunID))
 	case store.AgentEventFailed:
 		if agentEventCode(latest) == agent.CodeNoSteps {
 			return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s answered without steps; start a new run", run.RunID))
 		}
 	}
-	cfg, configured, err := st.TutorConfig()
-	if err != nil {
-		return internalError(opt, *flags.json, err)
-	}
-	if !configured {
-		return usageError(opt, *flags.json, "not_configured",
-			"no provider is configured; run passquest tutor config --endpoint URL --model NAME")
-	}
-	if err := agent.ValidateEndpoint(cfg.Endpoint); err != nil {
-		return usageError(opt, *flags.json, "invalid_config", err.Error())
+	cfg, code := agentProviderConfig(st, opt, *flags.json)
+	if code != 0 {
+		return code
 	}
 	if err := agent.PrepareStorePath(run.StorePath); err != nil {
 		return internalError(opt, *flags.json, err)
@@ -277,13 +249,43 @@ func runAgentResume(args []string, opt Options) int {
 		}
 		return internalError(opt, *flags.json, err)
 	}
-	executable, err := os.Executable()
+	// resume keeps the run's recorded model with the current endpoint, timeout
+	// and credential (Q-0006-05).
+	request, err := agentHostRequest(st, run, agent.ModeResume, run.Model, prompt, token, cfg, *timeoutFlag)
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
-	request := agent.HostRequest{
+	return executeAgentRun(opt, *flags.json, st, run, request, time.Duration(*timeoutFlag)*time.Second)
+}
+
+// agentProviderConfig applies the provider preconditions start and resume
+// share: a configured endpoint and the agent's endpoint rule.
+func agentProviderConfig(st *store.Store, opt Options, jsonMode bool) (tutor.Config, int) {
+	cfg, configured, err := st.TutorConfig()
+	if err != nil {
+		return tutor.Config{}, internalError(opt, jsonMode, err)
+	}
+	if !configured {
+		return tutor.Config{}, usageError(opt, jsonMode, "not_configured",
+			"no provider is configured; run passquest tutor config --endpoint URL --model NAME")
+	}
+	if err := agent.ValidateEndpoint(cfg.Endpoint); err != nil {
+		return tutor.Config{}, usageError(opt, jsonMode, "invalid_config", err.Error())
+	}
+	return cfg, 0
+}
+
+// agentHostRequest builds the one host request shape start and resume share.
+// model is explicit because resume binds the run's recorded model while start
+// binds the current configuration (Q-0006-05).
+func agentHostRequest(st *store.Store, run store.AgentRun, mode, model, prompt, token string, cfg tutor.Config, timeoutSeconds int) (agent.HostRequest, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return agent.HostRequest{}, err
+	}
+	return agent.HostRequest{
 		ProtocolVersion: agent.ProtocolVersion,
-		Mode:            agent.ModeResume,
+		Mode:            mode,
 		RunID:           run.RunID,
 		TaskKind:        run.TaskKind,
 		PromptVersion:   run.PromptVersion,
@@ -295,16 +297,15 @@ func runAgentResume(args []string, opt Options) int {
 		CredentialEnv:   agent.CredentialEnv,
 		Model: &agent.ModelConfig{
 			Endpoint:        cfg.Endpoint,
-			Model:           run.Model,
+			Model:           model,
 			TimeoutMS:       cfg.TimeoutMS,
 			MaxOutputTokens: cfg.MaxOutputTokens,
 			MaxSteps:        run.MaxSteps,
 			MaxTurns:        run.MaxTurns,
 		},
 		Prompt:     prompt,
-		DeadlineMS: int64(*timeoutFlag)*1000 + 10000,
-	}
-	return executeAgentRun(opt, *flags.json, st, run, request, time.Duration(*timeoutFlag)*time.Second)
+		DeadlineMS: int64(timeoutSeconds)*1000 + 10000,
+	}, nil
 }
 
 func runAgentStatus(args []string, opt Options) int {
@@ -336,7 +337,9 @@ func runAgentStatus(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
-	token := agentLatestToken(st, run.RunID)
+	// A token read failure leaves status without a heartbeat match; the run
+	// state still comes from the event trail and the read-only snapshot.
+	token, _ := agentLatestToken(st, run.RunID)
 	heartbeat, fresh := agent.HeartbeatFresh(run.StorePath+".host", run.RunID, token, opt.Now(), time.Duration(agent.HeartbeatStaleMS)*time.Millisecond)
 
 	durable := agentDurableView{Available: false, Reason: "not_started", HeartbeatFresh: fresh, HeartbeatPID: heartbeat.PID}
@@ -437,7 +440,10 @@ func runAgentCancel(args []string, opt Options) int {
 		return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed", run.RunID))
 	}
 	if latest.Kind != store.AgentEventCancelRequested && latest.Kind != store.AgentEventCancelled {
-		token := agentLatestToken(st, run.RunID)
+		token, err := agentLatestToken(st, run.RunID)
+		if err != nil {
+			return internalError(opt, *flags.json, err)
+		}
 		info := map[string]any{"host_token": token}
 		if heartbeat, fresh := agent.HeartbeatFresh(run.StorePath+".host", run.RunID, token, opt.Now(), time.Duration(agent.HeartbeatStaleMS)*time.Millisecond); fresh {
 			info["pid"] = heartbeat.PID
@@ -448,15 +454,7 @@ func runAgentCancel(args []string, opt Options) int {
 				if latest.Kind == store.AgentEventCompleted {
 					return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed", run.RunID))
 				}
-				existing := agentCancelDoc{
-					SchemaVersion: ProtocolVersion,
-					State:         string(agent.StateCancelled),
-					Run:           agentRunViewOf(run),
-					Status:        agentStatusViewOf(agent.StateCancelled, nil, store.AgentEventCancelled),
-					Cancelled:     true,
-					Confirmed:     true,
-					Limits:        agentLimits(),
-				}
+				existing := agentCancelDocOf(run, agent.StateCancelled, 0)
 				if *flags.json {
 					return writeJSON(opt, existing)
 				}
@@ -467,7 +465,10 @@ func runAgentCancel(args []string, opt Options) int {
 		}
 	}
 
-	token := agentLatestToken(st, run.RunID)
+	token, err := agentLatestToken(st, run.RunID)
+	if err != nil {
+		return internalError(opt, *flags.json, err)
+	}
 	heartbeatPath := run.StorePath + ".host"
 	heartbeat, fresh := agent.HeartbeatFresh(heartbeatPath, run.RunID, token, opt.Now(), time.Duration(agent.HeartbeatStaleMS)*time.Millisecond)
 	confirmed := true
@@ -501,16 +502,7 @@ func runAgentCancel(args []string, opt Options) int {
 		// Do not record a terminal cancellation beside a fresh heartbeat: that
 		// would hide a process that may still be running. cancel_requested stays
 		// the latest event, so status reports cancelling and resume refuses.
-		doc := agentCancelDoc{
-			SchemaVersion: ProtocolVersion,
-			State:         string(agent.StateCancelling),
-			Run:           agentRunViewOf(run),
-			Status:        agentStatusViewOf(agent.StateCancelling, nil, store.AgentEventCancelRequested),
-			Cancelled:     false,
-			Confirmed:     false,
-			HeartbeatPID:  heartbeat.PID,
-			Limits:        agentLimits(),
-		}
+		doc := agentCancelDocOf(run, agent.StateCancelling, heartbeat.PID)
 		if *flags.json {
 			_ = writeJSONTo(opt.Stderr, doc)
 		} else {
@@ -531,16 +523,7 @@ func runAgentCancel(args []string, opt Options) int {
 		if latest.Kind == store.AgentEventCompleted {
 			return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed", run.RunID))
 		}
-		existing := agentCancelDoc{
-			SchemaVersion: ProtocolVersion,
-			State:         string(agent.StateCancelled),
-			Run:           agentRunViewOf(run),
-			Status:        agentStatusViewOf(agent.StateCancelled, nil, store.AgentEventCancelled),
-			Cancelled:     true,
-			Confirmed:     true,
-			HeartbeatPID:  heartbeat.PID,
-			Limits:        agentLimits(),
-		}
+		existing := agentCancelDocOf(run, agent.StateCancelled, heartbeat.PID)
 		if *flags.json {
 			return writeJSON(opt, existing)
 		}
@@ -548,17 +531,7 @@ func runAgentCancel(args []string, opt Options) int {
 		return 0
 	}
 	agent.RemoveHeartbeat(heartbeatPath)
-	state := agent.StateCancelled
-	doc := agentCancelDoc{
-		SchemaVersion: ProtocolVersion,
-		State:         string(state),
-		Run:           agentRunViewOf(run),
-		Status:        agentStatusViewOf(state, nil, store.AgentEventCancelled),
-		Cancelled:     true,
-		Confirmed:     true,
-		HeartbeatPID:  heartbeat.PID,
-		Limits:        agentLimits(),
-	}
+	doc := agentCancelDocOf(run, agent.StateCancelled, heartbeat.PID)
 	if *flags.json {
 		return writeJSON(opt, doc)
 	}
@@ -679,12 +652,12 @@ func runAgentTranscript(args []string, opt Options) int {
 	if runErr != nil {
 		var unavailable *agent.UnavailableError
 		if errors.As(runErr, &unavailable) {
-			return agentCommandError(opt, *jsonFlag, agent.CodeAgentUnavailable, runErr.Error(), nil, nil)
+			return agentCommandError(opt, *jsonFlag, agent.CodeAgentUnavailable, runErr.Error())
 		}
-		return agentCommandError(opt, *jsonFlag, agent.CodeHostProtocol, runErr.Error(), nil, nil)
+		return agentCommandError(opt, *jsonFlag, agent.CodeHostProtocol, runErr.Error())
 	}
 	if outcome.Response.State != "transcript" {
-		return agentCommandError(opt, *jsonFlag, agent.CodeHostProtocol, "durable host returned an unexpected document", nil, nil)
+		return agentCommandError(opt, *jsonFlag, agent.CodeHostProtocol, "durable host returned an unexpected document")
 	}
 	if !outcome.Response.Found {
 		return usageError(opt, *jsonFlag, "unknown_run", fmt.Sprintf("run %s is not in durable store %s", runID, storePath))
@@ -1033,20 +1006,20 @@ func resolveAgentRun(opt Options, st *store.Store, raw string, unfinished bool, 
 	return run, latest, 0
 }
 
-func agentLatestToken(st *store.Store, runID string) string {
+func agentLatestToken(st *store.Store, runID string) (string, error) {
 	events, err := st.AgentRunEvents(runID)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	for i := len(events) - 1; i >= 0; i-- {
 		var detail struct {
 			HostToken string `json:"host_token"`
 		}
 		if err := json.Unmarshal([]byte(events[i].DetailJSON), &detail); err == nil && detail.HostToken != "" {
-			return detail.HostToken
+			return detail.HostToken, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func agentEventCode(event store.AgentRunEvent) string {
@@ -1141,19 +1114,11 @@ func writeAgentFailure(opt Options, jsonMode bool, run store.AgentRun, state age
 	return 3
 }
 
-func agentCommandError(opt Options, jsonMode bool, code, message string, run *store.AgentRun, state *agent.State) int {
+func agentCommandError(opt Options, jsonMode bool, code, message string) int {
 	doc := agentFailureDoc{
 		SchemaVersion: ProtocolVersion,
 		Error:         agent.ErrorDoc{Code: code, Message: redactAgent(opt, message)},
 		Limits:        agentLimits(),
-	}
-	if run != nil {
-		view := agentRunViewOf(*run)
-		doc.Run = &view
-	}
-	if state != nil {
-		view := agentStatusViewOf(*state, nil, "")
-		doc.Status = &view
 	}
 	if jsonMode {
 		_ = writeJSONTo(opt.Stderr, doc)
@@ -1169,7 +1134,7 @@ func agentRecordStepError(opt Options, jsonMode bool, code, message string) int 
 	if !jsonMode {
 		fmt.Fprintf(opt.Stderr, "passquest: %s\n", message)
 	}
-	if code == "invalid_step" || code == "unknown_run" || code == "run_cancelled" {
+	if code == "invalid_step" || code == "unknown_run" || code == "run_cancelled" || code == "run_completed" {
 		return 2
 	}
 	return 1

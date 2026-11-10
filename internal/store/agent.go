@@ -115,6 +115,56 @@ var ErrAgentRunCompleted = errors.New("store: agent run is already completed")
 // terminal states are absorbing: a late process cannot rewrite the outcome.
 var ErrAgentRunFinished = errors.New("store: agent run already reached a terminal state")
 
+// agentLatestEventPredicate is the single definition of a run's latest state
+// transition. A reconciled event records a duplicate effect, not a transition,
+// so it never becomes the latest event. %s is the run-id expression.
+const agentLatestEventPredicate = `e.run_id = %s AND e.kind <> 'reconciled'`
+
+// agentLatestEventQuery selects the latest transition kind for one run. The
+// run-id expression is "?" for a direct query and "r.run_id" inside a
+// correlated subquery.
+func agentLatestEventQuery(runIDExpr string) string {
+	return `SELECT e.kind FROM agent_run_events e WHERE ` +
+		fmt.Sprintf(agentLatestEventPredicate, runIDExpr) + ` ORDER BY e.id DESC LIMIT 1`
+}
+
+// agentLatestEventRowQuery selects the full latest transition row.
+func agentLatestEventRowQuery(runIDExpr string) string {
+	return `SELECT e.id, e.run_id, e.kind, e.detail_json, e.at FROM agent_run_events e WHERE ` +
+		fmt.Sprintf(agentLatestEventPredicate, runIDExpr) + ` ORDER BY e.id DESC LIMIT 1`
+}
+
+// rowQuerier is the read surface shared by *sql.DB and *sql.Tx.
+type rowQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// agentRunCancelPending reports whether a cancellation request is still
+// unconsummated. Terminal states are absorbing, so a request stays pending
+// until a completed or cancelled event follows it. Reading the whole trail
+// keeps a later interrupted or failed transition from hiding the request.
+func agentRunCancelPending(q rowQuerier, runID string) (bool, error) {
+	var requested, consumed int
+	if err := q.QueryRow(`SELECT
+		COUNT(CASE WHEN kind = 'cancel_requested' THEN 1 END),
+		COUNT(CASE WHEN kind IN ('completed', 'cancelled') THEN 1 END)
+		FROM agent_run_events WHERE run_id = ?`, runID).Scan(&requested, &consumed); err != nil {
+		return false, err
+	}
+	return requested > 0 && consumed == 0, nil
+}
+
+// AgentRunCancelPending reports whether cancellation was requested and no
+// terminal event followed. resume and the step effect use it so a racing
+// interruption cannot make a cancelled run look resumable.
+func (s *Store) AgentRunCancelPending(runID string) (bool, error) {
+	pending, err := agentRunCancelPending(s.db, runID)
+	if err != nil {
+		return false, fmt.Errorf("store: read agent cancellation: %w", err)
+	}
+	return pending, nil
+}
+
 // AgentRun is one immutable run definition. It records the model the run was
 // started with; resuming uses that model, not a later configuration.
 type AgentRun struct {
@@ -187,8 +237,7 @@ func (s *Store) CreateAgentRun(run AgentRun, detail any, at time.Time) error {
 
 	var unfinished int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM agent_runs r
-		WHERE COALESCE((SELECT e.kind FROM agent_run_events e
-			WHERE e.run_id = r.run_id ORDER BY e.id DESC LIMIT 1), 'started')
+		WHERE COALESCE((` + agentLatestEventQuery("r.run_id") + `), 'started')
 			NOT IN ('completed', 'cancelled')`).Scan(&unfinished); err != nil {
 		return fmt.Errorf("store: count unfinished agent runs: %w", err)
 	}
@@ -227,7 +276,7 @@ func (s *Store) AppendAgentRunEvent(runID, kind string, detail any, at time.Time
 	}
 	defer tx.Rollback()
 	var latest string
-	err = tx.QueryRow(`SELECT kind FROM agent_run_events WHERE run_id = ? AND kind <> 'reconciled' ORDER BY id DESC LIMIT 1`, runID).Scan(&latest)
+	err = tx.QueryRow(agentLatestEventQuery("?"), runID).Scan(&latest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentRunEvent{}, ErrAgentRunNotFound
 	}
@@ -269,7 +318,7 @@ func (s *Store) AppendAgentRunTerminal(runID, kind string, detail any, at time.T
 	}
 	defer tx.Rollback()
 	var latest string
-	err = tx.QueryRow(`SELECT kind FROM agent_run_events WHERE run_id = ? AND kind <> 'reconciled' ORDER BY id DESC LIMIT 1`, runID).Scan(&latest)
+	err = tx.QueryRow(agentLatestEventQuery("?"), runID).Scan(&latest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, ErrAgentRunNotFound
 	}
@@ -316,8 +365,7 @@ func (s *Store) AgentRun(runID string) (AgentRun, bool, error) {
 func (s *Store) LatestAgentRun(unfinishedOnly bool) (AgentRun, bool, error) {
 	query := `SELECT r.run_id, r.task_kind, r.prompt_version, r.model, r.store_path, r.max_steps, r.max_turns, r.created_at
 		FROM agent_runs r
-		WHERE (? = 0 OR COALESCE((SELECT e.kind FROM agent_run_events e
-			WHERE e.run_id = r.run_id ORDER BY e.id DESC LIMIT 1), 'started')
+		WHERE (? = 0 OR COALESCE((` + agentLatestEventQuery("r.run_id") + `), 'started')
 			NOT IN ('completed', 'cancelled'))
 		ORDER BY r.created_at DESC, r.run_id DESC LIMIT 1`
 	var (
@@ -344,7 +392,7 @@ func (s *Store) LatestAgentRun(unfinishedOnly bool) (AgentRun, bool, error) {
 func (s *Store) AgentRuns() ([]AgentRunSummary, error) {
 	rows, err := s.db.Query(`SELECT r.run_id, r.task_kind, r.prompt_version, r.model, r.store_path, r.max_steps, r.max_turns,
 			r.created_at,
-			COALESCE((SELECT e.kind FROM agent_run_events e WHERE e.run_id = r.run_id AND e.kind <> 'reconciled' ORDER BY e.id DESC LIMIT 1), ''),
+			COALESCE((` + agentLatestEventQuery("r.run_id") + `), ''),
 			(SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.run_id),
 			(SELECT COUNT(*) FROM agent_step_attempts a WHERE a.run_id = r.run_id)
 		FROM agent_runs r ORDER BY r.created_at DESC, r.run_id DESC`)
@@ -410,8 +458,7 @@ func (s *Store) LatestAgentRunEvent(runID string) (AgentRunEvent, bool, error) {
 		event AgentRunEvent
 		at    string
 	)
-	err := s.db.QueryRow(`SELECT id, run_id, kind, detail_json, at
-		FROM agent_run_events WHERE run_id = ? AND kind <> 'reconciled' ORDER BY id DESC LIMIT 1`, runID).
+	err := s.db.QueryRow(agentLatestEventRowQuery("?"), runID).
 		Scan(&event.ID, &event.RunID, &event.Kind, &event.DetailJSON, &at)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentRunEvent{}, false, nil
@@ -454,14 +501,21 @@ func (s *Store) RecordAgentStep(runID string, index int, kind, title, body, atte
 		return AgentStep{}, false, 0, fmt.Errorf("store: step index %d is outside 1..%d", index, maxSteps)
 	}
 	var latest string
-	if err := tx.QueryRow(`SELECT kind FROM agent_run_events WHERE run_id = ? AND kind <> 'reconciled' ORDER BY id DESC LIMIT 1`, runID).Scan(&latest); err != nil {
+	if err := tx.QueryRow(agentLatestEventQuery("?"), runID).Scan(&latest); err != nil {
 		return AgentStep{}, false, 0, fmt.Errorf("store: read agent run state: %w", err)
+	}
+	if latest == AgentEventCompleted {
+		return AgentStep{}, false, 0, ErrAgentRunCompleted
 	}
 	if latest == AgentEventCancelRequested || latest == AgentEventCancelled {
 		return AgentStep{}, false, 0, ErrAgentRunCancelled
 	}
-	if latest == AgentEventCompleted {
-		return AgentStep{}, false, 0, ErrAgentRunCompleted
+	pending, err := agentRunCancelPending(tx, runID)
+	if err != nil {
+		return AgentStep{}, false, 0, fmt.Errorf("store: read agent cancellation: %w", err)
+	}
+	if pending {
+		return AgentStep{}, false, 0, ErrAgentRunCancelled
 	}
 
 	var (

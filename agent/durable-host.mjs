@@ -139,20 +139,6 @@ function failureResult(reason, detail) {
   };
 }
 
-function classifyFailure(detail) {
-  const text = String(detail ?? "").trim();
-  const lower = text.toLowerCase();
-  if (lower.includes("missing credential") || lower.includes("no api key")) return "missing_credential";
-  if (text.startsWith("401:") || text.startsWith("403:") || lower.includes("invalid api key") || lower.includes("unauthorized")) return "auth_failed";
-  if (text.startsWith("429:") || lower.includes("rate limit")) return "rate_limited";
-  if (text.startsWith("400:") || text.startsWith("404:") || lower.includes("model not found")) return "config_error";
-  if (text.startsWith("500:") || text.startsWith("502:") || text.startsWith("503:") || text.startsWith("504:") || lower.includes("provider is not configured")) return "provider_error";
-  if (lower.includes("timeout") || lower.includes("timed out") || lower.includes("deadline")) return "timeout";
-  if (lower.includes("network") || lower.includes("connection") || lower.includes("dns")) return "network_error";
-  if (lower.includes("invalid response") || lower.includes("malformed") || lower.includes("unexpected end") || lower.includes("json")) return "invalid_response";
-  return "provider_error";
-}
-
 function validateRequest(doc) {
   if (!doc || typeof doc !== "object") throw new Error("request must be a JSON object");
   if (doc.protocol_version !== PROTOCOL_VERSION) throw new Error(`protocol ${doc.protocol_version} is not supported`);
@@ -234,7 +220,7 @@ function buildModels(model) {
   });
   const models = createModels();
   models.setProvider(provider);
-  return { models, ref: { provider: "passquest", modelId: model.model }, baseUrl };
+  return { models, ref: { provider: "passquest", modelId: model.model } };
 }
 
 function spawnStep(payload, signal) {
@@ -543,8 +529,6 @@ async function runTask() {
             if (error?.constructor?.name !== "ConversationBusy") throw error;
           }
         }
-      } else {
-        harness.resume();
       }
     }
     harness.resume();
@@ -594,7 +578,11 @@ async function runTask() {
     ],
   };
   if (usage) doc.usage = usage;
-  if (reports.length > 0) doc.limits.push(`The runtime reported ${reports.length} non-fatal diagnostic(s); see stderr or the transcript.`);
+  if (reports.length > 0) {
+    const first = reports[0];
+    const reason = first.reason ? ` (${first.reason})` : "";
+    doc.limits.push(`The runtime reported ${reports.length} non-fatal diagnostic(s); first kind: ${first.kind}${reason}.`);
+  }
   await closeQuietly();
   return finish(doc);
 }

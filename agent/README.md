@@ -35,9 +35,9 @@ while a BYOK text provider requires HTTPS. It is a single-shot process, not an a
 ## `durable-host.mjs` — the Pi Durable study brief
 
 `durable-host.mjs` is the goal-0006 runtime for one bounded multi-step task. It uses
-`@earendil-works/pi-durable` 1.5.1, `@earendil-works/pi-ai` 1.5.1 and `@earendil-works/chord` 1.5.1,
-opened over a separate SQLite file (`openNodeSqliteStorage`). The application database is never opened
-by this process.
+`@earendil-works/pi-durable` 1.5.1, `@earendil-works/pi-ai` 1.5.1, `@earendil-works/chord` 1.5.1 and
+`@earendil-works/pi-schema` 1.5.1, opened over a separate SQLite file (`openNodeSqliteStorage`). The
+application database is never opened by this process.
 
 Modes: `start`, `resume`, `status`, `transcript`.
 

@@ -191,6 +191,23 @@ func TestStudyBriefPacketFallsBackWhenTheRecommendationIsAbsent(t *testing.T) {
 	}
 }
 
+func TestStudyBriefPacketWithOneStepDoesNotAskForTwo(t *testing.T) {
+	packet, err := BuildStudyBrief("run-20261110T100000Z-aaaaaaaa", sampleRecords(), sampleAdaptiveResult(), skill.All(), 1, 4)
+	if err != nil {
+		t.Fatalf("BuildStudyBrief: %v", err)
+	}
+	prompt, err := packet.Prompt()
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if strings.Contains(prompt, "at least two") {
+		t.Fatalf("one-step prompt asks for a second step:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Use at most 1 step.") {
+		t.Fatalf("one-step prompt is missing its bound:\n%s", prompt)
+	}
+}
+
 func TestClassifyFailure(t *testing.T) {
 	tests := []struct {
 		detail string

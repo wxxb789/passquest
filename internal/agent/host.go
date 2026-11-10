@@ -265,8 +265,7 @@ func (r HostRunner) Run(ctx context.Context, request HostRequest) (RunOutcome, e
 	if stdout.truncated {
 		return RunOutcome{}, &ProtocolError{Message: "host response exceeded 2 MiB"}
 	}
-	key := strings.TrimSpace(r.getenv(CredentialEnv))
-	stderrText := redactSecret(strings.TrimSpace(stderr.String()), key)
+	stderrText := strings.TrimSpace(stderr.String())
 	out := RunOutcome{Interrupted: interrupted, InterruptReason: interruptReason}
 	if cmd.ProcessState != nil {
 		out.ExitCode = cmd.ProcessState.ExitCode()
@@ -276,12 +275,8 @@ func (r HostRunner) Run(ctx context.Context, request HostRequest) (RunOutcome, e
 		if decodeErr := json.Unmarshal(stdout.Bytes(), &response); decodeErr == nil {
 			if validateErr := ValidateHostResponse(response, request); validateErr == nil {
 				out.Response = response
-				if interrupted {
-					return out, nil
-				}
-				if err != nil && out.ExitCode != 0 {
-					return out, nil
-				}
+				// A valid document is authoritative even when the process
+				// exited nonzero or was interrupted.
 				return out, nil
 			}
 		}
@@ -441,13 +436,6 @@ func ValidateHostResponse(response HostResponse, request HostRequest) error {
 	default:
 		return fmt.Errorf("unknown state %q", response.State)
 	}
-}
-
-func redactSecret(value, key string) string {
-	if key == "" {
-		return value
-	}
-	return strings.ReplaceAll(value, key, "[redacted]")
 }
 
 type limitedBuffer struct {

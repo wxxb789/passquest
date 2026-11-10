@@ -178,9 +178,11 @@ export const agentSmoke: Gate = {
         await configure(db);
         const before = await call(["report", "--db", db, "--json"]);
         mode = "tools";
+        const requestsBefore = received.length;
         const started = await call(["agent", "start", "--db", db, "--agent-store", store, "--json"]);
         const startDoc = documentOf(started);
         check(started.code === 0, `start exit ${started.code}: ${started.stderr}`);
+        check(received.length - requestsBefore === 3, `start made ${received.length - requestsBefore} provider requests, want 3`);
         check(stringField(startDoc, "state") === "completed", "start state is not completed");
         check(arrayField(startDoc, "steps").length === 2, "start did not commit two steps");
         const steps = arrayField(startDoc, "steps");
@@ -198,7 +200,7 @@ export const agentSmoke: Gate = {
         check(stringField(statusDoc, "state") === "completed", "status is not completed");
         check(stringField(statusDoc, "latest_event") === "completed", "status latest event is not completed");
         check(numberField(field(statusDoc, "counts"), "steps") === 2, "status step count is not 2");
-        check(field(statusDoc, "durable") !== undefined && Boolean(field(statusDoc, "durable")), "status has no durable view");
+        check(field(statusDoc, "durable") !== undefined, "status has no durable view");
 
         const show = await call(["agent", "show", runID, "--db", db, "--json"]);
         const showDoc = documentOf(show);
@@ -296,8 +298,7 @@ export const agentSmoke: Gate = {
         check(numberField(effects, "reconciled_events") === 1, "reconciled event count is not 1");
         const after = await call(["report", "--db", db, "--json"]);
         check(before.stdout === after.stdout, "report changed after a retried effect");
-        const show = documentOf(await call(["agent", "show", runID, "--db", db, "--json"]));
-        const steps = arrayField(show, "steps");
+        const steps = arrayField(afterResume, "steps");
         check(steps.length === 2, "reconciliation step rows are not 2");
         check(
           steps.every((step) => (stringField(step, "title") ?? "").length > 0 && Boolean(field(step, "advisory"))),
@@ -408,12 +409,34 @@ export const agentSmoke: Gate = {
         check(practice.code === 0, `practice without node exit ${practice.code}: ${practice.stderr}`);
       }
 
+      // 8. A completed host answer with no committed step is the documented
+      // zero-step failure, not a completed run.
+      {
+        const db = path.join(temp, "app8.sqlite");
+        const store = path.join(temp, "agent8.sqlite");
+        await configure(db);
+        mode = "text";
+        const failed = await call(["agent", "start", "--db", db, "--agent-store", store, "--json"]);
+        const failure = documentOf(failed);
+        check(failed.code === 3, `no-step start exit ${failed.code}: ${failed.stderr}`);
+        check(
+          stringField(field(failure, "error"), "code") === "no_steps",
+          `no-step code ${stringField(field(failure, "error"), "code")}`,
+        );
+        check(stringField(field(failure, "status"), "state") === "failed", "no-step state is not failed");
+        const runID = stringField(field(failure, "run"), "run_id") ?? "";
+        const status = documentOf(await call(["agent", "status", runID, "--db", db, "--json"]));
+        check(stringField(status, "state") === "failed", "status after a no-step answer is not failed");
+        const resumed = await call(["agent", "resume", runID, "--db", db, "--json"]);
+        check(resumed.code === 2, `resume after a no-step answer exit ${resumed.code}`);
+      }
+
       check(!seenOutputs.join("\n").includes(KEY), "agent output contains the provider credential");
       if (checks.length > 0) return fail(checks);
       const permissionNote = permissionsSkipped
         ? "permissions skipped on Windows"
         : `${permissionChecks} permission checks`;
-      return pass(`${assertions} assertions, 7 scenarios, ${received.length} provider requests, ${permissionNote}`);
+      return pass(`${assertions} assertions, 8 scenarios, ${received.length} provider requests, ${permissionNote}`);
     } finally {
       server.stop(true);
       rmSync(temp, { recursive: true, force: true });

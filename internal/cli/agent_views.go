@@ -310,6 +310,28 @@ func agentRunDocOf(run store.AgentRun, state agent.State, failure *agent.Failure
 	return doc
 }
 
+// agentCancelDocOf renders one cancel outcome. The state decides the paired
+// cancelled/confirmed flags and the status event, so no caller can emit a
+// confirmed cancellation for a run that is still cancelling.
+func agentCancelDocOf(run store.AgentRun, state agent.State, heartbeatPID int) agentCancelDoc {
+	event := store.AgentEventCancelRequested
+	confirmed := false
+	if state == agent.StateCancelled {
+		event = store.AgentEventCancelled
+		confirmed = true
+	}
+	return agentCancelDoc{
+		SchemaVersion: ProtocolVersion,
+		State:         string(state),
+		Run:           agentRunViewOf(run),
+		Status:        agentStatusViewOf(state, nil, event),
+		Cancelled:     confirmed,
+		Confirmed:     confirmed,
+		HeartbeatPID:  heartbeatPID,
+		Limits:        agentLimits(),
+	}
+}
+
 func writeAgentRun(w io.Writer, doc agentRunDoc) {
 	fmt.Fprintf(w, "Pass Quest — durable study brief %s\n", doc.Run.RunID)
 	fmt.Fprintf(w, "State: %s\n", doc.State)
@@ -362,11 +384,14 @@ func writeAgentStatus(w io.Writer, doc agentStatusDoc) {
 		fmt.Fprintln(w, "Host: no fresh heartbeat")
 	}
 	if doc.Durable.Available {
-		if doc.Durable.Snapshot != nil && doc.Durable.Snapshot.Found {
+		switch {
+		case doc.Durable.Snapshot != nil && doc.Durable.Snapshot.Found:
 			fmt.Fprintf(w, "Durable runtime: conversation %d, live run %t, pending tasks %d, unsettled submissions %d\n",
 				doc.Durable.ConversationID, doc.Durable.Snapshot.LiveRun,
 				doc.Durable.Snapshot.PendingTasks, doc.Durable.Snapshot.UnsettledSubmissions)
-		} else {
+		case doc.Durable.Reason == "store_missing":
+			fmt.Fprintln(w, "Durable runtime: store missing; the application event trail is the only evidence")
+		default:
 			fmt.Fprintln(w, "Durable runtime: store available, run not found")
 		}
 	} else {

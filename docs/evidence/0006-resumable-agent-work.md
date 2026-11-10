@@ -24,7 +24,7 @@ application databases and stub output stayed under `/tmp`.
 | `internal/store` | Schema v9: immutable `agent_runs`, append-only `agent_run_events`, append-only advisory `agent_steps`, and the append-only `agent_step_attempts` effect ledger. The step key is idempotent; a duplicate keeps the first text and appends a `reconciled` event. No agent table can update `attempts`. |
 | `internal/cli` | `agent start/status/resume/cancel/runs/show/transcript/record-step`, run selection, provider/credential checks, signal/timeout pause, cancellation confirmation, the paired JSON/human documents and exit codes. |
 | `agent/durable-host.mjs` | The Pi Durable runtime: one conversation per run, a session mapping, a replay-safe `record_study_step` tool that invokes the application's validated command, read-only status/transcript, heartbeat, SIGTERM pause and SIGINT cancel. |
-| `harness/gates/agent-smoke.ts` | Real binary + real host + real Pi SQLite + loopback SSE stub; 91 assertions over 7 scenarios. |
+| `harness/gates/agent-smoke.ts` | Real binary + real host + real Pi SQLite + loopback SSE stub; 98 assertions over 8 scenarios. |
 
 ## Demonstration setup
 
@@ -128,7 +128,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (11 packages, 481 tests, 0 skipped)
+PASS  go test (11 packages, 485 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -158,7 +158,7 @@ PASS  adaptive smoke (120 assertions)
 PASS  tutor smoke (156 assertions)
 
 == agent smoke
-PASS  agent smoke (91 assertions, 7 scenarios, 16 provider requests, 2 permission checks)
+PASS  agent smoke (98 assertions, 8 scenarios, 17 provider requests, 2 permission checks)
 
 == harness self-test
 PASS  harness self-test (22 cases, 15/15 gates)
@@ -169,9 +169,9 @@ GATE: PASS
 
 `agent-smoke` itself covers the fresh completion, status/show/runs/transcript, timeout pause and
 resume, fault injection with reconciliation, cancellation, 401 handling, malformed stream handling,
-Node absence, the attempt-report invariant, the copied-store transcript, the `0600` store/heartbeat
-modes and a credential scan of the application and Pi stores. It runs after the Go suite, not
-concurrently with it.
+a zero-step answer, Node absence, the attempt-report invariant, the copied-store transcript, the
+`0600` store/heartbeat modes and a credential scan of the application and Pi stores. It runs after
+the Go suite, not concurrently with it.
 
 ## Contract clause → evidence
 

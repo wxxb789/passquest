@@ -118,6 +118,28 @@ func TestAgentStepRefusedAfterCancellation(t *testing.T) {
 	}
 }
 
+func TestAgentCancellationRequestedIsABarrier(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
+	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
+	mustCreateAgentRun(t, st, run)
+	if _, err := st.AppendAgentRunEvent(run.RunID, AgentEventCancelRequested, map[string]any{"pid": 4}, run.CreatedAt); err != nil {
+		t.Fatalf("cancel request: %v", err)
+	}
+	// A racing run process can append an interruption after the request; the
+	// step effect must still see the cancellation.
+	if _, err := st.AppendAgentRunEvent(run.RunID, AgentEventInterrupted,
+		map[string]any{"reason": "host_exit"}, run.CreatedAt.Add(time.Second)); err != nil {
+		t.Fatalf("late interruption: %v", err)
+	}
+	pending, err := st.AgentRunCancelPending(run.RunID)
+	if err != nil || !pending {
+		t.Fatalf("pending cancel = %v,%v; want true", pending, err)
+	}
+	if _, _, _, err := st.RecordAgentStep(run.RunID, 1, AgentStepDiagnosis, "t", "b", "call-1", run.CreatedAt); !errors.Is(err, ErrAgentRunCancelled) {
+		t.Fatalf("record after a hidden cancel = %v, want ErrAgentRunCancelled", err)
+	}
+}
+
 func TestAgentStepRefusedAfterCompletion(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
