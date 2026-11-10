@@ -145,13 +145,16 @@ type Question struct {
 	Evidence        string
 	Reasoning       string
 	OptionReasoning map[string]string
-	Tactics         []string
-	AnswerStatus    AnswerStatus
-	Review          ReviewStatus
-	ReviewedBy      string
-	ReviewedAt      time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// Tactics holds the question's skill tags. The JSON field keeps its
+	// goal-0003 name; values may be any registered skill, including the
+	// language prerequisites.
+	Tactics      []string
+	AnswerStatus AnswerStatus
+	Review       ReviewStatus
+	ReviewedBy   string
+	ReviewedAt   time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type Summary struct {

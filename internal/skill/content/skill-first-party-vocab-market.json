@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "skill-first-party-vocab-market",
+  "version": "1",
+  "title": "Market stall booking — vocabulary in context",
+  "notice": "First-party practice content authored for Pass Quest. It is not a live examination item and makes no exam-blueprint claim.",
+  "provenance": {
+    "author": "Pass Quest first-party",
+    "source": "authored for this repository",
+    "rights": "Redistributable first-party practice content.",
+    "exam_relation": "Practice for a language prerequisite; not a live examination and not an exam blueprint."
+  },
+  "passage": {
+    "title": "Market stall booking",
+    "text": "Market stall booking\n\nTraders may book a stall for Saturday or Sunday. The fee is 12 pounds for a single day and 20 pounds for the weekend. Booking closes on Thursday at noon. A trader who cancels after Thursday will not receive a refund. Tables are not provided; traders must bring their own."
+  },
+  "questions": [
+    {
+      "id": "v3",
+      "stem": "In the booking notice, the word \"refund\" most nearly means:",
+      "options": [
+        {"label": "A", "text": "money returned after a cancellation"},
+        {"label": "B", "text": "a table provided by the market"},
+        {"label": "C", "text": "a fee charged for a weekend stall"},
+        {"label": "D", "text": "a change to the booking day"}
+      ],
+      "answer": "A",
+      "evidence": "A trader who cancels after Thursday will not receive a refund.",
+      "reasoning": "The sentence says a trader who cancels after Thursday will not receive money back, so a refund is money returned after a cancellation.",
+      "option_reasoning": {
+        "A": "The sentence contrasts cancelling with receiving money back, which is a refund.",
+        "B": "The notice says tables are not provided; it does not define refund.",
+        "C": "The fee is charged for a stall, not returned after a cancellation.",
+        "D": "A booking day can change, but the sentence is about money after cancellation."
+      },
+      "tactics": ["vocabulary-in-context"]
+    }
+  ]
+}

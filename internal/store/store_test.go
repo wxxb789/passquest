@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -370,6 +371,120 @@ func TestAppendPersistsAssistanceAndTactic(t *testing.T) {
 	badAssistance.Assistance = "guessed"
 	if _, err := st.Append(badAssistance); err == nil || !strings.Contains(err.Error(), "assistance") {
 		t.Fatalf("invalid assistance error = %v", err)
+	}
+}
+
+func TestAppendPersistsSkillSnapshot(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "skills.sqlite"))
+
+	tagged := sampleAttempt("q1")
+	tagged.Skills = []string{"vocabulary-in-context", "sentence-structure"}
+	got := mustAppend(t, st, tagged)
+	if !slices.Equal(got.Skills, tagged.Skills) {
+		t.Fatalf("append returned skills %v, want %v", got.Skills, tagged.Skills)
+	}
+
+	ordinary := sampleAttempt("q2")
+	if _, err := st.Append(ordinary); err != nil {
+		t.Fatalf("Append ordinary: %v", err)
+	}
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(list))
+	}
+	if !slices.Equal(list[0].Skills, tagged.Skills) {
+		t.Fatalf("stored skills = %v, want %v", list[0].Skills, tagged.Skills)
+	}
+	if len(list[1].Skills) != 0 {
+		t.Fatalf("untagged stored skills = %v, want empty", list[1].Skills)
+	}
+}
+
+func TestAppendRejectsBadSkillSnapshot(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "bad-skills.sqlite"))
+	tests := []struct {
+		name   string
+		skills []string
+		want   string
+	}{
+		{"bad slug", []string{"Vocabulary In Context"}, "lowercase slug"},
+		{"duplicate", []string{"vocabulary-in-context", "vocabulary-in-context"}, "duplicated"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := sampleAttempt("q1")
+			rec.Skills = tt.skills
+			if _, err := st.Append(rec); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Append error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("invalid skill appends stored %d records", len(list))
+	}
+}
+
+func TestMigrationFromVersionFiveAddsSkillSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v5.sqlite")
+	db := openSQLite(t, path)
+	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5} {
+		for _, stmt := range statements {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("create v5 schema: %v", err)
+			}
+		}
+	}
+	at := "2026-11-10T09:00:00Z"
+	if _, err := db.Exec(`INSERT INTO attempts (
+			session_id, question_id, content_id, content_version, status,
+			selected_label, selected_text, correct_label, correct_text,
+			started_at, answered_at, elapsed_ms, assistance, tactic_id
+		) VALUES ('sess', 't1', 'tactic-first-party-not-except', '1', 'correct',
+			'D', 'option d', 'D', 'option d', ?, ?, 5, 'assisted', 'not-except-polarity')`,
+		at, at); err != nil {
+		t.Fatalf("insert v5 attempt: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 5`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := mustOpen(t, path)
+	var version int
+	if err := st.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, SchemaVersion)
+	}
+	list, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 || list[0].TacticID != "not-except-polarity" || len(list[0].Skills) != 0 {
+		t.Fatalf("v5 attempt after migration = %+v, want preserved tactic and empty snapshot", list)
+	}
+
+	next := sampleAttempt("q2")
+	next.Skills = []string{"vocabulary-in-context"}
+	if _, err := st.Append(next); err != nil {
+		t.Fatalf("Append after migration: %v", err)
+	}
+	list, err = st.List()
+	if err != nil {
+		t.Fatalf("List after append: %v", err)
+	}
+	if len(list) != 2 || !slices.Equal(list[1].Skills, next.Skills) {
+		t.Fatalf("post-migration snapshot = %+v", list)
 	}
 }
 

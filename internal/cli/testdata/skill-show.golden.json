@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "skill": {
+    "id": "vocabulary-in-context",
+    "kind": "language",
+    "title": "Vocabulary in context",
+    "summary": "Use the sentence around an unknown word to choose its meaning instead of translating the word in isolation.",
+    "principle": "A word's meaning is constrained by the sentence that contains it: the purpose, time, contrast and consequence around the word decide which sense is in use.",
+    "why_it_works": "Exam items often use a familiar word in an unfamiliar sense or ask for a paraphrase. The surrounding clause, not the word's usual translation, is the evidence that makes one option defensible.",
+    "when_it_works": "Use it when a question asks what a word or phrase means \"in the passage\" and the options are synonyms, paraphrases or restatements. It does not rescue a question whose key is disputed or whose passage is missing.",
+    "steps": [
+      "Find the sentence that contains the target word; include the clause before and after it.",
+      "Name what the sentence is doing: purpose, time, contrast, condition or consequence.",
+      "Replace the word with each option in turn and check which one keeps that meaning.",
+      "Reject an option that only repeats a familiar word or a word from the passage.",
+      "If two options still fit, mark the item for review instead of guessing from the word alone."
+    ],
+    "watch_out": "A familiar root or a word that looks like a translation can mislead. The sentence, not the word's usual meaning, decides; do not choose an option just because it contains vocabulary you recognize."
+  }
+}

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/wxxb789/passquest/internal/exam"
-	"github.com/wxxb789/passquest/internal/tactic"
+	"github.com/wxxb789/passquest/internal/skill"
 )
 
 // ErrNotPracticeable means a page or question has not reached the reviewed
@@ -100,12 +100,12 @@ func (q Question) Validate() error {
 	seenTag := make(map[string]bool, len(q.Tactics))
 	for _, tag := range q.Tactics {
 		if !exam.ValidSkillTag(tag) {
-			add("tactic tag %q is not a lowercase slug", tag)
-		} else if !tactic.IsRegistered(tag) {
-			add("tactic tag %q is not registered; registered: %s", tag, strings.Join(tactic.Registered(), ", "))
+			add("skill tag %q is not a lowercase slug", tag)
+		} else if !skill.IsRegistered(tag) {
+			add("skill tag %q is not registered; registered: %s", tag, strings.Join(skill.Registered(), ", "))
 		}
 		if seenTag[tag] {
-			add("tactic tag %q is repeated", tag)
+			add("skill tag %q is repeated", tag)
 		}
 		seenTag[tag] = true
 	}

@@ -188,3 +188,69 @@ Entry format:
   relaxing validation and adding a separate tag-vocabulary table.
 - Revisit when: users need to author their own tactic vocabularies, or goal 0004 introduces a larger
   skill taxonomy that should not be a compiled list.
+
+### Q-0004-01 — Is a new question on an already-seen passage independent transfer?
+- Status: decided(default taken)
+- Context: goal 0003 records `assistance=independent` for a first attempt on a distinct question and
+  calls it independent. Goal 0004 requires that "the same question or passage exposure does not
+  masquerade as independent transfer", and feedback on any question reveals the passage and its
+  evidence.
+- Options considered: (A) keep goal 0003's question-level rule and treat a new question on a seen
+  passage as independent; (B) count only the first independent attempt on a fresh content id as
+  independent transfer, and show later first attempts as passage re-exposure; (C) refuse a new
+  question on a seen passage entirely.
+- Default taken: (B). Stored attempts are unchanged; the adaptive policy classifies an independent
+  first attempt on an already-seen content id as `passage_repeats`, never as independent correctness.
+  Goal-0003 `t1`/`t2` therefore remain an assisted attempt plus an independent attempt in the report,
+  but the adaptive view shows one passage and zero independent transfers. Reverse by removing the
+  content-id condition in `internal/adaptive`; no migration is needed.
+- Revisit when: goal 0009 defines a delayed or held-out assessment whose passage exposure rule is
+  intentionally different, or a learner needs transfer measured on a passage they have already read.
+
+### Q-0004-02 — How small is the skill set, and which evidence thresholds are allowed?
+- Status: decided(default taken)
+- Context: goal 0004 asks for "a small set of scoring and minimal language prerequisite skills" and
+  requires recommendations to react to attempts, time, hints and revisits without claiming a measured
+  pass probability. The thresholds decide when a skill is called weak, mixed or supported.
+- Options considered: (A) one scoring skill plus two language prerequisites, with exact-count states
+  and a learner-relative pace rule; (B) a larger taxonomy with percentage thresholds and an
+  estimated mastery score; (C) one skill only, with no time rule.
+- Default taken: (A). `not-except-polarity` (scoring), `vocabulary-in-context` and
+  `sentence-structure` (language). States use exact counts: zero independent transfer is
+  `familiarity_only`, one answered observation is `insufficient`, two or more with zero correct is
+  `weak`, some correct is `mixed`, all correct is `supported`. "Slow" means the latest correct
+  independent answer took at least twice the learner's own fastest correct answer for that skill; no
+  exam time limit is invented. Vocabulary has three first-party passages so a supported state can
+  still have a fresh passage; sentence structure has two. Reverse by editing the registry thresholds
+  and authored content; stored attempts are unaffected.
+- Revisit when: real learner evidence shows the exact-count states are too coarse, or the owner wants
+  a different skill set or more passages.
+
+### Q-0004-03 — Does the question-file `tactics` field now accept language skill tags?
+- Status: decided(default taken)
+- Context: goal 0003 named the field `tactics` and validated it against the tactic registry. Goal
+  0004 needs question tags for language prerequisites, and renaming the JSON field would break every
+  authored question file and the goal-0003 protocol.
+- Options considered: (A) keep `tactics` as the field name and widen its values to any registered
+  skill; (B) rename it to `skills` and migrate question files; (C) add a second `skills` field and
+  accept both.
+- Default taken: (A). The field keeps its name and lowercase-slug grammar; validation now uses the
+  skill registry, where a scoring tactic is a skill kind. Human output labels the values `skills`.
+  Reverse by renaming the field with a one-release alias once existing local files can be migrated.
+- Revisit when: a question-file schema version is introduced or users need independent tactic and
+  language tag fields.
+
+### Q-0004-04 — Are skill tags snapshotted on attempts?
+- Status: decided(default taken)
+- Context: adaptive inference groups historical attempts by a skill. A question tag can be edited
+  after the attempt, which would otherwise regroup old evidence under a new label.
+- Options considered: (A) add an append-only `skills_json` snapshot to attempts and use it for
+  inference; (B) recompute every attempt from the question's current tags; (C) store a full derived
+  learner state.
+- Default taken: (A). Schema v6 adds `attempts.skills_json` with a default `[]`; new attempts snapshot
+  the tags visible when the answer was recorded. Pre-v6 rows read as empty and fall back to current
+  tags, marked `mapped_from_current_tags` with an uncertainty line. No derived learner state is
+  stored; `next` recomputes it. Reverse by ignoring the column and reading current tags, at the cost
+  of historical regrouping.
+- Revisit when: a tag-correction workflow needs to apply retroactively, or pre-v6 learner evidence
+  must stop being inferred from current tags.

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "skill-first-party-sentence-library",
+  "version": "1",
+  "title": "Overdue items — sentence structure",
+  "notice": "First-party practice content authored for Pass Quest. It is not a live examination item and makes no exam-blueprint claim.",
+  "provenance": {
+    "author": "Pass Quest first-party",
+    "source": "authored for this repository",
+    "rights": "Redistributable first-party practice content.",
+    "exam_relation": "Practice for a language prerequisite; not a live examination and not an exam blueprint."
+  },
+  "passage": {
+    "title": "Overdue items",
+    "text": "Overdue items\n\nBorrowers may not take out new items unless they return overdue books first. The librarian will send a reminder after an item is seven days late. If a borrowed item is lost, the borrower must pay the replacement cost before the account is cleared. Items returned to the front desk after closing will be dated the next working day."
+  },
+  "questions": [
+    {
+      "id": "s2",
+      "stem": "In the sentence \"Borrowers may not take out new items unless they return overdue books first.\", what must happen before a borrower can take out new items?",
+      "options": [
+        {"label": "A", "text": "The borrower must pay a fine."},
+        {"label": "B", "text": "The librarian must send a reminder."},
+        {"label": "C", "text": "The borrower must wait seven days."},
+        {"label": "D", "text": "The borrower must return overdue books."}
+      ],
+      "answer": "D",
+      "evidence": "Borrowers may not take out new items unless they return overdue books first.",
+      "reasoning": "\"Unless\" introduces the condition that must be met. The sentence says borrowers may not take out new items unless they return overdue books first, so returning the books is the required action.",
+      "option_reasoning": {
+        "A": "A fine appears in a later sentence about lost items, not in this condition.",
+        "B": "The reminder comes after an item is seven days late; it is not the condition for new items.",
+        "C": "The seven-day period describes when a reminder is sent, not a waiting rule for new items.",
+        "D": "\"Unless they return overdue books first\" states the condition for taking out new items."
+      },
+      "tactics": ["sentence-structure"]
+    }
+  ]
+}

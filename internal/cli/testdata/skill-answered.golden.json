@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "state": "answered",
+  "skill": {
+    "id": "vocabulary-in-context",
+    "title": "Vocabulary in context",
+    "kind": "language",
+    "assistance": "independent",
+    "passage_exposure": "fresh"
+  },
+  "content": {
+    "id": "skill-first-party-vocab-notice",
+    "version": "1",
+    "title": "Community notice — vocabulary in context",
+    "notice": "First-party practice content authored for Pass Quest. It is not a live examination item and makes no exam-blueprint claim.",
+    "provenance": {
+      "author": "Pass Quest first-party",
+      "source": "authored for this repository",
+      "rights": "Redistributable first-party practice content.",
+      "exam_relation": "Practice for a language prerequisite; not a live examination and not an exam blueprint."
+    }
+  },
+  "question": {
+    "id": "v1",
+    "number": 1,
+    "total": 1,
+    "passage": {
+      "title": "Notice to residents of Cedar Court",
+      "text": "Notice to residents of Cedar Court\n\nThe water supply will be interrupted on Tuesday, 10 June, from 09:00 to 13:00 while the main pipe is repaired. The repair visit was postponed from 3 June because the replacement part did not arrive. Residents who need water during the interruption may collect a bottle from the building office. The office is open until 18:00 on weekdays and until 12:00 on Saturday. Please do not use the lift during the repair; the service lift will remain available for residents who cannot use the stairs."
+    },
+    "stem": "In the notice, the word \"postponed\" most nearly means:",
+    "options": [
+      {
+        "label": "A",
+        "text": "moved to a later time"
+      },
+      {
+        "label": "B",
+        "text": "cancelled with no new date"
+      },
+      {
+        "label": "C",
+        "text": "repeated at the same time"
+      },
+      {
+        "label": "D",
+        "text": "finished earlier than planned"
+      }
+    ]
+  },
+  "attempt": {
+    "id": 1,
+    "session_id": "sess-test",
+    "question_id": "v1",
+    "attempt_number": 1,
+    "prior_attempts": 0,
+    "repeat": false,
+    "assistance": "independent",
+    "skills": [
+      "vocabulary-in-context"
+    ],
+    "status": "correct",
+    "selected_label": "A",
+    "selected_text": "moved to a later time",
+    "correct_label": "A",
+    "correct_text": "moved to a later time",
+    "started_at": "2026-11-10T09:00:01Z",
+    "answered_at": "2026-11-10T09:00:02Z",
+    "elapsed_ms": 1000,
+    "content_id": "skill-first-party-vocab-notice",
+    "content_version": "1"
+  },
+  "feedback": {
+    "verdict": "correct",
+    "correct_label": "A",
+    "correct_text": "moved to a later time",
+    "evidence": "The repair visit was postponed from 3 June because the replacement part did not arrive.",
+    "reasoning": "The visit was first set for 3 June and is now described for 10 June; a missing part caused the change, so the visit was moved later, not cancelled.",
+    "exposure": "first_attempt",
+    "assistance": "independent"
+  }
+}

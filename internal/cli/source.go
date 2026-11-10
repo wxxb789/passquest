@@ -637,6 +637,7 @@ type practiceSelection struct {
 	Page     *source.Page
 	Review   *source.Question
 	Tactic   *tacticRun
+	Skill    *skillRun
 }
 
 func selectSourcePractice(st *store.Store, sourceID string, pageNumber int, questionID string, records []attempt.Attempt) (practiceSelection, error) {

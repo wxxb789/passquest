@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "skills": [
+    {
+      "id": "not-except-polarity",
+      "kind": "scoring",
+      "title": "NOT/EXCEPT polarity",
+      "summary": "Read the stem's negative word first, then match statements to the passage instead of matching words."
+    },
+    {
+      "id": "vocabulary-in-context",
+      "kind": "language",
+      "title": "Vocabulary in context",
+      "summary": "Use the sentence around an unknown word to choose its meaning instead of translating the word in isolation."
+    },
+    {
+      "id": "sentence-structure",
+      "kind": "language",
+      "title": "Sentence structure",
+      "summary": "Find the subject and verb first, then attach each modifier to the noun it describes."
+    }
+  ]
+}

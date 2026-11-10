@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "skill-first-party-vocab-library",
+  "version": "1",
+  "title": "Library renewal — vocabulary in context",
+  "notice": "First-party practice content authored for Pass Quest. It is not a live examination item and makes no exam-blueprint claim.",
+  "provenance": {
+    "author": "Pass Quest first-party",
+    "source": "authored for this repository",
+    "rights": "Redistributable first-party practice content.",
+    "exam_relation": "Practice for a language prerequisite; not a live examination and not an exam blueprint."
+  },
+  "passage": {
+    "title": "Library membership renewal",
+    "text": "Library membership renewal\n\nYour library membership expires on 30 June. You may renew it online, at the front desk, or by telephone. Renewal is free unless you have unpaid fines. If your account has an outstanding charge, the renewal will be held until the charge is paid. Members who renew online receive a confirmation email within one working day. A membership that is not renewed by 15 July will be closed, and the member will need to register again."
+  },
+  "questions": [
+    {
+      "id": "v2",
+      "stem": "In the membership notice, the word \"renew\" most nearly means:",
+      "options": [
+        {"label": "A", "text": "close the account permanently"},
+        {"label": "B", "text": "extend the membership for another period"},
+        {"label": "C", "text": "pay an unpaid fine"},
+        {"label": "D", "text": "replace the library building"}
+      ],
+      "answer": "B",
+      "evidence": "You may renew it online, at the front desk, or by telephone.",
+      "reasoning": "The notice gives ways to renew before the expiry date and says a membership not renewed will be closed, so renewing keeps the membership active for another period.",
+      "option_reasoning": {
+        "A": "Closing the account is what happens when the membership is not renewed, not what renew means.",
+        "B": "The renewal happens before the expiry and keeps the account from closing.",
+        "C": "Paying a fine is a condition that can hold a renewal; it is not the meaning of renew.",
+        "D": "The notice is about membership dates, not the library building."
+      },
+      "tactics": ["vocabulary-in-context"]
+    }
+  ]
+}

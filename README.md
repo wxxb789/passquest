@@ -5,8 +5,8 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 ## Design and development
 
 - [Core Design](docs/core-design.md) — product purpose, safety, quality and architecture principles.
-- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0003
-  are done; 0004 is next.
+- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0004
+  are done; 0005 is next.
 - [Harness](docs/harness.md) — the single `bun run gate` entry point and what each gate reads.
 
 **Implementation order:** verified headless practice → private local baseline → scoring tactic
@@ -63,10 +63,30 @@ go run ./cmd/passquest report
 ```
 
 The lesson states why the tactic works, when it applies, and a counterexample showing why keyword
-matching and the "longest answer" folklore fail. Imported source questions opt into a tactic with a
+matching and the "longest answer" folklore fail. Imported source questions opt into a skill with a
 `tactics` tag in their local question file; only reviewed, tagged questions are used. Details:
 [`docs/tactics.md`](docs/tactics.md). Measured evidence:
 [`docs/evidence/0003-exam-tactic-practice.md`](docs/evidence/0003-exam-tactic-practice.md).
+
+## Choose practice from evidence
+
+Goal 0004 adds a small skill set (the NOT/EXCEPT tactic plus vocabulary-in-context and
+sentence-structure prerequisites) and a read-only recommendation surface:
+
+```bash
+go run ./cmd/passquest skill list
+go run ./cmd/passquest skill practice vocabulary-in-context
+go run ./cmd/passquest next
+go run ./cmd/passquest next --json
+```
+
+`next` separates recorded evidence from inferred state. A first independent attempt on a fresh
+passage counts as independent transfer; assisted attempts, repeats and a new question on an
+already-seen passage are shown but never counted as transfer. Time, hints and revisits can change the
+recommended action between `explain`, `practice_new` and `review`, and the reason names the counts.
+Recommendations are recomputed from attempts; nothing derived is stored. Details:
+[`docs/adaptive.md`](docs/adaptive.md). Measured evidence:
+[`docs/evidence/0004-adaptive-next-exercise.md`](docs/evidence/0004-adaptive-next-exercise.md).
 
 ## Run the gates
 

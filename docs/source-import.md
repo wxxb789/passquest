@@ -77,10 +77,13 @@ the same deterministic scoring, append-only attempts and first/repeated counting
 pre-answer output states the page and answer review provenance and contains no key, evidence,
 reasoning or status.
 
-A question file may add `"tactics": ["not-except-polarity"]` to make the question available to
-`passquest tactic practice --source SOURCE`. Tags are validated against the build's registered
-tactics, are shown by `passquest questions`, and survive review and restart. Only reviewed, tagged
-questions that still pass every practice gate are used; see [`tactics.md`](tactics.md).
+A question file may add `"tactics": ["not-except-polarity"]` or `"tactics":
+["vocabulary-in-context"]` to make the question available to `passquest tactic practice --source
+SOURCE` or `passquest skill practice --source SOURCE`. The field keeps its goal-0003 name but its
+values are validated against the build's registered skills; a scoring tactic is a skill kind. Tags are
+shown by `passquest questions` and survive review and restart. New attempts snapshot them in
+`attempts.skills_json`. Only reviewed, tagged questions that still pass every practice gate are used;
+see [`tactics.md`](tactics.md) and [`adaptive.md`](adaptive.md).
 
 ## Visible doubt, not silent authority
 

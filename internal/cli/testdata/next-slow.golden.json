@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "state": "recommendation",
+  "source_tagged_questions": 0,
+  "recommendation": {
+    "action": "review",
+    "skill": {
+      "id": "vocabulary-in-context",
+      "kind": "language",
+      "title": "Vocabulary in context"
+    },
+    "state": "supported",
+    "reason": "All 2 answered independent transfer(s) for vocabulary-in-context are correct, but the latest correct independent answer took 2500 ms against your fastest 1000 ms (at least twice as slow). A seen question is selected for review; a repeat is not independent transfer.",
+    "command": "passquest skill practice vocabulary-in-context --question v2",
+    "evidence_attempt_ids": [
+      1,
+      2
+    ]
+  },
+  "skills": [
+    {
+      "skill": {
+        "id": "not-except-polarity",
+        "kind": "scoring",
+        "title": "NOT/EXCEPT polarity"
+      },
+      "evidence": {
+        "attempts": 0,
+        "assisted_attempts": 0,
+        "assisted_correct": 0,
+        "independent_attempts": 0,
+        "independent_correct": 0,
+        "independent_incorrect": 0,
+        "independent_skipped": 0,
+        "revisits": 0,
+        "passage_repeats": 0,
+        "distinct_passages": 0,
+        "questions_seen": 0,
+        "fresh_passages": 2,
+        "fastest_independent_ms": 0,
+        "latest_independent_ms": 0,
+        "attempt_ids": [],
+        "independent_attempt_ids": [],
+        "mapped_from_current_tags": 0
+      },
+      "inference": {
+        "state": "no_evidence",
+        "action": "explain",
+        "reason": "No attempt is recorded for not-except-polarity. The scoring tactic starts with a guided walkthrough, so the explanation is selected before independent evidence; the guided attempt is recorded as assisted.",
+        "causal_diagnosis": "not_attempted",
+        "uncertainty": [
+          "This is an inference from 0 recorded attempt(s), not a measured pass probability or readiness score.",
+          "Two or fewer answered independent observations cannot establish a stable skill state.",
+          "No attempt exists yet; the state is a starting recommendation, not a measurement.",
+          "Scoring evidence is counted only for questions tagged with this skill; untagged attempts are listed separately."
+        ]
+      }
+    },
+    {
+      "skill": {
+        "id": "vocabulary-in-context",
+        "kind": "language",
+        "title": "Vocabulary in context"
+      },
+      "evidence": {
+        "attempts": 2,
+        "assisted_attempts": 0,
+        "assisted_correct": 0,
+        "independent_attempts": 2,
+        "independent_correct": 2,
+        "independent_incorrect": 0,
+        "independent_skipped": 0,
+        "revisits": 0,
+        "passage_repeats": 0,
+        "distinct_passages": 2,
+        "questions_seen": 2,
+        "fresh_passages": 1,
+        "fastest_independent_ms": 1000,
+        "latest_independent_ms": 2500,
+        "latest_independent_status": "correct",
+        "latest_attempt_id": 2,
+        "latest_status": "correct",
+        "latest_assistance": "independent",
+        "attempt_ids": [
+          1,
+          2
+        ],
+        "independent_attempt_ids": [
+          1,
+          2
+        ],
+        "mapped_from_current_tags": 0
+      },
+      "inference": {
+        "state": "supported",
+        "action": "review",
+        "reason": "All 2 answered independent transfer(s) for vocabulary-in-context are correct, but the latest correct independent answer took 2500 ms against your fastest 1000 ms (at least twice as slow). A seen question is selected for review; a repeat is not independent transfer.",
+        "causal_diagnosis": "no_error_observed",
+        "uncertainty": [
+          "This is an inference from 2 recorded attempt(s), not a measured pass probability or readiness score.",
+          "Two or fewer answered independent observations cannot establish a stable skill state.",
+          "Elapsed time is local prompt-to-answer time, not an exam time limit."
+        ]
+      }
+    },
+    {
+      "skill": {
+        "id": "sentence-structure",
+        "kind": "language",
+        "title": "Sentence structure"
+      },
+      "evidence": {
+        "attempts": 0,
+        "assisted_attempts": 0,
+        "assisted_correct": 0,
+        "independent_attempts": 0,
+        "independent_correct": 0,
+        "independent_incorrect": 0,
+        "independent_skipped": 0,
+        "revisits": 0,
+        "passage_repeats": 0,
+        "distinct_passages": 0,
+        "questions_seen": 0,
+        "fresh_passages": 2,
+        "fastest_independent_ms": 0,
+        "latest_independent_ms": 0,
+        "attempt_ids": [],
+        "independent_attempt_ids": [],
+        "mapped_from_current_tags": 0
+      },
+      "inference": {
+        "state": "no_evidence",
+        "action": "practice_new",
+        "reason": "No attempt is recorded for sentence-structure. A fresh passage is selected to measure the skill without help.",
+        "causal_diagnosis": "not_attempted",
+        "uncertainty": [
+          "This is an inference from 0 recorded attempt(s), not a measured pass probability or readiness score.",
+          "Two or fewer answered independent observations cannot establish a stable skill state.",
+          "No attempt exists yet; the state is a starting recommendation, not a measurement."
+        ]
+      }
+    }
+  ],
+  "unclassified_attempts": [],
+  "limitations": [
+    "Skill evidence is inferred from the local attempts shown; it is not an exam score, pass estimate or readiness claim.",
+    "Only a first independent attempt on a fresh passage counts as independent transfer; assisted, repeated and same-passage attempts are shown separately.",
+    "The exam blueprint, time limit and pass threshold are unknown; elapsed time is local prompt-to-answer time, not an exam clock.",
+    "Recommendations are recomputed from attempts and current question tags; no recommendation or derived learner state is stored."
+  ]
+}

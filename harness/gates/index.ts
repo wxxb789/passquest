@@ -1,5 +1,6 @@
 import type { Gate } from "../lib/types.ts";
 
+import { adaptiveSmoke } from "./adaptive-smoke.ts";
 import { baseline } from "./baseline.ts";
 import { docsLinks } from "./docs-links.ts";
 import { goBuild } from "./go-build.ts";
@@ -27,5 +28,6 @@ export const gates: Gate[] = [
   baseline,
   importSmoke,
   tacticSmoke,
+  adaptiveSmoke,
   selfTest,
 ];

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "state": "awaiting_answer",
+  "skill": {
+    "id": "vocabulary-in-context",
+    "title": "Vocabulary in context",
+    "kind": "language",
+    "assistance": "independent",
+    "passage_exposure": "fresh"
+  },
+  "content": {
+    "id": "skill-first-party-vocab-notice",
+    "version": "1",
+    "title": "Community notice — vocabulary in context",
+    "notice": "First-party practice content authored for Pass Quest. It is not a live examination item and makes no exam-blueprint claim.",
+    "provenance": {
+      "author": "Pass Quest first-party",
+      "source": "authored for this repository",
+      "rights": "Redistributable first-party practice content.",
+      "exam_relation": "Practice for a language prerequisite; not a live examination and not an exam blueprint."
+    }
+  },
+  "question": {
+    "id": "v1",
+    "number": 1,
+    "total": 1,
+    "passage": {
+      "title": "Notice to residents of Cedar Court",
+      "text": "Notice to residents of Cedar Court\n\nThe water supply will be interrupted on Tuesday, 10 June, from 09:00 to 13:00 while the main pipe is repaired. The repair visit was postponed from 3 June because the replacement part did not arrive. Residents who need water during the interruption may collect a bottle from the building office. The office is open until 18:00 on weekdays and until 12:00 on Saturday. Please do not use the lift during the repair; the service lift will remain available for residents who cannot use the stairs."
+    },
+    "stem": "In the notice, the word \"postponed\" most nearly means:",
+    "options": [
+      {
+        "label": "A",
+        "text": "moved to a later time"
+      },
+      {
+        "label": "B",
+        "text": "cancelled with no new date"
+      },
+      {
+        "label": "C",
+        "text": "repeated at the same time"
+      },
+      {
+        "label": "D",
+        "text": "finished earlier than planned"
+      }
+    ]
+  }
+}

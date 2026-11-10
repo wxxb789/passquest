@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "skill-first-party-scoring-library",
+  "version": "1",
+  "title": "Short-term borrowing — NOT/EXCEPT",
+  "notice": "First-party practice content authored for Pass Quest. It is not a live examination item and makes no exam-blueprint claim.",
+  "provenance": {
+    "author": "Pass Quest first-party",
+    "source": "authored for this repository",
+    "rights": "Redistributable first-party practice content.",
+    "exam_relation": "Practice for a scoring tactic; not a live examination and not an exam blueprint."
+  },
+  "passage": {
+    "title": "Short-term borrowing",
+    "text": "Short-term borrowing\n\nStudents may borrow up to three books for seven days. Reference books and newspapers may not be taken out of the library. A book may be renewed once if no other student has reserved it. Students with an unpaid fine of more than five pounds cannot borrow new items until the fine is paid. The library closes at 20:00 on weekdays and at 17:00 at weekends."
+  },
+  "questions": [
+    {
+      "id": "x1",
+      "stem": "All of the following are true EXCEPT:",
+      "options": [
+        {"label": "A", "text": "Students can borrow three books for seven days."},
+        {"label": "B", "text": "Reference books cannot leave the library."},
+        {"label": "C", "text": "A reserved book can always be renewed."},
+        {"label": "D", "text": "Students with a large unpaid fine cannot borrow new items."}
+      ],
+      "answer": "C",
+      "evidence": "A book may be renewed once if no other student has reserved it.",
+      "reasoning": "The passage allows one renewal only if no other student has reserved the book. Option C says a reserved book can always be renewed, which reverses that condition. The other options restate supported facts.",
+      "option_reasoning": {
+        "A": "The first sentence states this limit.",
+        "B": "The second sentence says reference books may not be taken out.",
+        "C": "The passage allows renewal only when no other student has reserved the book; \"always\" reverses the condition, so this is the odd statement. This option repeats \"renewed\" and \"reserved\" from the passage but is still false.",
+        "D": "The fourth sentence states the fine limit."
+      },
+      "tactics": ["not-except-polarity"]
+    }
+  ]
+}
