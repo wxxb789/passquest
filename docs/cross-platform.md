@@ -14,7 +14,7 @@ turns red.
 - A path literal such as `"/tmp/x.sqlite"` is **not absolute on Windows** (`filepath.IsAbs` is false),
   so validation rejects it and the test then blames the product. Build fixtures with `t.TempDir()` and
   `filepath.Join`. The `portable-paths` gate enforces this: a literal that is genuinely pure string data
-  must carry `// portable-paths: allow <why>` on the line.
+  must carry `// portable-paths: allow <why>` on its own line (the marker covers one line, nothing more).
 - The `portable-paths` gate reads both Go string forms, so a backticked raw string (`C:\Users\…`) is
   caught as well as the escaped one.
 - Compare normalised forms: `filepath.ToSlash(filepath.Clean(p))`, and mask the temp prefix before

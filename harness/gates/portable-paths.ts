@@ -6,7 +6,8 @@ import type { Gate } from "../lib/types.ts";
  * A path literal that only resolves on POSIX is a Windows defect waiting for CI.
  * Go has two string forms and a Windows path is usually written in the backticked
  * one, so both are scanned; a fixture that is genuinely pure string data must say
- * why on the line, so the next reader does not have to re-derive the argument.
+ * why on its own line, so the next reader does not have to re-derive the argument
+ * and one justified fixture cannot silence an unjustified path beside it.
  */
 const POSIX_ROOTS = [
   "/tmp/",
@@ -22,9 +23,6 @@ const POSIX_ROOTS = [
 ];
 
 const ALLOW_MARKER = /portable-paths:\s*allow\s+\S/;
-
-/** A table entry spans several lines, so a marker may sit up to three lines away. */
-const ALLOW_LOOKBACK = 3;
 
 /** Both Go string forms: interpreted (escapes intact) and raw (backticked). */
 const LITERAL = /"(?:[^"\\\n]|\\.)*"|`[^`\n]*`/g;
@@ -86,21 +84,9 @@ export function scanGoSource(file: string, content: string): Hit[] {
     const line = lines[index];
     const trimmed = line.trim();
     if (isComment(trimmed)) continue;
+    // The marker justifies the literals on its own line only: a window would let one
+    // justified fixture silence an unjustified path next to it.
     if (ALLOW_MARKER.test(line)) continue;
-    let allowed = false;
-    for (let back = 1; back <= ALLOW_LOOKBACK && index - back >= 0; back++) {
-      if (ALLOW_MARKER.test(lines[index - back])) {
-        allowed = true;
-        break;
-      }
-    }
-    for (let ahead = 1; !allowed && ahead <= ALLOW_LOOKBACK && index + ahead < lines.length; ahead++) {
-      if (ALLOW_MARKER.test(lines[index + ahead])) {
-        allowed = true;
-        break;
-      }
-    }
-    if (allowed) continue;
     for (const literal of literalsOnLine(line)) {
       hits.push({ file, line: index + 1, literal });
     }

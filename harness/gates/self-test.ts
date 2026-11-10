@@ -202,23 +202,26 @@ function brokenCases(): BrokenCase[] {
     },
     {
       gate: portablePaths,
-      label: "platform-bound path literal beside a justified one",
+      label: "an unjustified literal beside a justified one",
       files: {
         "go.mod": GO_MOD,
         "internal/x/x.go": "package x\n",
         "internal/x/x_test.go":
-          'package x\n\nimport "testing"\n\nfunc TestA(t *testing.T) {\n\topen("/tmp/fixture.sqlite")\n}\n\nfunc TestB(t *testing.T) {\n\t// portable-paths: allow a literal compared as string data, never resolved\n\tif "C:\\\\Users\\\\x" != "C:\\\\Users\\\\x" {\n\t\tt.Fatal("unreachable")\n\t}\n}\n',
+          'package x\n\nimport "testing"\n\nfunc TestA(t *testing.T) {\n\topen("/tmp/fixture.sqlite")\n\tif "C:\\\\Users\\\\x" != "C:\\\\Users\\\\x" { // portable-paths: allow compared as string data, never resolved\n\t\tt.Fatal("unreachable")\n\t}\n\topen("/tmp/adjacent.sqlite")\n}\n',
       },
       tracked: ["internal/x/x_test.go"],
       postFail: (failures) => {
-        if (failures.length !== 1) {
-          return `portable-paths: expected exactly one failure, saw ${failures.length}: ${failures.join("; ")}`;
+        if (failures.length !== 2) {
+          return `portable-paths: expected both unjustified literals, saw ${failures.length}: ${failures.join("; ")}`;
         }
-        if (!failures[0].includes("x_test.go:6") || !failures[0].includes("/tmp/fixture.sqlite")) {
-          return `portable-paths: did not name the unjustified literal: ${failures[0]}`;
+        if (!failures.some((line) => line.includes("x_test.go:6") && line.includes("/tmp/fixture.sqlite"))) {
+          return `portable-paths: did not name the first unjustified literal: ${failures.join("; ")}`;
         }
-        if (failures[0].includes("C:\\\\Users")) {
-          return "portable-paths: reported a literal the allow marker justified";
+        if (!failures.some((line) => line.includes("/tmp/adjacent.sqlite"))) {
+          return "portable-paths: the marker on the previous line silenced an adjacent unjustified path";
+        }
+        if (failures.some((line) => line.includes("C:\\\\Users"))) {
+          return "portable-paths: reported the literal its own marker justified";
         }
         return null;
       },

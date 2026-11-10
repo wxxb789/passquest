@@ -794,30 +794,25 @@ func TestSQLiteURIFormatsPathsForEveryOS(t *testing.T) {
 		want     string
 		wantPath string
 	}{
-		// portable-paths: allow the goos field selects the branch; these literals are the input under test
 		{
-			name: "posix", path: "/home/u/db.sqlite", goos: "linux",
-			want: "file:///home/u/db.sqlite" + options, wantPath: "/home/u/db.sqlite",
-		},
-		// portable-paths: allow the goos field selects the branch; these literals are the input under test
-		{
-			name: "posix darwin", path: "/Users/u/db.sqlite", goos: "darwin",
-			want: "file:///Users/u/db.sqlite" + options, wantPath: "/Users/u/db.sqlite",
+			name: "posix", path: "/home/u/db.sqlite", goos: "linux", // portable-paths: allow the goos field selects the branch; this literal is the input under test
+			want: "file:///home/u/db.sqlite" + options, wantPath: "/home/u/db.sqlite", // portable-paths: allow the goos field selects the branch; this literal is the input under test
 		},
 		{
-			// portable-paths: allow the goos field selects the branch; this literal is the input under test
-			name: "windows drive", path: `C:\Users\runner\db.sqlite`, goos: "windows",
+			name: "posix darwin", path: "/Users/u/db.sqlite", goos: "darwin", // portable-paths: allow the goos field selects the branch; this literal is the input under test
+			want: "file:///Users/u/db.sqlite" + options, wantPath: "/Users/u/db.sqlite", // portable-paths: allow the goos field selects the branch; this literal is the input under test
+		},
+		{
+			name: "windows drive", path: `C:\Users\runner\db.sqlite`, goos: "windows", // portable-paths: allow the goos field selects the branch; this literal is the input under test
 			want: "file:///C:/Users/runner/db.sqlite" + options, wantPath: "/C:/Users/runner/db.sqlite",
 		},
 		{
-			// portable-paths: allow the goos field selects the branch; this literal is the input under test
-			name: "windows drive with forward slashes", path: "C:/Users/runner/db.sqlite", goos: "windows",
+			name: "windows drive with forward slashes", path: "C:/Users/runner/db.sqlite", goos: "windows", // portable-paths: allow the goos field selects the branch; this literal is the input under test
 			want: "file:///C:/Users/runner/db.sqlite" + options, wantPath: "/C:/Users/runner/db.sqlite",
 		},
 		{
-			name: "windows import smoke temp path",
-			// portable-paths: allow the goos field selects the branch; this literal is the input under test
-			path:     `C:\Users\RUNNER~1\AppData\Local\Temp\passquest-import-smoke-bEarG2\smoke.sqlite`,
+			name:     "windows import smoke temp path",
+			path:     `C:\Users\RUNNER~1\AppData\Local\Temp\passquest-import-smoke-bEarG2\smoke.sqlite`, // portable-paths: allow the goos field selects the branch; this literal is the input under test
 			goos:     "windows",
 			want:     "file:///C:/Users/RUNNER~1/AppData/Local/Temp/passquest-import-smoke-bEarG2/smoke.sqlite" + options,
 			wantPath: "/C:/Users/RUNNER~1/AppData/Local/Temp/passquest-import-smoke-bEarG2/smoke.sqlite",
@@ -826,8 +821,7 @@ func TestSQLiteURIFormatsPathsForEveryOS(t *testing.T) {
 			// SQLite rejects every authority but "" and "localhost", so a UNC
 			// path must keep its leading "\\" in the path component: the DSN
 			// needs four slashes, not two.
-			// portable-paths: allow the goos field selects the branch; this literal is the input under test
-			name: "windows unc", path: `\\server\share\db.sqlite`, goos: "windows",
+			name: "windows unc", path: `\\server\share\db.sqlite`, goos: "windows", // portable-paths: allow the goos field selects the branch; this literal is the input under test
 			want: "file:////server/share/db.sqlite" + options, wantPath: "//server/share/db.sqlite",
 		},
 	}

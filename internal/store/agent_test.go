@@ -16,11 +16,10 @@ func sampleAgentRun(id string) AgentRun {
 		TaskKind:      "study-brief",
 		PromptVersion: "agent-study-brief-v1",
 		Model:         "example-model",
-		// portable-paths: allow the field is stored and echoed, never used to open a database
-		StorePath: "/tmp/example-agent.sqlite",
-		MaxSteps:  3,
-		MaxTurns:  8,
-		CreatedAt: time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC),
+		StorePath:     "/tmp/example-agent.sqlite", // portable-paths: allow stored and echoed, never used to open a database
+		MaxSteps:      3,
+		MaxTurns:      8,
+		CreatedAt:     time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC),
 	}
 }
 
