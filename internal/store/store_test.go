@@ -470,8 +470,8 @@ func TestMigrationFromVersionFiveAddsSkillSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(list) != 1 || list[0].TacticID != "not-except-polarity" || len(list[0].Skills) != 0 {
-		t.Fatalf("v5 attempt after migration = %+v, want preserved tactic and empty snapshot", list)
+	if len(list) != 1 || list[0].TacticID != "not-except-polarity" || len(list[0].Skills) != 0 || list[0].SkillsRecorded {
+		t.Fatalf("v5 attempt after migration = %+v, want preserved tactic and no recorded snapshot", list)
 	}
 
 	next := sampleAttempt("q2")
@@ -479,12 +479,19 @@ func TestMigrationFromVersionFiveAddsSkillSnapshot(t *testing.T) {
 	if _, err := st.Append(next); err != nil {
 		t.Fatalf("Append after migration: %v", err)
 	}
+	untagged := sampleAttempt("q3")
+	if _, err := st.Append(untagged); err != nil {
+		t.Fatalf("Append untagged after migration: %v", err)
+	}
 	list, err = st.List()
 	if err != nil {
 		t.Fatalf("List after append: %v", err)
 	}
-	if len(list) != 2 || !slices.Equal(list[1].Skills, next.Skills) {
+	if len(list) != 3 || !slices.Equal(list[1].Skills, next.Skills) || !list[1].SkillsRecorded {
 		t.Fatalf("post-migration snapshot = %+v", list)
+	}
+	if len(list[2].Skills) != 0 || !list[2].SkillsRecorded {
+		t.Fatalf("untagged snapshot = %+v, want a recorded empty snapshot", list[2])
 	}
 }
 

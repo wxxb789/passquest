@@ -28,6 +28,7 @@
         "attempts": 0,
         "assisted_attempts": 0,
         "assisted_correct": 0,
+        "guided_attempts": 0,
         "independent_attempts": 0,
         "independent_correct": 0,
         "independent_incorrect": 0,
@@ -66,6 +67,7 @@
         "attempts": 2,
         "assisted_attempts": 0,
         "assisted_correct": 0,
+        "guided_attempts": 0,
         "independent_attempts": 2,
         "independent_correct": 2,
         "independent_incorrect": 0,
@@ -113,6 +115,7 @@
         "attempts": 0,
         "assisted_attempts": 0,
         "assisted_correct": 0,
+        "guided_attempts": 0,
         "independent_attempts": 0,
         "independent_correct": 0,
         "independent_incorrect": 0,
@@ -146,6 +149,6 @@
     "Skill evidence is inferred from the local attempts shown; it is not an exam score, pass estimate or readiness claim.",
     "Only a first independent attempt on a fresh passage counts as independent transfer; assisted, repeated and same-passage attempts are shown separately.",
     "The exam blueprint, time limit and pass threshold are unknown; elapsed time is local prompt-to-answer time, not an exam clock.",
-    "Recommendations are recomputed from attempts and current question tags; no recommendation or derived learner state is stored."
+    "Recommendations are recomputed from attempts and their recorded skill snapshots; only pre-v6 attempts fall back to current question tags, and they are marked. No recommendation or derived learner state is stored."
   ]
 }

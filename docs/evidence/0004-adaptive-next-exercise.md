@@ -1,7 +1,8 @@
 # 0004 — Choose practice based on learner evidence: evidence
 
-- Tree: uncommitted increment on `47e709a70762772ca9a4cf3ef8edeacea5cd4b0c`, branch
-  `feat/0004-adaptive-next-exercise`; the operator commits.
+- Tree: working tree on top of `2d0cb4a39fe7a1ab8480febb2125adb1ba92f89f` (the reviewed goal-0004
+  head), branch `feat/0004-adaptive-next-exercise`; the fixes below are uncommitted and the operator
+  owns the commit. The final gate ran on this tree, not on a staged snapshot.
 - Date: 2026-11-10. Host: Linux 7.0.0-1017-azure x64.
 - Toolchain: Go 1.27.3 via mise; Bun 1.4.4; `modernc.org/sqlite` v1.62.0 (pure Go). No OCR engine was
   invoked and no PDF was read in this increment.
@@ -20,10 +21,10 @@ document; the raw protocol is pinned by the golden tests and `adaptive-smoke`.
 | `internal/skill` | The small registry (`not-except-polarity` scoring, `vocabulary-in-context` and `sentence-structure` language), authored lessons, and six first-party exercise passages. Validation requires at least two distinct passages per skill; vocabulary has three so a supported state can still have a fresh passage. |
 | `internal/adaptive` | Pure evidence classifier and policy. It classifies independent transfer, passage re-exposure, assisted attempts and revisits; infers `no_evidence`/`familiarity_only`/`insufficient`/`weak`/`mixed`/`supported`; selects `explain`, `practice_new` or `review`; states uncertainty. It writes nothing. |
 | `internal/attempt` | `Skills` snapshot on the graded record; `WithTactic` adds the tactic id to the snapshot without duplicating it. Existing assistance/tactic/repeat fields are unchanged. |
-| `internal/store` | Schema v6 adds `attempts.skills_json` with a default `[]`; migration keeps rows; append-only triggers unchanged; invalid or duplicate skill slugs are rejected. |
+| `internal/store` | Schema v6 adds a nullable `attempts.skills_json`; `NULL` marks a pre-v6 row, while a recorded array (including `[]`) is authoritative. Migration keeps rows; append-only triggers unchanged; invalid or duplicate skill slugs are rejected. |
 | `internal/source` | Question tags validate against the skill registry (the `tactics` field keeps its name). Review gates unchanged. |
 | `internal/cli` | `skill list/show/practice`, `next`, passage-exposure labels, key-hiding documents, and additive `skills` on attempt JSON. |
-| `harness/` | New `adaptive-smoke` gate (76 assertions) and a 20th self-test case over 13/13 gates. |
+| `harness/` | New `adaptive-smoke` gate (80 assertions) and a 20th self-test case over 13/13 gates. |
 
 The policy distinguishes recorded evidence from inference: the JSON has separate `evidence` and
 `inference` objects, and the human output has `Evidence (recorded attempts)` and `Inference
@@ -33,15 +34,15 @@ The policy distinguishes recorded evidence from inference: the JSON has separate
 
 | Command | Result |
 |---|---|
-| `go test ./... -count=1` | exit 0; 9 packages; 274 test runs, 274 passes, 0 skips, 0 failures (`go test -json` count) |
+| `go test ./... -count=1` | exit 0; 9 packages; 283 test runs, 283 passes, 0 skips, 0 failures (`go test -json` count) |
 | `go vet ./...` | exit 0 |
 | `go mod tidy -diff` | empty diff, exit 0 |
 | `gofmt -l` (tracked `*.go`) | empty output, exit 0; the gate checks 33 files |
 | `./node_modules/.bin/tsc --noEmit` | exit 0, 0 type errors |
 | `bash scripts/gate.sh` | exit 0; 14 passed, 0 failed, 0 skipped (final output below) |
 
-The final gate output, run on the staged tree (staged only so `git ls-files`-based gates can see the
-new and moved paths; nothing was committed):
+The final gate output, run on the working tree at `2d0cb4a` plus the review fixes (nothing staged or
+committed):
 
 ```text
 $ bash scripts/gate.sh
@@ -60,7 +61,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (9 packages, 274 tests, 0 skipped)
+PASS  go test (9 packages, 283 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -84,7 +85,7 @@ PASS  import smoke (35 assertions)
 PASS  tactic smoke (70 assertions)
 
 == adaptive smoke
-PASS  adaptive smoke (76 assertions)
+PASS  adaptive smoke (80 assertions)
 
 == harness self-test
 PASS  harness self-test (20 cases, 13/13 gates)
@@ -103,9 +104,9 @@ The tests that pin this increment's contract clauses:
 | `TestValidateContent`, `TestTaggedReturnsOnlyTaggedQuestions` | Every first-party tag is registered; ids are unique; each skill has at least two distinct passages; an untagged question is never selected. |
 | `TestScoringExerciseCarriesTheKeywordTrap` | The second scoring passage contains a real keyword-overlap trap whose key explanation says repetition is not truth. |
 | `TestBuildRecordSnapshotsSkillTags`, `TestWithTactic` | A graded record snapshots the question's tags; a tactic attempt adds its tactic id exactly once; the caller's slice is not aliased. |
-| `TestAppendPersistsSkillSnapshot`, `TestAppendRejectsBadSkillSnapshot`, `TestMigrationFromVersionFiveAddsSkillSnapshot` | The snapshot round-trips; malformed/duplicate slugs are rejected; a v5 database keeps attempts and gains an empty snapshot. |
-| `TestParseQuestionJSONKeepsRegisteredTags` | A language skill tag is accepted by the question-file parser; an unregistered tag is still rejected. |
-| `TestNoEvidence`, `TestAssistedOnlyIsNotIndependent`, `TestOneIndependentObservationIsInsufficient` | Empty, assisted-only and single-observation states select the documented action and never call help independent. |
+| `TestAppendPersistsSkillSnapshot`, `TestAppendRejectsBadSkillSnapshot`, `TestMigrationFromVersionFiveAddsSkillSnapshot` | The snapshot round-trips; malformed/duplicate slugs are rejected; a v5 database keeps attempts with no recorded snapshot, while a new untagged attempt has a recorded empty one. |
+| `TestParseQuestionJSONKeepsRegisteredTags`, `TestQuestionsHumanOutputLabelsTagsAsSkills` | A language skill tag is accepted by the question-file parser; an unregistered tag is still rejected; the human question list labels tag values `skills`. |
+| `TestNoEvidence`, `TestAssistedOnlyIsNotIndependent`, `TestAssistedPracticeWithoutGuidedTacticStillExplains`, `TestOneIndependentObservationIsInsufficient` | Empty, guided-assisted-only and ordinary-assisted-only states select the documented action and never call help independent; scoring re-teaches until a guided tactic attempt exists. |
 | `TestRepeatedIncorrectSelectsExplanation`, `TestMixedEvidenceUsesLatestIndependentAttempt`, `TestSkipAfterAnswersKeepsAnsweredEvidence` | Repeated or mixed errors select an explanation; the reason says the cause is unresolved; the latest answered independent attempt decides re-teach vs confirm; a later skip does not erase earlier answered evidence or make the reason claim the skip was an answer. |
 | `TestSupportedEvidenceUsesTime` | Two correct observations select `practice_new` when fast, `review` when the latest is at least twice the fastest, and `practice_new` when the latest is faster. |
 | `TestPassageExposureIsNotIndependentTransfer`, `TestAssistedFirstAttemptExposesThePassage` | A second question on a seen passage is a passage re-exposure; an assisted first attempt exposes the passage for later attempts. |
@@ -113,6 +114,7 @@ The tests that pin this increment's contract clauses:
 | `TestNoFreshPassageSelectsReview`, `TestPriorityOrder`, `TestTiesFollowRegistryOrder` | No fresh passage selects review; weak/familiarity/insufficient evidence outranks no-evidence material; ties follow registry order. |
 | `TestCurrentTagFallbackIsDisclosed`, `TestMultiSkillRecordCountsForEachAndExposesContent`, `TestNoMaterialSkill` | Pre-v6 tags disclose the fallback; one attempt counts for each tagged skill but exposes the passage once; no material produces no recommendation. |
 | `TestSkillPracticeHidesKeyAndSnapshotsSkill`, `TestSkillPracticeSecondPassageAndRepeat`, `TestSkillPracticeSourcePath` | Skill awaiting JSON hides the key; the attempt snapshots the skill; fresh/seen passages are labelled; source review provenance survives. |
+| `TestSkillPracticeScoringRequiresGuidedAttempt`, `TestNextSendsUnGuidedScoringToTacticWalkthrough`, `TestSkillPracticeSkipsGuidedExposure`, `TestSkillPracticeAssistedFreshPreambleIsTruthful`, `TestNextRecordedEmptySnapshotDoesNotRegroupAfterTagEdit` | Scoring skill practice refuses without a guided attempt and records no attempt; `next` sends unguided scoring evidence to the tactic walkthrough and then offers a runnable scoring practice; an already-shown walkthrough is skipped when a fresh alternative exists; assisted-fresh output never claims independent transfer; a recorded empty snapshot survives a later tag edit without being regrouped. |
 | `TestNextNoEvidence`, `TestNextPassageExposureAndHints`, `TestNextTimeChangesAction`, `TestNextRevisitsAndSkips` | `next` separates evidence from inference; hints and same-passage exposure are not independent; time changes the action; revisits and skips are retained. |
 | `TestNextUnclassifiedAttempt`, `TestNextReopenRecalculatesWithoutRewriting` | Untagged attempts are unclassified; reopening recomputes the same JSON and does not rewrite attempt rows. |
 | `TestNextRecordClassification`, `TestNextIncludesImportedSourceWithoutScope` | A known untagged question, unavailable content and an unregistered snapshot are classified apart with a reason; an attempt on an imported source is included by an unscoped `next` without being reported unavailable. |
@@ -251,6 +253,9 @@ source: src-bb4d9a5479518365
 $ passquest question add src-bb4d9a5479518365 1 --file .../question-q2-tagged.json --db source.sqlite
 $ passquest page review src-bb4d9a5479518365 1 --reviewer demo-operator --db source.sqlite
 $ passquest question review src-bb4d9a5479518365 q2 --answer C --reviewer demo-operator --db source.sqlite
+$ passquest tactic practice not-except-polarity --answer D --json --db source.sqlite
+attempt: {content_id: tactic-first-party-not-except, question_id: t1, status: correct,
+          assistance: assisted, tactic_id: not-except-polarity, skills: [not-except-polarity]}
 $ passquest skill practice not-except-polarity --source src-bb4d9a5479518365 --answer C --json --db source.sqlite
 attempt: {content_id: src-bb4d9a5479518365-p001, question_id: q2, status: correct,
           assistance: independent, skills: [not-except-polarity]}
@@ -263,9 +268,13 @@ recommendation: practice_new — not-except-polarity
 state: insufficient
 reason: "Only 1 answered independent transfer observation(s) exist ... A single observation cannot
          distinguish a skill pattern from luck; a fresh passage is selected."
-scoring evidence: attempts 1, independent_attempts 1, independent_correct 1,
-                  distinct_passages 1, fresh_passages 2
+scoring evidence: attempts 2, assisted_attempts 1, assisted_correct 1, guided_attempts 1,
+                  independent_attempts 1, independent_correct 1,
+                  distinct_passages 2, fresh_passages 1
 ```
+
+The guided attempt is required before scoring `skill practice` (Q-0004-05); it is the goal-0003
+walkthrough, not an extra source claim. The source question is still answered independently.
 
 The fixture is first-party and redistributable; the private CRSC baseline was not imported or read.
 The review is a workflow demonstration by the agent, not an owner verification.
@@ -319,12 +328,12 @@ change.
 | First-party network imports | `bun run gate` local-only gate | 9 first-party packages, 0 network imports, 0 confidential markers |
 | Baseline provenance | `bun run gate` baseline gate | 165 pages (22 native, 143 OCR), 0 fixture references |
 | Secrets / private sources | `bun run gate` secrets gate | 308 tracked files, 0 findings |
-| New-file markers | local-only gate after staging | 9 first-party packages, 0 confidential markers |
+| New-file markers | local-only gate on the working tree | 9 first-party packages, 0 confidential markers |
 
 `net` remains linked transitively by the pure-Go SQLite chain; no Pass Quest package imports or calls
-it. The strace runs are the runtime proof. The tree was staged for the final gate run so
-`git ls-files`-based gates could scan the new files and the archived goal path; nothing was committed
-or pushed. The evidence and report state that the operator owns the commit.
+it. The strace runs are the runtime proof. The final gate ran on the working tree; the tracked-file
+gates scanned the same paths because the fixes changed tracked files only. Nothing was staged,
+committed or pushed. The evidence and report state that the operator owns the commit.
 
 ## Contract clause → evidence
 
@@ -333,13 +342,13 @@ or pushed. The evidence and report state that the operator owns the commit.
 | Independently recorded attempts, time, hints and revisits change the recommendation, and the reason is inspectable. | Assisted-only tactic evidence selects `practice_new` and says 1 assisted, 0 independent; two correct fresh vocabulary attempts select `supported`; 134 ms vs 897 ms changes the action to `review` and the reason quotes both values; a revisit adds `revisits=1` but independent correctness stays 3; two wrong sentence attempts select `explain`. `next --json` exposes `evidence`, `inference`, `reason`, `uncertainty` and the exact command. |
 | Same question or passage exposure does not masquerade as independent transfer; repeat exposure and uncertain causal diagnosis are retained. | Goal-0003 `t1`/`t2` on one passage: 1 assisted, 0 independent, 1 passage re-exposure, `familiarity_only`; the report still has both stored attempts. `revisits` and `passage_repeats` are separate fields. A repeated wrong answer yields `causal_diagnosis: unresolved` and the reason says the wrong option does not identify the cause. |
 | The user can see what evidence supports a gap, what is uncertain, and why an explanation, new question or review was selected. | Human `next` prints `Evidence (recorded attempts)` and `Inference (recomputed from evidence)`; JSON has per-skill `evidence` counts/attempt ids and `inference.state/action/reason/causal_diagnosis/uncertainty`; the selected recommendation repeats its reason and follow-up command. |
-| Reopening keeps historical evidence intact and recalculates recommendations without rewriting attempts. | Schema v6 snapshot migration test; `next` is read-only; two separate `next` processes produced byte-identical JSON (`cmp` exit 0); `report` after the reopen still shows 4 attempts with ids 1–4; `mapped_from_current_tags` records the pre-v6 fallback. |
+| Reopening keeps historical evidence intact and recalculates recommendations without rewriting attempts. | Schema v6 snapshot migration test (a v5 row has no snapshot; a new untagged row has a recorded empty one); a recorded empty snapshot is not regrouped by a later tag edit; `next` is read-only; two separate `next` processes produced byte-identical JSON (`cmp` exit 0); `report` after the reopen still shows 4 attempts with ids 1–4; `mapped_from_current_tags` records the pre-v6 fallback. |
 | Do not claim measured pass probability or introduce a broad ontology. | Three skills only; every recommendation has a limitation line "not an exam score, pass estimate or readiness claim"; exact-count states; no pass threshold or exam time limit is invented. |
 
 ## Harness growth
 
 Goal 0004 adds a new CLI protocol and an evidence dimension, so it adds
-`harness/gates/adaptive-smoke.ts` (76 assertions) and a self-test input that makes it fail when the CLI
+`harness/gates/adaptive-smoke.ts` (80 assertions) and a self-test input that makes it fail when the CLI
 prints `{}` instead of the skill/next protocol. The tick comes from the real CLI, the real database and
 the real report; the gate does not re-implement scoring or the policy. The self-test now reports 20
 cases over 13/13 gates. `harness.md` lists the new gate and the updated counts.
@@ -355,8 +364,15 @@ cases over 13/13 gates. `harness.md` lists the new gate and the updated counts.
 - Passage-level independence is stricter than goal 0003's stored attempt condition. A new question on
   a seen passage is recorded as an independent attempt but classified as a passage re-exposure by
   `next`. Goal 0003's report fields are unchanged.
-- Pre-v6 attempts have no skill snapshot; they are mapped from current question tags and marked
-  `mapped_from_current_tags`. A later tag edit can regroup those rows; new rows cannot be regrouped.
+- Pre-v6 attempts have no skill snapshot (`NULL`); they are mapped from current question tags and
+  marked `mapped_from_current_tags`. A later tag edit can regroup only those rows. A recorded empty
+  snapshot means "no registered tag at answer time" and is never regrouped; it is listed as
+  unclassified.
+- Scoring `skill practice` is refused until a guided tactic attempt exists, so the plan's "ordinary
+  unassisted practice" is narrower for the scoring skill than for the language skills (Q-0004-05).
+- A database created by the reviewed intermediate v6 build (`skills_json NOT NULL DEFAULT '[]'`)
+  cannot distinguish its migrated pre-v6 rows after the column becomes nullable. No released v6
+  database existed because goal 0004 was uncommitted; a fresh v5→v6 migration is correct.
 - The time rule is relative to the learner's own fastest correct answer for the same skill. The demo
   used interactive sleeps (134 ms and 897 ms); it is not an exam clock and says so.
 - `next` loads embedded material plus every imported source by default, which reads all source pages
@@ -365,6 +381,6 @@ cases over 13/13 gates. `harness.md` lists the new gate and the updated counts.
   The private CRSC baseline was not read or imported; no claim is made about its pages.
 - Windows has no POSIX mode, so the database-mode assertion remains skipped there. The adaptive smoke
   is platform-neutral apart from the binary name.
-- The tree is staged but uncommitted for operator verification. The final gate ran on that staged
-  tree (44 staged paths); a commit would let CI reproduce the same tracked-file scan from a clean
+- The fixes are uncommitted on top of `2d0cb4a` for operator verification. The final gate ran on
+  that working tree; a commit would let CI reproduce the same tracked-file scan from a clean
   checkout.

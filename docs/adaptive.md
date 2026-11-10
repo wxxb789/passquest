@@ -57,9 +57,18 @@ on any question reveals the passage and its evidence, so a new question on a see
 familiarity, not transfer. Goal-0003 `t1`/`t2` show this: the report keeps one assisted attempt and
 one independent attempt, while `next` shows one passage and zero independent transfers.
 
-`skill practice` prefers a fresh passage, then an unattempted question, then a repeat. Every document
-carries `passage_exposure: fresh | already_seen`, so the learner can see whether the attempt can add
-transfer evidence before answering.
+`skill practice` prefers a fresh passage, then an unattempted question, then a repeat. A question
+whose guided walkthrough was already shown is skipped while preferring fresh or unattempted material:
+that attempt would be assisted and cannot add independent transfer. An explicit `--question` still
+selects it and records it as assisted. Every document carries `passage_exposure: fresh |
+already_seen`, so the learner can see whether the attempt can add transfer evidence before answering.
+
+Scoring practice follows Q-0003-02. `skill practice not-except-polarity` is refused with exit 2
+(`guided_required`) until a guided `not-except-polarity` attempt exists, because a scoring answer
+recorded as independent before the walkthrough would bypass the contract and could consume the
+question the guided example needs. Language practice measures a prerequisite and has no such rule.
+The human preamble states the assistance condition and the passage exposure together, so an assisted
+attempt on a fresh passage is never described as independent transfer.
 
 ## States and actions
 
@@ -79,6 +88,12 @@ A **fresh passage** is a content id with a tagged question and zero attempts on 
 the only material that can add independent transfer evidence. `review` repeats a seen question and is
 never independent transfer; the reason says so.
 
+A scoring skill with recorded attempts but no guided tactic attempt selects `explain` whatever its
+computed state, because scoring `skill practice` is refused until that walkthrough exists. The reason
+names the recorded observations and the missing walkthrough. `guided_attempts` counts assisted
+attempts that carry the tactic id; an ordinary assisted answer after a walkthrough is not a guided
+tactic attempt.
+
 **Slow** means at least two independent correct attempts, the latest independent status is correct,
 and the latest elapsed time is at least twice the learner's fastest correct independent time for that
 skill. It changes only the `supported` action, from `practice_new` to `review`. This is a relative
@@ -93,9 +108,9 @@ deterministic.
 
 `next --json` separates the two sides explicitly:
 
-- `evidence` — recorded facts: attempts, assisted, independent correct/incorrect/skipped, revisits,
-  passage re-exposures, distinct passages, questions seen, fresh passages, fastest/latest elapsed and
-  the attempt ids.
+- `evidence` — recorded facts: attempts, assisted, guided tactic attempts, independent
+  correct/incorrect/skipped, revisits, passage re-exposures, distinct passages, questions seen, fresh
+  passages, fastest/latest elapsed and the attempt ids.
 - `inference` — recomputed state, action, reason, causal diagnosis and uncertainty lines.
 
 The human output prints `Evidence (recorded attempts)` and `Inference (recomputed from evidence)`
@@ -121,9 +136,11 @@ including `vocabulary-in-context` and `sentence-structure`. Unknown tags are rej
 `question add`/`question edit`; see [`source-import.md`](source-import.md).
 
 New attempts snapshot the question's current tags in `attempts.skills_json` (schema version 6), so a
-later tag edit cannot regroup old evidence. Attempts written before version 6 have no snapshot; they
-are mapped from the question's current tags and marked `mapped_from_current_tags` with an uncertainty
-line.
+later tag edit cannot regroup old evidence. The column is nullable: `NULL` marks an attempt written
+before version 6, which is mapped from the question's current tags and marked
+`mapped_from_current_tags` with an uncertainty line. A recorded empty array is authoritative and means
+the question had no registered skill tag when the answer was recorded; a later edit does not regroup
+it, and the attempt is listed as unclassified.
 
 ## Limits
 

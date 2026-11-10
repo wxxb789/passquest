@@ -53,6 +53,10 @@ export const adaptiveSmoke: Gate = {
       check((stringField(lesson, "watch_out") ?? "").length > 0, "skill show has no watch_out");
       check(arrayField(lesson, "steps").length >= 3, "skill show has fewer than 3 steps");
 
+      const emptyNext = parse((await callDB(["next", "--json"])).stdout);
+      check(stringField(field(emptyNext, "recommendation"), "action") === "explain", "empty next does not select the scoring explanation");
+      check(stringField(field(field(emptyNext, "recommendation"), "skill"), "id") === "not-except-polarity", "empty next recommendation skill");
+
       const awaitingResult = await callDB(["skill", "practice", "vocabulary-in-context", "--json"]);
       if (!check(awaitingResult.code === 0, `skill awaiting exit = ${awaitingResult.code}`)) return fail(checks);
       const awaiting = parse(awaitingResult.stdout);
@@ -144,6 +148,8 @@ export const adaptiveSmoke: Gate = {
       check(stringField(field(weakSentence, "inference"), "causal_diagnosis") === "unresolved", "weak sentence causal diagnosis");
       check(stringField(field(field(weak, "recommendation"), "skill"), "id") === "sentence-structure", "weak recommendation skill");
       check(stringField(field(weak, "recommendation"), "action") === "explain", "weak recommendation action");
+      check(stringField(field(weak, "recommendation"), "command") === "passquest skill show sentence-structure", "weak recommendation command");
+      check(stringField(field(weak, "recommendation"), "follow_up_command") === "passquest skill practice sentence-structure --question s2", "weak recommendation follow-up command");
 
       const firstNextRun = await callDB(["next", "--json"]);
       check(firstNextRun.code === 0, `reopened next exit = ${firstNextRun.code}`);

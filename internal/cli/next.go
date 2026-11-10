@@ -184,11 +184,13 @@ func buildNextCatalog(st *store.Store, sourceID string) (nextCatalog, error) {
 	return catalog, nil
 }
 
-// nextRecord maps one attempt to the policy's shape. The snapshot is
-// authoritative; a pre-v6 row without a snapshot falls back to the current
-// question tags and is marked so the output can disclose it. An unmapped
-// attempt is still passed to the policy with no skills so its content still
-// counts as a seen passage.
+// nextRecord maps one attempt to the policy's shape. A recorded snapshot is
+// authoritative even when it is empty: it means the question had no registered
+// skill tag at answer time. Only a row written before the snapshot column
+// existed (SkillsRecorded false) falls back to the current question tags, and
+// that fallback is marked so the output can disclose it. An unmapped attempt is
+// still passed to the policy with no skills so its content still counts as a
+// seen passage.
 func nextRecord(record attempt.Attempt, tagsByKey map[attempt.QuestionKey][]string) (adaptive.Record, string) {
 	adapted := adaptive.Record{
 		AttemptID:       record.ID,
@@ -200,9 +202,13 @@ func nextRecord(record attempt.Attempt, tagsByKey map[attempt.QuestionKey][]stri
 		ElapsedMS:       record.ElapsedMS,
 		Skills:          append([]string(nil), record.Skills...),
 		FromCurrentTags: false,
+		TacticID:        record.TacticID,
 	}
 	reason := ""
-	if len(adapted.Skills) > 0 {
+	if record.SkillsRecorded {
+		if len(adapted.Skills) == 0 {
+			return adapted, "question had no registered skill tag when the attempt was recorded"
+		}
 		for _, id := range adapted.Skills {
 			if !skill.IsRegistered(id) {
 				reason = fmt.Sprintf("recorded skill tags include %q, which is not registered in this build", id)
@@ -218,7 +224,7 @@ func nextRecord(record attempt.Attempt, tagsByKey map[attempt.QuestionKey][]stri
 		return adapted, ""
 	}
 	if _, known := tagsByKey[attempt.QuestionKey{ContentID: record.ContentID, QuestionID: record.QuestionID}]; known {
-		return adapted, "question has no registered skill tag"
+		return adapted, "pre-v6 attempt on a question with no registered skill tag"
 	}
 	return adapted, "content or question is unavailable in the current material"
 }
@@ -306,6 +312,7 @@ func nextEvidenceViewOf(ev adaptive.Evidence) nextEvidenceView {
 		Attempts:                ev.Attempts,
 		AssistedAttempts:        ev.AssistedAttempts,
 		AssistedCorrect:         ev.AssistedCorrect,
+		GuidedAttempts:          ev.GuidedAttempts,
 		IndependentAttempts:     ev.IndependentAttempts,
 		IndependentCorrect:      ev.IndependentCorrect,
 		IndependentIncorrect:    ev.IndependentIncorrect,
@@ -342,7 +349,7 @@ func nextLimitations(unclassified int) []string {
 		"Skill evidence is inferred from the local attempts shown; it is not an exam score, pass estimate or readiness claim.",
 		"Only a first independent attempt on a fresh passage counts as independent transfer; assisted, repeated and same-passage attempts are shown separately.",
 		"The exam blueprint, time limit and pass threshold are unknown; elapsed time is local prompt-to-answer time, not an exam clock.",
-		"Recommendations are recomputed from attempts and current question tags; no recommendation or derived learner state is stored.",
+		"Recommendations are recomputed from attempts and their recorded skill snapshots; only pre-v6 attempts fall back to current question tags, and they are marked. No recommendation or derived learner state is stored.",
 	}
 	if unclassified > 0 {
 		out = append(out, fmt.Sprintf("%d attempt(s) could not be mapped to a registered skill and are listed separately; they still mark their passage as seen.", unclassified))
@@ -374,10 +381,10 @@ func writeNext(w io.Writer, doc nextDoc, dbPath string) {
 		if ev.LatestStatus != "" {
 			latest = "  latest " + ev.LatestStatus
 		}
-		fmt.Fprintf(w, "  %-24s %-8s attempts %d  independent %d (correct %d, incorrect %d, skipped %d)  assisted %d  revisits %d  passage-repeats %d  fresh passages %d%s\n",
+		fmt.Fprintf(w, "  %-24s %-8s attempts %d  independent %d (correct %d, incorrect %d, skipped %d)  assisted %d (guided %d)  revisits %d  passage-repeats %d  fresh passages %d%s\n",
 			candidate.Skill.ID, candidate.Skill.Kind, ev.Attempts,
 			ev.IndependentAttempts, ev.IndependentCorrect, ev.IndependentIncorrect, ev.IndependentSkipped,
-			ev.AssistedAttempts, ev.Revisits, ev.PassageRepeats, ev.FreshPassages, latest)
+			ev.AssistedAttempts, ev.GuidedAttempts, ev.Revisits, ev.PassageRepeats, ev.FreshPassages, latest)
 	}
 	fmt.Fprintln(w, "\nInference (recomputed from evidence)")
 	for _, candidate := range doc.Skills {
@@ -424,6 +431,7 @@ type nextEvidenceView struct {
 	Attempts                int     `json:"attempts"`
 	AssistedAttempts        int     `json:"assisted_attempts"`
 	AssistedCorrect         int     `json:"assisted_correct"`
+	GuidedAttempts          int     `json:"guided_attempts"`
 	IndependentAttempts     int     `json:"independent_attempts"`
 	IndependentCorrect      int     `json:"independent_correct"`
 	IndependentIncorrect    int     `json:"independent_incorrect"`

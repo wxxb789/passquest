@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -265,12 +266,129 @@ func TestSkillPracticeSecondPassageAndRepeat(t *testing.T) {
 	}
 }
 
+func TestSkillPracticeScoringRequiresGuidedAttempt(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+
+	code, out, errOut := runCLI(t, db, clock, "", "skill", "practice", "not-except-polarity", "--json")
+	if code != 2 || out != "" {
+		t.Fatalf("scoring practice before guided = exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if got := errorCode(t, errOut); got != "guided_required" {
+		t.Fatalf("error code = %q, want guided_required\n%s", got, errOut)
+	}
+	if report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json")); report.Counts.Attempts != 0 {
+		t.Fatalf("refused scoring practice recorded %d attempts", report.Counts.Attempts)
+	}
+
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
+	awaiting := decodeAwaiting(t, mustRun(t, db, clock, "", "skill", "practice", "not-except-polarity", "--json"))
+	if awaiting.Question.ID != "x1" {
+		t.Fatalf("scoring practice selected %s, want the fresh scoring passage x1", awaiting.Question.ID)
+	}
+	if awaiting.Skill == nil || awaiting.Skill.Assistance != "independent" || awaiting.Skill.PassageExposure != "fresh" {
+		t.Fatalf("scoring practice skill view = %+v", awaiting.Skill)
+	}
+	answered := decodeSkillAnswered(t, mustRun(t, db, clock, "", "skill", "practice", "not-except-polarity", "--answer", "C", "--json"))
+	if answered.Attempt.Status != "correct" || answered.Attempt.Assistance != "independent" {
+		t.Fatalf("scoring practice attempt = %+v", answered.Attempt)
+	}
+}
+
+func TestNextSendsUnGuidedScoringToTacticWalkthrough(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	imported := importFixture(t, db, clock)
+	sourceID := imported.Source.ID
+	reviewedTaggedFixtureQuestion(t, db, clock, sourceID)
+
+	// Ordinary practice can supply independent scoring evidence without the
+	// tactic walkthrough. next must still offer a command the CLI accepts.
+	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--question", "q2", "--answer", "C", "--json")
+	doc := decodeNext(t, mustRun(t, db, clock, "", "next", "--source", sourceID, "--json"))
+	scoring := nextSkill(t, doc, "not-except-polarity")
+	if scoring.Evidence.IndependentAttempts != 1 || scoring.Evidence.GuidedAttempts != 0 {
+		t.Fatalf("ordinary scoring evidence = %+v", scoring.Evidence)
+	}
+	if scoring.Inference.State != "insufficient" || scoring.Inference.Action != "explain" {
+		t.Fatalf("scoring inference = %+v", scoring.Inference)
+	}
+	if doc.Recommendation == nil || doc.Recommendation.Command != "passquest tactic practice not-except-polarity --stage guided" {
+		t.Fatalf("recommendation = %+v", doc.Recommendation)
+	}
+
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
+	doc = decodeNext(t, mustRun(t, db, clock, "", "next", "--source", sourceID, "--json"))
+	scoring = nextSkill(t, doc, "not-except-polarity")
+	if scoring.Evidence.GuidedAttempts != 1 {
+		t.Fatalf("guided attempts = %+v", scoring.Evidence)
+	}
+	if doc.Recommendation == nil || doc.Recommendation.Action != "practice_new" {
+		t.Fatalf("recommendation after guided = %+v", doc.Recommendation)
+	}
+	awaiting := decodeAwaiting(t, mustRun(t, db, clock, "", "skill", "practice", "not-except-polarity", "--json"))
+	if awaiting.Question.ID == "t1" {
+		t.Fatalf("skill practice selected the guided example %s", awaiting.Question.ID)
+	}
+}
+
+func TestSkillPracticeSkipsGuidedExposure(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	imported := importFixture(t, db, clock)
+	sourceID := imported.Source.ID
+	reviewedTaggedFixtureQuestion(t, db, clock, sourceID)
+
+	// The guided attempt is on the source, so the embedded exercise passage stays
+	// fresh. Showing its guided walkthrough without answering exposes t1 only.
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--source", sourceID, "--answer", "C", "--json")
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--question", "t1", "--stage", "guided", "--json")
+
+	awaiting := decodeAwaiting(t, mustRun(t, db, clock, "", "skill", "practice", "not-except-polarity", "--json"))
+	if awaiting.Question.ID != "t2" {
+		t.Fatalf("skill practice selected %s, want the unexposed t2", awaiting.Question.ID)
+	}
+	if awaiting.Skill == nil || awaiting.Skill.Assistance != "independent" || awaiting.Skill.PassageExposure != "fresh" {
+		t.Fatalf("skill practice skill view = %+v", awaiting.Skill)
+	}
+}
+
+func TestSkillPracticeAssistedFreshPreambleIsTruthful(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	imported := importFixture(t, db, clock)
+	sourceID := imported.Source.ID
+	reviewedTaggedFixtureQuestion(t, db, clock, sourceID)
+
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--source", sourceID, "--question", "q2", "--stage", "guided", "--json")
+
+	human := mustRun(t, db, clock, "", "skill", "practice", "not-except-polarity", "--source", sourceID, "--question", "q2", "--answer", "C")
+	if !strings.Contains(human, "the earlier walkthrough makes this attempt assisted; it is not independent transfer evidence") {
+		t.Fatalf("assisted-fresh preamble is not truthful:\n%s", human)
+	}
+	if strings.Contains(human, "a correct answer can be independent transfer evidence") {
+		t.Fatalf("assisted-fresh preamble claims independent transfer:\n%s", human)
+	}
+	report := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
+	if report.Attempts[len(report.Attempts)-1].Assistance != "assisted" {
+		t.Fatalf("recorded assistance = %+v", report.Attempts[len(report.Attempts)-1])
+	}
+}
+
 func TestSkillPracticeSourcePath(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
 	sourceID := imported.Source.ID
 	reviewedTaggedFixtureQuestion(t, db, clock, sourceID)
+
+	// Q-0003-02: scoring practice records independent evidence, so it follows the
+	// guided walkthrough. The embedded guided example does not touch the source.
+	guided := decodeAnswered(t, mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json"))
+	if guided.Attempt.Assistance != "assisted" {
+		t.Fatalf("guided attempt assistance = %q", guided.Attempt.Assistance)
+	}
 
 	awaitingRaw := mustRun(t, db, clock, "", "skill", "practice", "not-except-polarity", "--source", sourceID, "--json")
 	assertAwaitingHidesKey(t, awaitingRaw)
@@ -301,7 +419,7 @@ func TestSkillPracticeSourcePath(t *testing.T) {
 		t.Fatalf("source scope = %q/%d", next.SourceScope, next.SourceTaggedQuestions)
 	}
 	scoring := nextSkill(t, next, "not-except-polarity")
-	if scoring.Evidence.Attempts != 1 || scoring.Evidence.IndependentAttempts != 1 || scoring.Evidence.IndependentCorrect != 1 {
+	if scoring.Evidence.Attempts != 2 || scoring.Evidence.AssistedAttempts != 1 || scoring.Evidence.IndependentAttempts != 1 || scoring.Evidence.IndependentCorrect != 1 {
 		t.Fatalf("scoring evidence = %+v", scoring.Evidence)
 	}
 	if scoring.Inference.State != "insufficient" || scoring.Inference.Action != "practice_new" {
@@ -325,6 +443,7 @@ func TestNextIncludesImportedSourceWithoutScope(t *testing.T) {
 	imported := importFixture(t, db, clock)
 	sourceID := imported.Source.ID
 	reviewedTaggedFixtureQuestion(t, db, clock, sourceID)
+	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
 	mustRun(t, db, clock, "", "skill", "practice", "not-except-polarity", "--source", sourceID, "--answer", "C", "--json")
 
 	doc := decodeNext(t, mustRun(t, db, clock, "", "next", "--json"))
@@ -332,7 +451,7 @@ func TestNextIncludesImportedSourceWithoutScope(t *testing.T) {
 		t.Fatalf("source scope = %q, want the unscoped catalog", doc.SourceScope)
 	}
 	scoring := nextSkill(t, doc, "not-except-polarity")
-	if scoring.Evidence.Attempts != 1 || scoring.Evidence.IndependentAttempts != 1 || scoring.Evidence.IndependentCorrect != 1 {
+	if scoring.Evidence.Attempts != 2 || scoring.Evidence.AssistedAttempts != 1 || scoring.Evidence.IndependentAttempts != 1 || scoring.Evidence.IndependentCorrect != 1 {
 		t.Fatalf("imported source attempt is not included by default: %+v", scoring.Evidence)
 	}
 	if len(doc.UnclassifiedAttempts) != 0 {
@@ -523,16 +642,34 @@ func TestNextRecordClassification(t *testing.T) {
 	key := attempt.QuestionKey{ContentID: "content", QuestionID: "q1"}
 	record := attempt.Attempt{ID: 7, ContentID: key.ContentID, QuestionID: key.QuestionID, AttemptNumber: 1}
 	tests := []struct {
-		name   string
-		record attempt.Attempt
-		tags   map[attempt.QuestionKey][]string
-		reason string
+		name           string
+		record         attempt.Attempt
+		tags           map[attempt.QuestionKey][]string
+		reason         string
+		wantSkills     []string
+		fromCurrentTag bool
 	}{
 		{
-			name:   "known question without a registered tag",
+			name:   "recorded attempt on a question without a registered tag",
+			record: attempt.Attempt{ID: 7, ContentID: key.ContentID, QuestionID: key.QuestionID, AttemptNumber: 1, SkillsRecorded: true},
+			tags:   map[attempt.QuestionKey][]string{key: {"vocabulary-in-context"}},
+			reason: "question had no registered skill tag when the attempt was recorded",
+		},
+		{
+			name:   "pre-v6 attempt maps from current tags",
+			record: record,
+			tags:   map[attempt.QuestionKey][]string{key: {"vocabulary-in-context"}},
+			reason: "",
+			wantSkills: []string{
+				"vocabulary-in-context",
+			},
+			fromCurrentTag: true,
+		},
+		{
+			name:   "pre-v6 attempt on a known untagged question",
 			record: record,
 			tags:   map[attempt.QuestionKey][]string{key: {}},
-			reason: "question has no registered skill tag",
+			reason: "pre-v6 attempt on a question with no registered skill tag",
 		},
 		{
 			name:   "content or question unavailable",
@@ -542,7 +679,7 @@ func TestNextRecordClassification(t *testing.T) {
 		},
 		{
 			name:   "snapshot names an unregistered skill",
-			record: attempt.Attempt{ID: 8, ContentID: "content", QuestionID: "q2", AttemptNumber: 1, Skills: []string{"retired-skill"}},
+			record: attempt.Attempt{ID: 8, ContentID: "content", QuestionID: "q2", AttemptNumber: 1, Skills: []string{"retired-skill"}, SkillsRecorded: true},
 			tags:   map[attempt.QuestionKey][]string{},
 			reason: `recorded skill tags include "retired-skill", which is not registered in this build`,
 		},
@@ -556,8 +693,8 @@ func TestNextRecordClassification(t *testing.T) {
 			if adapted.AttemptID != tt.record.ID {
 				t.Fatalf("attempt id = %d, want %d", adapted.AttemptID, tt.record.ID)
 			}
-			if len(adapted.Skills) != 0 || adapted.FromCurrentTags {
-				t.Fatalf("record = %+v, want no skills and no current-tag fallback", adapted)
+			if !slices.Equal(adapted.Skills, tt.wantSkills) || adapted.FromCurrentTags != tt.fromCurrentTag {
+				t.Fatalf("record = %+v, want skills %v and fromCurrentTags %v", adapted, tt.wantSkills, tt.fromCurrentTag)
 			}
 		})
 	}
@@ -574,6 +711,50 @@ func runChildCLI(t *testing.T, args ...string) string {
 		t.Fatalf("child %v: %v\nstderr:\n%s", args, err, stderr.String())
 	}
 	return stdout.String()
+}
+
+func TestNextRecordedEmptySnapshotDoesNotRegroupAfterTagEdit(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	imported := importFixture(t, db, clock)
+	sourceID := imported.Source.ID
+	mustRun(t, db, clock, "", "question", "add", sourceID, "1", "--file", fixtureFile(t, "question-q1.json"), "--json")
+	mustRun(t, db, clock, "", "page", "review", sourceID, "1", "--reviewer", "fixture-reviewer", "--json")
+	mustRun(t, db, clock, "", "question", "review", sourceID, "q1", "--answer", "B", "--reviewer", "fixture-reviewer", "--json")
+	mustRun(t, db, clock, "", "practice", "--source", sourceID, "--question", "q1", "--answer", "B", "--json")
+
+	raw, err := os.ReadFile(fixtureFile(t, "question-q1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var question map[string]any
+	if err := json.Unmarshal(raw, &question); err != nil {
+		t.Fatal(err)
+	}
+	question["tactics"] = []string{"not-except-polarity"}
+	tagged, err := json.Marshal(question)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taggedPath := filepath.Join(t.TempDir(), "question-q1-tagged.json")
+	if err := os.WriteFile(taggedPath, tagged, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, db, clock, "", "question", "edit", sourceID, "q1", "--file", taggedPath, "--json")
+	mustRun(t, db, clock, "", "question", "review", sourceID, "q1", "--answer", "B", "--reviewer", "fixture-reviewer", "--json")
+
+	doc := decodeNext(t, mustRun(t, db, clock, "", "next", "--source", sourceID, "--json"))
+	scoring := nextSkill(t, doc, "not-except-polarity")
+	if scoring.Evidence.Attempts != 0 || scoring.Evidence.MappedFromCurrentTags != 0 {
+		t.Fatalf("a recorded empty snapshot was regrouped after a tag edit: %+v", scoring.Evidence)
+	}
+	if len(doc.UnclassifiedAttempts) != 1 {
+		t.Fatalf("unclassified attempts = %+v", doc.UnclassifiedAttempts)
+	}
+	want := "question had no registered skill tag when the attempt was recorded"
+	if doc.UnclassifiedAttempts[0].Reason != want {
+		t.Fatalf("unclassified reason = %q, want %q", doc.UnclassifiedAttempts[0].Reason, want)
+	}
 }
 
 func TestNextReopenRecalculatesWithoutRewriting(t *testing.T) {

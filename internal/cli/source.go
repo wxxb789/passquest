@@ -889,7 +889,7 @@ func questionLine(q source.Question, page source.Page) string {
 	line := fmt.Sprintf("%s  page %03d  answer %-14s  review %-10s  flags %s  %s",
 		q.ID, q.Page, answer, reviewed, displayFlags(flags), q.Stem)
 	if len(q.Tactics) > 0 {
-		line += "  tactics " + strings.Join(q.Tactics, ",")
+		line += "  skills " + strings.Join(q.Tactics, ",")
 	}
 	return line
 }

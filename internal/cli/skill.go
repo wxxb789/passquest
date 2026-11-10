@@ -127,11 +127,18 @@ func runSkillPractice(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
+	if err := requireGuidedTactic(lesson, records); err != nil {
+		return tacticError(opt, *jsonFlag, err)
+	}
+	exposures, err := st.ListExposures()
+	if err != nil {
+		return internalError(opt, *jsonFlag, err)
+	}
 	candidates, err := skillCandidates(st, lesson, *sourceFlag)
 	if err != nil {
 		return tacticError(opt, *jsonFlag, err)
 	}
-	candidate, err := pickSkillCandidate(lesson, *questionFlag, candidates, records)
+	candidate, err := pickSkillCandidate(lesson, *questionFlag, candidates, records, exposures)
 	if err != nil {
 		return tacticError(opt, *jsonFlag, err)
 	}
@@ -195,14 +202,21 @@ func skillCandidates(st *store.Store, lesson skill.Skill, sourceID string) ([]pr
 
 // pickSkillCandidate prefers material that can add independent transfer: a
 // fresh passage first, then an unattempted question on a seen passage, then a
-// repeat. A repeat is allowed but its exposure is printed and never counted as
-// independent transfer by the adaptive policy.
-func pickSkillCandidate(lesson skill.Skill, questionID string, candidates []practiceCandidate, records []attempt.Attempt) (practiceCandidate, error) {
+// repeat. A question whose guided walkthrough was already shown is skipped in
+// the first two passes because the attempt would be assisted, not independent;
+// an explicit --question still selects it and is recorded as assisted. A repeat
+// is allowed but its exposure is printed and never counted as independent
+// transfer by the adaptive policy.
+func pickSkillCandidate(lesson skill.Skill, questionID string, candidates []practiceCandidate, records []attempt.Attempt, exposures []store.Exposure) (practiceCandidate, error) {
 	attempted := make(map[attempt.QuestionKey]bool, len(records))
 	seenContent := make(map[string]bool)
 	for _, record := range records {
 		attempted[record.Key()] = true
 		seenContent[record.ContentID] = true
+	}
+	exposed := make(map[attempt.QuestionKey]bool, len(exposures))
+	for _, exposure := range exposures {
+		exposed[exposure.Key()] = true
 	}
 	if strings.TrimSpace(questionID) != "" {
 		for _, candidate := range candidates {
@@ -214,16 +228,36 @@ func pickSkillCandidate(lesson skill.Skill, questionID string, candidates []prac
 			"question %q is not a practiceable question tagged %q in this material", questionID, lesson.ID)
 	}
 	for _, candidate := range candidates {
-		if !seenContent[candidate.Content.ID] {
+		if !seenContent[candidate.Content.ID] && !exposed[candidate.key()] {
 			return candidate, nil
 		}
 	}
 	for _, candidate := range candidates {
-		if !attempted[candidate.key()] {
+		if !attempted[candidate.key()] && !exposed[candidate.key()] {
 			return candidate, nil
 		}
 	}
 	return candidates[0], nil
+}
+
+// requireGuidedTactic applies Q-0003-02 to the scoring skill's practice surface.
+// Ordinary language practice measures a prerequisite; scoring practice records
+// independent evidence about a tactic, so it must follow the guided walkthrough
+// rather than bypass it. Without the rule, a skill-practice answer on the
+// guided-example question silently consumes it and makes the tactic's own
+// independent stage unreachable.
+func requireGuidedTactic(lesson skill.Skill, records []attempt.Attempt) error {
+	if lesson.Kind != skill.KindScoring {
+		return nil
+	}
+	for _, record := range records {
+		if record.TacticID == lesson.ID && record.Assistance == attempt.AssistanceAssisted {
+			return nil
+		}
+	}
+	return refuse("guided_required",
+		"complete a guided %s attempt before independent %s practice; run passquest tactic practice %s --stage guided",
+		lesson.ID, lesson.ID, lesson.ID)
 }
 
 func skillPassageExposure(contentID string, records []attempt.Attempt) string {
@@ -255,7 +289,11 @@ func writeSkillPreamble(w io.Writer, run *skillRun) {
 	}
 	switch run.PassageExposure {
 	case passageFresh:
-		fmt.Fprintln(w, "No hint is shown. This is the first recorded attempt on this passage, so a correct answer can be independent transfer evidence.")
+		if run.Assistance == attempt.AssistanceIndependent {
+			fmt.Fprintln(w, "No hint is shown. This is the first recorded attempt on this passage, so a correct answer can be independent transfer evidence.")
+		} else {
+			fmt.Fprintln(w, "This is the first recorded attempt on this passage, but the earlier walkthrough makes this attempt assisted; it is not independent transfer evidence.")
+		}
 	default:
 		fmt.Fprintln(w, "This passage was already seen in an earlier attempt. The attempt is repeat exposure, not independent transfer evidence.")
 	}

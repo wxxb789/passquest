@@ -716,3 +716,19 @@ func TestReportMarksUnknownContentUnavailable(t *testing.T) {
 		t.Fatalf("attempt retention = counts %+v, attempts %+v", report.Counts, report.Attempts)
 	}
 }
+
+func TestQuestionsHumanOutputLabelsTagsAsSkills(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	imported := importFixture(t, db, clock)
+	sourceID := imported.Source.ID
+	reviewedTaggedFixtureQuestion(t, db, clock, sourceID)
+
+	human := mustRun(t, db, clock, "", "questions", sourceID)
+	if !strings.Contains(human, "skills not-except-polarity") {
+		t.Fatalf("human questions output does not label tags as skills:\n%s", human)
+	}
+	if strings.Contains(human, "tactics not-except-polarity") {
+		t.Fatalf("human questions output still uses the old label:\n%s", human)
+	}
+}

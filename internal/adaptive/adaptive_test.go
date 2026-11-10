@@ -55,6 +55,14 @@ func record(id int64, content, question string, number int, assistance attempt.A
 	}
 }
 
+// guidedRecord is an assisted attempt delivered with the tactic walkthrough.
+// Ordinary practice after a walkthrough is assisted too but names no tactic.
+func guidedRecord(id int64, content, question string, number int, status attempt.Status, elapsed int64, skill string) Record {
+	rec := record(id, content, question, number, attempt.AssistanceAssisted, status, elapsed, skill)
+	rec.TacticID = skill
+	return rec
+}
+
 func findSkill(t *testing.T, result Result, id string) SkillResult {
 	t.Helper()
 	for _, candidate := range result.Skills {
@@ -107,7 +115,7 @@ func TestNoEvidence(t *testing.T) {
 func TestAssistedOnlyIsNotIndependent(t *testing.T) {
 	input := testInput()
 	input.Records = []Record{
-		record(1, "score-a", "x1", 1, attempt.AssistanceAssisted, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		guidedRecord(1, "score-a", "x1", 1, attempt.StatusCorrect, 1000, "not-except-polarity"),
 	}
 	result := Recommend(input)
 	requireRecommendation(t, result, "not-except-polarity", ActionPracticeNew)
@@ -120,6 +128,25 @@ func TestAssistedOnlyIsNotIndependent(t *testing.T) {
 	}
 	if scoring.Inference.State != StateFamiliarityOnly {
 		t.Fatalf("state = %s", scoring.Inference.State)
+	}
+}
+
+func TestAssistedPracticeWithoutGuidedTacticStillExplains(t *testing.T) {
+	input := testInput()
+	input.Records = []Record{
+		record(1, "score-a", "x1", 1, attempt.AssistanceAssisted, attempt.StatusCorrect, 1000, "not-except-polarity"),
+	}
+	result := Recommend(input)
+	requireRecommendation(t, result, "not-except-polarity", ActionExplain)
+	scoring := findSkill(t, result, "not-except-polarity")
+	if scoring.Evidence.AssistedAttempts != 1 || scoring.Evidence.GuidedAttempts != 0 {
+		t.Fatalf("assisted evidence = %+v", scoring.Evidence)
+	}
+	if scoring.Inference.State != StateFamiliarityOnly {
+		t.Fatalf("state = %s", scoring.Inference.State)
+	}
+	if !strings.Contains(scoring.Inference.Reason, "no guided tactic attempt exists") {
+		t.Fatalf("reason = %s", scoring.Inference.Reason)
 	}
 }
 
@@ -363,7 +390,7 @@ func TestNoFreshPassageSelectsReview(t *testing.T) {
 func TestPriorityOrder(t *testing.T) {
 	input := testInput()
 	input.Records = []Record{
-		record(1, "score-a", "x1", 1, attempt.AssistanceAssisted, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		guidedRecord(1, "score-a", "x1", 1, attempt.StatusCorrect, 1000, "not-except-polarity"),
 		record(2, "vocab-a", "v1", 1, attempt.AssistanceIndependent, attempt.StatusIncorrect, 1000, "vocabulary-in-context"),
 		record(3, "vocab-b", "v2", 1, attempt.AssistanceIndependent, attempt.StatusIncorrect, 1000, "vocabulary-in-context"),
 	}
@@ -372,7 +399,7 @@ func TestPriorityOrder(t *testing.T) {
 
 	input = testInput()
 	input.Records = []Record{
-		record(1, "score-a", "x1", 1, attempt.AssistanceAssisted, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		guidedRecord(1, "score-a", "x1", 1, attempt.StatusCorrect, 1000, "not-except-polarity"),
 		record(2, "vocab-a", "v1", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "vocabulary-in-context"),
 	}
 	result = Recommend(input)

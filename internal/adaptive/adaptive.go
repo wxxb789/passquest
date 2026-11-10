@@ -62,6 +62,11 @@ type Record struct {
 	ElapsedMS       int64
 	Skills          []string
 	FromCurrentTags bool
+	// TacticID names the tactic whose guided walkthrough accompanied the
+	// attempt. It is empty for ordinary practice, including an assisted answer
+	// after a walkthrough, so the policy can tell a guided tactic attempt from
+	// other help.
+	TacticID string
 }
 
 // Material is one practiceable tagged question in the current catalog. SourceID
@@ -86,6 +91,7 @@ type Evidence struct {
 	Attempts                int
 	AssistedAttempts        int
 	AssistedCorrect         int
+	GuidedAttempts          int
 	IndependentAttempts     int
 	IndependentCorrect      int
 	IndependentIncorrect    int
@@ -227,6 +233,9 @@ func Recommend(input Input) Result {
 			}
 			if record.Assistance == attempt.AssistanceAssisted {
 				ev.AssistedAttempts++
+				if record.TacticID == skillID {
+					ev.GuidedAttempts++
+				}
 				if record.Status == attempt.StatusCorrect {
 					ev.AssistedCorrect++
 				}
@@ -333,7 +342,22 @@ func Recommend(input Input) Result {
 	return result
 }
 
+// infer selects an action from recorded evidence. A scoring skill whose guided
+// tactic attempt does not exist yet selects the explanation even when ordinary
+// practice already supplied independent observations: scoring `skill practice`
+// is refused until that walkthrough exists, so another action would print a
+// command the CLI rejects.
 func infer(candidate Skill, ev Evidence, st *skillState, materialCount int) (State, Action, string, int) {
+	state, action, reason, priority := inferState(candidate, ev, st, materialCount)
+	if candidate.Kind == KindScoring && ev.GuidedAttempts == 0 && action != ActionExplain {
+		return state, ActionExplain,
+			fmt.Sprintf("%d answered independent transfer observation(s) are recorded for %s, but no guided tactic attempt exists. The guided walkthrough is selected before independent scoring practice.",
+				ev.IndependentCorrect+ev.IndependentIncorrect, candidate.ID), 1
+	}
+	return state, action, reason, priority
+}
+
+func inferState(candidate Skill, ev Evidence, st *skillState, materialCount int) (State, Action, string, int) {
 	if materialCount == 0 {
 		return StateNoMaterial, "", fmt.Sprintf("No practiceable question tagged %s is available in the current material; add and review a tagged question or import a source.", candidate.ID), 99
 	}
@@ -352,7 +376,7 @@ func infer(candidate Skill, ev Evidence, st *skillState, materialCount int) (Sta
 			fmt.Sprintf("No attempt is recorded for %s. A fresh passage is selected to measure the skill without help.", candidate.ID), 5
 
 	case answers == 0 && ev.IndependentAttempts == 0:
-		if candidate.Kind == KindScoring && ev.AssistedAttempts == 0 {
+		if candidate.Kind == KindScoring && ev.GuidedAttempts == 0 {
 			return StateFamiliarityOnly, ActionExplain,
 				fmt.Sprintf("%d attempt(s) are recorded for %s but none is independent transfer (assisted %d, revisits %d, passage re-exposures %d), and no guided tactic attempt exists. The explanation is selected before independent evidence.", ev.Attempts, candidate.ID, ev.AssistedAttempts, ev.Revisits, ev.PassageRepeats), 1
 		}

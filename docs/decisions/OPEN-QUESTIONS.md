@@ -247,10 +247,34 @@ Entry format:
 - Options considered: (A) add an append-only `skills_json` snapshot to attempts and use it for
   inference; (B) recompute every attempt from the question's current tags; (C) store a full derived
   learner state.
-- Default taken: (A). Schema v6 adds `attempts.skills_json` with a default `[]`; new attempts snapshot
-  the tags visible when the answer was recorded. Pre-v6 rows read as empty and fall back to current
-  tags, marked `mapped_from_current_tags` with an uncertainty line. No derived learner state is
-  stored; `next` recomputes it. Reverse by ignoring the column and reading current tags, at the cost
-  of historical regrouping.
+- Default taken: (A). Schema v6 adds a nullable `attempts.skills_json`; new attempts always write a
+  JSON array (including `[]`), and `NULL` marks a pre-v6 row. A later `question edit` cannot regroup a
+  recorded snapshot, even an empty one. Pre-v6 rows fall back to current tags, marked
+  `mapped_from_current_tags` with an uncertainty line. No derived learner state is stored; `next`
+  recomputes it. Reverse by ignoring the column and reading current tags, at the cost of historical
+  regrouping.
 - Revisit when: a tag-correction workflow needs to apply retroactively, or pre-v6 learner evidence
   must stop being inferred from current tags.
+
+### Q-0004-05 — Does the guided-first rule apply to scoring `skill practice`?
+- Status: decided(default taken)
+- Context: Q-0003-02 requires an independent attempt to be a different question from every guided
+  example and refuses an independent tactic call before a guided attempt. Goal 0004 adds
+  `skill practice`, which the plan calls ordinary unassisted practice. On a fresh database it could
+  select the tactic exercise's guided example, record it as independent, and make the tactic's own
+  independent stage unreachable; the adaptive view then counted that answer as scoring transfer
+  before the walkthrough. The review asked whether the rule is universal or scoped to
+  `tactic practice`.
+- Options considered: (A) enforce Q-0003-02 on the scoring skill practice surface; (B) scope the rule
+  to `tactic practice` and amend the decision text.
+- Default taken: (A). `skill practice` for a scoring skill refuses with exit 2 (`guided_required`)
+  until a guided attempt for that skill exists, and candidate selection skips any question whose
+  walkthrough was already shown. Language skills are unaffected. `next` counts `guided_attempts` from
+  attempts that carry the tactic id, not from every assisted attempt, and a scoring skill with
+  recorded attempts but no guided tactic attempt selects `explain`; an assisted ordinary answer after
+  a walkthrough still selects the guided explanation instead of printing an unrunnable command.
+  This is the safer default: it cannot consume the guided-example question or overstate independent
+  scoring evidence. Reverse by removing `requireGuidedTactic` and the exposure skip in
+  `internal/cli/skill.go`; stored attempts are unaffected.
+- Revisit when: the owner wants a separate unassisted scoring surface that does not feed adaptive
+  transfer evidence, or goal 0009 defines a held-out assessment with different help rules.

@@ -79,9 +79,12 @@ var schemaV4 = []string{
 
 // schemaV6 snapshots the question's skill tags on the attempt. Adaptive
 // selection groups history by the tags visible when the answer was recorded, so
-// a later tag edit cannot regroup old evidence. Pre-v6 rows read as untagged.
+// a later tag edit cannot regroup old evidence. The column is nullable: NULL
+// marks a pre-v6 row that may fall back to current tags, while a recorded
+// empty array means the question had no registered tag at answer time and must
+// never be regrouped.
 var schemaV6 = []string{
-	`ALTER TABLE attempts ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'`,
+	`ALTER TABLE attempts ADD COLUMN skills_json TEXT`,
 }
 
 var migrations = []struct {
@@ -279,6 +282,7 @@ func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 	a.ID = id
 	a.PriorAttempts = prior
 	a.AttemptNumber = prior + 1
+	a.SkillsRecorded = true
 	return a, nil
 }
 
@@ -306,7 +310,7 @@ func (s *Store) List() ([]attempt.Attempt, error) {
 			selectedTxt sql.NullString
 			started     string
 			answered    string
-			skillsRaw   string
+			skillsRaw   sql.NullString
 		)
 		if err := rows.Scan(
 			&a.ID, &a.SessionID, &a.QuestionID, &a.ContentID, &a.ContentVersion, &status,
@@ -317,8 +321,11 @@ func (s *Store) List() ([]attempt.Attempt, error) {
 		}
 		a.Status = attempt.Status(status)
 		a.Assistance = attempt.Assistance(assistance)
-		if a.Skills, err = decodeSkills(skillsRaw); err != nil {
-			return nil, fmt.Errorf("store: decode skills of attempt %d: %w", a.ID, err)
+		if skillsRaw.Valid {
+			a.SkillsRecorded = true
+			if a.Skills, err = decodeSkills(skillsRaw.String); err != nil {
+				return nil, fmt.Errorf("store: decode skills of attempt %d: %w", a.ID, err)
+			}
 		}
 		if selectedLbl.Valid {
 			a.SelectedLabel = selectedLbl.String

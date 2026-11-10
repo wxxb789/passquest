@@ -101,6 +101,12 @@ type Attempt struct {
 	// later tag edit cannot silently regroup old evidence. It is empty for
 	// untagged questions and for rows written before schema version 6.
 	Skills []string
+	// SkillsRecorded reports whether the row carries a skill snapshot at all.
+	// A recorded empty snapshot means the question had no registered tag when
+	// the answer was recorded; a row without a snapshot predates version 6 and
+	// may fall back to the question's current tags. The distinction is stored
+	// as NULL versus a JSON array.
+	SkillsRecorded bool
 }
 
 // Key returns the content-scoped identity used for numbering and repeats.
@@ -173,6 +179,7 @@ func BuildRecord(contentID, contentVersion string, q exam.Question, sel Selectio
 		ElapsedMS:      answered.Sub(started).Milliseconds(),
 		Assistance:     AssistanceIndependent,
 		Skills:         append([]string(nil), q.Tactics...),
+		SkillsRecorded: true,
 	}
 
 	switch {
