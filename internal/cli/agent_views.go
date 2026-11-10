@@ -137,7 +137,8 @@ type agentShowDoc struct {
 	SchemaVersion int              `json:"schema_version"`
 	State         string           `json:"state"`
 	Run           agentRunView     `json:"run"`
-	Status        agentStatusView  `json:"status"`
+	TrailState    string           `json:"trail_state"`
+	LatestEvent   string           `json:"latest_event"`
 	Counts        agentCountsView  `json:"counts"`
 	Events        []agentEventView `json:"events"`
 	Steps         []agentStepView  `json:"steps"`
@@ -451,7 +452,7 @@ func writeAgentRuns(w io.Writer, doc agentRunsDoc) {
 
 func writeAgentShow(w io.Writer, doc agentShowDoc) {
 	fmt.Fprintf(w, "Pass Quest — agent run %s\n", doc.Run.RunID)
-	fmt.Fprintf(w, "State: %s | latest event: %s\n", doc.Status.State, doc.Status.Reason)
+	fmt.Fprintf(w, "Trail state: %s | latest event: %s\n", doc.TrailState, doc.LatestEvent)
 	fmt.Fprintf(w, "Model: %s | created %s\n", doc.Run.Model, doc.Run.CreatedAt)
 	fmt.Fprintf(w, "Effects: %d steps, %d attempts, %d committed, %d duplicate, %d reconciliation event(s)\n",
 		doc.Effects.Steps, doc.Effects.Attempts, doc.Effects.Committed, doc.Effects.Duplicates, doc.Effects.Reconciled)

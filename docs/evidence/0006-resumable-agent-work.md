@@ -16,6 +16,10 @@ The stub made no external network call and the provider credential was the synth
 `test-key-not-real`. Nothing from the demonstration was added to the repository; the Pi SQLite files,
 application databases and stub output stayed under `/tmp`.
 
+The gate output below, the cancellation table and the store-boundary table were re-measured after the
+0006 review fixes (R-0006-01..03). The remaining scenario tables are the original demonstration run;
+the fixed paths do not change their outcomes.
+
 ## What was built
 
 | Package / area | Truth it owns |
@@ -24,7 +28,7 @@ application databases and stub output stayed under `/tmp`.
 | `internal/store` | Schema v9: immutable `agent_runs`, append-only `agent_run_events`, append-only advisory `agent_steps`, and the append-only `agent_step_attempts` effect ledger. The step key is idempotent; a duplicate keeps the first text and appends a `reconciled` event. No agent table can update `attempts`. |
 | `internal/cli` | `agent start/status/resume/cancel/runs/show/transcript/record-step`, run selection, provider/credential checks, signal/timeout pause, cancellation confirmation, the paired JSON/human documents and exit codes. |
 | `agent/durable-host.mjs` | The Pi Durable runtime: one conversation per run, a session mapping, a replay-safe `record_study_step` tool that invokes the application's validated command, read-only status/transcript, heartbeat, SIGTERM pause and SIGINT cancel. |
-| `harness/gates/agent-smoke.ts` | Real binary + real host + real Pi SQLite + loopback SSE stub; 98 assertions over 8 scenarios. |
+| `harness/gates/agent-smoke.ts` | Real binary + real host + real Pi SQLite + loopback SSE stub; 101 assertions over 8 scenarios. |
 
 ## Demonstration setup
 
@@ -90,12 +94,30 @@ The retry ran the same Pi call id; the application returned the existing step an
 
 | Step | Observed |
 |---|---|
-| delayed run, polled from a second process | `agent status` reported `running`, `heartbeat_fresh:true`, a host pid, and the heartbeat file was `0600` |
-| `agent cancel RUN --json` | exit 0; `cancelled`, `confirmed:true`, host pid 3700139 |
+| delayed run, polled from a second process | `agent status` reported `running`, `heartbeat_fresh:true`, host pid 3815744, and the heartbeat file was `0600` |
+| `agent resume RUN` beside the live host | exit 2, `run_running` naming pid 3815744; `agent status` still `running`; the start process was untouched |
+| `agent cancel RUN --json` | exit 0; `cancelled`, `confirmed:true`, host pid 3815744 |
 | the original `agent start` | exit 0; state `cancelled` |
 | `agent status RUN` | `cancelled` |
+| `ps -p 3815744` | the host process is gone |
 | `agent resume RUN` | exit 2, `run_cancelled` |
 | heartbeat | removed |
+
+### Store boundary and the resume claim
+
+The review reproduced `agent resume --db app.sqlite --agent-store app.sqlite` initialising the
+application database as the Pi store. The fixed real binary refuses before any host starts; the
+application database's table list is unchanged.
+
+| Command | Observed |
+|---|---|
+| `agent resume RUN --db app.sqlite --agent-store app.sqlite --json` | exit 2, `invalid_input`, `--agent-store must differ from the application database` |
+| `agent resume RUN --db app.sqlite --agent-store other.sqlite --json` | exit 2, `store_mismatch`; resume reopens only the recorded store |
+| `sqlite_master` before and after | application tables only (`attempts`, `source_*`, `page_revisions`, `agent_*`); no Pi table (`conversations`, `durable_metadata`, `entries`, `record_ids`, `submissions`, `tasks`, `documents`) was created |
+
+The resume claim itself is one immediate transaction guarded by the latest-event id
+(`TestAgentResumeClaimIsSingleWriter`): a second claim that read the same event fails with
+`ErrAgentRunChanged`, and a pending cancellation fails with `ErrAgentRunCancelled`.
 
 ### Needs action and terminal failure
 
@@ -128,7 +150,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (11 packages, 485 tests, 0 skipped)
+PASS  go test (11 packages, 490 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -158,7 +180,7 @@ PASS  adaptive smoke (120 assertions)
 PASS  tutor smoke (156 assertions)
 
 == agent smoke
-PASS  agent smoke (98 assertions, 8 scenarios, 17 provider requests, 2 permission checks)
+PASS  agent smoke (101 assertions, 8 scenarios, 17 provider requests, 2 permission checks)
 
 == harness self-test
 PASS  harness self-test (22 cases, 15/15 gates)
@@ -168,17 +190,17 @@ GATE: PASS
 ```
 
 `agent-smoke` itself covers the fresh completion, status/show/runs/transcript, timeout pause and
-resume, fault injection with reconciliation, cancellation, 401 handling, malformed stream handling,
-a zero-step answer, Node absence, the attempt-report invariant, the copied-store transcript, the
-`0600` store/heartbeat modes and a credential scan of the application and Pi stores. It runs after
-the Go suite, not concurrently with it.
+resume, fault injection with reconciliation, cancellation with a resume refused beside the live host,
+401 handling, malformed stream handling, a zero-step answer, Node absence, the attempt-report
+invariant, the copied-store transcript, the `0600` store/heartbeat modes and a credential scan of the
+application and Pi stores. It runs after the Go suite, not concurrently with it.
 
 ## Contract clause → evidence
 
 | Done-when clause | Evidence |
 |---|---|
 | A real, nontrivial AI task can be started, interrupted and resumed from persisted state; prior context and observable output remain coherent. | `study-brief` uses two model/tool rounds and a final answer. The 1-second timeout left `live_run:true`/`pending_tasks:1`; resume completed the same run id; the transcript has the original task, both tool results and the answer. Gate scenario 2. |
-| The user can tell if work is running, paused, completed, failed or needs action, and can cancel without invisible execution. | `running` (fresh heartbeat, pid), `paused` (timeout), `completed`, `failed` (malformed SSE) and `needs_action` (401, missing Node) were observed. `cancel` recorded `confirmed:true`, the start process exited `cancelled`, `resume` refused, and the heartbeat file was removed. Gate scenarios 4–6. |
+| The user can tell if work is running, paused, completed, failed or needs action, and can cancel without invisible execution. | `running` (fresh heartbeat, pid), `paused` (timeout), `completed`, `failed` (malformed SSE) and `needs_action` (401, missing Node) were observed. A resume beside the live host exited 2 `run_running` and left `status` at `running`; `cancel` then recorded `confirmed:true`, the start process exited `cancelled`, the host pid was gone, `resume` refused, and the heartbeat file was removed. Gate scenarios 4–6. |
 | At least one side-effecting operation is interrupted/retried without duplicate committed learner evidence or duplicate content, with reconciliation evidence. | The fault run left 1 step/1 attempt; resume produced 2 steps/3 attempts/1 duplicate/1 reconciled event, kept the first text, and `report --json` was byte-identical. Gate scenario 3, plus `TestAgentStepEffectIsIdempotentAndLeavesAttemptsAlone`. |
 | Verified scoring/history remain application-owned; durable history is independently recoverable; core practice works without the agent host. | The agent never writes `attempts`; the report is unchanged across runs. A copied Pi SQLite file printed the same 7 transcript entries with a missing application database. With Node absent, `agent start` exited 3/`agent_unavailable` and `practice` still recorded and graded. Gate scenario 7. |
 
@@ -201,7 +223,9 @@ the Go suite, not concurrently with it.
   application `cancel_requested`/`cancelled` trail. The durable conversation may remain pending in the
   Pi store, but `resume` refuses. The smoke gate reports permissions as skipped on Windows.
 - The heartbeat is considered stale after 5 seconds. A host that hangs without refreshing it is
-  reported as paused and can be cancelled; a stale pid is never signalled because the token must match.
+  reported as paused and can be cancelled. A stale pid is never signalled; a fresh heartbeat is
+  signalled even when its token differs from the latest event's, because that means a host raced the
+  run's claim.
 - Agent runs do not consume the `tutor` daily-call ledger. The run is bounded by `max_turns+1`
   provider requests and the configured timeout; this is disclosed and revisited with goal 0010.
 - `transcript` clips each entry to 4,000 characters and at most 200 entries. It is a local recovery

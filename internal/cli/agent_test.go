@@ -140,11 +140,16 @@ func completingAgentRunner(t *testing.T, db string, at time.Time) *agentFakeRunn
 
 func createAgentTestRun(t *testing.T, st *store.Store, runID string) {
 	t.Helper()
+	createAgentTestRunAt(t, st, runID, filepath.Join(t.TempDir(), "agent.sqlite"), goldenBase, nil)
+}
+
+func createAgentTestRunAt(t *testing.T, st *store.Store, runID, storePath string, at time.Time, detail any) {
+	t.Helper()
 	if err := st.CreateAgentRun(store.AgentRun{
 		RunID: runID, TaskKind: agent.TaskStudyBrief, PromptVersion: agent.PromptVersion,
-		Model: "example-model", StorePath: filepath.Join(t.TempDir(), "agent.sqlite"),
-		MaxSteps: 3, MaxTurns: 8, CreatedAt: goldenBase,
-	}, nil, goldenBase); err != nil {
+		Model: "example-model", StorePath: storePath,
+		MaxSteps: 3, MaxTurns: 8, CreatedAt: at,
+	}, detail, at); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 }
@@ -295,7 +300,8 @@ func TestAgentStatusAndShowGoldenDocuments(t *testing.T) {
 	if err := json.Unmarshal([]byte(showRaw), &show); err != nil {
 		t.Fatalf("decode show: %v", err)
 	}
-	if show.Effects.Steps != 2 || show.Effects.Attempts != 2 || show.Status.State != string(agent.StateCompleted) {
+	if show.Effects.Steps != 2 || show.Effects.Attempts != 2 || show.TrailState != string(agent.StateCompleted) ||
+		show.LatestEvent != store.AgentEventCompleted {
 		t.Fatalf("show = %+v", show)
 	}
 	checkGolden(t, goldenPath(t, "agent-show.golden.json"), normalizedAgentJSON(t, showRaw, temp))
@@ -446,6 +452,217 @@ func TestAgentCancelCompletedRunRefused(t *testing.T) {
 		"agent", "cancel", doc.Run.RunID, "--db", db, "--json")
 	if code != 2 || !strings.Contains(stderr, "run_completed") {
 		t.Fatalf("cancel completed code=%d stderr=%s", code, stderr)
+	}
+}
+
+func TestAgentResumeRefusesLiveHost(t *testing.T) {
+	temp := t.TempDir()
+	db := filepath.Join(temp, "app.sqlite")
+	configureAgentProvider(t, db)
+	storePath := filepath.Join(temp, "agent.sqlite")
+	runID := "run-20261110T100000Z-aaaaaaaa"
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	// The claim is old enough to be hostless; the live heartbeat carries a
+	// token the trail never recorded, which must still count as a live host.
+	createAgentTestRunAt(t, st, runID, storePath, goldenBase.Add(-time.Hour), map[string]any{"host_token": strings.Repeat("a", 32)})
+	st.Close()
+	raw, err := json.Marshal(agent.Heartbeat{
+		RunID: runID, PID: 4242, Token: strings.Repeat("b", 32), At: goldenBase.UnixMilli(),
+	})
+	if err != nil {
+		t.Fatalf("encode heartbeat: %v", err)
+	}
+	if err := os.WriteFile(storePath+".host", raw, 0o600); err != nil {
+		t.Fatalf("write heartbeat: %v", err)
+	}
+	runner := &agentFakeRunner{}
+	code, stdout, stderr := runAgentTest(t, agentTestOptions(t, &stepClock{base: goldenBase}, runner, nil, agentTestKey), "",
+		"agent", "resume", runID, "--db", db, "--json")
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "run_running") {
+		t.Fatalf("resume with a live host code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if runner.count() != 0 {
+		t.Fatal("resume started a second host beside a live heartbeat")
+	}
+	st, err = store.Open(db)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer st.Close()
+	events, err := st.AgentRunEvents(runID)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	for _, event := range events {
+		if event.Kind == store.AgentEventResumed {
+			t.Fatalf("refused resume appended %+v", event)
+		}
+	}
+}
+
+func TestAgentResumeStoreOverrideGuards(t *testing.T) {
+	temp := t.TempDir()
+	db := filepath.Join(temp, "app.sqlite")
+	configureAgentProvider(t, db)
+	storePath := filepath.Join(temp, "agent.sqlite")
+	runID := "run-20261110T100000Z-aaaaaaaa"
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	createAgentTestRunAt(t, st, runID, storePath, goldenBase.Add(-time.Hour), nil)
+	st.Close()
+	runner := &agentFakeRunner{}
+	opt := agentTestOptions(t, &stepClock{base: goldenBase}, runner, nil, agentTestKey)
+	for _, command := range []string{"resume", "status"} {
+		code, _, stderr := runAgentTest(t, opt, "",
+			"agent", command, runID, "--db", db, "--agent-store", db, "--json")
+		if code != 2 || !strings.Contains(stderr, "must differ") {
+			t.Fatalf("%s with the application database as store code=%d stderr=%s", command, code, stderr)
+		}
+	}
+	code, _, stderr := runAgentTest(t, opt, "",
+		"agent", "resume", runID, "--db", db, "--agent-store", filepath.Join(temp, "other.sqlite"), "--json")
+	if code != 2 || !strings.Contains(stderr, "store_mismatch") {
+		t.Fatalf("resume with a rebound store code=%d stderr=%s", code, stderr)
+	}
+	if runner.count() != 0 {
+		t.Fatal("a refused store override reached the host")
+	}
+}
+
+func TestAgentCancelKeepsTerminalOffALiveHost(t *testing.T) {
+	temp := t.TempDir()
+	db := filepath.Join(temp, "app.sqlite")
+	configureAgentProvider(t, db)
+	storePath := filepath.Join(temp, "agent.sqlite")
+	runID := "run-20261110T100000Z-aaaaaaaa"
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	createAgentTestRunAt(t, st, runID, storePath, time.Now().Add(-time.Minute), map[string]any{"host_token": strings.Repeat("a", 32)})
+	st.Close()
+	heartbeatPath := storePath + ".host"
+	// A host keeps refreshing the heartbeat while its pid cannot be signalled
+	// (0 is rejected before any OS call). cancel must still treat the run as
+	// live and must not record a terminal outcome.
+	stop := make(chan struct{})
+	ready := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(50 * time.Millisecond)
+		defer ticker.Stop()
+		first := true
+		for {
+			raw, _ := json.Marshal(agent.Heartbeat{
+				RunID: runID, PID: 0, Token: strings.Repeat("b", 32), At: time.Now().UnixMilli(),
+			})
+			_ = os.WriteFile(heartbeatPath+".tmp", raw, 0o600)
+			_ = os.Rename(heartbeatPath+".tmp", heartbeatPath)
+			if first {
+				close(ready)
+				first = false
+			}
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	<-ready
+	opt := agentTestOptions(t, nil, &agentFakeRunner{}, nil, agentTestKey)
+	opt.Now = time.Now
+	code, stdout, stderr := runAgentTest(t, opt, "",
+		"agent", "cancel", runID, "--db", db, "--wait-seconds", "1", "--json")
+	if code != 1 || stdout != "" {
+		t.Fatalf("cancel beside a live host code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	var doc agentCancelDoc
+	if err := json.Unmarshal([]byte(stderr), &doc); err != nil {
+		t.Fatalf("decode unconfirmed cancel: %v\n%s", err, stderr)
+	}
+	if doc.State != string(agent.StateCancelling) || doc.Confirmed {
+		t.Fatalf("unconfirmed cancel = %+v", doc)
+	}
+	close(stop)
+	<-done
+	st, err = store.Open(db)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	latest, _, err := st.LatestAgentRunEvent(runID)
+	st.Close()
+	if err != nil || latest.Kind != store.AgentEventCancelRequested {
+		t.Fatalf("latest event after an unconfirmed cancel = %+v err=%v", latest, err)
+	}
+	if err := os.Remove(heartbeatPath); err != nil {
+		t.Fatalf("remove heartbeat: %v", err)
+	}
+	code, stdout, stderr = runAgentTest(t, opt, "",
+		"agent", "cancel", runID, "--db", db, "--wait-seconds", "1", "--json")
+	if code != 0 {
+		t.Fatalf("confirmed cancel code=%d stderr=%s", code, stderr)
+	}
+	var confirmed agentCancelDoc
+	if err := json.Unmarshal([]byte(stdout), &confirmed); err != nil {
+		t.Fatalf("decode confirmed cancel: %v", err)
+	}
+	if !confirmed.Confirmed || confirmed.State != string(agent.StateCancelled) {
+		t.Fatalf("confirmed cancel = %+v", confirmed)
+	}
+}
+
+func TestAgentShowReportsTrailStateNotLiveState(t *testing.T) {
+	temp := t.TempDir()
+	db := filepath.Join(temp, "app.sqlite")
+	storePath := filepath.Join(temp, "agent.sqlite")
+	runID := "run-20261110T100000Z-aaaaaaaa"
+	if err := os.WriteFile(storePath, []byte("pi fixture"), 0o600); err != nil {
+		t.Fatalf("write store fixture: %v", err)
+	}
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	createAgentTestRunAt(t, st, runID, storePath, goldenBase.Add(-time.Hour), nil)
+	if _, _, _, err := st.RecordAgentStep(runID, 1, store.AgentStepDiagnosis, "Title", "Body", "call-1", goldenBase); err != nil {
+		t.Fatalf("record step: %v", err)
+	}
+	// Crash window: the host answered but the CLI died before recording the
+	// completed event.
+	if _, err := st.AppendAgentRunEvent(runID, store.AgentEventInterrupted, map[string]any{"reason": "host_exit"}, goldenBase); err != nil {
+		t.Fatalf("interrupt run: %v", err)
+	}
+	st.Close()
+	runner := statusAgentRunner(&agent.Snapshot{Found: true, ConversationID: 3, AnswerChars: 40, Entries: 7})
+	opt := agentTestOptions(t, &stepClock{base: goldenBase}, runner, nil, agentTestKey)
+	code, statusRaw, stderr := runAgentTest(t, opt, "", "agent", "status", runID, "--db", db, "--json")
+	if code != 0 {
+		t.Fatalf("status code=%d stderr=%s", code, stderr)
+	}
+	var status agentStatusDoc
+	if err := json.Unmarshal([]byte(statusRaw), &status); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if status.State != string(agent.StateCompleted) || status.LatestEvent != store.AgentEventInterrupted {
+		t.Fatalf("status = %+v", status)
+	}
+	code, showRaw, stderr := runAgentTest(t, opt, "", "agent", "show", runID, "--db", db, "--json")
+	if code != 0 {
+		t.Fatalf("show code=%d stderr=%s", code, stderr)
+	}
+	var show agentShowDoc
+	if err := json.Unmarshal([]byte(showRaw), &show); err != nil {
+		t.Fatalf("decode show: %v", err)
+	}
+	if show.TrailState != string(agent.StatePaused) || show.LatestEvent != store.AgentEventInterrupted {
+		t.Fatalf("show trail state = %q latest=%q", show.TrailState, show.LatestEvent)
 	}
 }
 

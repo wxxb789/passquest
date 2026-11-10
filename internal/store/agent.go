@@ -115,6 +115,11 @@ var ErrAgentRunCompleted = errors.New("store: agent run is already completed")
 // terminal states are absorbing: a late process cannot rewrite the outcome.
 var ErrAgentRunFinished = errors.New("store: agent run already reached a terminal state")
 
+// ErrAgentRunChanged refuses a resume claim whose expected latest event is no
+// longer the latest. Another writer appended first, so the caller must re-read
+// the run instead of starting a second host.
+var ErrAgentRunChanged = errors.New("store: agent run changed while claiming it")
+
 // agentLatestEventPredicate is the single definition of a run's latest state
 // transition. A reconciled event records a duplicate effect, not a transition,
 // so it never becomes the latest event. %s is the run-id expression.
@@ -299,6 +304,67 @@ func (s *Store) AppendAgentRunEvent(runID, kind string, detail any, at time.Time
 		return AgentRunEvent{}, fmt.Errorf("store: commit agent event: %w", err)
 	}
 	return AgentRunEvent{RunID: runID, Kind: kind, DetailJSON: encoded, At: at.UTC(), ID: id}, nil
+}
+
+// ClaimAgentResume appends the resumed transition only when the latest event is
+// still the one the caller observed. The comparison and the insert run in one
+// immediate transaction, so two processes racing to resume the same run cannot
+// both claim it and start a host. A cancellation request blocks the claim.
+func (s *Store) ClaimAgentResume(runID string, expectEventID int64, detail any, at time.Time) (AgentRunEvent, error) {
+	encoded, err := encodeAgentDetail(detail)
+	if err != nil {
+		return AgentRunEvent{}, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return AgentRunEvent{}, fmt.Errorf("store: begin agent resume claim: %w", err)
+	}
+	defer tx.Rollback()
+	var (
+		latestID   int64
+		latestKind string
+	)
+	err = tx.QueryRow(`SELECT id, kind FROM agent_run_events
+		WHERE id = (SELECT MAX(id) FROM agent_run_events WHERE run_id = ? AND kind <> 'reconciled')`,
+		runID).Scan(&latestID, &latestKind)
+	if errors.Is(err, sql.ErrNoRows) {
+		var exists int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM agent_runs WHERE run_id = ?`, runID).Scan(&exists); err != nil {
+			return AgentRunEvent{}, fmt.Errorf("store: read agent run for claim: %w", err)
+		}
+		if exists == 0 {
+			return AgentRunEvent{}, ErrAgentRunNotFound
+		}
+		latestKind = AgentEventStarted
+	} else if err != nil {
+		return AgentRunEvent{}, fmt.Errorf("store: read agent run state: %w", err)
+	}
+	if latestKind == AgentEventCompleted || latestKind == AgentEventCancelled {
+		return AgentRunEvent{}, ErrAgentRunFinished
+	}
+	pending, err := agentRunCancelPending(tx, runID)
+	if err != nil {
+		return AgentRunEvent{}, fmt.Errorf("store: read agent cancellation: %w", err)
+	}
+	if pending {
+		return AgentRunEvent{}, ErrAgentRunCancelled
+	}
+	if latestID != expectEventID {
+		return AgentRunEvent{}, ErrAgentRunChanged
+	}
+	res, err := tx.Exec(`INSERT INTO agent_run_events (run_id, kind, detail_json, at) VALUES (?, ?, ?, ?)`,
+		runID, AgentEventResumed, encoded, at.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return AgentRunEvent{}, fmt.Errorf("store: append agent resume claim: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return AgentRunEvent{}, fmt.Errorf("store: read agent resume claim id: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return AgentRunEvent{}, fmt.Errorf("store: commit agent resume claim: %w", err)
+	}
+	return AgentRunEvent{RunID: runID, Kind: AgentEventResumed, DetailJSON: encoded, At: at.UTC(), ID: id}, nil
 }
 
 // AppendAgentRunTerminal appends completed or cancelled only when it is not

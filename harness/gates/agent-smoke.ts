@@ -306,8 +306,9 @@ export const agentSmoke: Gate = {
         );
       }
 
-      // 4. Cancel a running host from a second process; the start process
-      // reports cancelled and resume refuses.
+      // 4. Cancel a running host from a second process; a resume beside the
+      // live host is refused; the start process reports cancelled and resume
+      // refuses afterwards.
       {
         const db = path.join(temp, "app4.sqlite");
         const store = path.join(temp, "agent4.sqlite");
@@ -334,6 +335,14 @@ export const agentSmoke: Gate = {
           }
         }
         check(running, "run never reported running");
+        const busyResume = await call(["agent", "resume", runID, "--db", db, "--timeout-seconds", "5", "--json"]);
+        check(busyResume.code === 2, `resume beside a live host exit ${busyResume.code}: ${busyResume.stderr}`);
+        check(
+          stringField(field(documentOf(busyResume), "error"), "code") === "run_running",
+          "resume beside a live host is not run_running",
+        );
+        const stillRunning = documentOf(await call(["agent", "status", runID, "--db", db, "--json"]));
+        check(stringField(stillRunning, "state") === "running", "resume beside a live host changed the state");
         const cancelled = await call(["agent", "cancel", runID, "--db", db, "--json"]);
         const cancelDoc = documentOf(cancelled);
         check(cancelled.code === 0, `cancel exit ${cancelled.code}: ${cancelled.stderr}`);

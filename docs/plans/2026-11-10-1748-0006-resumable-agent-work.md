@@ -30,18 +30,25 @@ passquest agent record-step [--db PATH] [--json]      # host-internal, JSON on s
   3); `--timeout-seconds` is 1–900 (default 120).
 - `status` reports the five contract states plus `cancelled` and the transient `cancelling`. It reads
   the application event trail, the host heartbeat and a read-only Pi snapshot; it never mutates.
-- `resume` continues the same run and the same Pi conversation. It refuses `completed`, `cancelled`
-  and the app-level `no_steps` failure.
+- `resume` continues the same run and the same Pi conversation. It refuses `completed`, `cancelled`,
+  the app-level `no_steps` failure, a live heartbeat for the run, and a `started`/`resumed` claim
+  younger than the 5-second heartbeat window (`run_running`, exit 2). The claim is one immediate
+  transaction that must still see the latest event the command read, so two concurrent resumes cannot
+  both start a host.
 - `cancel` appends `cancel_requested` **before** signalling, aborts the host on POSIX, kills it on
-  Windows, confirms the heartbeat stopped, then appends `cancelled`. `resume` refuses afterwards.
-- `runs` and `show` are Go-only; `show` carries the run's event trail, committed steps and
-  committed/duplicate effect attempts. `transcript` opens only the Pi store and prints the durable
-  agent history, so it works after the application database is gone.
+  Windows, confirms the heartbeat stopped, then appends `cancelled`. A fresh heartbeat is a live host
+  whatever token it carries; the live token is recorded in the request as provenance. `resume`
+  refuses afterwards.
+- `runs` and `show` are Go-only; `show` carries the run's `trail_state`/`latest_event` (the event
+  trail only, never the heartbeat), committed steps and committed/duplicate effect attempts.
+  `transcript` opens only the Pi store and prints the durable agent history, so it works after the
+  application database is gone.
 - Defaults: run = latest unfinished run (or latest run for `status`). `--agent-store` defaults to
   `$PASSQUEST_AGENT_STORE` or `<db dir>/<db base>-agent.sqlite`, so the Pi SQLite file is separate
-  from the application SQLite file. The provider is the goal-0005 `tutor_config`; the endpoint must
-  end in `/chat/completions`, because pi-ai appends that path. The credential is still only
-  `PASSQUEST_TUTOR_API_KEY`.
+  from the application SQLite file. Every command refuses an override equal to the application
+  database, and `resume` refuses one that differs from the recorded store (`store_mismatch`). The
+  provider is the goal-0005 `tutor_config`; the endpoint must end in `/chat/completions`, because
+  pi-ai appends that path. The credential is still only `PASSQUEST_TUTOR_API_KEY`.
 
 Exit codes:
 
@@ -93,8 +100,8 @@ step advisory and never writes it into an attempt, answer key or grade.
   finished failure, or submits the original input when the crash happened before admission. Then it
   waits for idle and reads the committed live state and transcript.
 - The host writes a 1-second heartbeat file (`<agent-store>.host`, `0600`, pid + run + random token)
-  and removes it on clean exit. Go uses it for cross-platform liveness; the token prevents a reused
-  pid from being signalled.
+  and removes it on clean exit. Go uses it for cross-platform liveness; liveness is run-scoped, the
+  token names the host, and a stale pid is never signalled.
 - POSIX interruption: `start`/`resume` timeout, SIGINT or SIGTERM to the CLI sends SIGTERM to the
   host, which closes the Harness (work stays pending), returns `interrupted` and exits; Go records
   `interrupted` and exits 4. `agent cancel` sends SIGINT, which makes the host abort the conversation
@@ -131,9 +138,9 @@ step, with the attempts table unchanged.
 
 | State | Evidence |
 |---|---|
-| `running` | The latest event is not terminal and the heartbeat token matches and is < 5 s old. |
+| `running` | The latest event is not terminal and a heartbeat for this run is < 5 s old, whatever token it carries. |
 | `paused` | Durable work exists (a live run, pending tasks or an unsettled submission) and no host is running; also a run whose host never started. |
-| `completed` | The Pi submission answered, no run failure remains, at least one step is committed, and the application recorded `completed`. |
+| `completed` | The Pi submission answered and at least one step is committed. The answer can come from the read-only snapshot when the CLI died before recording `completed`; otherwise the recorded `completed` event supplies it. A zero-step answer is `failed`. |
 | `failed` | A non-actionable failure: malformed response (`invalid_response`), host protocol/storage error, `no_steps`, `turn_limit`, `task_faulted`, `orphaned`, `restart_limit`. |
 | `needs_action` | A user-actionable failure: `agent_unavailable`, `missing_credential`, 401/403, 429, 4xx model/config error, timeout, network error, 5xx. The status carries an action hint (`check_host`, `fix_credential`, `wait_and_resume`, `check_endpoint`, `resume`). |
 | `cancelling` | `cancel_requested` is the latest event and the heartbeat is still fresh. |
@@ -174,13 +181,17 @@ the credential from every message. It has no generic shell tool and no applicati
 1. **Go tests**:
    - `internal/agent`: packet determinism, private-string exclusion, clipping and total bound; endpoint
      base derivation; run id/token validation; host request/response validation; failure classification;
-     status classification (all seven states); step validation; refusal rules.
+     status classification (all seven states); step validation; refusal rules; run-scoped heartbeat
+     liveness and application-database store rejection.
    - `internal/store`: v8→v9 migration keeps attempts/tutor rows; run/event/step/attempt round trips;
      unique step and duplicate outcome; cancelled step refusal; unfinished-run refusal; append-only
-     update/delete triggers; attempts count/content unchanged.
+     update/delete triggers; attempts count/content unchanged; one-winner resume claim.
    - `internal/cli`: not configured; missing credential → `needs_action`; completed/failed/paused JSON
-     with a fake runner; runs/show/status from events; cancel then resume refusal; record-step
-     validation and duplicate; human writers; golden documents for start/status/show/runs.
+     with a fake runner; runs/show/status from events; resume refusal beside a live heartbeat and for a
+     rebind/application-database store override; cancel then resume refusal; a live cancel host that
+     keeps refreshing its heartbeat and is not recorded terminal; show `trail_state` versus live
+     `status` in a crash window; record-step validation and duplicate; human writers; golden documents
+     for start/status/show/runs.
 2. **Tier 2 real transcripts** in `/tmp/passquest-0006-demo/` with the real binary, real Node, real Pi
    SQLite and a loopback OpenAI-compatible SSE stub (no external network, no real key):
    - Fresh `next`/practice state; `agent start` completes 2 steps; `status`, `show`, `runs`,
@@ -189,8 +200,9 @@ the credential from every message. It has no generic shell tool and no applicati
      completes with the same run id and a coherent transcript (task, tool results, answer).
    - `PASSQUEST_AGENT_FAULT=kill-after-step` → exit 4; `resume`; `show` proves 2 steps, 3 effect
      attempts, 1 duplicate, 1 reconciliation event; `attempts` count and rows unchanged.
-   - A delayed run cancelled from a second process → exit 0 `cancelled`, heartbeat gone, no process,
-     `resume` exit 2; a completed run's `cancel` exit 2.
+   - A delayed run cancelled from a second process → a resume beside the live host exits 2
+     `run_running`, cancel exits 0 `cancelled`, heartbeat gone, no process, `resume` exit 2; a
+     completed run's `cancel` exit 2.
    - 401 stub → `needs_action` exit 3; fix the stub and `resume` completes; malformed SSE → `failed`.
    - `PASSQUEST_NODE` missing → `agent start` exit 3 `agent_unavailable`, `status` still reports the
      app trail, `practice` exit 0.

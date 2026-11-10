@@ -38,6 +38,7 @@
       "kind": "completed"
     }
   ],
+  "latest_event": "completed",
   "limits": [
     "Study steps are advisory model output, not verified answers, grades or exam facts.",
     "The durable task carries recorded attempt facts, derived skill state and authored lesson text only; no private source text, answer key or learner identity.",
@@ -55,10 +56,6 @@
   },
   "schema_version": 1,
   "state": "run",
-  "status": {
-    "reason": "completed",
-    "state": "completed"
-  },
   "steps": [
     {
       "advisory": true,
@@ -78,5 +75,6 @@
       "title": "Apply the boundary",
       "verified_answer": false
     }
-  ]
+  ],
+  "trail_state": "completed"
 }

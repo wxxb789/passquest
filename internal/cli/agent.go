@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -203,11 +202,16 @@ func runAgentResume(args []string, opt Options) int {
 	if code != 0 {
 		return code
 	}
-	storePath, code := agentStoreOverride(opt, run, *flags.store, *flags.json)
+	storePath, code := agentStoreOverride(opt, st, run, *flags.store, *flags.json)
 	if code != 0 {
 		return code
 	}
+	recordedStore := run.StorePath
 	run.StorePath = storePath
+	if strings.TrimSpace(*flags.store) != "" && storePath != recordedStore {
+		return usageError(opt, *flags.json, "store_mismatch",
+			fmt.Sprintf("--agent-store %s is not the store recorded for run %s; resume reopens the recorded Pi store", storePath, run.RunID))
+	}
 	pending, err := st.AgentRunCancelPending(run.RunID)
 	if err != nil {
 		return internalError(opt, *flags.json, err)
@@ -215,6 +219,18 @@ func runAgentResume(args []string, opt Options) int {
 	if pending {
 		return usageError(opt, *flags.json, "cancel_pending",
 			fmt.Sprintf("cancellation was requested for run %s; run agent cancel to confirm it", run.RunID))
+	}
+	// A fresh heartbeat is a live host for this run whatever token it carries.
+	// A start/resume claim younger than the heartbeat window may not have
+	// written its heartbeat yet, so it is treated as live too.
+	if heartbeat, live := agent.HeartbeatLive(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow()); live {
+		return usageError(opt, *flags.json, "run_running",
+			fmt.Sprintf("run %s has a live host (pid %d); cancel it before resuming", run.RunID, heartbeat.PID))
+	}
+	if (latest.Kind == store.AgentEventStarted || latest.Kind == store.AgentEventResumed) &&
+		!latest.At.IsZero() && opt.Now().Sub(latest.At) < agentHeartbeatWindow() {
+		return usageError(opt, *flags.json, "run_running",
+			fmt.Sprintf("run %s was claimed moments ago and its host may still be starting; check agent status before resuming", run.RunID))
 	}
 	switch latest.Kind {
 	case store.AgentEventCompleted:
@@ -241,13 +257,21 @@ func runAgentResume(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
-	if _, err := st.AppendAgentRunEvent(run.RunID, store.AgentEventResumed, map[string]any{
+	if _, err := st.ClaimAgentResume(run.RunID, latest.ID, map[string]any{
 		"model": run.Model, "host_token": token, "max_steps": run.MaxSteps, "max_turns": run.MaxTurns,
 	}, opt.Now()); err != nil {
-		if errors.Is(err, store.ErrAgentRunFinished) {
+		switch {
+		case errors.Is(err, store.ErrAgentRunChanged):
+			return usageError(opt, *flags.json, "run_running",
+				fmt.Sprintf("run %s changed or was claimed by another process; check agent status before retrying", run.RunID))
+		case errors.Is(err, store.ErrAgentRunFinished):
 			return agentAppendFinished(opt, *flags.json, st, run, nil)
+		case errors.Is(err, store.ErrAgentRunCancelled):
+			return usageError(opt, *flags.json, "cancel_pending",
+				fmt.Sprintf("cancellation was requested for run %s; run agent cancel to confirm it", run.RunID))
+		default:
+			return internalError(opt, *flags.json, err)
 		}
-		return internalError(opt, *flags.json, err)
 	}
 	// resume keeps the run's recorded model with the current endpoint, timeout
 	// and credential (Q-0006-05).
@@ -324,7 +348,7 @@ func runAgentStatus(args []string, opt Options) int {
 	if code != 0 {
 		return code
 	}
-	storePath, code := agentStoreOverride(opt, run, *flags.store, *flags.json)
+	storePath, code := agentStoreOverride(opt, st, run, *flags.store, *flags.json)
 	if code != 0 {
 		return code
 	}
@@ -337,10 +361,9 @@ func runAgentStatus(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
-	// A token read failure leaves status without a heartbeat match; the run
-	// state still comes from the event trail and the read-only snapshot.
-	token, _ := agentLatestToken(st, run.RunID)
-	heartbeat, fresh := agent.HeartbeatFresh(run.StorePath+".host", run.RunID, token, opt.Now(), time.Duration(agent.HeartbeatStaleMS)*time.Millisecond)
+	// A fresh heartbeat belongs to the run, not to the token of the latest
+	// trail event: a second host that raced the claim still means a live run.
+	heartbeat, fresh := agent.HeartbeatLive(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow())
 
 	durable := agentDurableView{Available: false, Reason: "not_started", HeartbeatFresh: fresh, HeartbeatPID: heartbeat.PID}
 	var snapshot *agent.Snapshot
@@ -431,7 +454,7 @@ func runAgentCancel(args []string, opt Options) int {
 	if code != 0 {
 		return code
 	}
-	storePath, code := agentStoreOverride(opt, run, *flags.store, *flags.json)
+	storePath, code := agentStoreOverride(opt, st, run, *flags.store, *flags.json)
 	if code != 0 {
 		return code
 	}
@@ -445,8 +468,14 @@ func runAgentCancel(args []string, opt Options) int {
 			return internalError(opt, *flags.json, err)
 		}
 		info := map[string]any{"host_token": token}
-		if heartbeat, fresh := agent.HeartbeatFresh(run.StorePath+".host", run.RunID, token, opt.Now(), time.Duration(agent.HeartbeatStaleMS)*time.Millisecond); fresh {
+		if heartbeat, live := agent.HeartbeatLive(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow()); live {
 			info["pid"] = heartbeat.PID
+			// A live heartbeat names the host to signal even when the latest
+			// event recorded another token; keep that host's token as
+			// provenance in the cancellation request.
+			if heartbeat.Token != "" {
+				info["host_token"] = heartbeat.Token
+			}
 		}
 		if _, err := st.AppendAgentRunEvent(run.RunID, store.AgentEventCancelRequested, info, opt.Now()); err != nil {
 			if errors.Is(err, store.ErrAgentRunFinished) {
@@ -465,20 +494,16 @@ func runAgentCancel(args []string, opt Options) int {
 		}
 	}
 
-	token, err := agentLatestToken(st, run.RunID)
-	if err != nil {
-		return internalError(opt, *flags.json, err)
-	}
 	heartbeatPath := run.StorePath + ".host"
-	heartbeat, fresh := agent.HeartbeatFresh(heartbeatPath, run.RunID, token, opt.Now(), time.Duration(agent.HeartbeatStaleMS)*time.Millisecond)
+	heartbeat, live := agentHostClaimWait(heartbeatPath, run.RunID, latest, opt)
 	confirmed := true
-	if fresh {
+	if live {
 		confirmed = false
 		_ = agent.SignalCancelPID(heartbeat.PID)
 		deadline := time.Now().Add(time.Duration(*waitFlag) * time.Second)
 		for time.Now().Before(deadline) {
 			time.Sleep(100 * time.Millisecond)
-			if _, still := agent.HeartbeatFresh(heartbeatPath, run.RunID, token, opt.Now(), time.Duration(agent.HeartbeatStaleMS)*time.Millisecond); !still {
+			if _, still := agent.HeartbeatLive(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow()); !still {
 				confirmed = true
 				break
 			}
@@ -491,7 +516,7 @@ func runAgentCancel(args []string, opt Options) int {
 			killDeadline := time.Now().Add(6 * time.Second)
 			for time.Now().Before(killDeadline) {
 				time.Sleep(100 * time.Millisecond)
-				if _, still := agent.HeartbeatFresh(heartbeatPath, run.RunID, token, opt.Now(), time.Duration(agent.HeartbeatStaleMS)*time.Millisecond); !still {
+				if _, still := agent.HeartbeatLive(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow()); !still {
 					confirmed = true
 					break
 				}
@@ -595,12 +620,15 @@ func runAgentShow(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	state := agentAppState(latest.Kind)
+	// show is a Go-only view of the recorded trail. Its state is the trail
+	// state, which cannot see the heartbeat or the Pi snapshot; agent status is
+	// the live-state view.
 	doc := agentShowDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         "run",
 		Run:           agentRunViewOf(run),
-		Status:        agentStatusViewOf(state, nil, latest.Kind),
+		TrailState:    string(agentAppState(latest.Kind)),
+		LatestEvent:   latest.Kind,
 		Counts:        agentCountsOf(steps, attempts),
 		Events:        agentEventViews(events),
 		Steps:         agentStepViews(steps),
@@ -955,15 +983,49 @@ func agentPrompt(st *store.Store, runID string, maxSteps, maxTurns int) (string,
 	return packet.Prompt()
 }
 
-func agentStoreOverride(opt Options, run store.AgentRun, raw string, jsonMode bool) (string, int) {
+// agentStoreOverride resolves one command's --agent-store override. Every
+// command shares agent.ResolveStorePath's inequality guard, so no override can
+// point the Pi host at the application database.
+func agentStoreOverride(opt Options, st *store.Store, run store.AgentRun, raw string, jsonMode bool) (string, int) {
 	if strings.TrimSpace(raw) == "" {
 		return run.StorePath, 0
 	}
-	absolute, err := filepath.Abs(raw)
+	resolved, err := agent.ResolveStorePath(raw, st.Path())
 	if err != nil {
-		return "", usageError(opt, jsonMode, "invalid_input", fmt.Sprintf("--agent-store: %v", err))
+		return "", usageError(opt, jsonMode, "invalid_input", err.Error())
 	}
-	return absolute, 0
+	return resolved, 0
+}
+
+// agentHeartbeatWindow is the liveness window for the host heartbeat file and
+// the grace period for a start/resume claim whose host has not written one yet.
+func agentHeartbeatWindow() time.Duration {
+	return time.Duration(agent.HeartbeatStaleMS) * time.Millisecond
+}
+
+// agentHostClaimWait gives a start/resume claim younger than the heartbeat
+// window a chance to publish its first heartbeat. A cancel that finds no
+// heartbeat for such a claim must not record a terminal outcome beside a host
+// that is still starting; it either observes the heartbeat or waits until the
+// claim can no longer be starting.
+func agentHostClaimWait(path, runID string, latest store.AgentRunEvent, opt Options) (agent.Heartbeat, bool) {
+	heartbeat, live := agent.HeartbeatLive(path, runID, opt.Now(), agentHeartbeatWindow())
+	if live || latest.At.IsZero() ||
+		(latest.Kind != store.AgentEventStarted && latest.Kind != store.AgentEventResumed) {
+		return heartbeat, live
+	}
+	age := opt.Now().Sub(latest.At)
+	if age >= agentHeartbeatWindow() {
+		return heartbeat, false
+	}
+	deadline := time.Now().Add(agentHeartbeatWindow() - age)
+	for time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		if heartbeat, live = agent.HeartbeatLive(path, runID, opt.Now(), agentHeartbeatWindow()); live {
+			return heartbeat, true
+		}
+	}
+	return heartbeat, false
 }
 
 func resolveAgentRun(opt Options, st *store.Store, raw string, unfinished bool, jsonMode bool) (store.AgentRun, store.AgentRunEvent, int) {

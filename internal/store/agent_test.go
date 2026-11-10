@@ -182,6 +182,50 @@ func TestAgentEventAppendRequiresARun(t *testing.T) {
 	}
 }
 
+func TestAgentResumeClaimIsSingleWriter(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
+	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
+	mustCreateAgentRun(t, st, run)
+	latest, ok, err := st.LatestAgentRunEvent(run.RunID)
+	if err != nil || !ok {
+		t.Fatalf("latest event = %+v ok=%v err=%v", latest, ok, err)
+	}
+	claim, err := st.ClaimAgentResume(run.RunID, latest.ID, map[string]any{"host_token": strings.Repeat("b", 32)}, run.CreatedAt)
+	if err != nil || claim.Kind != AgentEventResumed {
+		t.Fatalf("claim = %+v err=%v", claim, err)
+	}
+	// A second resume that observed the same latest event loses the claim and
+	// must not start another host.
+	if _, err := st.ClaimAgentResume(run.RunID, latest.ID, nil, run.CreatedAt); !errors.Is(err, ErrAgentRunChanged) {
+		t.Fatalf("second claim = %v, want ErrAgentRunChanged", err)
+	}
+	// A retry that re-reads the trail can claim after the first host crashed.
+	latest, _, err = st.LatestAgentRunEvent(run.RunID)
+	if err != nil {
+		t.Fatalf("latest event after claim: %v", err)
+	}
+	if _, err := st.ClaimAgentResume(run.RunID, latest.ID, nil, run.CreatedAt.Add(time.Second)); err != nil {
+		t.Fatalf("retry claim: %v", err)
+	}
+	if _, err := st.AppendAgentRunEvent(run.RunID, AgentEventCancelRequested, nil, run.CreatedAt); err != nil {
+		t.Fatalf("cancel request: %v", err)
+	}
+	latest, _, _ = st.LatestAgentRunEvent(run.RunID)
+	if _, err := st.ClaimAgentResume(run.RunID, latest.ID, nil, run.CreatedAt); !errors.Is(err, ErrAgentRunCancelled) {
+		t.Fatalf("claim with a pending cancel = %v, want ErrAgentRunCancelled", err)
+	}
+	if _, err := st.AppendAgentRunTerminal(run.RunID, AgentEventCancelled, map[string]any{"confirmed": true}, run.CreatedAt); err != nil {
+		t.Fatalf("cancel run: %v", err)
+	}
+	latest, _, _ = st.LatestAgentRunEvent(run.RunID)
+	if _, err := st.ClaimAgentResume(run.RunID, latest.ID, nil, run.CreatedAt); !errors.Is(err, ErrAgentRunFinished) {
+		t.Fatalf("claim on a cancelled run = %v, want ErrAgentRunFinished", err)
+	}
+	if _, err := st.ClaimAgentResume("run-20261110T100000Z-bbbbbbbb", 0, nil, run.CreatedAt); !errors.Is(err, ErrAgentRunNotFound) {
+		t.Fatalf("claim on an unknown run = %v, want ErrAgentRunNotFound", err)
+	}
+}
+
 func TestAgentTerminalStateIsAbsorbing(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")

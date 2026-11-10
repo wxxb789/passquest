@@ -472,9 +472,12 @@ type Heartbeat struct {
 	At    int64  `json:"at"`
 }
 
-// HeartbeatFresh reads the file, requires the expected token and run, and
-// reports whether its timestamp is within the stale window.
-func HeartbeatFresh(path, runID, token string, now time.Time, stale time.Duration) (Heartbeat, bool) {
+// HeartbeatLive reports a fresh heartbeat for this run without matching the
+// token. Liveness belongs to the run: a host that raced another claim still
+// holds the Pi store, so a token mismatch must not make a running task look
+// idle. The parsed heartbeat is returned even when stale so a caller can name
+// the last pid.
+func HeartbeatLive(path, runID string, now time.Time, stale time.Duration) (Heartbeat, bool) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Heartbeat{}, false
@@ -483,7 +486,7 @@ func HeartbeatFresh(path, runID, token string, now time.Time, stale time.Duratio
 	if err := json.Unmarshal(raw, &heartbeat); err != nil {
 		return Heartbeat{}, false
 	}
-	if heartbeat.RunID != runID || heartbeat.Token != token {
+	if heartbeat.RunID != runID {
 		return Heartbeat{}, false
 	}
 	at := time.UnixMilli(heartbeat.At)
@@ -528,6 +531,13 @@ func StorePath(flagValue, dbPath string, getenv func(string) string) (string, er
 	if selected == "" {
 		selected = DefaultStorePath(dbPath)
 	}
+	return ResolveStorePath(selected, dbPath)
+}
+
+// ResolveStorePath makes one explicit Pi store path absolute and refuses one
+// equal to the application database. Every command that accepts an override
+// shares this guard: the host never opens the application database.
+func ResolveStorePath(selected, dbPath string) (string, error) {
 	absolute, err := filepath.Abs(selected)
 	if err != nil {
 		return "", fmt.Errorf("agent: resolve store path: %w", err)

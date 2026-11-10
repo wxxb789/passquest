@@ -440,20 +440,31 @@ func TestHeartbeatFreshnessAndStorePath(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatalf("write heartbeat: %v", err)
 	}
-	heartbeat, fresh := HeartbeatFresh(path, "run-20261110T100000Z-aaaaaaaa", strings.Repeat("a", 32), now.Add(2*time.Second), 5*time.Second)
-	if !fresh || heartbeat.PID != 42 {
-		t.Fatalf("heartbeat = %+v fresh=%v", heartbeat, fresh)
+	heartbeat, live := HeartbeatLive(path, "run-20261110T100000Z-aaaaaaaa", now.Add(2*time.Second), 5*time.Second)
+	if !live || heartbeat.PID != 42 || heartbeat.Token != strings.Repeat("a", 32) {
+		t.Fatalf("heartbeat = %+v live=%v", heartbeat, live)
 	}
-	if _, fresh := HeartbeatFresh(path, "run-20261110T100000Z-bbbbbbbb", strings.Repeat("a", 32), now, 5*time.Second); fresh {
-		t.Fatal("heartbeat matched a different run")
+	// Liveness belongs to the run: a fresh heartbeat from a host whose token is
+	// not the latest trail token still proves that something holds the store.
+	if heartbeat, live := HeartbeatLive(path, "run-20261110T100000Z-aaaaaaaa", now, 5*time.Second); !live || heartbeat.PID != 42 {
+		t.Fatalf("run-scoped heartbeat = %+v live=%v", heartbeat, live)
 	}
-	if _, fresh := HeartbeatFresh(path, "run-20261110T100000Z-aaaaaaaa", strings.Repeat("a", 32), now.Add(10*time.Second), 5*time.Second); fresh {
-		t.Fatal("stale heartbeat reported fresh")
+	if _, live := HeartbeatLive(path, "run-20261110T100000Z-bbbbbbbb", now, 5*time.Second); live {
+		t.Fatal("run-scoped heartbeat matched a different run")
+	}
+	if _, live := HeartbeatLive(path, "run-20261110T100000Z-aaaaaaaa", now.Add(10*time.Second), 5*time.Second); live {
+		t.Fatal("stale heartbeat reported live")
 	}
 	if got := DefaultStorePath("/tmp/demo/app.sqlite"); got != "/tmp/demo/app-agent.sqlite" {
 		t.Fatalf("DefaultStorePath = %q", got)
 	}
 	if _, err := StorePath("/tmp/app.sqlite", "/tmp/app.sqlite", nil); err == nil {
 		t.Fatal("store equal to the application database accepted")
+	}
+	if _, err := ResolveStorePath("/tmp/app.sqlite", "/tmp/app.sqlite"); err == nil {
+		t.Fatal("explicit store equal to the application database accepted")
+	}
+	if got, err := ResolveStorePath("relative-agent.sqlite", "/tmp/app.sqlite"); err != nil || !filepath.IsAbs(got) {
+		t.Fatalf("ResolveStorePath = %q err=%v", got, err)
 	}
 }

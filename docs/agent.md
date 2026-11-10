@@ -28,7 +28,10 @@ step JSON document on stdin and writes one JSON document on stdout.
 `--max-steps` is 1–6 (default 3); `--timeout-seconds` is 1–900 (default 120); `--wait-seconds` is
 1–60 (default 10). `--agent-store` defaults to `$PASSQUEST_AGENT_STORE` or
 `<db dir>/<db base>-agent.sqlite`; the Pi SQLite file is separate from the application database and is
-recorded in the run, so `status`, `resume` and `cancel` find it without repeating the flag.
+recorded in the run, so `status`, `resume` and `cancel` find it without repeating the flag. Every
+command that accepts `--agent-store` refuses a path equal to the application database, and `resume`
+refuses an override that differs from the recorded store (`store_mismatch`): a run cannot silently
+switch Pi stores or point the host at the application database.
 
 ## The bounded task
 
@@ -83,14 +86,19 @@ trail and marks `durable.available: false`; `transcript` needs the host because 
 |---|---|
 | `running` | A host process holds a fresh heartbeat (≤ 5 s) for this run. |
 | `paused` | Durable work (a live run, pending tasks or an unsettled submission) exists and no host is running; or an interrupted/started run has not completed. |
-| `completed` | The run answered, no durable failure remains, at least one step is committed and the application recorded completion. |
+| `completed` | The run answered and at least one step is committed. The host snapshot can supply the answer when the CLI died before recording completion; otherwise the recorded `completed` event does. A zero-step answer is `failed`. |
 | `failed` | A non-actionable failure: malformed response, host protocol/storage error, zero committed steps, turn limit, faulted/orphaned/restart-limited task. |
 | `needs_action` | A user-actionable failure: missing credential, 401/403, 429, model/config 4xx, timeout, network error, 5xx, missing host, or a run interrupted before its answer. |
 | `cancelling` | `cancel_requested` is the latest event and the heartbeat is still fresh. |
 | `cancelled` | `cancelled` is the latest event, or cancellation was requested and the heartbeat is stale. `resume` refuses. |
 
 `agent runs` lists the event-trail state; `agent status` adds the live heartbeat and a read-only Pi
-snapshot. A failure document carries the run, status, action hint and any steps already committed.
+snapshot. `agent show` is Go-only: it reports `trail_state` (the state implied by the recorded event
+trail) and `latest_event`, and does not read the heartbeat or the Pi store. It can therefore disagree
+with `status` in a crash window — for example the host answered but the CLI died before appending
+`completed`: `status` reports `completed` from the snapshot, while `show` still reports the
+`interrupted` trail. A failure document carries the run, status, action hint and any steps already
+committed.
 
 Two different `interrupted` values are deliberately distinct: the application event `interrupted`
 recorded on a timeout or SIGTERM is `paused` and resumable, while a Pi snapshot failure whose reason
@@ -103,19 +111,27 @@ is `interrupted` is a host failure and is `needs_action`.
   The application records `interrupted`; the command exits 4 and prints a paused document.
 - `resume` reopens the same Pi store, finds the conversation, resumes pending work, continues a
   retryable finished failure, or submits the original task if the crash happened before admission.
-  It uses the same run id and keeps prior context and output.
+  It uses the same run id and keeps prior context and output. It refuses with exit 2 `run_running`
+  while a host holds a fresh heartbeat for the run, or while a `started`/`resumed` claim is younger
+  than the 5-second heartbeat window (its host may not have written the first heartbeat yet). The
+  claim is one immediate transaction that must still see the latest event the command read, so two
+  concurrent resumes cannot both start a host.
 - `agent cancel` appends `cancel_requested` **before** signalling, then sends SIGINT on POSIX so the
   host aborts the conversation durably, or terminates the process on Windows. It waits for the
   heartbeat to stop, escalates to SIGKILL if needed, and appends `cancelled`. If the heartbeat is
   still fresh after the bounded wait and kill, the run stays `cancel_requested`, the command exits 1
   and status reports `cancelling`; it never records a terminal cancellation beside a live process.
   `resume` refuses either way.
+- A fresh heartbeat belongs to the run, not to the token of the latest event. When a racing host
+  wrote a different token, `cancel` still treats the run as live, signals that pid and records the
+  live token in the request as provenance. `status` likewise reports `running`/`cancelling` from a
+  fresh heartbeat whatever token it carries.
 - A process that dies before returning a document is treated as interrupted (exit 4), not failed, so
   resume can recover the work. A missing Node/host or missing module is `agent_unavailable` and
   `needs_action`.
 - The host writes `<agent-store>.host` every second with its pid, run id and a random token and
-  removes it on clean exit. Go uses that file for cross-platform liveness; the token prevents a reused
-  pid from being signalled.
+  removes it on clean exit. Go uses that file for cross-platform liveness; the token names the host
+  that wrote it. A stale pid is never signalled.
 
 ## The side effect and reconciliation
 
