@@ -614,6 +614,73 @@ func TestNextExhaustedScoringYieldsToLanguage(t *testing.T) {
 	}
 }
 
+func TestNextExhaustedWeakYieldsToFreshMaterial(t *testing.T) {
+	seedScoring := func(t *testing.T, db string, clock *stepClock) {
+		t.Helper()
+		mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
+		mustRun(t, db, clock, "", "skill", "practice", "not-except-polarity", "--answer", "C", "--json")
+	}
+
+	t.Run("weak", func(t *testing.T) {
+		db := newDB(t)
+		clock := &stepClock{base: goldenBase}
+		seedScoring(t, db, clock)
+		mustRun(t, db, clock, "", "skill", "practice", "sentence-structure", "--answer", "A", "--json")
+		mustRun(t, db, clock, "", "skill", "practice", "sentence-structure", "--answer", "A", "--json")
+
+		doc := decodeNext(t, mustRun(t, db, clock, "", "next", "--json"))
+		sentence := nextSkill(t, doc, "sentence-structure")
+		if sentence.Evidence.IndependentAttempts != 2 || sentence.Evidence.IndependentIncorrect != 2 || sentence.Evidence.FreshPassages != 0 {
+			t.Fatalf("exhausted weak evidence = %+v", sentence.Evidence)
+		}
+		if sentence.Inference.State != "weak" || sentence.Inference.Action != "explain" {
+			t.Fatalf("exhausted weak inference = %+v", sentence.Inference)
+		}
+		// The lesson repeats a seen question and cannot add evidence; fresh
+		// vocabulary material can, so it is recommended first.
+		if doc.Recommendation == nil || doc.Recommendation.Skill.ID != "vocabulary-in-context" || doc.Recommendation.Action != "practice_new" {
+			t.Fatalf("recommendation = %+v, want fresh vocabulary practice", doc.Recommendation)
+		}
+		if !strings.Contains(doc.Recommendation.Command, "--db "+quoteCommandArgument(db)) {
+			t.Fatalf("vocabulary command does not preserve the database: %q", doc.Recommendation.Command)
+		}
+
+		// With every skill exhausted nothing can add evidence; the weak
+		// explanation is selected again instead of being lost.
+		for _, answer := range []string{"A", "B", "A"} {
+			mustRun(t, db, clock, "", "skill", "practice", "vocabulary-in-context", "--answer", answer, "--json")
+		}
+		doc = decodeNext(t, mustRun(t, db, clock, "", "next", "--json"))
+		if doc.Recommendation == nil || doc.Recommendation.Skill.ID != "sentence-structure" || doc.Recommendation.Action != "explain" {
+			t.Fatalf("exhausted recommendation = %+v, want the weak explanation", doc.Recommendation)
+		}
+		if doc.Recommendation.Command != "passquest skill show sentence-structure" {
+			t.Fatalf("exhausted explanation command = %q", doc.Recommendation.Command)
+		}
+		if !strings.Contains(doc.Recommendation.FollowUpCommand, "--question s2") ||
+			!strings.Contains(doc.Recommendation.FollowUpCommand, "--db "+quoteCommandArgument(db)) {
+			t.Fatalf("exhausted explanation follow-up = %q", doc.Recommendation.FollowUpCommand)
+		}
+	})
+
+	t.Run("mixed latest incorrect", func(t *testing.T) {
+		db := newDB(t)
+		clock := &stepClock{base: goldenBase}
+		seedScoring(t, db, clock)
+		mustRun(t, db, clock, "", "skill", "practice", "sentence-structure", "--answer", "C", "--json")
+		mustRun(t, db, clock, "", "skill", "practice", "sentence-structure", "--answer", "A", "--json")
+
+		doc := decodeNext(t, mustRun(t, db, clock, "", "next", "--json"))
+		sentence := nextSkill(t, doc, "sentence-structure")
+		if sentence.Inference.State != "mixed" || sentence.Inference.Action != "explain" || sentence.Evidence.FreshPassages != 0 {
+			t.Fatalf("exhausted mixed inference = %+v, fresh = %d", sentence.Inference, sentence.Evidence.FreshPassages)
+		}
+		if doc.Recommendation == nil || doc.Recommendation.Skill.ID != "vocabulary-in-context" || doc.Recommendation.Action != "practice_new" {
+			t.Fatalf("recommendation = %+v, want fresh vocabulary practice", doc.Recommendation)
+		}
+	})
+}
+
 func TestNextReviewCommandWhenEverySkillIsExhausted(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}

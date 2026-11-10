@@ -86,13 +86,19 @@ independent attempts are shown but count as no answer evidence.
 
 A **fresh passage** is a content id with a tagged question and zero attempts on that content. It is
 the only material that can add independent transfer evidence. `review` repeats a seen question and is
-never independent transfer; the reason says so.
+never independent transfer; the reason says so. An explanation whose follow-up would only repeat a
+seen question is in the same position: the lesson records nothing and the follow-up cannot add an
+observation.
 
 A scoring skill with recorded attempts but no guided tactic attempt selects `explain` whatever its
 computed state, because scoring `skill practice` is refused until that walkthrough exists. The reason
 names the recorded observations and the missing walkthrough. `guided_attempts` counts assisted
 attempts that carry the tactic id; an ordinary assisted answer after a walkthrough is not a guided
 tactic attempt.
+
+The action is the skill's own need. When that skill has no fresh passage left, the top recommendation
+prefers another skill's action that can still add evidence; the skill list keeps this action and its
+reason visible, and the exhausted action is selected again once nothing can add evidence.
 
 **Slow** means at least two independent correct attempts, the latest independent status is correct,
 and the latest elapsed time is at least twice the learner's fastest correct independent time for that
@@ -103,12 +109,17 @@ quotes both times.
 
 Recommendation priority among actions that can add evidence is: `weak` / `mixed` with latest
 incorrect, then `familiarity_only`, then `insufficient`, then `mixed` with latest correct, then
-`no_evidence`, then `supported` fresh. A `review` action repeats seen material and cannot change the
-skill's state, so it is ranked after every action that can add evidence; it is selected only when
-every skill with material is also on review. Among review actions the existing state priority still
-decides (`familiarity_only`, `insufficient`, `mixed`, `supported`). This is what moves the learner
-off an exhausted skill: with only embedded material, the scoring skill can run out of fresh passages
-while a language skill is untouched, and review must yield to that first measurement. Ties follow
+`no_evidence`, then `supported` fresh. An action can add an independent transfer observation only
+when it leads to a fresh passage: `practice_new` always does, and an `explain` does when a fresh
+passage remains for that skill after the lesson or walkthrough. A `review` repeats seen material, and
+an `explain` chosen because no fresh passage remains only re-shows a lesson whose follow-up repeats a
+seen question; neither can change the skill's state. Those exhausted actions are ranked after every
+action that can add evidence and are selected only when every skill with material is exhausted too.
+They then keep the state priority above: a `weak` / `mixed` explanation is shown before a review, so
+the lesson is deferred, not lost. Among reviews the same state priority still decides
+(`familiarity_only`, `insufficient`, `mixed`, `supported`). This is what moves the learner off an
+exhausted skill: with only embedded material, a skill can run out of fresh passages while another is
+untouched, and its exhausted lesson or review must yield to that first measurement. Ties follow
 registry order, so the output is deterministic.
 
 ## Inspecting the evidence

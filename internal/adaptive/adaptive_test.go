@@ -407,6 +407,75 @@ func TestExhaustedReviewYieldsToFreshMaterial(t *testing.T) {
 	requireRecommendation(t, result, "vocabulary-in-context", ActionPracticeNew)
 }
 
+func TestExhaustedWeakYieldsToFreshMaterial(t *testing.T) {
+	input := testInput()
+	input.Records = []Record{
+		guidedRecord(1, "score-a", "x1", 1, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		record(2, "score-b", "x2", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		record(3, "sent-a", "s1", 1, attempt.AssistanceIndependent, attempt.StatusIncorrect, 1000, "sentence-structure"),
+		record(4, "sent-b", "s2", 1, attempt.AssistanceIndependent, attempt.StatusIncorrect, 1000, "sentence-structure"),
+	}
+	result := Recommend(input)
+	sentence := findSkill(t, result, "sentence-structure")
+	if sentence.Inference.State != StateWeak || sentence.Inference.Action != ActionExplain {
+		t.Fatalf("exhausted weak inference = %+v", sentence.Inference)
+	}
+	if sentence.Evidence.FreshPassages != 0 {
+		t.Fatalf("exhausted weak fresh passages = %d", sentence.Evidence.FreshPassages)
+	}
+	// The lesson still describes the skill's need, but its follow-up repeats a
+	// seen question. Fresh vocabulary material can add evidence, so it is
+	// recommended first instead of the weak explanation forever.
+	requireRecommendation(t, result, "vocabulary-in-context", ActionPracticeNew)
+	if result.Recommendation.FreshMaterial == nil {
+		t.Fatal("yielded recommendation has no fresh material")
+	}
+}
+
+func TestExhaustedMixedLatestIncorrectYieldsToFreshMaterial(t *testing.T) {
+	input := testInput()
+	input.Records = []Record{
+		guidedRecord(1, "score-a", "x1", 1, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		record(2, "score-b", "x2", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		record(3, "sent-a", "s1", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "sentence-structure"),
+		record(4, "sent-b", "s2", 1, attempt.AssistanceIndependent, attempt.StatusIncorrect, 1000, "sentence-structure"),
+	}
+	result := Recommend(input)
+	sentence := findSkill(t, result, "sentence-structure")
+	if sentence.Inference.State != StateMixed || sentence.Inference.Action != ActionExplain {
+		t.Fatalf("exhausted mixed inference = %+v", sentence.Inference)
+	}
+	if sentence.Evidence.FreshPassages != 0 {
+		t.Fatalf("exhausted mixed fresh passages = %d", sentence.Evidence.FreshPassages)
+	}
+	requireRecommendation(t, result, "vocabulary-in-context", ActionPracticeNew)
+}
+
+func TestExhaustedExplanationSelectedWhenNothingAddsEvidence(t *testing.T) {
+	input := testInput()
+	input.Records = []Record{
+		guidedRecord(1, "score-a", "x1", 1, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		record(2, "score-b", "x2", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "not-except-polarity"),
+		record(3, "sent-a", "s1", 1, attempt.AssistanceIndependent, attempt.StatusIncorrect, 1000, "sentence-structure"),
+		record(4, "sent-b", "s2", 1, attempt.AssistanceIndependent, attempt.StatusIncorrect, 1000, "sentence-structure"),
+		record(5, "vocab-a", "v1", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "vocabulary-in-context"),
+		record(6, "vocab-b", "v2", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "vocabulary-in-context"),
+		record(7, "vocab-c", "v3", 1, attempt.AssistanceIndependent, attempt.StatusCorrect, 1000, "vocabulary-in-context"),
+	}
+	result := Recommend(input)
+	for _, candidate := range result.Skills {
+		if candidate.Evidence.FreshPassages != 0 {
+			t.Fatalf("%s still has %d fresh passages", candidate.Skill.ID, candidate.Evidence.FreshPassages)
+		}
+	}
+	// Nothing can add evidence now, so the weak explanation's own priority
+	// decides and the lesson is not lost.
+	requireRecommendation(t, result, "sentence-structure", ActionExplain)
+	if result.Recommendation.ReviewMaterial == nil {
+		t.Fatal("exhausted explanation has no reviewable question")
+	}
+}
+
 func TestReviewSelectedOnlyWhenEverySkillIsExhausted(t *testing.T) {
 	input := testInput()
 	input.Records = []Record{

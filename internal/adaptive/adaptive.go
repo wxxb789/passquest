@@ -309,29 +309,32 @@ func Recommend(input Input) Result {
 		result.Skills = append(result.Skills, skillResult)
 	}
 
-	// A review repeats seen material, so it cannot add independent transfer
-	// evidence or change the skill's state. It is selected only when every
-	// skill with material is also on review; otherwise any action that can add
-	// evidence is preferred. Without this rule an exhausted skill whose
-	// under-sampled state needs another observation would outrank fresh
-	// material for an unpracticed skill forever. Among candidates of the same
-	// class the state priority above decides, and ties follow registry order.
+	// An action can add an independent transfer observation only when it leads
+	// to a fresh passage. A review repeats seen material, and an explanation
+	// chosen because no fresh passage remains only re-shows a lesson whose
+	// follow-up repeats a seen question; neither can change the skill's state.
+	// Such candidates are ranked after every candidate that can add evidence
+	// and are selected only when every skill with material is exhausted too.
+	// Without this rule an exhausted skill whose weak state asks for another
+	// lesson would outrank fresh material for an unpracticed skill forever.
+	// Among candidates of the same class the state priority above decides, and
+	// ties follow registry order.
 	var best *SkillResult
 	bestRank := 0
-	bestReview := false
+	bestAddsEvidence := false
 	for i := range result.Skills {
 		candidate := &result.Skills[i]
 		if candidate.Inference.State == StateNoMaterial {
 			continue
 		}
-		review := candidate.Inference.Action == ActionReview
+		addsEvidence := candidateAddsEvidence(candidate)
 		better := best == nil ||
-			(bestReview && !review) ||
-			(bestReview == review && candidate.priority < bestRank)
+			(addsEvidence && !bestAddsEvidence) ||
+			(addsEvidence == bestAddsEvidence && candidate.priority < bestRank)
 		if better {
 			best = candidate
 			bestRank = candidate.priority
-			bestReview = review
+			bestAddsEvidence = addsEvidence
 		}
 	}
 	if best != nil {
@@ -353,6 +356,15 @@ func Recommend(input Input) Result {
 		result.Recommendation = recommendation
 	}
 	return result
+}
+
+// candidateAddsEvidence reports whether selecting the candidate can record a
+// new independent transfer observation. Only a fresh passage can: a review
+// names a seen question, and an explanation with no fresh passage has only a
+// repeat follow-up. The action is the skill's own need; this predicate decides
+// only whether the top recommendation should prefer another skill first.
+func candidateAddsEvidence(candidate *SkillResult) bool {
+	return candidate.Inference.Action != ActionReview && len(candidate.freshMaterials) > 0
 }
 
 // infer selects an action from recorded evidence. A scoring skill whose guided

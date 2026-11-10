@@ -180,21 +180,56 @@ export const adaptiveSmoke: Gate = {
       check(passageCommand.includes("--db") && passageCommand.includes(passageDB), "same-passage recommendation does not preserve the database");
 
       const weakDB = path.join(temp, "weak.sqlite");
+      const weakGuided = await callDB(["tactic", "practice", "not-except-polarity", "--json"], weakDB);
+      check(weakGuided.code === 0, `weak guided awaiting exit = ${weakGuided.code}`);
+      const weakGuidedAnswer = await callDB(["tactic", "practice", "not-except-polarity", "--json", "--answer", "D"], weakDB);
+      check(weakGuidedAnswer.code === 0, `weak guided answer exit = ${weakGuidedAnswer.code}`);
+      const weakScoring = await callDB(["skill", "practice", "not-except-polarity", "--json", "--answer", "C"], weakDB);
+      check(weakScoring.code === 0, `weak scoring practice exit = ${weakScoring.code}`);
       await callDB(["skill", "practice", "sentence-structure", "--json", "--answer", "A"], weakDB);
       await callDB(["skill", "practice", "sentence-structure", "--json", "--answer", "A"], weakDB);
       const weak = parse((await callDB(["next", "--json"], weakDB)).stdout);
       const weakSentence = skillEntry(weak, "sentence-structure");
       check(numberField(field(weakSentence, "evidence"), "independent_attempts") === 2, "weak sentence independent attempts");
       check(numberField(field(weakSentence, "evidence"), "independent_correct") === 0, "weak sentence counted a correct answer");
+      check(numberField(field(weakSentence, "evidence"), "fresh_passages") === 0, "weak sentence still has a fresh passage");
       check(stringField(field(weakSentence, "inference"), "state") === "weak", "weak sentence state");
       check(stringField(field(weakSentence, "inference"), "action") === "explain", "weak sentence action");
       check(stringField(field(weakSentence, "inference"), "causal_diagnosis") === "unresolved", "weak sentence causal diagnosis");
-      check(stringField(field(field(weak, "recommendation"), "skill"), "id") === "sentence-structure", "weak recommendation skill");
-      check(stringField(field(weak, "recommendation"), "action") === "explain", "weak recommendation action");
-      check(stringField(field(weak, "recommendation"), "command") === "passquest skill show sentence-structure", "weak recommendation command");
-      const weakFollowUp = stringField(field(weak, "recommendation"), "follow_up_command") ?? "";
-      check(weakFollowUp.startsWith("passquest skill practice sentence-structure --question s2"), "weak recommendation follow-up command");
-      check(weakFollowUp.includes("--db") && weakFollowUp.includes(weakDB), "weak recommendation follow-up does not preserve the database");
+      check(stringField(field(field(weak, "recommendation"), "skill"), "id") === "vocabulary-in-context", "exhausted weak explanation blocks fresh language material");
+      check(stringField(field(weak, "recommendation"), "action") === "practice_new", "weak recommendation action");
+      const weakCommand = stringField(field(weak, "recommendation"), "command") ?? "";
+      check(weakCommand.includes("--db") && weakCommand.includes(weakDB), "weak recommendation does not preserve the database");
+
+      // Nothing can add evidence once vocabulary is exhausted too; the weak
+      // skill's own explanation is selected again instead of being lost.
+      for (const answer of ["A", "B", "A"]) {
+        const attempt = await callDB(["skill", "practice", "vocabulary-in-context", "--json", "--answer", answer], weakDB);
+        check(attempt.code === 0, `weak vocabulary seed exit = ${attempt.code}`);
+      }
+      const weakExhausted = parse((await callDB(["next", "--json"], weakDB)).stdout);
+      check(stringField(field(field(weakExhausted, "recommendation"), "skill"), "id") === "sentence-structure", "exhausted weak explanation is not selected again");
+      check(stringField(field(weakExhausted, "recommendation"), "action") === "explain", "exhausted weak recommendation action");
+      check(stringField(field(weakExhausted, "recommendation"), "command") === "passquest skill show sentence-structure", "exhausted weak recommendation command");
+      const weakFollowUp = stringField(field(weakExhausted, "recommendation"), "follow_up_command") ?? "";
+      check(weakFollowUp.startsWith("passquest skill practice sentence-structure --question s2"), "exhausted weak follow-up command");
+      check(weakFollowUp.includes("--db") && weakFollowUp.includes(weakDB), "exhausted weak follow-up does not preserve the database");
+
+      const mixedDB = path.join(temp, "mixed.sqlite");
+      await callDB(["tactic", "practice", "not-except-polarity", "--json"], mixedDB);
+      await callDB(["tactic", "practice", "not-except-polarity", "--json", "--answer", "D"], mixedDB);
+      await callDB(["skill", "practice", "not-except-polarity", "--json", "--answer", "C"], mixedDB);
+      await callDB(["skill", "practice", "sentence-structure", "--json", "--answer", "C"], mixedDB);
+      await callDB(["skill", "practice", "sentence-structure", "--json", "--answer", "A"], mixedDB);
+      const mixed = parse((await callDB(["next", "--json"], mixedDB)).stdout);
+      const mixedSentence = skillEntry(mixed, "sentence-structure");
+      check(numberField(field(mixedSentence, "evidence"), "independent_attempts") === 2, "mixed sentence independent attempts");
+      check(numberField(field(mixedSentence, "evidence"), "independent_correct") === 1, "mixed sentence correctness count");
+      check(numberField(field(mixedSentence, "evidence"), "fresh_passages") === 0, "mixed sentence still has a fresh passage");
+      check(stringField(field(mixedSentence, "inference"), "state") === "mixed", "mixed sentence state");
+      check(stringField(field(mixedSentence, "inference"), "action") === "explain", "mixed sentence action");
+      check(stringField(field(field(mixed, "recommendation"), "skill"), "id") === "vocabulary-in-context", "exhausted mixed explanation blocks fresh language material");
+      check(stringField(field(mixed, "recommendation"), "action") === "practice_new", "mixed recommendation action");
 
       const firstNextRun = await callDB(["next", "--json"]);
       check(firstNextRun.code === 0, `reopened next exit = ${firstNextRun.code}`);

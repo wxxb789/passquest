@@ -298,3 +298,23 @@ Entry format:
 - Revisit when: goal 0009 defines a delayed or held-out assessment whose consolidation signal should
   outrank fresh material, or real learner evidence shows the top recommendation should prefer a
   review over an unpracticed skill.
+
+### Q-0004-07 — Does an exhausted explanation yield to another skill's evidence-adding action?
+- Status: decided(default taken)
+- Context: round-2 review found that with only embedded material, two wrong `sentence-structure`
+  answers leave the skill `weak` with `explain` at priority 0, and its lesson followed by
+  `skill practice --question s2` records no independent observation; the untouched vocabulary skill
+  was therefore never recommended. The same trap exists for an exhausted `mixed` skill whose latest
+  answered independent attempt was incorrect. Q-0004-06 covered `review` only, and the selection rule
+  demoted reviews alone.
+- Options considered: (A) at selection, rank any candidate that cannot add evidence — a review, or an
+  `explain` with no fresh passage — after one that can, while keeping the skill's own inferred
+  action; (B) change the `weak`/`mixed` branches to `review` when no fresh passage remains; (C) keep
+  the explanation as the unconditional top recommendation.
+- Default taken: (A). `internal/adaptive.Recommend` compares candidates by whether they lead to a
+  fresh passage; the skill's `inference.action` stays `explain` because the lesson is still its own
+  need, and the explanation is selected again once every skill is exhausted (its priority 0 outranks
+  a review). Reverse by changing the candidate comparison in `Recommend`; stored attempts and the
+  per-skill inference are unaffected.
+- Revisit when: goal 0009 needs a consolidation signal to outrank fresh material, or the owner wants
+  an exhausted repeated-error lesson to keep the top slot.
