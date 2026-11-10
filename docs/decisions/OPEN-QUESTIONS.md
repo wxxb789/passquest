@@ -51,7 +51,12 @@ Entry format:
 - Revisit when: a second machine or a contributor joins.
 
 ### Q-0000-04 — Two agent loops are writing the same worktree and branch
-- Status: open
+- Status: resolved
+- Resolution: (owner, 2026-11-10) the second loop is confirmed stopped — no process with a
+  `~/repos/passquest` cwd, no `omp-passquest-*` tmux session, no `.git` lock, and the last foreign
+  touch was the 01:20:56 commit; a single writer (the delivery loop) resumed at the `apply` stage by
+  instruction. Option (A) file-scope splitting is therefore unnecessary, and the fetch-then-rebase
+  guard in `conductor.py` stays as the standing protection against a recurrence.
 - Context: while the agent loop was running goal 0001, two owner commits appeared on the same branch
   in the same clone (`5e89188` D-0001 Bun/TS harness, `4a861ca` parsed private source). The reflog
   shows a `reset --hard` + two commits + push from another process at the same second, i.e. a second
