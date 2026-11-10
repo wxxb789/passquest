@@ -568,3 +568,55 @@ Entry format:
   (C) create a new note and leave the old one.
 - Default taken: (A); a local revision that disagrees with what Anki holds is surfaced as a conflict, not
   silently overwritten.
+
+### Q-0008-01 — Which search provider, and what happens with no credential?
+- Status: decided(default taken)
+- Context: goal 0008 needs external discovery, but no provider key or endpoint exists in this environment and
+  CI cannot reach a real provider from any OS.
+- Options considered: (A) one adapter behind `PASSQUEST_SEARCH_ENDPOINT`/`_KEY`, proven against a loopback
+  stub, with "no provider configured" as a first-class outcome; (B) block until a credential arrives;
+  (C) hard-code one vendor's SDK.
+- Default taken: (A). The policy this goal owns — bounded intent, provenance, rights, budget, injection
+  containment — is provable without a vendor; a vendor SDK would bury it.
+- Revisit when: a real credential exists, or a second provider must be supported.
+
+### Q-0008-02 — What may be shown or downloaded from a result?
+- Status: decided(default taken)
+- Context: external content carries copyright risk, and the app already refuses to bundle the internal-only
+  source.
+- Options considered: (A) classify each candidate `link-only` / `local-usable` / `generated-unverified`, and
+  download nothing by default; (B) fetch and store every result; (C) show only links.
+- Default taken: (A). A link with provenance still helps, `generated-unverified` must never become study
+  state, and `local-usable` requires an explicit open-license field from the provider.
+- Revisit when: a curated open-license source is added on purpose.
+
+### Q-0008-03 — How large is a search budget?
+- Status: decided(default taken)
+- Context: "no unlimited scraping or search costs" is the goal's constraint; the learner's real budget is
+  unknown and the goal must not invent one silently.
+- Options considered: (A) 5 queries/day and 20 candidates/run as visible flags with persisted counters;
+  (B) no limit but a warning; (C) one query per day.
+- Default taken: (A). Both are flags, so a different number is one argument, and a refusal names the
+  remaining allowance instead of truncating.
+- Revisit when: the daily study budget is known.
+
+### Q-0008-04 — What counts as the observed gap that justifies a search?
+- Status: decided(default taken)
+- Context: "a learner's observed skill gap" has no definition and a search must not fire on noise.
+- Options considered: (A) highest `(wrong + skipped) / attempts` ratio among skills with at least three
+  attempts, tie broken by attempt count, else the most recent wrong answer's tactic, else "nothing to find";
+  (B) the skill with the most wrong answers in absolute terms; (C) the learner asks.
+- Default taken: (A). A ratio keeps a 3-of-3 skill above a 10-of-100 one, three attempts is the smallest count
+  that is not a coin flip, and the two fallbacks keep the command honest instead of silent. Clause 1 of the
+  goal, this entry and the acceptance checks use this same rule.
+- Revisit when: real practice volume makes a better signal visible.
+
+### Q-0008-05 — How is an injected instruction in fetched text contained?
+- Status: decided(default taken)
+- Context: web pages can carry text that reads like a command, and the app has an agent loop that can act.
+- Options considered: (A) fetched text is stored as data only, never parsed for instructions, and a stub page
+  carrying "ignore previous instructions" must leave scoring and the next exercise unchanged; (B) rely on the
+  model to resist; (C) strip suspicious sentences by keyword.
+- Default taken: (A). Keyword stripping invites a bypass; not treating page text as instructions at all is the
+  property to prove.
+- Revisit when: fetched text is ever fed to an agent prompt.
