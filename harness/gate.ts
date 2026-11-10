@@ -33,7 +33,10 @@ for (const gate of gates) {
       failed++;
       process.stdout.write(`FAIL  ${gate.title}${result.detail ? ` (${result.detail})` : ""}\n`);
       const failures = result.failures ?? [];
-      const limit = 40;
+      // Gates bound their own output (go-test keeps 12 lines per failing test).
+      // This cap only guards against an unbounded list; at 40 the four-failure
+      // Windows run would have dropped the last test's reason entirely.
+      const limit = 200;
       for (const line of failures.slice(0, limit)) {
         process.stdout.write(`  ${line}\n`);
       }

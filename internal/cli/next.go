@@ -29,11 +29,7 @@ func runNext(args []string, opt Options) int {
 		return internalError(opt, *jsonFlag, err)
 	}
 	defer st.Close()
-	records, err := st.List()
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	catalog, err := buildNextCatalog(st, *sourceFlag)
+	input, unclassified, catalog, err := buildAdaptiveInput(st, *sourceFlag)
 	if err != nil {
 		if *sourceFlag != "" {
 			return sourceError(opt, *jsonFlag, err)
@@ -41,6 +37,28 @@ func runNext(args []string, opt Options) int {
 		return internalError(opt, *jsonFlag, err)
 	}
 
+	result := adaptive.Recommend(input)
+	doc := nextDocOf(result, unclassified, *sourceFlag, catalog.sourceTaggedQuestions, nextDatabaseArgument(*dbFlag, opt))
+	if *jsonFlag {
+		return writeJSON(opt, doc)
+	}
+	writeNext(opt.Stdout, doc, st.Path())
+	return 0
+}
+
+// buildAdaptiveInput maps every recorded attempt through the same skill
+// snapshot and current-tag fallback the adaptive policy uses, and catalogs the
+// practiceable material. It is shared by `next` and the durable study brief so
+// both read learner evidence the same way.
+func buildAdaptiveInput(st *store.Store, sourceID string) (adaptive.Input, []unclassifiedAttemptView, nextCatalog, error) {
+	records, err := st.List()
+	if err != nil {
+		return adaptive.Input{}, nil, nextCatalog{}, err
+	}
+	catalog, err := buildNextCatalog(st, sourceID)
+	if err != nil {
+		return adaptive.Input{}, nil, nextCatalog{}, err
+	}
 	input := adaptive.Input{
 		Skills:    nextSkills(),
 		Materials: catalog.materials,
@@ -58,14 +76,7 @@ func runNext(args []string, opt Options) int {
 		}
 		input.Records = append(input.Records, adapted)
 	}
-
-	result := adaptive.Recommend(input)
-	doc := nextDocOf(result, unclassified, *sourceFlag, catalog.sourceTaggedQuestions, nextDatabaseArgument(*dbFlag, opt))
-	if *jsonFlag {
-		return writeJSON(opt, doc)
-	}
-	writeNext(opt.Stdout, doc, st.Path())
-	return 0
+	return input, unclassified, catalog, nil
 }
 
 // nextDatabaseArgument is the database selection repeated in generated

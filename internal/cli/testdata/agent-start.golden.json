@@ -1,0 +1,66 @@
+{
+  "durable": {
+    "available": true,
+    "conversation_id": 3,
+    "heartbeat_fresh": false,
+    "snapshot": {
+      "answer_chars": 28,
+      "conversation_id": 3,
+      "entries": 7,
+      "found": true,
+      "live_run": false,
+      "pending_tasks": 0,
+      "tool_calls": 2,
+      "turns": 3,
+      "unsettled_submissions": 0
+    }
+  },
+  "limits": [
+    "Study steps are advisory model output, not verified answers, grades or exam facts.",
+    "The durable task carries recorded attempt facts, derived skill state and authored lesson text only; no private source text, answer key or learner identity.",
+    "One agent run at a time; a second start is refused until the current run completes or is cancelled."
+  ],
+  "run": {
+    "created_at": "2026-11-10T09:00:01Z",
+    "max_steps": 3,
+    "max_turns": 8,
+    "model": "example-model",
+    "prompt_version": "agent-study-brief-v1",
+    "run_id": "run-20261110T100000Z-00000001",
+    "store": "\u003ctmp\u003e/agent.sqlite",
+    "task": "study-brief"
+  },
+  "schema_version": 1,
+  "state": "completed",
+  "status": {
+    "reason": "completed",
+    "state": "completed"
+  },
+  "steps": [
+    {
+      "advisory": true,
+      "body": "Mark NOT before comparing options.",
+      "created_at": "2026-11-10T09:00:10Z",
+      "index": 1,
+      "kind": "diagnosis",
+      "title": "Check the polarity cue",
+      "verified_answer": false
+    },
+    {
+      "advisory": true,
+      "body": "A word match is not evidence; check the negation.",
+      "created_at": "2026-11-10T09:00:11Z",
+      "index": 2,
+      "kind": "tactic",
+      "title": "Apply the boundary",
+      "verified_answer": false
+    }
+  ],
+  "summary": {
+    "answer": "Two advisory steps recorded.",
+    "answer_chars": 28,
+    "tool_calls": 2,
+    "tool_errors": 0,
+    "turns": 3
+  }
+}

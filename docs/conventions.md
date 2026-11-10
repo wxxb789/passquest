@@ -17,8 +17,9 @@ Binding project conventions. Read this before writing code for any goal.
 - **SQLite** via a **pure-Go** driver (`modernc.org/sqlite`) — the project builds without cgo.
   One process is the writer/authority for each logical state domain; migrations are versioned and
   idempotent.
-- **Node/TypeScript** exists only for the Pi Durable agent host (goal 0005+) under `agent/`. The core
-  CLI and every verified local practice path must work with Node absent.
+- **Node/TypeScript** exists only for the agent hosts under `agent/`: the single-call BYOK tutor
+  (goal 0005) and the Pi Durable study brief (goal 0006). The core CLI and every verified local
+  practice path must work with Node absent.
 - **MyGo + WebView** desktop shell arrives at goal 0011. Until then the access surface is a real,
   scriptable CLI plus a test harness — screenshots and mock UIs are not evidence.
 - **Bun + TypeScript** is the harness runtime (`harness/`, gate modules under `harness/gates/`), not
@@ -46,7 +47,7 @@ Binding project conventions. Read this before writing code for any goal.
 ```text
 cmd/passquest/          CLI entry point (the pre-0011 access surface)
 internal/<domain>/      Go packages by domain truth, not by layer
-agent/                  Node/TypeScript Pi Durable host (from goal 0005)
+agent/                  Node/TypeScript BYOK tutor and Pi Durable hosts (`docs/agent.md`)
 data/baselines/         owner-directed public parsed text (unreviewed; see its README)
 data/private/, data/local/, local-data/, .passquest/   never committed
 docs/goals/             numbered contracts; docs/goals/archive/ after close
