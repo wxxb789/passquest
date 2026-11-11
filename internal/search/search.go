@@ -39,14 +39,22 @@ const (
 	DefaultTimeoutMS = 10000
 	MinTimeoutMS     = 1000
 	MaxTimeoutMS     = 120000
+	// MaxResponseBytes bounds the provider body after the host envelope is
+	// decoded. It is the provider contract enforced by agent/search-host.mjs.
 	MaxResponseBytes = 1 << 20
-	MaxResults       = 1000
-	MaxTitleRunes    = 300
-	MaxURLRunes      = 2048
-	MaxSnippetRunes  = 2000
-	MaxContentRunes  = 20000
-	MaxLicenseRunes  = 100
-	MaxProviderRunes = 200
+	// MaxHostResponseBytes bounds the host's whole stdout document. The
+	// provider body travels inside it as a JSON string, where a byte can cost
+	// six escaped bytes (`\u0000`), so this cannot equal MaxResponseBytes
+	// without rejecting legal responses as truncation. The extra 64 KiB covers
+	// the envelope fields, the trailing newline and provider metadata.
+	MaxHostResponseBytes = 6*MaxResponseBytes + (64 << 10)
+	MaxResults           = 1000
+	MaxTitleRunes        = 300
+	MaxURLRunes          = 2048
+	MaxSnippetRunes      = 2000
+	MaxContentRunes      = 20000
+	MaxLicenseRunes      = 100
+	MaxProviderRunes     = 200
 	// MaxEndpointHostChars matches find_queries.endpoint_host. A longer host is
 	// refused before a reservation or a provider request.
 	MaxEndpointHostChars = 300
@@ -370,7 +378,7 @@ func (t HostTransport) Search(ctx context.Context, req Request) (Result, error) 
 	cmd.Env = t.environ()
 	cmd.Stdin = bytes.NewReader(payload)
 	var stdout, stderr limitedBuffer
-	stdout.limit = MaxResponseBytes
+	stdout.limit = MaxHostResponseBytes
 	stderr.limit = 64 << 10
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -412,7 +420,7 @@ func (t HostTransport) Search(ctx context.Context, req Request) (Result, error) 
 	if stdout.truncated {
 		return Result{}, &ProviderError{
 			Code:        "invalid_response",
-			Message:     fmt.Sprintf("search host response exceeded %d bytes", MaxResponseBytes),
+			Message:     fmt.Sprintf("search host response exceeded %d bytes", MaxHostResponseBytes),
 			RequestSent: true,
 			RequestSHA:  requestSHA,
 			RequestSize: requestBytes,
@@ -463,6 +471,19 @@ func (t HostTransport) Search(ctx context.Context, req Request) (Result, error) 
 		return Result{}, &ProviderError{
 			Code:        "invalid_response",
 			Message:     fmt.Sprintf("search host returned unknown state %q", response.Status),
+			RequestSent: response.RequestSent,
+			RequestSHA:  requestSHA,
+			RequestSize: requestBytes,
+		}
+	}
+	// The host enforces the same bound on the provider body; re-check the
+	// decoded string so the larger envelope buffer cannot raise the contract.
+	if len(response.Body) > MaxResponseBytes {
+		return Result{}, &ProviderError{
+			Code:        "invalid_response",
+			Message:     fmt.Sprintf("provider response exceeded %d bytes", MaxResponseBytes),
+			HTTPStatus:  response.HTTPStatus,
+			LatencyMS:   response.LatencyMS,
 			RequestSent: response.RequestSent,
 			RequestSHA:  requestSHA,
 			RequestSize: requestBytes,

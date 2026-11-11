@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -37,20 +38,63 @@ func runSearchHelper() int {
 		if err := os.WriteFile(os.Getenv("PASSQUEST_SEARCH_HELPER_BODY_FILE"), []byte(request.Body), 0o600); err != nil {
 			return 4
 		}
-		response := hostResponse{
-			ProtocolVersion: ProtocolVersion,
-			Status:          "ok",
-			HTTPStatus:      200,
-			LatencyMS:       1,
-			RequestSent:     true,
-			Body:            `{"provider":"helper","results":[]}`,
-		}
-		if err := json.NewEncoder(os.Stdout).Encode(response); err != nil {
+		if err := writeHostResponse(`{"provider":"helper","results":[]}`); err != nil {
 			return 5
+		}
+		return 0
+	case "quote-heavy":
+		if err := writeHostResponse(quoteHeavyProvider()); err != nil {
+			return 7
+		}
+		return 0
+	case "oversize-body":
+		if err := writeHostResponse(strings.Repeat("x", MaxResponseBytes+1)); err != nil {
+			return 8
 		}
 		return 0
 	}
 	return 6
+}
+
+// writeHostResponse writes the host envelope and, when the test asks, copies
+// the exact bytes it emitted so the test can measure what the transport read.
+func writeHostResponse(body string) error {
+	encoded, err := json.Marshal(hostResponse{
+		ProtocolVersion: ProtocolVersion,
+		Status:          "ok",
+		HTTPStatus:      200,
+		LatencyMS:       1,
+		RequestSent:     true,
+		Body:            body,
+	})
+	if err != nil {
+		return err
+	}
+	if path := os.Getenv("PASSQUEST_SEARCH_HELPER_RESPONSE_FILE"); path != "" {
+		if err := os.WriteFile(path, encoded, 0o600); err != nil {
+			return err
+		}
+	}
+	_, err = os.Stdout.Write(append(encoded, '\n'))
+	return err
+}
+
+// quoteHeavyProvider is a provider body just under MaxResponseBytes whose
+// quote characters double when the host nests it in the JSON envelope.
+func quoteHeavyProvider() string {
+	results := make([]map[string]any, 0, 20)
+	for index := range 20 {
+		results = append(results, map[string]any{
+			"title":   fmt.Sprintf("result %d", index+1),
+			"url":     fmt.Sprintf("https://example.com/%d", index+1),
+			"content": strings.Repeat(`"`, MaxContentRunes),
+		})
+	}
+	encoded, err := json.Marshal(map[string]any{"provider": "helper", "results": results})
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
 }
 
 func helperTransport(t *testing.T, mode string) (HostTransport, string) {
@@ -70,6 +114,16 @@ func helperTransport(t *testing.T, mode string) (HostTransport, string) {
 		NodeEnv: os.Args[0],
 	}
 	return HostTransport{Getenv: func(key string) string { return env[key] }}, bodyFile
+}
+
+// helperTransportWithResponse also captures the exact host document the
+// helper wrote, so a test can measure the envelope rather than guess it.
+func helperTransportWithResponse(t *testing.T, mode string) (HostTransport, string) {
+	t.Helper()
+	transport, _ := helperTransport(t, mode)
+	responseFile := filepath.Join(t.TempDir(), "host-response")
+	t.Setenv("PASSQUEST_SEARCH_HELPER_RESPONSE_FILE", responseFile)
+	return transport, responseFile
 }
 
 func TestHostTransportHashesTheBodyItPosted(t *testing.T) {
@@ -100,6 +154,59 @@ func TestHostTransportHashesTheBodyItPosted(t *testing.T) {
 	}
 	if result.RequestBytes != len(body) {
 		t.Fatalf("request bytes = %d, want %d", result.RequestBytes, len(body))
+	}
+}
+
+// The host nests the provider body as a JSON string, so a legal body just
+// under the provider limit can exceed it once quotes are escaped. The envelope
+// has its own bound; reading it must not be mistaken for a truncated response.
+func TestHostTransportAcceptsAnEscapedProviderBodyOverTheProviderLimit(t *testing.T) {
+	transport, responseFile := helperTransportWithResponse(t, "quote-heavy")
+	result, err := transport.Search(context.Background(), Request{
+		Endpoint:  "https://api.example.com/search",
+		Query:     "vocabulary in context",
+		Limit:     20,
+		TimeoutMS: 5000,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(result.Items) != 20 {
+		t.Fatalf("items = %d, want 20", len(result.Items))
+	}
+	if got := result.Items[0].Content; got != strings.Repeat(`"`, MaxContentRunes) {
+		t.Fatalf("first content length = %d, want %d", len(got), MaxContentRunes)
+	}
+	envelope, err := os.ReadFile(responseFile)
+	if err != nil {
+		t.Fatalf("read the host document: %v", err)
+	}
+	if len(envelope) <= MaxResponseBytes {
+		t.Fatalf("host document = %d bytes; the fixture must exceed the provider limit to reproduce the truncation", len(envelope))
+	}
+	if len(envelope) > MaxHostResponseBytes {
+		t.Fatalf("host document = %d bytes, over the %d-byte envelope bound", len(envelope), MaxHostResponseBytes)
+	}
+}
+
+// The larger envelope buffer must not raise the provider-body contract.
+func TestHostTransportRejectsAProviderBodyOverTheProviderLimit(t *testing.T) {
+	transport, _ := helperTransport(t, "oversize-body")
+	_, err := transport.Search(context.Background(), Request{
+		Endpoint:  "https://api.example.com/search",
+		Query:     "vocabulary in context",
+		Limit:     20,
+		TimeoutMS: 5000,
+	})
+	failure, ok := AsProviderError(err)
+	if !ok {
+		t.Fatalf("error = %v, want a structured provider failure", err)
+	}
+	if failure.Code != "invalid_response" || !failure.RequestSent {
+		t.Fatalf("failure = %+v; an over-limit provider body is an invalid response after a sent request", failure)
+	}
+	if !strings.Contains(failure.Message, "provider response exceeded") || !strings.Contains(failure.Message, fmt.Sprint(MaxResponseBytes)) {
+		t.Fatalf("message = %q, want the provider-body limit named", failure.Message)
 	}
 }
 
