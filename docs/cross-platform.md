@@ -58,6 +58,9 @@ turns red.
   IPv4-mapped loopback is accepted on both sides: Go's `netip.IsLoopback` accepts it, and the host
   decodes the URL form `::ffff:7f00:1` back to an IPv4 loopback. Only a loopback endpoint is accepted
   on either side.
+- The search host validates its endpoint in Go and again in Node: `https` off-loopback, plain `http`
+  only for a loopback stub, no userinfo/query/fragment, and a path is allowed. It posts one bounded
+  body and never opens a candidate URL.
 - A note export is written to a temporary file in the destination directory and renamed over the
   target. The file is `0600` on POSIX; a parent directory the export creates is `0700`, while an
   existing directory keeps its mode. Windows has no POSIX mode, so only the content and replacement
@@ -82,5 +85,5 @@ turns red.
 
 ## Gates
 
-`bun run gate` → 18 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
+`bun run gate` → 19 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
 gates run on all three OS in CI.

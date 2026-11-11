@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "state": "found",
+  "intent": {
+    "selection": "skill_error_ratio",
+    "skill_id": "vocabulary-in-context",
+    "skill_title": "Vocabulary in context",
+    "kind": "language",
+    "tactic_id": "",
+    "exam_section": "embedded",
+    "learner_level": "foundation",
+    "level_basis": {
+      "independent_first_attempts": 3,
+      "correct": 0,
+      "skipped": 0,
+      "rule": "first independent attempts, skips included in the denominator"
+    },
+    "candidate_limit": 20,
+    "query": "Vocabulary in context English exam practice for foundation level learners",
+    "evidence": {
+      "attempts": 3,
+      "incorrect": 3,
+      "skipped": 0,
+      "attempt_ids": [
+        1,
+        2,
+        3
+      ]
+    },
+    "reason": "3 of 3 attempt(s) for vocabulary-in-context are wrong or skipped (3 incorrect, 0 skipped); this is the highest error ratio among skills with at least three attempts."
+  },
+  "budget": {
+    "day": "2026-11-10",
+    "max_queries": 5,
+    "queries_used": 1,
+    "queries_remaining": 4,
+    "max_candidates": 20,
+    "candidates_allowed": 20,
+    "candidates_stored": 3
+  },
+  "provider": {
+    "configured": true,
+    "name": "stub-search",
+    "endpoint_host": "127.0.0.1:18768"
+  },
+  "query_id": 1,
+  "candidates": [
+    {
+      "id": 1,
+      "provider": "stub-search",
+      "query": "Vocabulary in context English exam practice for foundation level learners",
+      "retrieved_at": "2026-11-10T09:00:02Z",
+      "title": "Open text",
+      "url": "https://example.com/open",
+      "classification": "local-usable",
+      "license": "cc-by-4.0",
+      "reason": "",
+      "content": "open study text",
+      "content_sha256": "7c7e2b7fb023ef1e6f8522d2768a5f848e4e4439120ce5f142e7f7f1da0da16b",
+      "displayable": true
+    },
+    {
+      "id": 2,
+      "provider": "stub-search",
+      "query": "Vocabulary in context English exam practice for foundation level learners",
+      "retrieved_at": "2026-11-10T09:00:02Z",
+      "title": "Link only",
+      "url": "https://example.com/link",
+      "classification": "link-only",
+      "license": "",
+      "reason": "no_open_license",
+      "content": "",
+      "content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "displayable": false
+    },
+    {
+      "id": 3,
+      "provider": "stub-search",
+      "query": "Vocabulary in context English exam practice for foundation level learners",
+      "retrieved_at": "2026-11-10T09:00:02Z",
+      "title": "Generated",
+      "url": "https://example.com/generated",
+      "classification": "generated-unverified",
+      "license": "",
+      "reason": "model_generated",
+      "content": "",
+      "content_sha256": "22c01a0519b8c601541da354edcba99fd8527a689fb0335065c4cc55e5b54a79",
+      "displayable": false
+    }
+  ],
+  "counts": {
+    "link_only": 1,
+    "local_usable": 1,
+    "generated_unverified": 1,
+    "total": 3
+  },
+  "unclassified_attempts": 0,
+  "message": "3 candidate(s) stored; 1 local-usable, 1 link-only, 1 generated-unverified. Only local-usable text is shown for local study.",
+  "limitations": [
+    "Fetched text is untrusted data: it is never treated as an instruction, never sent to a model, and cannot change an attempt, grade, score or the next exercise.",
+    "No candidate URL is fetched; only text the provider returned in its response is stored.",
+    "A search candidate is not a verified exam item or answer key.",
+    "An open license is provider-declared, not independently verified.",
+    "The learner level is an evidence-derived bucket, not a CEFR, junior-high or exam-readiness measurement."
+  ]
+}

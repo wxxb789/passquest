@@ -61,8 +61,8 @@ ingestion pipeline, provider-specific SDKs, and any automatic download of third-
 | # | Acceptance | Evidence |
 |---|---|---|
 | 1 | A real stored gap produces a bounded intent; no evidence produces an honest "nothing to find" | two CLI runs over stored attempts, JSON shown |
-| 2 | No configured endpoint means zero network I/O and an explicit message | run with the env unset plus a listener that records connections |
-| 3 | Adapter protocol works: query, parse, candidate limit | loopback stub smoke gate, 3 OS, no network |
+| 2 | No configured endpoint means zero network I/O and an explicit message | run with the env unset; `find-smoke` asserts an unchanged stub POST counter and zero accepts on a raw TCP listener, with a connect probe proving the listener counts connections |
+| 3 | Adapter protocol works: query, parse, candidate limit | loopback stub smoke gate (`find-smoke`, no external network). The 3-OS claim is the CI matrix (ubuntu, macos, windows) on the merge head; the local run for this increment was Linux only |
 | 4 | Each candidate is classified and only `local-usable` text is displayable | stub returns all three classes; CLI output shows the difference |
 | 5 | Provenance is stored and auditable (provider, time, URL, SHA256) | stored row printed back, hash recomputed |
 | 6 | Budget refuses the 6th query of the day and the 21st candidate | two runs that hit each limit, refusal text shown |

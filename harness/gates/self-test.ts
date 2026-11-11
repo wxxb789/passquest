@@ -12,6 +12,7 @@ import { adaptiveSmoke } from "./adaptive-smoke.ts";
 import { agentSmoke } from "./agent-smoke.ts";
 import { baseline } from "./baseline.ts";
 import { docsLinks } from "./docs-links.ts";
+import { findSmoke } from "./find-smoke.ts";
 import { goBuild } from "./go-build.ts";
 import { goTest } from "./go-test.ts";
 import { goTidy } from "./go-tidy.ts";
@@ -476,6 +477,14 @@ function brokenCases(): BrokenCase[] {
         "go.mod": GO_MOD,
         "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
         "internal/cli/testdata/import/question-q1.json": "{}",
+      },
+    },
+    {
+      gate: findSmoke,
+      label: "CLI whose find output is not the protocol",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
       },
     },
   ];

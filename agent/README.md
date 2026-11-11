@@ -1,8 +1,9 @@
 # Agent hosts
 
 `agent/` holds the only Node/TypeScript product runtime: the provider egress for the BYOK tutor, the
-loopback AnkiConnect transport and the Pi Durable host for bounded study-brief work. The Go core never
-imports a network package; every host is spawned as a child process over a versioned JSON boundary.
+search transport for bounded resource discovery, the loopback AnkiConnect transport and the Pi Durable
+host for bounded study-brief work. The Go core never imports a network package; every host is spawned
+as a child process over a versioned JSON boundary.
 
 Install the pinned runtime dependencies from the repository root (they are a Bun workspace):
 
@@ -31,6 +32,28 @@ while a BYOK text provider requires HTTPS. It is a single-shot process, not an a
   key.
 
 `docs/tutor.md` documents the CLI, the consent model and the exact request fields.
+
+## `search-host.mjs` — the bounded search path
+
+`search-host.mjs` is the only search egress. Goal 0008 owns the policy (evidence rule, candidate
+classification, rights, budget and provenance); this host is a transport.
+
+- One JSON request on stdin with an endpoint, timeout, query, candidate `limit` and the exact provider
+  `body`. The host rejects a body that does not carry exactly `query` and `limit`, then posts those bytes
+  unchanged so the CLI's recorded SHA-256 identifies what left the machine.
+- `https` is required off-loopback; plain `http` is accepted only for a loopback stub. Userinfo, query
+  and fragment are refused; a path such as `/v1/search` is allowed.
+- `PASSQUEST_SEARCH_KEY` is optional. When set, it is placed only in `Authorization: Bearer …`; it is
+  never in the request document, a stored row or an error. Redirects are refused, the response is capped
+  at 1 MiB and the process logs nothing.
+- The host returns the provider body unmodified. Go parses the documented `{provider, results}` shape,
+  classifies each candidate and stores only what the policy permits. A malformed body is
+  `invalid_response`, not an empty result.
+- The host has no database, filesystem or tool access. It cannot change an attempt, grade, answer key or
+  the next exercise, and it never fetches a candidate URL.
+
+`docs/find.md` documents the commands, the one selection rule, classification, budget and failure
+vocabulary.
 
 ## `anki-host.mjs` — the loopback AnkiConnect path
 
@@ -85,5 +108,5 @@ platform limits.
 
 ## Boundary
 
-Both hosts are replaced by the desktop lifecycle in goal 0011. The versioned JSON documents are the
+These hosts are replaced by the desktop lifecycle in goal 0011. The versioned JSON documents are the
 contract; provider SDKs stay inside Node and never reach `cmd/` or `internal/`.
