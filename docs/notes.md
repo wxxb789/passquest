@@ -112,6 +112,10 @@ question therefore cannot create a second card for the same lesson.
   new queue entry.
 - An edited accept (`--front`, `--back`, `--tactic`): revision `n+1`; every earlier revision stays in
   append-only history and `note show` prints it.
+- Every accept starts from the content of the last successful accept on that draft. A repeated accept
+  therefore reports `unchanged` instead of restoring the original proposal, and an accept that edits
+  one field (`--tactic`, say) preserves the learner's other edited fields. A new `--refine` proposal
+  replaces those accepted values because it is a new proposal to review.
 
 Drafts are transient proposals. An accepted draft stays open so a repeated or edited accept works;
 `note skip` closes it without writing anything. When more than one draft is open, `--draft ID`
@@ -127,14 +131,16 @@ selects one; `preview`, `accept` and `skip` default to the latest open draft.
 #notetype:PassQuest Note
 #deck:Pass Quest
 #tags:passquest
-Front	Back	Tactic	Source
+#columns:Front	Back	Tactic	Source
 …
 ```
 
 Fields are HTML: text is escaped, newlines become `<br>`, and the back's blank line becomes the
-meaning/example paragraphs. Anki's importer reads a row beginning with `#` as an option or comment
-line, so a front that starts with `#` is written with the `&#35;` entity; it renders as the learner's
-text and the row stays data. The file is written `0600` through a temporary file in the destination
+meaning/example paragraphs. `#columns` declares the four field names (Anki separates them with the
+separator set above) and is not imported as a note; there is no uncommented header row that would
+become a card with front `Front`. Anki's importer reads a row beginning with `#` as an option or
+comment line, so a front that starts with `#` is written with the `&#35;` entity; it renders as the
+learner's text and the row stays data. The file is written `0600` through a temporary file in the destination
 directory, synced and renamed; a failure leaves an existing export untouched and removes the
 temporary file. A missing parent directory is created `0700`; an existing `--out` directory keeps its
 mode, so choose a private directory.
@@ -158,7 +164,12 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
   `createDeck`, `modelNames`, `createModel`, `addNote`, `updateNoteFields`, `notesInfo`. It refuses
   redirects and has no database or filesystem access. A push with more than 50 pending notes splits
   its writes into consecutive documents of at most 50 actions, preserving queue order; a chunk whose
-  endpoint does not answer stays queued.
+  endpoint does not answer stays queued. Each completed chunk is recorded before the next call, so a
+  later failure cannot discard an acknowledged note id.
+- The read-back is bounded the same way: more than 50 previously pushed notes are queried in
+  consecutive `notesInfo` documents of at most 50 ids, and the results are combined before conflict
+  classification. The host caps one HTTP response at 1 MiB, so one unbounded request would make every
+  push of a larger collection fail before any update.
 - `version` must be at least 6. The deck `Pass Quest` is created when missing; the model
   `PassQuest Note` is created when `modelNames` does not contain it.
 - `addNote` uses `allowDuplicate: false`. A duplicate of a note's first revision, with nothing pushed
@@ -168,18 +179,21 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
   then push again. A note edited before its first push is queued at revision ≥ 2, so a duplicate
   error there is a **conflict** rather than `already_present`: Anki never received revision 1, and
   marking an unwritten revision delivered would be false.
-- A revision with an Anki note id calls `notesInfo` first. If the fields no longer match the revision
-  last pushed, the card is a **conflict**: Anki is left untouched and `push` exits 3. `--force` is the
-  explicit overwrite. If the card is gone, a `check/not_found` ledger row is recorded, it is re-added
-  once and the new id is stored.
+- A revision with an Anki note id calls `notesInfo` first (in bounded batches). If the fields no
+  longer match the revision last pushed, the card is a **conflict**: Anki is left untouched and
+  `push` exits 3. `--force` is the explicit overwrite. If the card is gone, a `check/not_found`
+  ledger row is recorded, it is re-added once and the new id is stored.
 - An update calls `updateNoteFields` for the recorded id, so no second card is created and Anki's
   review history survives.
 - When no endpoint answers, every pending note stays queued and `push` exits 0. The next reachable
   push drains each pending revision once; a second push sends nothing. A transport failure after a
-  request was sent also leaves the note pending. A retried `addNote` is deduplicated by Anki; if Anki
+  request was sent leaves only the unacknowledged notes pending: a completed earlier batch keeps its
+  recorded note ids and is not sent again. A retried `addNote` is deduplicated by Anki; if Anki
   applied an `updateNoteFields` before the error, the next push's read-back can surface a **conflict**
   (exit 3) that `--force` resolves. No note text is lost.
-- A missing Node or host is `anki_unavailable` (exit 3) with the queue unchanged. `propose` without
+- A missing Node or host is `anki_unavailable` (exit 3); nothing was acknowledged before the first
+  call, so the queue is unchanged. A failure after an earlier batch is reported with `partial` counts
+  and the acknowledged rows already recorded. `propose` without
   `--refine`, `preview`, `accept`, `skip`, `show` and `export` work with no Node and no Anki;
   `propose --refine` needs Node, and `push` needs it only when there is pending work.
 

@@ -271,12 +271,13 @@ export const noteSmoke: Gate = {
         "#notetype:PassQuest Note",
         "#deck:Pass Quest",
         "#tags:passquest",
-        "Front\tBack\tTactic\tSource",
+        "#columns:Front\tBack\tTactic\tSource",
         "closes on Sundays",
       ]) {
         check(exportText.includes(want), `export is missing ${want}`);
       }
       check(exportText.split("\n").length === 8, `export line count = ${exportText.split("\n").length}`);
+      check(!exportText.includes("\nFront\tBack\tTactic\tSource\n"), "export has an uncommented header row");
       const exportDir = path.join(temp, "export-target");
       mkdirSync(exportDir);
       const failedExport = await call(["note", "export", "--out", exportDir, "--json"]);

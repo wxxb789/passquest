@@ -9,9 +9,10 @@ import (
 	"strings"
 )
 
-// ImportHeader is the first non-option row of the export: the four note fields
-// in model order. Anki maps a header row to the note fields by name.
-const ImportHeader = "Front\tBack\tTactic\tSource"
+// ColumnsDirective declares the four note fields in model order. Anki treats a
+// line beginning with '#' as an import option, so this line is not imported as
+// a note; setting #columns also makes field count and order explicit.
+const ColumnsDirective = "#columns:Front\tBack\tTactic\tSource"
 
 // exportPrelude holds the importer directives. They declare the exact
 // separator, HTML field content, note type, deck and tag so a manual import
@@ -32,7 +33,7 @@ type ExportResult struct {
 func ExportBytes(rows []Fields) ([]byte, error) {
 	var builder strings.Builder
 	builder.WriteString(exportPrelude)
-	builder.WriteString(ImportHeader)
+	builder.WriteString(ColumnsDirective)
 	builder.WriteString("\n")
 	for i, row := range rows {
 		for name, value := range row.Map() {
@@ -109,6 +110,6 @@ func WriteExport(rows []Fields, path string) (ExportResult, error) {
 		Notes:  len(rows),
 		Bytes:  len(data),
 		SHA256: hex.EncodeToString(sum[:]),
-		Header: ImportHeader,
+		Header: ColumnsDirective,
 	}, nil
 }

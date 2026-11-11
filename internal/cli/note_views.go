@@ -247,7 +247,7 @@ func noteFieldsViewOf(f note.Fields) noteFieldsView {
 }
 
 func notePlainViewOf(e noteEffective) notePlainView {
-	return notePlainView{Front: e.Front, Back: e.Back, Tactic: e.Built.Tactic, Source: e.Built.SourceLabel}
+	return notePlainView{Front: e.Front, Back: e.Back, Tactic: e.Tactic, Source: e.Built.SourceLabel}
 }
 
 func noteViewOf(n store.Note) noteView {
@@ -440,7 +440,7 @@ func writeNoteExport(w io.Writer, doc noteExportDoc) {
 	fmt.Fprintf(w, "File: %s\n", doc.Path)
 	fmt.Fprintf(w, "Notes: %d · bytes: %d · sha256: %s\n", doc.Notes, doc.Bytes, doc.SHA256)
 	fmt.Fprintf(w, "Deck: %s · model: %s\n", doc.Deck, doc.Model)
-	fmt.Fprintf(w, "Header: %s\n", doc.Header)
+	fmt.Fprintf(w, "Columns directive: %s\n", doc.Header)
 	fmt.Fprintln(w, "Import with Anki Desktop: File > Import, then choose the deck and note type above.")
 	fmt.Fprintf(w, "%s\n", noteSyncStatement)
 }

@@ -140,6 +140,18 @@ var schemaV11 = []string{
 	`ALTER TABLE notes ADD COLUMN mark TEXT NOT NULL DEFAULT ''`,
 }
 
+// schemaV12 records the content of the last successful accept on its open
+// draft. A repeated or incremental accept starts from these values instead of
+// re-deriving the original draft, so an edit is never silently reverted. An
+// empty accepted_front means the draft has not been accepted yet.
+var schemaV12 = []string{
+	`ALTER TABLE note_drafts ADD COLUMN accepted_front TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE note_drafts ADD COLUMN accepted_back TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE note_drafts ADD COLUMN accepted_tactic TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE note_drafts ADD COLUMN accepted_origin TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE note_drafts ADD COLUMN accepted_model TEXT NOT NULL DEFAULT ''`,
+}
+
 // Note draft states. A draft is a proposal, not evidence; only notes/revisions
 // are canonical local content.
 const (
@@ -159,7 +171,9 @@ const (
 )
 
 // NoteDraft is one open proposal. RefinedFront/RefinedBack are advisory text
-// retained until the learner accepts or skips the draft.
+// retained until the learner accepts or skips the draft. AcceptedFront and
+// friends hold the content of the last successful accept, so a repeated or
+// incremental accept starts from the learner's current text.
 type NoteDraft struct {
 	ID             int64
 	TargetKey      string
@@ -176,6 +190,11 @@ type NoteDraft struct {
 	RefinementID   int64
 	RefinedFront   string
 	RefinedBack    string
+	AcceptedFront  string
+	AcceptedBack   string
+	AcceptedTactic string
+	AcceptedOrigin string
+	AcceptedModel  string
 	Status         string
 	CreatedAt      time.Time
 }
@@ -368,7 +387,8 @@ func sameNoteDraftInput(a, b NoteDraft) bool {
 }
 
 const noteDraftColumns = `id, target_key, attempt_id, content_id, content_version, question_id, source_id,
-	page_number, mark, restricted, origin, model, refinement_id, refined_front, refined_back, status, created_at`
+	page_number, mark, restricted, origin, model, refinement_id, refined_front, refined_back,
+	accepted_front, accepted_back, accepted_tactic, accepted_origin, accepted_model, status, created_at`
 
 func scanNoteDraft(row rowScanner) (NoteDraft, bool, error) {
 	var (
@@ -378,7 +398,8 @@ func scanNoteDraft(row rowScanner) (NoteDraft, bool, error) {
 	)
 	err := row.Scan(&d.ID, &d.TargetKey, &d.AttemptID, &d.ContentID, &d.ContentVersion, &d.QuestionID,
 		&d.SourceID, &d.Page, &d.Mark, &restricted, &d.Origin, &d.Model, &d.RefinementID,
-		&d.RefinedFront, &d.RefinedBack, &d.Status, &created)
+		&d.RefinedFront, &d.RefinedBack, &d.AcceptedFront, &d.AcceptedBack, &d.AcceptedTactic,
+		&d.AcceptedOrigin, &d.AcceptedModel, &d.Status, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return NoteDraft{}, false, nil
 	}
@@ -426,7 +447,9 @@ func (s *Store) SetNoteDraftStatus(id int64, status string) error {
 // SetNoteDraftRefinement stores an advisory refined front/back on a draft.
 func (s *Store) SetNoteDraftRefinement(id, refinementID int64, model, front, back string) error {
 	res, err := s.db.Exec(`UPDATE note_drafts SET origin = 'refined', model = ?, refinement_id = ?,
-		refined_front = ?, refined_back = ? WHERE id = ?`, model, refinementID, front, back, id)
+		refined_front = ?, refined_back = ?,
+		accepted_front = '', accepted_back = '', accepted_tactic = '', accepted_origin = '', accepted_model = ''
+		WHERE id = ?`, model, refinementID, front, back, id)
 	if err != nil {
 		return fmt.Errorf("store: refine note draft: %w", err)
 	}
@@ -443,6 +466,20 @@ func (s *Store) SetNoteDraftRefinement(id, refinementID int64, model, front, bac
 // AcceptNote inserts or revises one note in a single transaction. Equal content
 // is a no-op; different content appends a revision and enqueues the note.
 func (s *Store) AcceptNote(target NoteTarget, content NoteContent, at time.Time) (AcceptResult, error) {
+	return s.acceptNote(target, content, 0, "", at)
+}
+
+// AcceptDraftNote accepts a note and records its content on the open draft in
+// the same transaction. A later accept of that draft starts from the accepted
+// values instead of re-deriving the original proposal.
+func (s *Store) AcceptDraftNote(draftID int64, target NoteTarget, content NoteContent, at time.Time) (AcceptResult, error) {
+	if draftID <= 0 {
+		return AcceptResult{}, errors.New("store: note draft id is required")
+	}
+	return s.acceptNote(target, content, draftID, target.TargetKey, at)
+}
+
+func (s *Store) acceptNote(target NoteTarget, content NoteContent, draftID int64, targetKey string, at time.Time) (AcceptResult, error) {
 	if strings.TrimSpace(target.NoteID) == "" || strings.TrimSpace(target.TargetKey) == "" {
 		return AcceptResult{}, errors.New("store: note id and target key are required")
 	}
@@ -468,6 +505,12 @@ func (s *Store) AcceptNote(target NoteTarget, content NoteContent, at time.Time)
 	stamp := at.UTC().Format(time.RFC3339Nano)
 	if found {
 		if existing.ContentHash == content.ContentHash {
+			if err := recordDraftAccepted(tx, draftID, targetKey, content); err != nil {
+				return AcceptResult{}, err
+			}
+			if err := tx.Commit(); err != nil {
+				return AcceptResult{}, fmt.Errorf("store: commit unchanged note: %w", err)
+			}
 			return AcceptResult{Note: existing, Previous: existing.Revision}, nil
 		}
 		revision := existing.Revision + 1
@@ -486,6 +529,9 @@ func (s *Store) AcceptNote(target NoteTarget, content NoteContent, at time.Time)
 			return AcceptResult{}, fmt.Errorf("store: update note: %w", err)
 		}
 		if err := upsertNoteOutbox(tx, existing.NoteID, revision, stamp); err != nil {
+			return AcceptResult{}, err
+		}
+		if err := recordDraftAccepted(tx, draftID, targetKey, content); err != nil {
 			return AcceptResult{}, err
 		}
 		updated, _, err := scanNote(tx.QueryRow(`SELECT `+noteColumns+` FROM notes WHERE note_id = ?`, existing.NoteID))
@@ -519,6 +565,9 @@ func (s *Store) AcceptNote(target NoteTarget, content NoteContent, at time.Time)
 	if err := upsertNoteOutbox(tx, target.NoteID, 1, stamp); err != nil {
 		return AcceptResult{}, err
 	}
+	if err := recordDraftAccepted(tx, draftID, targetKey, content); err != nil {
+		return AcceptResult{}, err
+	}
 	created, _, err := scanNote(tx.QueryRow(`SELECT `+noteColumns+` FROM notes WHERE note_id = ?`, target.NoteID))
 	if err != nil {
 		return AcceptResult{}, fmt.Errorf("store: reread created note: %w", err)
@@ -527,6 +576,30 @@ func (s *Store) AcceptNote(target NoteTarget, content NoteContent, at time.Time)
 		return AcceptResult{}, fmt.Errorf("store: commit note: %w", err)
 	}
 	return AcceptResult{Note: created, Created: true, Changed: true}, nil
+}
+
+// recordDraftAccepted stores the accepted content on the draft in the same
+// transaction as the note write. A draft that closed between the read and this
+// write makes the whole accept fail rather than leaving the two out of step.
+func recordDraftAccepted(tx *sql.Tx, draftID int64, targetKey string, content NoteContent) error {
+	if draftID == 0 {
+		return nil
+	}
+	res, err := tx.Exec(`UPDATE note_drafts SET
+			accepted_front = ?, accepted_back = ?, accepted_tactic = ?, accepted_origin = ?, accepted_model = ?
+		WHERE id = ? AND status = 'open' AND target_key = ?`,
+		content.Front, content.Back, content.Tactic, content.Origin, content.Model, draftID, targetKey)
+	if err != nil {
+		return fmt.Errorf("store: record accepted draft content: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: read accepted draft update: %w", err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("store: note draft %d is not open for this target", draftID)
+	}
+	return nil
 }
 
 func upsertNoteOutbox(tx *sql.Tx, noteID string, revision int, stamp string) error {

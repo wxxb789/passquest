@@ -31,6 +31,7 @@ type fakeAnkiTransport struct {
 	failAddAfter int
 	adds         int
 	calls        int
+	failCall     int
 	shortCall    int
 	err          error
 }
@@ -44,6 +45,9 @@ func (f *fakeAnkiTransport) Call(_ context.Context, req anki.HostRequest) (anki.
 	f.calls++
 	if f.err != nil {
 		return anki.HostResponse{}, f.err
+	}
+	if f.failCall > 0 && f.calls == f.failCall {
+		return anki.HostResponse{}, errors.New("anki host exited before answering")
 	}
 	resp := anki.HostResponse{ProtocolVersion: anki.ProtocolVersion, State: "ok"}
 	for _, action := range req.Actions {
@@ -644,6 +648,185 @@ func TestNotePushChunksMoreThanFiftyActions(t *testing.T) {
 	}
 }
 
+func seedBulkNotes(t *testing.T, db string, clock *stepClock, count int) []store.NoteTarget {
+	t.Helper()
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := make([]store.NoteTarget, 0, count)
+	for i := range count {
+		targetKey := fmt.Sprintf("bulk\x1fq\x1fmark-%02d", i)
+		target := store.NoteTarget{
+			NoteID: note.NoteID(targetKey), TargetKey: targetKey,
+			ContentID: "bulk", ContentVersion: "v1", QuestionID: "q",
+			Page: 1, Mark: fmt.Sprintf("mark-%02d", i),
+		}
+		content := store.NoteContent{
+			Front: fmt.Sprintf("front %02d", i), Back: "meaning",
+			SourceLabel: "sample · bulk · q", ContentHash: strings.Repeat("a", 64),
+			Origin: "deterministic",
+		}
+		if _, err := st.AcceptNote(target, content, clock.Now()); err != nil {
+			st.Close()
+			t.Fatalf("accept bulk note %d: %v", i, err)
+		}
+		targets = append(targets, target)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return targets
+}
+
+func reviseBulkNotes(t *testing.T, db string, clock *stepClock, targets []store.NoteTarget) {
+	t.Helper()
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for i, target := range targets {
+		content := store.NoteContent{
+			Front: fmt.Sprintf("revised %02d", i), Back: "revised meaning",
+			SourceLabel: "sample · bulk · q", ContentHash: strings.Repeat("b", 64),
+			Origin: "deterministic",
+		}
+		if _, err := st.AcceptNote(target, content, clock.Now()); err != nil {
+			t.Fatalf("revise bulk note %d: %v", i, err)
+		}
+	}
+}
+
+func TestNotePushBatchesReadbackAboveFiftyNotes(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	targets := seedBulkNotes(t, db, clock, 51)
+
+	ankiTransport := newFakeAnki()
+	first := notePushDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.State != "pushed" || first.Counts.Pushed != 51 {
+		t.Fatalf("initial bulk push = %+v", first)
+	}
+	reviseBulkNotes(t, db, clock, targets)
+
+	ankiTransport.resetActions()
+	updated := notePushDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.State != "pushed" || updated.Counts.Pushed != 51 || updated.Counts.Pending != 0 {
+		t.Fatalf("readback bulk push = %+v", updated)
+	}
+	var readbackIDs []int
+	for _, request := range ankiTransport.requests {
+		for _, action := range request.Actions {
+			if action.Action != "notesInfo" {
+				continue
+			}
+			ids, ok := action.Params["notes"].([]int64)
+			if !ok {
+				t.Fatalf("notesInfo params = %#v", action.Params)
+			}
+			if len(ids) > anki.MaxActionsPerCall {
+				t.Fatalf("notesInfo carried %d ids, over the %d bound", len(ids), anki.MaxActionsPerCall)
+			}
+			readbackIDs = append(readbackIDs, len(ids))
+		}
+	}
+	if len(readbackIDs) != 2 || readbackIDs[0] != 50 || readbackIDs[1] != 1 {
+		t.Fatalf("notesInfo batch sizes = %v, want [50 1]", readbackIDs)
+	}
+	for _, fields := range ankiTransport.notes {
+		if !strings.HasPrefix(fields["Front"], "revised ") {
+			t.Fatalf("note was not updated: %+v", fields)
+		}
+	}
+	if pending := notePending(t, db); len(pending) != 0 {
+		t.Fatalf("readback bulk push left %d pending", len(pending))
+	}
+}
+
+func TestNotePushPersistsAcknowledgedBatchesBeforeTheNextCall(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	seedBulkNotes(t, db, clock, 51)
+
+	ankiTransport := newFakeAnki()
+	// Call 1 is the capability pass, 2 creates the model, 3 adds the first 50
+	// notes; call 4 must fail before the last note is sent.
+	ankiTransport.failCall = 4
+	code, _, errOut := runNoteCLI(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")
+	if code != 3 {
+		t.Fatalf("failed batch exit = %d, stderr = %s", code, errOut)
+	}
+	partial := notePushDoc{}
+	if err := json.Unmarshal([]byte(errOut), &partial); err != nil {
+		t.Fatalf("decode failed batch: %v\n%s", err, errOut)
+	}
+	if partial.State != "partial" || partial.Counts.Pushed != 50 ||
+		partial.Counts.Queued != 1 || partial.Counts.Pending != 1 {
+		t.Fatalf("failed batch document = %+v", partial)
+	}
+	if partial.Error == nil || partial.Error.Code != "anki_unavailable" {
+		t.Fatalf("failed batch error = %+v", partial.Error)
+	}
+	if ankiTransport.count("addNote") != 50 {
+		t.Fatalf("addNote count before the failed call = %d, want 50", ankiTransport.count("addNote"))
+	}
+
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := st.PendingNoteOutbox()
+	if err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	if len(pending) != 1 {
+		st.Close()
+		t.Fatalf("pending after the failed batch = %+v", pending)
+	}
+	notes, err := st.Notes()
+	if err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	pushed := 0
+	for _, n := range notes {
+		if n.AnkiState == store.AnkiStatePushed && n.AnkiNoteID > 0 {
+			pushed++
+		}
+	}
+	if pushed != 50 {
+		st.Close()
+		t.Fatalf("persisted pushes after the failed batch = %d, want 50", pushed)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ankiTransport.failCall = 0
+	ankiTransport.resetActions()
+	retry := notePushDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")), &retry); err != nil {
+		t.Fatal(err)
+	}
+	if retry.State != "pushed" || retry.Counts.Pushed != 1 || retry.Counts.Pending != 0 {
+		t.Fatalf("retry = %+v", retry)
+	}
+	if ankiTransport.count("addNote") != 1 {
+		t.Fatalf("retry re-added acknowledged notes: addNote = %d", ankiTransport.count("addNote"))
+	}
+	if len(ankiTransport.notes) != 51 {
+		t.Fatalf("fake Anki holds %d notes, want 51", len(ankiTransport.notes))
+	}
+}
+
 func TestNotePushRefusesRevokedConsentAndMissingHost(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
@@ -981,6 +1164,84 @@ func TestNoteAcceptEditedFieldsAreValidated(t *testing.T) {
 	code, _, errOut = runNoteCLI(t, db, clock, nil, nil, "", "note", "accept", "--back", "", "--json")
 	if code != 2 || !strings.Contains(errOut, "invalid_back") {
 		t.Fatalf("empty back = %d, %s", code, errOut)
+	}
+}
+
+func TestNoteAcceptPreservesAcceptedEdits(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	readyNoteSource(t, db, clock)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+
+	first := noteAcceptDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")), &first); err != nil {
+		t.Fatal(err)
+	}
+	edited := noteAcceptDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "",
+		"note", "accept", "--front", "custom wording", "--tactic", "custom tactic", "--json")), &edited); err != nil {
+		t.Fatal(err)
+	}
+	if edited.Note.Revision != 2 || edited.Plain.Front != "custom wording" ||
+		edited.Plain.Back != first.Plain.Back || edited.Plain.Tactic != "custom tactic" {
+		t.Fatalf("edited accept = %+v", edited)
+	}
+
+	preview := notePreviewDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "preview", "--json")), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.Plain.Front != "custom wording" || preview.Plain.Back != first.Plain.Back ||
+		preview.Plain.Tactic != "custom tactic" {
+		t.Fatalf("preview after an edited accept = %+v", preview.Plain)
+	}
+
+	repeat := noteAcceptDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")), &repeat); err != nil {
+		t.Fatal(err)
+	}
+	if repeat.State != "unchanged" || repeat.Note.Revision != 2 ||
+		repeat.Plain.Front != "custom wording" || repeat.Plain.Tactic != "custom tactic" {
+		t.Fatalf("repeat accept reverted the edit = %+v", repeat)
+	}
+
+	incremental := noteAcceptDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "",
+		"note", "accept", "--back", "A learner meaning.", "--json")), &incremental); err != nil {
+		t.Fatal(err)
+	}
+	if incremental.Note.Revision != 3 || incremental.Plain.Front != "custom wording" ||
+		incremental.Plain.Back != "A learner meaning." || incremental.Plain.Tactic != "custom tactic" {
+		t.Fatalf("incremental accept reset another field = %+v", incremental)
+	}
+
+	confirm := noteAcceptDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")), &confirm); err != nil {
+		t.Fatal(err)
+	}
+	if confirm.State != "unchanged" || confirm.Note.Revision != 3 {
+		t.Fatalf("confirm accept = %+v", confirm)
+	}
+}
+
+func TestNotePreviewWithholdsAcceptedTextAfterRevoke(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	sourceID := readyNoteSource(t, db, clock)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "learner wording", "--json")
+	mustRun(t, db, clock, "", "tutor", "revoke", sourceID, "--reviewer", "note-reviewer", "--json")
+
+	preview := notePreviewDoc{}
+	out := mustNoteRun(t, db, clock, nil, nil, "", "note", "preview", "--json")
+	if err := json.Unmarshal([]byte(out), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.Fields.Front != "" || preview.Fields.Back != "" || preview.Plain.Front != "" {
+		t.Fatalf("revoked preview exposed accepted text: %+v", preview)
+	}
+	if strings.Contains(out, "learner wording") {
+		t.Fatal("revoked preview document contains the accepted front")
 	}
 }
 

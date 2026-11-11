@@ -307,11 +307,14 @@ func TestExportBytesAndAtomicWrite(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{
 		"#separator:tab\n", "#html:true\n", "#notetype:PassQuest Note\n", "#deck:Pass Quest\n",
-		"#tags:passquest\n", "Front\tBack\tTactic\tSource\n",
+		"#tags:passquest\n", "#columns:Front\tBack\tTactic\tSource\n",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("export misses %q", want)
 		}
+	}
+	if strings.Contains(text, "\nFront\tBack\tTactic\tSource") {
+		t.Fatal("export still contains an uncommented header row")
 	}
 	if strings.Count(text, "\n") != 8 {
 		t.Fatalf("export line count = %d\n%s", strings.Count(text, "\n"), text)
@@ -325,7 +328,7 @@ func TestExportBytesAndAtomicWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteExport: %v", err)
 	}
-	if result.Notes != 2 || result.Bytes != len(data) || result.Header != ImportHeader {
+	if result.Notes != 2 || result.Bytes != len(data) || result.Header != ColumnsDirective {
 		t.Fatalf("result = %+v", result)
 	}
 	got, err := os.ReadFile(path)

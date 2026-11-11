@@ -340,6 +340,84 @@ func TestMigrationFromVersionTenAddsNoteMark(t *testing.T) {
 	}
 }
 
+func TestMigrationFromVersionElevenAddsAcceptedDraftFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v11.sqlite")
+	db := openSQLite(t, path)
+	for _, statements := range [][]string{
+		schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,
+	} {
+		for _, statement := range statements {
+			if _, err := db.Exec(statement); err != nil {
+				t.Fatalf("create v11 schema: %v", err)
+			}
+		}
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 11`); err != nil {
+		t.Fatalf("set v11 version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close v11 fixture: %v", err)
+	}
+
+	st := mustOpen(t, path)
+	at := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+	targetKey := "src-x-p001\x1fq1\x1fcloses"
+	draft, err := st.SaveNoteDraft(NoteDraft{
+		TargetKey: targetKey, ContentID: "src-x-p001", QuestionID: "q1", Origin: "deterministic",
+	}, at)
+	if err != nil {
+		t.Fatalf("save draft after v12 migration: %v", err)
+	}
+	target := NoteTarget{
+		NoteID: "note-accepted-draft", TargetKey: targetKey,
+		ContentID: "src-x-p001", ContentVersion: "v1", QuestionID: "q1", Page: 1, Mark: "closes",
+	}
+	content := noteContentFixture("accepted")
+	content.Origin = "edited"
+	if _, err := st.AcceptDraftNote(draft.ID, target, content, at); err != nil {
+		t.Fatalf("accept draft after v12 migration: %v", err)
+	}
+	stored, found, err := st.NoteDraftByID(draft.ID)
+	if err != nil || !found {
+		t.Fatalf("read accepted draft = %+v, %t, %v", stored, found, err)
+	}
+	if stored.AcceptedFront != content.Front || stored.AcceptedBack != content.Back ||
+		stored.AcceptedTactic != content.Tactic || stored.AcceptedOrigin != content.Origin {
+		t.Fatalf("accepted draft content = %+v", stored)
+	}
+}
+
+func TestNoteDraftRefinementClearsAcceptedContent(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
+	at := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+	targetKey := "src-x-p001\x1fq1\x1fcloses"
+	draft, err := st.SaveNoteDraft(NoteDraft{
+		TargetKey: targetKey, ContentID: "src-x-p001", QuestionID: "q1", Origin: "deterministic",
+	}, at)
+	if err != nil {
+		t.Fatalf("save draft: %v", err)
+	}
+	target := NoteTarget{
+		NoteID: "note-refined-draft", TargetKey: targetKey,
+		ContentID: "src-x-p001", ContentVersion: "v1", QuestionID: "q1", Page: 1, Mark: "closes",
+	}
+	content := noteContentFixture("edited")
+	content.Origin = "edited"
+	if _, err := st.AcceptDraftNote(draft.ID, target, content, at); err != nil {
+		t.Fatalf("accept draft: %v", err)
+	}
+	if err := st.SetNoteDraftRefinement(draft.ID, 1, "m", "refined front", "refined back"); err != nil {
+		t.Fatalf("set refinement: %v", err)
+	}
+	stored, found, err := st.NoteDraftByID(draft.ID)
+	if err != nil || !found {
+		t.Fatalf("read refined draft = %+v, %t, %v", stored, found, err)
+	}
+	if stored.AcceptedFront != "" || stored.RefinedFront != "refined front" {
+		t.Fatalf("refinement did not replace accepted content: %+v", stored)
+	}
+}
+
 func TestNoteCommandsDoNotChangeAttempts(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	mustAppend(t, st, sampleAttempt("q1"))

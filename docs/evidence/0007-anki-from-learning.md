@@ -1,8 +1,8 @@
 # 0007 — Useful Anki notes created during study: evidence
 
-- Tree: working tree on top of `3219a0b914bb63d8f2e419b3119ea9f3c37671e7` (`refactor(0007): apply
-  accepted simplifications`), including the round-1 review fixes. The operator owns the commit; this
-  run did not commit, push or open a pull request.
+- Tree: working tree on top of `5e87524c46aa9f837c8ab098c70e1e9ef738c35a` (`merge: main b5473f9df`),
+  including the round-1 review fixes and the round-2 findings below. The operator owns the commit;
+  this run did not commit, push or open a pull request.
 - Date: 2026-11-11. Host: Linux 7.0.0-1017-azure x64.
 - Toolchain: Go 1.27.3; Node v24.16.0; Bun 1.4.4.
 - Contract: [`../goals/archive/0007-anki-from-learning.md`](../goals/archive/0007-anki-from-learning.md).
@@ -13,8 +13,10 @@ The demonstration used `/tmp/passquest-0007-demo/`, a locally built binary, the 
 `agent/anki-host.mjs` and a loopback AnkiConnect stub on `127.0.0.1:18765`. The stub made no external
 network call and no real deck was involved. The provider refinement used the real
 `agent/tutor-host.mjs` against a loopback OpenAI-compatible stub on `127.0.0.1:18767` with the
-synthetic credential `test-key-not-real`. Nothing from the demonstration was added to the repository;
-the databases, stub logs and exports stayed under `/tmp`.
+synthetic credential `test-key-not-real`. The export numbers were re-measured after the round-2
+`#columns` fix in `/tmp/passquest-0007-r2/`, replaying the same import/consent/accept sequence.
+Nothing from the demonstration was added to the repository; the databases, stub logs and exports
+stayed under `/tmp`.
 
 ## What was built
 
@@ -23,9 +25,9 @@ the databases, stub logs and exports stayed under `/tmp`.
 | `internal/note` | Target identity, deterministic key-safe draft, consent withholding, exact field HTML, the note model/CSS/card template, atomic HTML/TSV export, refinement prompt parsing. No database, no network. |
 | `internal/anki` | AnkiConnect action allowlist, loopback endpoint validation, host request/response validation, duplicate/not-found classifiers, payload builders, Node transport. |
 | `agent/anki-host.mjs` | The only Anki egress: one versioned document, 1–50 allow-listed actions, loopback-only, redirects refused, 1 MiB response cap, no database or tool access. |
-| `internal/store` | Schema v10: `note_drafts`, `notes`, append-only `note_revisions`, one-row `note_outbox`, append-only `anki_push_attempts`, append-only `note_refinements`; schema v11 adds `notes.mark` so `note show` reports the identity mark. No table can update an attempt, source, question or answer key. |
+| `internal/store` | Schema v10: `note_drafts`, `notes`, append-only `note_revisions`, one-row `note_outbox`, append-only `anki_push_attempts`, append-only `note_refinements`; schema v11 adds `notes.mark` so `note show` reports the identity mark; schema v12 adds the accepted front/back/tactic/origin/model on an open draft, written in the same transaction as the note. No table can update an attempt, source, question or answer key. |
 | `internal/cli` | `note propose/preview/accept/skip/show/model/export/push`, JSON/human documents, consent checks, revision equality, outbox orchestration and conflict/queue handling. |
-| `harness/gates/note-smoke.ts` | Real binary + real Anki host + loopback stub; 805 assertions across draft, consent, idempotency, revisions, export, model, add, update, duplicate, conflict, queue/drain, revoked consent, missing Node, pending counts, error envelope and host validation. |
+| `harness/gates/note-smoke.ts` | Real binary + real Anki host + loopback stub; 806 assertions across draft, consent, idempotency, revisions, export, model, add, update, duplicate, conflict, queue/drain, revoked consent, missing Node, pending counts, error envelope and host validation. |
 
 ## Draft and consent
 
@@ -93,16 +95,17 @@ passquest note export --db demo.sqlite --json
 
 | Observation | Value |
 |---|---|
-| Path | `/tmp/passquest-0007-demo/passquest-notes.tsv` |
-| Notes / bytes / sha256 | 1 / 299 / `f3afb50cd3e13df58ab49558907604690056404b6883b3fde9d81ab580257fc2` |
-| Header | `Front\tBack\tTactic\tSource` + `#separator:tab`, `#html:true`, `#notetype:PassQuest Note`, `#deck:Pass Quest`, `#tags:passquest` |
+| Path | `/tmp/passquest-0007-r2/passquest-notes.tsv` |
+| Notes / bytes / sha256 | 1 / 308 / `a0dea717d5f1522df7db985631c2d8eb59fc093d832fa81d6d764546d1ca5b6b` |
+| Columns directive | `#columns:Front\tBack\tTactic\tSource` + `#separator:tab`, `#html:true`, `#notetype:PassQuest Note`, `#deck:Pass Quest`, `#tags:passquest` |
 | Row | `closes on Sundays` · `<div class="pq-meaning">A closing time.</div><div class="pq-example">Example: …</div>` · `NOT/EXCEPT polarity` · source |
 | Failure path (`--out outdir`, an existing directory) | exit 1, `internal_error`; the message names the failed rename; no `.outdir.tmp-*` remained |
 | Repeat export to the same path | replaced atomically; content changed |
 
-The row encoder writes a front beginning with `#` as `&#35;…`, so Anki's importer cannot read it as
-an option or comment line; `TestExportEncodesALeadingHashInFront` pins both a normal and a
-directive-shaped front.
+The file starts with importer options and a `#columns:` directive, not a data header row, so importing
+it does not create a card whose front is `Front`. The row encoder writes a front beginning with `#`
+as `&#35;…`, so Anki's importer cannot read it as an option or comment line;
+`TestExportEncodesALeadingHashInFront` pins both a normal and a directive-shaped front.
 
 ## AnkiConnect push
 
@@ -234,6 +237,9 @@ outbox              pending rows only for undelivered revisions; delivered revis
 The v9→v10 migration test opens a v9 fixture, keeps its attempt, accepts a note, and verifies the
 append-only triggers still reject an attempt update. `TestMigrationFromVersionTenAddsNoteMark` opens
 a v10 fixture and proves the v11 `notes.mark` column accepts and returns the identity mark.
+`TestMigrationFromVersionElevenAddsAcceptedDraftFields` opens a v11 fixture and proves that
+`AcceptDraftNote` writes the v12 accepted fields, and `TestNoteDraftRefinementClearsAcceptedContent`
+pins that a new refinement replaces them.
 
 ## Gates
 
@@ -255,7 +261,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (14 packages, 565 tests, 0 skipped)
+PASS  go test (14 packages, 577 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -288,7 +294,7 @@ PASS  tutor smoke (156 assertions)
 PASS  agent smoke (120 assertions, 11 scenarios, 25 provider requests, 2 permission checks)
 
 == note smoke
-PASS  note smoke (805 assertions)
+PASS  note smoke (806 assertions)
 
 == portable paths
 PASS  portable paths (69 Go files, no platform-bound path literal)
@@ -300,7 +306,7 @@ PASS  harness self-test (29 cases, 17/17 gates)
 GATE: PASS
 ```
 
-The gate runs 18 modules. `note-smoke` reports `805 assertions`; `harness self-test` reports
+The gate runs 18 modules. `note-smoke` reports `806 assertions`; `harness self-test` reports
 `29 cases, 17/17 gates`.
 
 ## Limitations
@@ -330,8 +336,8 @@ The gate runs 18 modules. `note-smoke` reports `805 assertions`; `harness self-t
 |---|---|
 | 1. Draft from a stored attempt with front/back/tactic/source/restricted | `note propose --attempt 1` table; draft target, fields and `restricted:true`; JSON above |
 | 2. Preview is the exact payload; unanswered key hidden; restricted text waits for consent | before/after consent table and field values; `accept` exit 2 `consent_required`; unanswered preview key-absence checks; `TestNoteRefineRejectsAnAnswerRevealingResponse` and `TestNotePreviewIgnoresAStoredAnswerRevealingRefinement` |
-| 3. Repeated accept is a no-op; an edit bumps revision and keeps history | accept table: revisions 1, 1, 2; `note show` history `[1,2]`; `note show` reports `target.mark` |
-| 4. Export is importable text, written atomically | export header/row/bytes/sha256; directory-target failure exit 1 with no temp file; repeat replacement; `TestExportEncodesALeadingHashInFront` |
-| 5. AnkiConnect create model/deck, add, duplicate, update-not-re-add, queue-and-drain | action sequences and counts above; `note-smoke` 805 assertions; `TestNotePushChunksMoreThanFiftyActions` |
+| 3. Repeated accept is a no-op; an edit bumps revision and keeps history | accept table: revisions 1, 1, 2; `note show` history `[1,2]`; `note show` reports `target.mark`; `TestNoteAcceptPreservesAcceptedEdits` proves a repeat and a single-field edit keep accepted text |
+| 4. Export is importable text, written atomically | export `#columns` directive/row/bytes/sha256; directory-target failure exit 1 with no temp file; repeat replacement; `TestExportEncodesALeadingHashInFront` |
+| 5. AnkiConnect create model/deck, add, duplicate, update-not-re-add, queue-and-drain | action sequences and counts above; `note-smoke` 806 assertions; `TestNotePushChunksMoreThanFiftyActions`, `TestNotePushBatchesReadbackAboveFiftyNotes` and `TestNotePushPersistsAcknowledgedBatchesBeforeTheNextCall` |
 | 6. Model template is mobile-safe and self-contained | `note model` table; CSS/template checks; `createModel` payload |
 | 7. No output claims a phone push | `note-smoke` scans every captured output for 8 forbidden phrases and asserts the manual-sync statement; human preview assertion |

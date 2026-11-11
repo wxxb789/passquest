@@ -51,6 +51,7 @@ type noteEffective struct {
 	Built    note.Draft
 	Front    string
 	Back     string
+	Tactic   string
 	Origin   note.Origin
 	Model    string
 	Advisory bool
@@ -159,25 +160,41 @@ func noteEffectiveOf(draft store.NoteDraft, input note.Input, built note.Draft) 
 		Built:  built,
 		Front:  built.Front,
 		Back:   built.Back,
+		Tactic: built.Tactic,
 		Origin: note.OriginDeterministic,
 	}
-	refined := draft.Origin == string(note.OriginRefined) &&
-		strings.TrimSpace(draft.RefinedFront) != "" && strings.TrimSpace(draft.RefinedBack) != "" &&
-		len(built.Withheld) == 0
-	if refined && built.Unanswered && input.Question != nil &&
-		note.RevealsAnswer(*input.Question, draft.RefinedFront+"\n"+draft.RefinedBack) {
-		// A stale or hostile refinement must not put an unanswered key into
-		// preview or accept; the deterministic draft is key-safe.
-		refined = false
+	// Accepted values are the base for a repeated or incremental accept, so an
+	// edit is never replaced by the original proposal. A withheld draft keeps
+	// the deterministic empty fields instead: revoked consent hides the text.
+	if len(built.Withheld) == 0 && draft.AcceptedFront != "" {
+		effective.Front = draft.AcceptedFront
+		effective.Back = draft.AcceptedBack
+		effective.Tactic = draft.AcceptedTactic
+		switch origin := note.Origin(draft.AcceptedOrigin); origin {
+		case note.OriginDeterministic, note.OriginRefined, note.OriginEdited:
+			effective.Origin = origin
+		}
+		effective.Model = draft.AcceptedModel
+		effective.Advisory = effective.Origin == note.OriginRefined
+	} else {
+		refined := draft.Origin == string(note.OriginRefined) &&
+			strings.TrimSpace(draft.RefinedFront) != "" && strings.TrimSpace(draft.RefinedBack) != "" &&
+			len(built.Withheld) == 0
+		if refined && built.Unanswered && input.Question != nil &&
+			note.RevealsAnswer(*input.Question, draft.RefinedFront+"\n"+draft.RefinedBack) {
+			// A stale or hostile refinement must not put an unanswered key into
+			// preview or accept; the deterministic draft is key-safe.
+			refined = false
+		}
+		if refined {
+			effective.Front = draft.RefinedFront
+			effective.Back = draft.RefinedBack
+			effective.Origin = note.OriginRefined
+			effective.Model = draft.Model
+			effective.Advisory = true
+		}
 	}
-	if refined {
-		effective.Front = draft.RefinedFront
-		effective.Back = draft.RefinedBack
-		effective.Origin = note.OriginRefined
-		effective.Model = draft.Model
-		effective.Advisory = true
-	}
-	effective.Fields = note.HTML(effective.Front, effective.Back, built.Tactic, built.SourceLabel)
+	effective.Fields = note.HTML(effective.Front, effective.Back, effective.Tactic, built.SourceLabel)
 	return effective
 }
 
@@ -427,7 +444,7 @@ func runNoteAccept(args []string, opt Options) int {
 	if len(effective.Built.Withheld) > 0 {
 		return usageError(opt, *jsonFlag, "consent_required", noteConsentMessage(draft))
 	}
-	front, back, tactic := effective.Front, effective.Back, effective.Built.Tactic
+	front, back, tactic := effective.Front, effective.Back, effective.Tactic
 	if frontSet {
 		value, err := note.SanitizeFront(*frontFlag)
 		if err != nil {
@@ -474,7 +491,7 @@ func runNoteAccept(args []string, opt Options) int {
 		Origin:      string(origin),
 		Model:       effective.Model,
 	}
-	result, err := st.AcceptNote(target, content, opt.Now())
+	result, err := st.AcceptDraftNote(draft.ID, target, content, opt.Now())
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}

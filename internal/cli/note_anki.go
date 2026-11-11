@@ -78,6 +78,7 @@ type notePushWork struct {
 	AnkiNoteID int64
 	State      string
 	Drain      bool
+	Persisted  bool
 }
 
 func runNotePush(args []string, opt Options) int {
@@ -168,8 +169,45 @@ func runNotePush(args []string, opt Options) int {
 			Actions:         actions,
 		})
 	}
-	finish := func(exit int) int {
-		for _, item := range work {
+	// persist records every classified outcome immediately. Each completed host
+	// batch is written before the next call, so a later transport or protocol
+	// failure cannot discard an acknowledged note id or a conflict verdict.
+	persist := func() error {
+		for i := range work {
+			item := &work[i]
+			if item.State == "" || item.Persisted {
+				continue
+			}
+			action := item.Action
+			if action == "" {
+				action = "check"
+			}
+			if action != "add" && action != "update" && action != "readd" && action != "check" {
+				action = "check"
+			}
+			outcome := item.Outcome
+			if outcome == "" {
+				outcome = "failed"
+			}
+			attempt := store.AnkiAttempt{
+				NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: action, Outcome: outcome,
+				Detail: item.Detail, At: opt.Now(), AnkiNoteID: item.AnkiNoteID, AnkiState: item.State,
+				Drain: item.Drain,
+			}
+			if item.Drain {
+				attempt.PushedRevision = item.Entry.Revision
+			}
+			if err := st.RecordAnkiAttempt(attempt); err != nil {
+				return err
+			}
+			item.Persisted = true
+		}
+		return nil
+	}
+	report := func(exit int, failure *errorBody) int {
+		doc.Notes = doc.Notes[:0]
+		for i := range work {
+			item := &work[i]
 			if item.State == "" {
 				continue
 			}
@@ -210,10 +248,14 @@ func runNotePush(args []string, opt Options) int {
 		default:
 			doc.State = "idle"
 		}
+		if failure != nil {
+			doc.Error = failure
+			exit = 3
+		}
 		if exit == 0 && (doc.State == "conflict" || doc.State == "failed") {
 			exit = 3
 		}
-		if exit != 0 {
+		if exit != 0 && doc.Error == nil {
 			switch doc.State {
 			case "conflict":
 				doc.Error = &errorBody{Code: "anki_conflict", Message: fmt.Sprintf(
@@ -238,6 +280,15 @@ func runNotePush(args []string, opt Options) int {
 		}
 		return exit
 	}
+	// unreachable marks every unclassified note as queued before reporting. It
+	// is used when the endpoint did not answer or the host call failed after an
+	// earlier batch was already persisted.
+	unreachable := func(exit int, failure *errorBody, detail string) int {
+		if err := noteMarkUnreachable(work, st, opt, detail); err != nil {
+			return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+		}
+		return report(exit, failure)
+	}
 
 	// Capability pass. A transport error means Node or the host is missing;
 	// nothing was contacted and the queue is untouched.
@@ -250,8 +301,7 @@ func runNotePush(args []string, opt Options) int {
 		return noteAnkiFailure(opt, *jsonFlag, "anki_unavailable", err.Error())
 	}
 	if anki.IsUnreachable(capabilities) {
-		noteMarkUnreachable(work, st, opt, "endpoint did not answer")
-		return finish(0)
+		return unreachable(0, nil, "endpoint did not answer")
 	}
 	version, err := noteActionResultInt(capabilities, 0)
 	if err != nil {
@@ -281,8 +331,7 @@ func runNotePush(args []string, opt Options) int {
 			return noteAnkiFailure(opt, *jsonFlag, "anki_unavailable", err.Error())
 		}
 		if anki.IsUnreachable(created) {
-			noteMarkUnreachable(work, st, opt, "endpoint did not answer while creating the model")
-			return finish(0)
+			return unreachable(0, nil, "endpoint did not answer while creating the model")
 		}
 		if err := noteResultOK(created, 0, "createModel"); err != nil {
 			return noteAnkiFailure(opt, *jsonFlag, "anki_error", err.Error())
@@ -300,24 +349,28 @@ func runNotePush(args []string, opt Options) int {
 			}
 		}
 		if len(ids) > 0 {
-			readback, err := call([]anki.Action{{Action: "notesInfo", Params: anki.NotesInfoParams(ids)}})
-			if err != nil {
-				return noteAnkiFailure(opt, *jsonFlag, "anki_unavailable", err.Error())
-			}
-			if anki.IsUnreachable(readback) {
-				noteMarkUnreachable(work, st, opt, "endpoint did not answer during read-back")
-				return finish(0)
-			}
-			if err := noteResultOK(readback, 0, "notesInfo"); err != nil {
-				return noteAnkiFailure(opt, *jsonFlag, "anki_error", err.Error())
-			}
-			infos, err := anki.DecodeNotesInfo(readback.Results[0].Result)
-			if err != nil {
-				return noteAnkiFailure(opt, *jsonFlag, "anki_error", err.Error())
-			}
-			byID := make(map[int64]anki.NoteInfo, len(infos))
-			for _, info := range infos {
-				byID[info.NoteID] = info
+			// A note's fields are bounded by the note package limits, so this
+			// action count keeps one response well under the host's 1 MiB cap.
+			byID := make(map[int64]anki.NoteInfo, len(ids))
+			for start := 0; start < len(ids); start += anki.MaxActionsPerCall {
+				end := min(start+anki.MaxActionsPerCall, len(ids))
+				readback, err := call([]anki.Action{{Action: "notesInfo", Params: anki.NotesInfoParams(ids[start:end])}})
+				if err != nil {
+					return unreachable(3, &errorBody{Code: "anki_unavailable", Message: err.Error()}, err.Error())
+				}
+				if anki.IsUnreachable(readback) {
+					return unreachable(0, nil, "endpoint did not answer during read-back")
+				}
+				if err := noteResultOK(readback, 0, "notesInfo"); err != nil {
+					return unreachable(3, &errorBody{Code: "anki_error", Message: err.Error()}, err.Error())
+				}
+				infos, err := anki.DecodeNotesInfo(readback.Results[0].Result)
+				if err != nil {
+					return unreachable(3, &errorBody{Code: "anki_error", Message: err.Error()}, err.Error())
+				}
+				for _, info := range infos {
+					byID[info.NoteID] = info
+				}
 			}
 			for i := range work {
 				item := &work[i]
@@ -361,6 +414,9 @@ func runNotePush(args []string, opt Options) int {
 					continue
 				}
 				item.Action = "update"
+			}
+			if err := persist(); err != nil {
+				return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
 			}
 		}
 	}
@@ -409,7 +465,7 @@ func runNotePush(args []string, opt Options) int {
 			end := min(start+anki.MaxActionsPerCall, len(writes))
 			response, err := call(actions[start:end])
 			if err != nil {
-				return noteAnkiFailure(opt, *jsonFlag, "anki_unavailable", err.Error())
+				return unreachable(3, &errorBody{Code: "anki_unavailable", Message: err.Error()}, err.Error())
 			}
 			for position, ref := range writes[start:end] {
 				item := &work[ref.index]
@@ -429,6 +485,9 @@ func runNotePush(args []string, opt Options) int {
 					readdIndexes = append(readdIndexes, ref.index)
 				}
 			}
+			if err := persist(); err != nil {
+				return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+			}
 		}
 		// A card deleted after the read-back is re-added once; there is no
 		// review history left to preserve.
@@ -444,7 +503,7 @@ func runNotePush(args []string, opt Options) int {
 				end := min(start+anki.MaxActionsPerCall, len(readdActions))
 				readd, err := call(readdActions[start:end])
 				if err != nil {
-					return noteAnkiFailure(opt, *jsonFlag, "anki_unavailable", err.Error())
+					return unreachable(3, &errorBody{Code: "anki_unavailable", Message: err.Error()}, err.Error())
 				}
 				for position := start; position < end; position++ {
 					item := &work[readdRefs[position]]
@@ -457,42 +516,19 @@ func runNotePush(args []string, opt Options) int {
 					}
 					classifyWriteResult(item, readd.Results[position-start], "readd", true)
 				}
+				if err := persist(); err != nil {
+					return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+				}
 			}
 		}
 	}
 
-	// Persist every classified outcome. A storage failure here leaves the
-	// outbox pending, so the next push retries safely.
-	for i := range work {
-		item := &work[i]
-		if item.State == "" {
-			continue
-		}
-		action := item.Action
-		if action == "" {
-			action = "check"
-		}
-		if action != "add" && action != "update" && action != "readd" && action != "check" {
-			action = "check"
-		}
-		outcome := item.Outcome
-		if outcome == "" {
-			outcome = "failed"
-		}
-		state := item.State
-		attempt := store.AnkiAttempt{
-			NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: action, Outcome: outcome,
-			Detail: item.Detail, At: opt.Now(), AnkiNoteID: item.AnkiNoteID, AnkiState: state,
-			Drain: item.Drain,
-		}
-		if item.Drain {
-			attempt.PushedRevision = item.Entry.Revision
-		}
-		if err := st.RecordAnkiAttempt(attempt); err != nil {
-			return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
-		}
+	// A storage failure leaves the outbox pending, so the next push retries
+	// safely.
+	if err := persist(); err != nil {
+		return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
 	}
-	return finish(0)
+	return report(0, nil)
 }
 
 // classifyWriteResult applies one Anki write result to its work item. It
@@ -578,7 +614,7 @@ func noteConsentRefusal(st *store.Store, notes []store.Note, verb string) (strin
 		strings.Join(denied, ", "), verb), true
 }
 
-func noteMarkUnreachable(work []notePushWork, st *store.Store, opt Options, detail string) {
+func noteMarkUnreachable(work []notePushWork, st *store.Store, opt Options, detail string) error {
 	for i := range work {
 		item := &work[i]
 		if item.State != "" {
@@ -591,11 +627,15 @@ func noteMarkUnreachable(work []notePushWork, st *store.Store, opt Options, deta
 		if action != "add" && action != "update" && action != "readd" {
 			action = "check"
 		}
-		_ = st.RecordAnkiAttempt(store.AnkiAttempt{
+		if err := st.RecordAnkiAttempt(store.AnkiAttempt{
 			NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: action, Outcome: "unreachable",
 			Detail: detail, At: opt.Now(), AnkiState: store.AnkiStateQueued,
-		})
+		}); err != nil {
+			return err
+		}
+		item.Persisted = true
 	}
+	return nil
 }
 
 func notePushedFields(st *store.Store, n store.Note) (note.Fields, error) {
@@ -648,7 +688,7 @@ func noteAnkiFailure(opt Options, jsonMode bool, code, message string) int {
 		_ = writeJSONTo(opt.Stderr, errorDoc{SchemaVersion: ProtocolVersion, Error: errorBody{Code: code, Message: message}})
 	} else {
 		fmt.Fprintf(opt.Stderr, "passquest: %s: %s\n", code, message)
-		fmt.Fprintln(opt.Stderr, "The note queue is unchanged; fix the connection and run passquest note push again.")
+		fmt.Fprintln(opt.Stderr, "Pending notes stay queued; fix the problem and run passquest note push again.")
 	}
 	return 3
 }
