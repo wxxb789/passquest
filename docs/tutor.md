@@ -110,7 +110,8 @@ budget is reached. `preview` names every clipped or omitted field.
 
 ## What is stored
 
-Schema version 8 adds four tables:
+Schema version 8 added four tutor tables (the current schema is later; goal 0007 adds
+`note_refinements` to the same provider budget):
 
 - `tutor_config` — endpoint, model, timeout, output bound and daily budget. Mutable settings, no
   credential.
@@ -129,7 +130,9 @@ stored advisory text. A call records `source_text_shared` only when the host act
 that carried private source text; a failure before the request was sent records `false`. `report`,
 `next`, `practice` and any export path do not read these tables.
 
-The call budget counts failed calls and resets at 00:00 UTC. `ask` claims a slot with an immediate
+The call budget counts failed calls and note refinements (`note propose --refine`), and resets at
+00:00 UTC. `tutor history` reports the shared daily count but lists coaching calls only. `ask` claims
+a slot with an immediate
 database transaction before it spawns the host, so two concurrent invocations cannot both pass the
 same check with, say, `--daily-calls 1`; the recorded call replaces its claim atomically. A path that
 fails before the host is invoked releases its claim. A crash or a storage failure after that cannot,

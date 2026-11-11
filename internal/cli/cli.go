@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/wxxb789/passquest/internal/agent"
+	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
@@ -40,6 +41,9 @@ type Options struct {
 	// TutorTransport isolates the CLI from the Node host. Tests inject a fake;
 	// production defaults to the stdin/stdout host process.
 	TutorTransport tutor.Transport
+	// AnkiTransport isolates the AnkiConnect host. Tests inject a fake;
+	// production spawns agent/anki-host.mjs.
+	AnkiTransport anki.Transport
 	// AgentRunner isolates the durable-agent host. Tests inject a fake;
 	// production spawns agent/durable-host.mjs with the Pi runtime.
 	AgentRunner agent.Runner
@@ -71,6 +75,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.TutorTransport == nil {
 		o.TutorTransport = tutor.HostTransport{Getenv: o.Getenv, Environ: os.Environ}
+	}
+	if o.AnkiTransport == nil {
+		o.AnkiTransport = anki.HostTransport{Getenv: o.Getenv, Environ: os.Environ}
 	}
 	if o.AgentRunner == nil {
 		o.AgentRunner = agent.HostRunner{Getenv: o.Getenv, Environ: os.Environ}
@@ -118,6 +125,8 @@ func Run(args []string, options Options) int {
 		return runTutor(args[1:], opt)
 	case "agent":
 		return runAgent(args[1:], opt)
+	case "note":
+		return runNote(args[1:], opt)
 	case "version":
 		return runVersion(opt)
 	case "help", "-h", "--help":
@@ -169,6 +178,16 @@ Usage:
   passquest agent runs   [--db PATH] [--json]
   passquest agent show   RUN [--db PATH] [--json]
   passquest agent transcript RUN [--agent-store PATH] [--db PATH] [--limit N] [--json]
+  passquest note propose [--attempt ID] [--content CONTENT --question QUESTION] [--mark TEXT]
+                     [--refine] [--db PATH] [--json]
+  passquest note preview [--draft ID] [--db PATH] [--json]
+  passquest note accept  [--draft ID] [--front TEXT] [--back TEXT] [--tactic TEXT]
+                     [--db PATH] [--json]
+  passquest note skip    [--draft ID] [--db PATH] [--json]
+  passquest note show    [NOTE] [--db PATH] [--json]
+  passquest note model   [--json]
+  passquest note export  [--out PATH] [--db PATH] [--json]
+  passquest note push    [--endpoint URL] [--timeout-seconds N] [--force] [--db PATH] [--json]
   passquest report   [--db PATH] [--json]
   passquest version
   passquest help
@@ -178,6 +197,8 @@ practiced. A tactic guided attempt shows the walkthrough and is recorded as
 assisted; the independent question is a different, never-exposed, first-attempt,
 answer-verified question with no hint. The shipped exercise is a self-authored
 sample. No exam score, pass threshold or readiness probability is computed.
+Notes are local revisions; AnkiWeb and mobile synchronization are the learner's
+own manual actions, and Pass Quest never contacts AnkiWeb or a phone.
 Default database: $PASSQUEST_DB or ./.passquest/passquest.sqlite
 `
 

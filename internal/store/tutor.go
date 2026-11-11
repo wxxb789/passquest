@@ -254,12 +254,12 @@ func scanTutorConsent(row rowScanner) (TutorConsentEvent, error) {
 }
 
 // ReserveTutorCall claims one slot in the daily call budget and returns its
-// reservation id. Recorded calls and in-flight reservations are counted inside
-// one immediate transaction, so two processes cannot both pass the same check.
-// A refused reservation returns id 0 and the number of slots already consumed.
-// A reservation that is never finalized keeps its slot for the rest of the UTC
-// day: the provider may already have been contacted, so under-spending is the
-// safe accounting error.
+// reservation id. Recorded calls, in-flight reservations and finalized note
+// refinements are counted inside one immediate transaction, so two processes
+// cannot both pass the same check. A refused reservation returns id 0 and the
+// number of slots already consumed. A reservation that is never finalized keeps
+// its slot for the rest of the UTC day: the provider may already have been
+// contacted, so under-spending is the safe accounting error.
 func (s *Store) ReserveTutorCall(since, at time.Time, limit int) (int64, int, error) {
 	if limit <= 0 {
 		return 0, 0, errors.New("store: tutor daily call limit must be positive")
@@ -273,8 +273,9 @@ func (s *Store) ReserveTutorCall(since, at time.Time, limit int) (int64, int, er
 	var used int
 	err = tx.QueryRow(`SELECT
 			(SELECT COUNT(*) FROM tutor_calls WHERE julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM tutor_call_reservations WHERE julianday(created_at) >= julianday(?))`,
-		boundary, boundary).Scan(&used)
+			(SELECT COUNT(*) FROM tutor_call_reservations WHERE julianday(created_at) >= julianday(?)) +
+			(SELECT COUNT(*) FROM note_refinements WHERE julianday(created_at) >= julianday(?))`,
+		boundary, boundary, boundary).Scan(&used)
 	if err != nil {
 		return 0, 0, fmt.Errorf("store: count tutor budget: %w", err)
 	}
@@ -411,12 +412,15 @@ func (s *Store) TutorCall(id int64) (TutorCall, error) {
 	return call, nil
 }
 
-// TutorCallCountSince counts calls at or after at, including failures, for the
-// daily budget. SQLite parses the stored RFC3339 timestamps.
+// TutorCallCountSince counts provider calls at or after at, including failures
+// and note refinements, because both share the daily budget. SQLite parses the
+// stored RFC3339 timestamps. The tutor call list remains coaching-only.
 func (s *Store) TutorCallCountSince(at time.Time) (int, error) {
 	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM tutor_calls WHERE julianday(created_at) >= julianday(?)`,
-		at.UTC().Format(time.RFC3339Nano)).Scan(&count)
+	err := s.db.QueryRow(`SELECT
+			(SELECT COUNT(*) FROM tutor_calls WHERE julianday(created_at) >= julianday(?)) +
+			(SELECT COUNT(*) FROM note_refinements WHERE julianday(created_at) >= julianday(?))`,
+		at.UTC().Format(time.RFC3339Nano), at.UTC().Format(time.RFC3339Nano)).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("store: count tutor calls: %w", err)
 	}
