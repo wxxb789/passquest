@@ -31,7 +31,9 @@ Entry format:
 - Revisit when: the owner returns, or a merge gate produces a false green.
 
 ### Q-0000-02 — Project instruction file location
-- Status: open
+- Status: resolved
+- Resolution: (owner, 2026-11-11) option (A) confirmed: a root `AGENTS.md` now exists as a thin
+  pointer to `docs/conventions.md` and the rest of the read order. It restates no rule of its own.
 - Context: `AGENTS.md` at the repository root is the file coding agents read first by convention. Its
   creation required an interactive approval that was unavailable during the unattended run, so the
   binding conventions currently live in `docs/conventions.md`.
@@ -352,7 +354,10 @@ Entry format:
   the single-shot host cannot express.
 
 ### Q-0005-03 — Is imported source text sent to the provider by default?
-- Status: decided(default taken)
+- Status: resolved
+- Resolution: (owner, 2026-11-11) option (A) confirmed: imported source text reaches the provider only after an
+  explicit per-source `tutor consent`; `preview` shows the exact payload and `revoke` appends a
+  withholding event. The implementation already does this and is unchanged.
 - Context: the contract requires the learner to inspect, avoid or authorize any private source
   material sent to the provider, and the owner's source is restricted. The embedded first-party
   exercises are redistributable; imported pages, questions and evidence are private.
@@ -545,7 +550,10 @@ Entry format:
 - Default taken: (A): system font stack, no external asset, no fixed height, readable at phone width.
 
 ### Q-0007-04 — May a note carry text from the internal-only source?
-- Status: decided(default taken)
+- Status: resolved
+- Resolution: (owner, 2026-11-11) option (A) confirmed: restricted text may reach a note only after the goal-0005
+  consent is recorded, and AnkiWeb sync stays the learner's own manual act. The app never claims to
+  push anything to a phone.
 - Context: the 165-page source is internal-only; an Anki note can leave the machine through AnkiWeb.
 - Options considered: (A) restricted text is written only after the goal-0005 consent is recorded, and the
   app says AnkiWeb sync is the learner's own action; (B) always include the source sentence; (C) never
@@ -570,7 +578,10 @@ Entry format:
   silently overwritten.
 
 ### Q-0008-01 — Which search provider, and what happens with no credential?
-- Status: decided(default taken)
+- Status: resolved
+- Resolution: (owner, 2026-11-11) option (A) confirmed: one adapter behind `PASSQUEST_SEARCH_ENDPOINT`/`_KEY` with
+  `no_provider` as a first-class outcome, proven against a loopback stub. A real-provider run is
+  deferred until a credential exists and is owner evidence, not a gate.
 - Context: goal 0008 needs external discovery, but no provider key or endpoint exists in this environment and
   CI cannot reach a real provider from any OS.
 - Options considered: (A) one adapter behind `PASSQUEST_SEARCH_ENDPOINT`/`_KEY`, proven against a loopback
@@ -591,7 +602,10 @@ Entry format:
 - Revisit when: a curated open-license source is added on purpose.
 
 ### Q-0008-03 — How large is a search budget?
-- Status: decided(default taken)
+- Status: resolved
+- Resolution: (owner, 2026-11-11) option (A) confirmed: 5 queries/day and 20 candidates/run as visible flags with
+  persisted counters; a refusal names the remaining allowance instead of truncating. The numbers stay
+  flags, so a real study budget is one argument away.
 - Context: "no unlimited scraping or search costs" is the goal's constraint; the learner's real budget is
   unknown and the goal must not invent one silently.
 - Options considered: (A) 5 queries/day and 20 candidates/run as visible flags with persisted counters;

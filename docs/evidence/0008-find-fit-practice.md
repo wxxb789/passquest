@@ -5,7 +5,7 @@
   pull request.
 - Date: 2026-11-11. Host: Linux 7.0.0-1017-azure x64.
 - Toolchain: Go 1.27.3; Node v24.16.0; Bun 1.4.4.
-- Contract: [`../goals/0008-agent-find-fit-practice.md`](../goals/0008-agent-find-fit-practice.md).
+- Contract: [`../goals/archive/0008-agent-find-fit-practice.md`](../goals/archive/0008-agent-find-fit-practice.md).
   Plan: [`../plans/2026-11-11-0238-0008-find-fit-practice.md`](../plans/2026-11-11-0238-0008-find-fit-practice.md).
   Behaviour: [`../find.md`](../find.md).
 
