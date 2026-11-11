@@ -221,7 +221,9 @@ func runAgentResume(args []string, opt Options) int {
 	// cannot) must not veto resume. A start/resume claim younger than the
 	// heartbeat window may not have written its heartbeat yet, so it is
 	// treated as live too.
-	if heartbeat, live := agent.HeartbeatLive(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow()); live &&
+	// An unknown read (present file, transient failure) is live: refusing a
+	// resume costs nothing, starting a second host beside the old one does not.
+	if heartbeat, status := agent.ProbeHeartbeat(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow()); status.Live() &&
 		agent.HeartbeatAuthority(latest.Kind) {
 		return usageError(opt, *flags.json, "run_running",
 			fmt.Sprintf("run %s has a live host (pid %d); cancel it before resuming", run.RunID, heartbeat.PID))
@@ -365,7 +367,8 @@ func runAgentStatus(args []string, opt Options) int {
 	// It describes a live host only while the trail is a live claim; an
 	// interrupted/failed/completed trail wins over a heartbeat the dead host
 	// could not remove.
-	heartbeat, fresh := agent.HeartbeatLive(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow())
+	heartbeat, status := agent.ProbeHeartbeat(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow())
+	fresh := status.Live()
 	if !agent.HeartbeatAuthority(latest.Kind) {
 		fresh = false
 	}
@@ -486,7 +489,8 @@ func runAgentCancel(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
-	heartbeat, live := agent.HeartbeatLive(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow())
+	heartbeat, heartbeatStatus := agent.ProbeHeartbeat(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow())
+	live := heartbeatStatus.Live()
 	if live && agent.HeartbeatAuthority(latest.Kind) {
 		if heartbeat.Token != "" {
 			controlToken = heartbeat.Token
@@ -537,7 +541,7 @@ func runAgentCancel(args []string, opt Options) int {
 		deadline := time.Now().Add(time.Duration(*waitFlag) * time.Second)
 		for time.Now().Before(deadline) {
 			time.Sleep(100 * time.Millisecond)
-			if _, still := agent.HeartbeatLive(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow()); !still {
+			if _, still := agent.ProbeHeartbeat(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow()); !still.Live() {
 				confirmed = true
 				break
 			}
@@ -550,7 +554,7 @@ func runAgentCancel(args []string, opt Options) int {
 			killDeadline := time.Now().Add(6 * time.Second)
 			for time.Now().Before(killDeadline) {
 				time.Sleep(100 * time.Millisecond)
-				if _, still := agent.HeartbeatLive(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow()); !still {
+				if _, still := agent.ProbeHeartbeat(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow()); !still.Live() {
 					confirmed = true
 					break
 				}
@@ -1070,7 +1074,8 @@ func agentHeartbeatWindow() time.Duration {
 // that is still starting; it either observes the heartbeat or waits until the
 // claim can no longer be starting.
 func agentHostClaimWait(path, runID string, latest store.AgentRunEvent, opt Options) (agent.Heartbeat, bool) {
-	heartbeat, live := agent.HeartbeatLive(path, runID, opt.Now(), agentHeartbeatWindow())
+	heartbeat, status := agent.ProbeHeartbeat(path, runID, opt.Now(), agentHeartbeatWindow())
+	live := status.Live()
 	if live && !agent.HeartbeatAuthority(latest.Kind) {
 		// The trail proves the host has gone; a heartbeat it left behind must
 		// not make cancellation wait or signal a dead pid.
@@ -1087,7 +1092,7 @@ func agentHostClaimWait(path, runID string, latest store.AgentRunEvent, opt Opti
 	deadline := time.Now().Add(agentHeartbeatWindow() - age)
 	for time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
-		if heartbeat, live = agent.HeartbeatLive(path, runID, opt.Now(), agentHeartbeatWindow()); live {
+		if heartbeat, status = agent.ProbeHeartbeat(path, runID, opt.Now(), agentHeartbeatWindow()); status.Live() {
 			return heartbeat, true
 		}
 	}

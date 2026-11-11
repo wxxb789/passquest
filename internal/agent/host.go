@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"os/exec"
@@ -561,32 +562,100 @@ func HeartbeatAuthority(latestEvent string) bool {
 	}
 }
 
-// HeartbeatLive reports a fresh heartbeat for this run without matching the
+// HeartbeatStatus classifies one liveness probe. Absent is authoritative: the
+// run has no heartbeat. Unreadable is not: a read can fail transiently, notably
+// on Windows while the host replaces the file with os.Rename.
+type HeartbeatStatus int
+
+const (
+	HeartbeatAbsent HeartbeatStatus = iota
+	HeartbeatStale
+	HeartbeatFresh
+	HeartbeatUnreadable
+)
+
+// Live reports whether the run must be treated as live. Unreadable is live on
+// purpose: a false live costs one wait, but a false not-live confirms a cancel
+// beside a running host.
+func (s HeartbeatStatus) Live() bool {
+	return s == HeartbeatFresh || s == HeartbeatUnreadable
+}
+
+// heartbeatReadAttempts bounds retries of a non-missing read error. The total
+// backoff (150ms) is far below HeartbeatStaleMS, so probing cannot stretch a
+// cancel or status call.
+const (
+	heartbeatReadAttempts = 5
+	heartbeatReadBackoff  = 10 * time.Millisecond
+)
+
+// readHeartbeat retries a non-missing read error with a short bounded backoff.
+// Absence is authoritative and returned immediately: retrying it would make
+// every cancel of an idle run wait.
+func readHeartbeat(path string, read func(string) ([]byte, error)) ([]byte, error) {
+	delay := heartbeatReadBackoff
+	var err error
+	for attempt := range heartbeatReadAttempts {
+		var raw []byte
+		raw, err = read(path)
+		if err == nil {
+			return raw, nil
+		}
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		if attempt+1 < heartbeatReadAttempts {
+			time.Sleep(delay)
+			delay *= 2
+		}
+	}
+	return nil, err
+}
+
+// ProbeHeartbeat classifies the heartbeat file for one run without matching the
 // token. Liveness belongs to the run: a host that raced another claim still
 // holds the Pi store, so a token mismatch must not make a running task look
 // idle. The parsed heartbeat is returned even when stale so a caller can name
 // the last pid.
-func HeartbeatLive(path, runID string, now time.Time, stale time.Duration) (Heartbeat, bool) {
-	raw, err := os.ReadFile(path)
+func ProbeHeartbeat(path, runID string, now time.Time, stale time.Duration) (Heartbeat, HeartbeatStatus) {
+	return probeHeartbeat(os.ReadFile, path, runID, now, stale)
+}
+
+func probeHeartbeat(read func(string) ([]byte, error), path, runID string, now time.Time, stale time.Duration) (Heartbeat, HeartbeatStatus) {
+	raw, err := readHeartbeat(path, read)
 	if err != nil {
-		return Heartbeat{}, false
+		if errors.Is(err, fs.ErrNotExist) {
+			return Heartbeat{}, HeartbeatAbsent
+		}
+		return Heartbeat{}, HeartbeatUnreadable
 	}
 	var heartbeat Heartbeat
 	if err := json.Unmarshal(raw, &heartbeat); err != nil {
-		return Heartbeat{}, false
+		return Heartbeat{}, HeartbeatAbsent
 	}
 	if heartbeat.RunID != runID {
-		return Heartbeat{}, false
+		return Heartbeat{}, HeartbeatAbsent
+	}
+	if heartbeat.At <= 0 {
+		return heartbeat, HeartbeatStale
 	}
 	at := time.UnixMilli(heartbeat.At)
-	if heartbeat.At <= 0 {
-		return heartbeat, false
-	}
 	age := now.Sub(at)
 	if age < -2*time.Second {
-		return heartbeat, false
+		return heartbeat, HeartbeatStale
 	}
-	return heartbeat, age <= stale
+	if age > stale {
+		return heartbeat, HeartbeatStale
+	}
+	return heartbeat, HeartbeatFresh
+}
+
+// HeartbeatLive reports whether the run must be treated as live: a fresh
+// heartbeat, or an unreadable one whose error is not absence. Missing and stale
+// heartbeats are not live.
+func HeartbeatLive(path, runID string, now time.Time, stale time.Duration) (Heartbeat, bool) {
+	heartbeat, status := ProbeHeartbeat(path, runID, now, stale)
+	return heartbeat, status.Live()
 }
 
 // RemoveHeartbeatForRun clears a stale or finished liveness file only when it
