@@ -88,7 +88,6 @@ func findResult(items ...search.Item) search.Result {
 		LatencyMS:     5,
 		RequestSHA256: strings.Repeat("c", 64),
 		RequestBytes:  80,
-		RequestSent:   true,
 	}
 }
 
@@ -400,12 +399,11 @@ func TestFindBudgetRefusesTheSecondQueryOfTheDay(t *testing.T) {
 		Title: "Open", URL: "https://example.com/open", Content: "text", License: "cc-by-4.0",
 	})}
 	env := map[string]string{search.EndpointEnv: "http://127.0.0.1:18768/search"}
-	code, out, errOut := runFindCLI(t, db, clock, env, adapter, "find", "--json", "--max-queries", "1")
+	code, _, errOut := runFindCLI(t, db, clock, env, adapter, "find", "--json", "--max-queries", "1")
 	if code != 0 {
 		t.Fatalf("first exit = %d, stderr = %s", code, errOut)
 	}
-	_ = out
-	code, out, errOut = runFindCLI(t, db, clock, env, adapter, "find", "--json", "--max-queries", "1")
+	code, out, errOut := runFindCLI(t, db, clock, env, adapter, "find", "--json", "--max-queries", "1")
 	if code != 2 {
 		t.Fatalf("second exit = %d, stderr = %s", code, errOut)
 	}
@@ -454,6 +452,33 @@ func TestFindCandidateBudgetRefusesInsteadOfTruncating(t *testing.T) {
 	}
 	query, candidates, found, err := storeFindQuery(db, failure.QueryID)
 	if err != nil || !found || query.Status != "candidate_limit_exceeded" || len(candidates) != 0 {
+		t.Fatalf("stored = %+v / %d / %t / %v", query, len(candidates), found, err)
+	}
+}
+
+func TestFindCandidateBudgetAcceptsExactlyTheLimit(t *testing.T) {
+	db := newDB(t)
+	seedFindAttempts(t, db)
+	clock := &stepClock{base: goldenBase}
+	adapter := &fakeSearchAdapter{result: findResult(
+		search.Item{Title: "One", URL: "https://example.com/1", Content: "1", License: "cc-by-4.0"},
+		search.Item{Title: "Two", URL: "https://example.com/2", Content: "2", License: "cc-by-4.0"},
+	)}
+	code, out, errOut := runFindCLI(t, db, clock, map[string]string{
+		search.EndpointEnv: "http://127.0.0.1:18768/search",
+	}, adapter, "find", "--json", "--max-candidates", "2")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, errOut)
+	}
+	doc := decodeFindDoc(t, out)
+	if doc.State != "found" || doc.QueryID == 0 {
+		t.Fatalf("doc = %+v", doc)
+	}
+	if len(doc.Candidates) != 2 || doc.Budget.CandidatesStored != 2 {
+		t.Fatalf("candidates = %d, stored = %d", len(doc.Candidates), doc.Budget.CandidatesStored)
+	}
+	query, candidates, found, err := storeFindQuery(db, doc.QueryID)
+	if err != nil || !found || query.Status != "ok" || len(candidates) != 2 {
 		t.Fatalf("stored = %+v / %d / %t / %v", query, len(candidates), found, err)
 	}
 }

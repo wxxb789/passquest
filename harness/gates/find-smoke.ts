@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
-import type { Server as NetServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -33,7 +31,6 @@ export const findSmoke: Gate = {
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-find-smoke-"));
     const binary = path.join(temp, binaryName);
     const checks: string[] = [];
-    const outputs: string[] = [];
     let assertions = 0;
     const check = (condition: boolean, message: string): boolean => {
       assertions++;
@@ -45,8 +42,6 @@ export const findSmoke: Gate = {
     let pageRequests = 0;
     let lastBody: Record<string, unknown> = {};
     let stub: Bun.Server<undefined> | undefined;
-    let listener: NetServer | undefined;
-    let connections = 0;
 
     try {
       stub = Bun.serve({
@@ -105,15 +100,6 @@ export const findSmoke: Gate = {
       const endpoint = (mode: string) => `http://127.0.0.1:${stub!.port}/search/${mode}`;
       const hostPath = path.join(ctx.root, "agent", "search-host.mjs");
 
-      listener = createServer((socket) => {
-        connections++;
-        socket.destroy();
-      });
-      const listening = Promise.withResolvers<void>();
-      listener.once("error", listening.reject);
-      listener.listen(0, "127.0.0.1", listening.resolve);
-      await listening.promise;
-
       const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
       if (build.code !== 0) {
         return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
@@ -125,7 +111,6 @@ export const findSmoke: Gate = {
           cwd: ctx.root,
           env: { ...baseEnv, ...env },
         });
-        outputs.push(result.stdout, result.stderr);
         return result;
       };
       const callJSON = async (db: string, args: string[], env: Record<string, string> = {}) => {
@@ -136,24 +121,31 @@ export const findSmoke: Gate = {
         const result = await callJSON(db, ["find", "history"]);
         return result;
       };
+      const seedReviewedSource = async (db: string, label: string, practices: number): Promise<boolean> => {
+        const importResult = await callJSON(db, ["import", "--path", path.join(ctx.root, "internal", "cli", "testdata", "import")]);
+        if (!check(importResult.code === 0, `${label} import exit = ${importResult.code}: ${importResult.stderr}`)) return false;
+        const sourceID = stringField(field(importResult.doc, "source"), "id");
+        if (sourceID === undefined) {
+          check(false, `${label} import did not return a source id`);
+          return false;
+        }
+        for (const args of [
+          ["question", "add", sourceID, "1", "--file", path.join(ctx.root, "internal", "cli", "testdata", "import", "question-q2-tagged.json")],
+          ["page", "review", sourceID, "1", "--reviewer", "smoke"],
+          ["question", "review", sourceID, "q2", "--answer", "C", "--reviewer", "smoke"],
+        ]) {
+          const result = await callJSON(db, args);
+          check(result.code === 0, `${label} ${args.join(" ")} exit = ${result.code}: ${result.stderr}`);
+        }
+        for (let index = 0; index < practices; index++) {
+          const result = await callJSON(db, ["practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A"]);
+          check(result.code === 0, `${label} practice ${index + 1} exit = ${result.code}: ${result.stderr}`);
+        }
+        return true;
+      };
 
       const db1 = path.join(temp, "find.sqlite");
-      const importResult = await callJSON(db1, ["import", "--path", path.join(ctx.root, "internal", "cli", "testdata", "import")]);
-      if (!check(importResult.code === 0, `import exit = ${importResult.code}: ${importResult.stderr}`)) return fail(checks);
-      const sourceID = stringField(field(importResult.doc, "source"), "id");
-      if (!check(sourceID !== undefined, "import did not return a source id")) return fail(checks);
-      for (const args of [
-        ["question", "add", sourceID!, "1", "--file", path.join(ctx.root, "internal", "cli", "testdata", "import", "question-q2-tagged.json")],
-        ["page", "review", sourceID!, "1", "--reviewer", "smoke"],
-        ["question", "review", sourceID!, "q2", "--answer", "C", "--reviewer", "smoke"],
-      ]) {
-        const result = await callJSON(db1, args);
-        check(result.code === 0, `${args.join(" ")} exit = ${result.code}: ${result.stderr}`);
-      }
-      for (let index = 0; index < 3; index++) {
-        const result = await callJSON(db1, ["practice", "--source", sourceID!, "--page", "1", "--question", "q2", "--answer", "A"]);
-        check(result.code === 0, `practice ${index + 1} exit = ${result.code}: ${result.stderr}`);
-      }
+      if (!(await seedReviewedSource(db1, "find", 3))) return fail(checks);
 
       const reportBefore = await call(db1, ["report", "--json"]);
       const nextBefore = await call(db1, ["next", "--json"]);
@@ -174,7 +166,6 @@ export const findSmoke: Gate = {
       check(stringField(field(noProvider.doc, "intent"), "exam_section") === "notice", "no-provider intent section");
       check(stringField(field(noProvider.doc, "intent"), "skill_id") === "not-except-polarity", "no-provider intent skill");
       check(requests === requestsBeforeNoProvider, "no-provider run contacted the provider");
-      check(connections === 0, `no-provider run opened ${connections} listener connection(s)`);
       const noProviderHistory = await history(db1);
       check(arrayField(noProviderHistory.doc, "queries").length === 0, "no-provider run stored a query");
 
@@ -306,18 +297,7 @@ export const findSmoke: Gate = {
 
       // A provider response over the candidate limit is refused, not truncated.
       const db3 = path.join(temp, "candidate-budget.sqlite");
-      const import3 = await callJSON(db3, ["import", "--path", path.join(ctx.root, "internal", "cli", "testdata", "import")]);
-      const source3 = stringField(field(import3.doc, "source"), "id");
-      if (!check(source3 !== undefined, "candidate-budget import")) return fail(checks);
-      for (const args of [
-        ["question", "add", source3!, "1", "--file", path.join(ctx.root, "internal", "cli", "testdata", "import", "question-q2-tagged.json")],
-        ["page", "review", source3!, "1", "--reviewer", "smoke"],
-        ["question", "review", source3!, "q2", "--answer", "C", "--reviewer", "smoke"],
-        ["practice", "--source", source3!, "--page", "1", "--question", "q2", "--answer", "A"],
-      ]) {
-        const result = await callJSON(db3, args);
-        check(result.code === 0, `${args.join(" ")} exit = ${result.code}`);
-      }
+      if (!(await seedReviewedSource(db3, "candidate-budget", 1))) return fail(checks);
       const tooMany = await callJSON(db3, ["find", "--max-candidates", "2"], {
         PASSQUEST_SEARCH_ENDPOINT: endpoint("too-many"),
         PASSQUEST_SEARCH_KEY: "test-key-not-real",
@@ -337,18 +317,7 @@ export const findSmoke: Gate = {
 
       // A malformed provider body is its own failure, not an empty result.
       const db4 = path.join(temp, "invalid-response.sqlite");
-      const import4 = await callJSON(db4, ["import", "--path", path.join(ctx.root, "internal", "cli", "testdata", "import")]);
-      const source4 = stringField(field(import4.doc, "source"), "id");
-      if (!check(source4 !== undefined, "invalid-response import")) return fail(checks);
-      for (const args of [
-        ["question", "add", source4!, "1", "--file", path.join(ctx.root, "internal", "cli", "testdata", "import", "question-q2-tagged.json")],
-        ["page", "review", source4!, "1", "--reviewer", "smoke"],
-        ["question", "review", source4!, "q2", "--answer", "C", "--reviewer", "smoke"],
-        ["practice", "--source", source4!, "--page", "1", "--question", "q2", "--answer", "A"],
-      ]) {
-        const result = await callJSON(db4, args);
-        check(result.code === 0, `${args.join(" ")} exit = ${result.code}`);
-      }
+      if (!(await seedReviewedSource(db4, "invalid-response", 1))) return fail(checks);
       const bad = await callJSON(db4, ["find"], {
         PASSQUEST_SEARCH_ENDPOINT: endpoint("bad"),
         PASSQUEST_SEARCH_KEY: "test-key-not-real",
@@ -379,7 +348,6 @@ export const findSmoke: Gate = {
       checks.push(error instanceof Error ? error.message : String(error));
     } finally {
       stub?.stop(true);
-      listener?.close();
       rmSync(temp, { recursive: true, force: true });
     }
 

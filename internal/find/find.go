@@ -50,8 +50,6 @@ const (
 // resolves ExamSection from the content the attempt was taken on.
 type Record struct {
 	AttemptID     int64
-	ContentID     string
-	QuestionID    string
 	AttemptNumber int
 	Assistance    attempt.Assistance
 	Status        attempt.Status
@@ -67,7 +65,6 @@ type Evidence struct {
 	Incorrect  int
 	Skipped    int
 	AttemptIDs []int64
-	LatestID   int64
 }
 
 // LevelBasis explains the evidence bucket.
@@ -191,7 +188,6 @@ func Derive(records []Record, candidateLimit int) (Intent, bool) {
 				Incorrect:  bestEvidence.incorrect,
 				Skipped:    bestEvidence.skipped,
 				AttemptIDs: append([]int64(nil), bestEvidence.ids...),
-				LatestID:   bestEvidence.latest.AttemptID,
 			},
 			Reason: reason,
 		}, true
@@ -202,14 +198,13 @@ func Derive(records []Record, candidateLimit int) (Intent, bool) {
 		return Intent{}, false
 	}
 	lesson, _ := skill.Get(tacticID)
-	evidence := Evidence{AttemptIDs: []int64{latestWrong.AttemptID}, LatestID: latestWrong.AttemptID}
+	evidence := Evidence{AttemptIDs: []int64{latestWrong.AttemptID}}
 	if entry := bySkill[tacticID]; entry != nil {
 		evidence = Evidence{
 			Attempts:   entry.attempts,
 			Incorrect:  entry.incorrect,
 			Skipped:    entry.skipped,
 			AttemptIDs: append([]int64(nil), entry.ids...),
-			LatestID:   entry.latest.AttemptID,
 		}
 	}
 	section := sectionOrUnavailable(latestWrong.ExamSection)

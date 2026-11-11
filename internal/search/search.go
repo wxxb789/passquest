@@ -40,7 +40,6 @@ const (
 	MinTimeoutMS     = 1000
 	MaxTimeoutMS     = 120000
 	MaxResponseBytes = 1 << 20
-	MaxRequestBytes  = 64 << 10
 	MaxResults       = 1000
 	MaxTitleRunes    = 300
 	MaxURLRunes      = 2048
@@ -78,7 +77,6 @@ type Result struct {
 	LatencyMS     int64
 	RequestSHA256 string
 	RequestBytes  int
-	RequestSent   bool
 }
 
 // ProviderError is a structured failure. RequestSent is true only when the
@@ -474,7 +472,6 @@ func (t HostTransport) Search(ctx context.Context, req Request) (Result, error) 
 		LatencyMS:     response.LatencyMS,
 		RequestSHA256: requestSHA,
 		RequestBytes:  requestBytes,
-		RequestSent:   response.RequestSent,
 	}, nil
 }
 
@@ -525,9 +522,6 @@ func ParseProviderResponse(data []byte) (string, []Item, error) {
 			return "", nil, fmt.Errorf("result %d has no title", index+1)
 		}
 		title := *item.Title
-		if !utf8.ValidString(title) {
-			return "", nil, fmt.Errorf("result %d title is not UTF-8", index+1)
-		}
 		if utf8.RuneCountInString(title) > MaxTitleRunes {
 			return "", nil, fmt.Errorf("result %d title is longer than %d characters", index+1, MaxTitleRunes)
 		}
@@ -549,13 +543,6 @@ func ParseProviderResponse(data []byte) (string, []Item, error) {
 		}
 		if utf8.RuneCountInString(license) > MaxLicenseRunes {
 			return "", nil, fmt.Errorf("result %d license is longer than %d characters", index+1, MaxLicenseRunes)
-		}
-		for name, value := range map[string]string{
-			"title": title, "URL": rawURL, "snippet": snippet, "content": content, "license": license,
-		} {
-			if !utf8.ValidString(value) {
-				return "", nil, fmt.Errorf("result %d %s is not UTF-8", index+1, name)
-			}
 		}
 		generated := false
 		if item.Generated != nil {

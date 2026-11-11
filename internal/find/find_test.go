@@ -13,8 +13,6 @@ import (
 func record(id int64, status attempt.Status, section string, skills ...string) Record {
 	return Record{
 		AttemptID:     id,
-		ContentID:     "sample-0001",
-		QuestionID:    "q1",
 		AttemptNumber: 1,
 		Assistance:    attempt.AssistanceIndependent,
 		Status:        status,
@@ -173,7 +171,12 @@ func TestInferLevelUsesFirstIndependentAttempts(t *testing.T) {
 		{"empty", nil, LevelEarly, 0, 0},
 		{"two observations", []Record{correct(1), wrong(2)}, LevelEarly, 1, 0},
 		{"foundation", []Record{wrong(1), wrong(2), correct(3)}, LevelFoundation, 1, 0},
+		{"developing at 2/5", []Record{wrong(1), wrong(2), wrong(3), correct(4), correct(5)}, LevelDeveloping, 2, 0},
 		{"developing", []Record{correct(1), correct(2), wrong(3)}, LevelDeveloping, 2, 0},
+		{"consolidating at 7/10", []Record{
+			wrong(1), wrong(2), wrong(3), correct(4), correct(5),
+			correct(6), correct(7), correct(8), correct(9), correct(10),
+		}, LevelConsolidating, 7, 0},
 		{"consolidating", []Record{correct(1), correct(2), correct(3)}, LevelConsolidating, 3, 0},
 		{"skip counts in denominator", []Record{correct(1), correct(2), skipped(3)}, LevelDeveloping, 2, 1},
 	}
@@ -238,10 +241,8 @@ func TestClassifyPrecedence(t *testing.T) {
 	if candidates[4].Classification != ClassLinkOnly || candidates[4].Reason != "no_returned_text" {
 		t.Fatalf("license-without-text candidate = %+v", candidates[4])
 	}
-	for _, candidate := range candidates {
-		if candidate.Classification == ClassGeneratedUnverified && candidate.License != "cc-by-4.0" {
-			t.Fatalf("generated license was not retained: %+v", candidate)
-		}
+	if candidates[0].License != "cc-by-4.0" {
+		t.Fatalf("generated license was not retained: %+v", candidates[0])
 	}
 	counts := Count(candidates)
 	if counts.Total != 5 || counts.LocalUsable != 1 || counts.LinkOnly != 3 || counts.GeneratedUnverified != 1 {

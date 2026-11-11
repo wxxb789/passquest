@@ -24,7 +24,7 @@ documents stayed under `/tmp`.
 | `agent/search-host.mjs` | The only search egress: one versioned document, `https` off-loopback, loopback `http` for a stub, optional bearer credential, redirect refusal, 1 MiB cap, no URL fetch. |
 | `internal/store` | Schema v13: transient `find_query_reservations`, append-only `find_queries` and `find_candidates`, with a CHECK that only `local-usable` rows can carry text. No write path into attempts, sources, questions, skills or recommendations. |
 | `internal/cli` | `find`, `find history`, `find show`, JSON/human documents, budget reservation/finalization, failure vocabulary, provenance display. |
-| `harness/gates/find-smoke.ts` | Real CLI + real search host + loopback search stub; 97 assertions over no evidence, no provider, three classifications, provenance, hash recomputation, no URL fetch, injection containment, empty/link-only/rate-limit outcomes, both budget limits and invalid response. |
+| `harness/gates/find-smoke.ts` | Real CLI + real search host + loopback search stub; 95 assertions over no evidence, no provider, three classifications, provenance, hash recomputation, no URL fetch, injection containment, empty/link-only/rate-limit outcomes, both budget limits and invalid response. |
 
 ## Intent and the two CLI outcomes
 
@@ -84,8 +84,8 @@ No provider was configured for the first run (`PASSQUEST_SEARCH_ENDPOINT` empty,
 ```
 
 The stub's POST counter did not change across the no-provider run, so that path made no request. The
-`find-smoke` gate additionally starts a raw `node:net` listener and asserts 0 connections for the same
-scenario.
+`find-smoke` gate proves the same path with an unchanged stub request counter and a missing
+`PASSQUEST_SEARCH_HOST`.
 
 A new empty database with a configured endpoint produced exit 0 and
 
@@ -273,7 +273,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (16 packages, 660 tests, 0 skipped)
+PASS  go test (16 packages, 663 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -309,7 +309,7 @@ PASS  agent smoke (120 assertions, 11 scenarios, 25 provider requests, 2 permiss
 PASS  note smoke (806 assertions)
 
 == find smoke
-PASS  find smoke (97 assertions)
+PASS  find smoke (95 assertions)
 
 == portable paths
 PASS  portable paths (78 Go files, no platform-bound path literal)
@@ -344,10 +344,10 @@ GATE: PASS
 | Clause | Evidence |
 |---|---|
 | 1. One evidence rule; bounded intent; no evidence → `nothing_to_find` | intent JSON above (`not-except-polarity`, notice, 3/3, attempts 1–3); empty DB run; `internal/find` unit tests for ratio, ties, fallback, no intent |
-| 2. No endpoint → no network I/O, explicit message, exit 0 | no-provider JSON, stub POST count unchanged, missing host, `find-smoke` raw listener 0 connections |
+| 2. No endpoint → no network I/O, explicit message, exit 0 | no-provider JSON, stub POST count unchanged, missing host, `find-smoke` unchanged request counter |
 | 3. Adapter protocol; query, parse, candidate limit | `find --json` request identity, stub body query/limit, 3 candidates parsed; `too-many` refusal with `--max-candidates 2` |
 | 4. Every candidate classified; only `local-usable` displayable | counts 1/1/1; local content stored, link/generated empty; schema CHECK; `TestClassifyPrecedence` |
 | 5. Provenance stored and auditable | `find show 1` provider/query/retrieved_at/URL/SHA; recomputed hash matches; `TestAppendFindQueryStoresCandidatesAndReleasesReservation` |
 | 6. Budget refuses 6th query and over-limit candidate response | sixth-run JSON with 0 remaining and no provider POST; candidate-limit JSON and zero candidates stored |
-| 7. Injected instruction changes no state | `cmp` report/next 0; attempt count 3; `find-smoke` 97 assertions |
+| 7. Injected instruction changes no state | `cmp` report/next 0; attempt count 3; `find-smoke` 95 assertions |
 | 8. Rate limit, empty and all-link-only reported as themselves | three outcome rows above; `find history` statuses |

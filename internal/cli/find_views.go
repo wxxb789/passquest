@@ -251,13 +251,21 @@ func findQueryViewsOf(queries []store.FindQuery) []findQueryView {
 	return out
 }
 
+func writeFindBudget(w io.Writer, budget findBudgetView, stored bool) {
+	suffix := "candidates this run"
+	if stored {
+		suffix = "candidates stored this run"
+	}
+	fmt.Fprintf(w, "Budget: %d/%d queries used today (%d remain); %d/%d %s.\n",
+		budget.QueriesUsed, budget.MaxQueries, budget.QueriesRemaining,
+		budget.CandidatesStored, budget.MaxCandidates, suffix)
+}
+
 func writeFindNothing(w io.Writer, doc findDoc) {
 	fmt.Fprintln(w, "Pass Quest — find practice")
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "%s\n", doc.Message)
-	fmt.Fprintf(w, "Budget: %d/%d queries used today (%d remain); %d/%d candidates this run.\n",
-		doc.Budget.QueriesUsed, doc.Budget.MaxQueries, doc.Budget.QueriesRemaining,
-		doc.Budget.CandidatesStored, doc.Budget.MaxCandidates)
+	writeFindBudget(w, doc.Budget, false)
 }
 
 func writeFindNoProvider(w io.Writer, doc findDoc) {
@@ -265,9 +273,7 @@ func writeFindNoProvider(w io.Writer, doc findDoc) {
 	fmt.Fprintln(w)
 	writeFindIntent(w, doc.Intent)
 	fmt.Fprintf(w, "Provider: not configured — %s\n", doc.Message)
-	fmt.Fprintf(w, "Budget: %d/%d queries used today (%d remain); %d/%d candidates this run.\n",
-		doc.Budget.QueriesUsed, doc.Budget.MaxQueries, doc.Budget.QueriesRemaining,
-		doc.Budget.CandidatesStored, doc.Budget.MaxCandidates)
+	writeFindBudget(w, doc.Budget, false)
 }
 
 func writeFind(w io.Writer, doc findDoc) {
@@ -275,9 +281,7 @@ func writeFind(w io.Writer, doc findDoc) {
 	fmt.Fprintln(w)
 	writeFindIntent(w, doc.Intent)
 	fmt.Fprintf(w, "Provider: %s (%s)\n", doc.Provider.Name, doc.Provider.EndpointHost)
-	fmt.Fprintf(w, "Budget: %d/%d queries used today (%d remain); %d/%d candidates stored this run.\n",
-		doc.Budget.QueriesUsed, doc.Budget.MaxQueries, doc.Budget.QueriesRemaining,
-		doc.Budget.CandidatesStored, doc.Budget.MaxCandidates)
+	writeFindBudget(w, doc.Budget, true)
 	fmt.Fprintf(w, "Counts: %d stored — %d local-usable, %d link-only, %d generated-unverified.\n\n",
 		doc.Counts.Total, doc.Counts.LocalUsable, doc.Counts.LinkOnly, doc.Counts.GeneratedUnverified)
 	if len(doc.Candidates) == 0 {

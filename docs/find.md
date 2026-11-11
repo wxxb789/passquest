@@ -36,7 +36,8 @@ describe the whole evidence set, and the output document carries every id. A ski
 
 **Exam section** is the stored section of the source page holding the selected attempt's content
 (`notice`, `mock-exam`, …). First-party content has no exam section and is reported as `embedded`; an
-unreadable source page is `unavailable`.
+unreadable source page is `unavailable`; a page whose stored section is blank is `unspecified`.
+`embedded`, `unavailable` and `unspecified` are omitted from the query text.
 
 **Learner level** is not a stored profile and is not a CEFR or exam-readiness measurement. It is a
 bucket over first, independent attempts (attempt number 1, `assistance=independent`), with skips in the
@@ -154,6 +155,7 @@ without a finalized query row; that is the intended under-spend, not a lost quer
 | All candidates link-only | `all_link_only` | 0 | yes |
 | HTTP 429 | `rate_limited` | 3 | yes |
 | HTTP 401/403 | `auth_failed` | 3 | yes |
+| Provider timeout | `timeout` | 3 | yes |
 | Other provider/transport failure | `provider_error` / `unreachable` | 3 | yes when a request may have been sent |
 | Malformed provider body | `invalid_response` | 3 | yes |
 | Missing Node or host before a request | `search_unavailable` | 3 | no; slot released |

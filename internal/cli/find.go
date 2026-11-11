@@ -124,13 +124,6 @@ func runFindQuery(args []string, opt Options) int {
 	if endpointErr != nil {
 		return usageError(opt, *jsonFlag, "invalid_endpoint", endpointErr.Error())
 	}
-	if usage.Used() >= *maxQueriesFlag {
-		message := fmt.Sprintf(
-			"query budget exhausted: %d of %d queries used on %s UTC; 0 remain. No network request was made.",
-			usage.Used(), *maxQueriesFlag, day,
-		)
-		return findFailure(opt, *jsonFlag, 2, "budget_exceeded", message, &intentView, budget, provider, 0)
-	}
 
 	reservationID, usage, reserved, err := st.ReserveFindQuery(day, *maxQueriesFlag, now)
 	if err != nil {
@@ -144,11 +137,7 @@ func runFindQuery(args []string, opt Options) int {
 		return findFailure(opt, *jsonFlag, 2, "budget_exceeded", message, &intentView, budget, provider, 0)
 	}
 	budget = findBudgetViewOf(day, *maxQueriesFlag, *maxCandidatesFlag, usage.Used(), 0)
-	adapter := opt.SearchTransport
-	if adapter == nil {
-		adapter = search.HostTransport{Getenv: opt.Getenv}
-	}
-	result, searchErr := adapter.Search(context.Background(), search.Request{
+	result, searchErr := opt.SearchTransport.Search(context.Background(), search.Request{
 		Endpoint:  normalized,
 		Query:     intent.Query,
 		Limit:     *maxCandidatesFlag,
@@ -172,7 +161,7 @@ func runFindQuery(args []string, opt Options) int {
 			return findFailure(opt, *jsonFlag, 3, failure.Code, message, &intentView, budget, provider, 0)
 		}
 		code := findErrorCode(failure.Code)
-		status := findStatusForCode(code)
+		status := code
 		query := findStoredQuery(now, day, intent, intentView, failure.RequestSHA, failure.RequestSize,
 			"", status, code, failure.Message, failure.HTTPStatus, failure.LatencyMS)
 		query.EndpointHost = provider.EndpointHost
@@ -208,7 +197,6 @@ func runFindQuery(args []string, opt Options) int {
 	storedCandidates := findStoredCandidates(classified, result.Provider, intent.Query, now)
 	status := "ok"
 	state := "found"
-	errorMessage := ""
 	message := fmt.Sprintf(
 		"%d candidate(s) stored; %d local-usable, %d link-only, %d generated-unverified. Only local-usable text is shown for local study.",
 		counts.Total, counts.LocalUsable, counts.LinkOnly, counts.GeneratedUnverified,
@@ -227,7 +215,7 @@ func runFindQuery(args []string, opt Options) int {
 		)
 	}
 	query := findStoredQuery(now, day, intent, intentView, result.RequestSHA256, result.RequestBytes,
-		result.Provider, status, "", errorMessage, result.HTTPStatus, result.LatencyMS)
+		result.Provider, status, "", "", result.HTTPStatus, result.LatencyMS)
 	query.EndpointHost = provider.EndpointHost
 	stored, err := st.AppendFindQuery(query, storedCandidates, reservationID)
 	if err != nil {
@@ -357,8 +345,6 @@ func findRecords(st *store.Store) ([]find.Record, []unclassifiedAttemptView, err
 		}
 		records = append(records, find.Record{
 			AttemptID:     record.AttemptID,
-			ContentID:     record.ContentID,
-			QuestionID:    record.QuestionID,
 			AttemptNumber: record.AttemptNumber,
 			Assistance:    record.Assistance,
 			Status:        record.Status,
@@ -479,15 +465,6 @@ func findClipText(value string, limit int) string {
 	return value
 }
 
-func findStatusForCode(code string) string {
-	switch code {
-	case "rate_limited", "auth_failed", "provider_error", "unreachable", "invalid_response", "timeout":
-		return code
-	default:
-		return "provider_error"
-	}
-}
-
 func findStoreMessage(message string) string {
 	message = find.SanitizeText(message)
 	runes := []rune(message)
@@ -512,8 +489,7 @@ func findFailure(opt Options, jsonMode bool, exitCode int, code, message string,
 		return exitCode
 	}
 	fmt.Fprintf(opt.Stderr, "passquest: %s\n", message)
-	fmt.Fprintf(opt.Stderr, "Budget: %d/%d queries used today (%d remain); %d/%d candidates stored this run.\n",
-		budget.QueriesUsed, budget.MaxQueries, budget.QueriesRemaining, budget.CandidatesStored, budget.MaxCandidates)
+	writeFindBudget(opt.Stderr, budget, true)
 	if queryID > 0 {
 		fmt.Fprintf(opt.Stderr, "Stored query: %d (inspect with `passquest find show %d`).\n", queryID, queryID)
 	}

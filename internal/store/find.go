@@ -127,7 +127,6 @@ type FindCandidate struct {
 // FindUsage is the persisted budget state for one UTC day. Reservations count
 // as used: a process that dies after claiming a slot can only under-spend.
 type FindUsage struct {
-	Day          string
 	Queries      int
 	Reservations int
 }
@@ -140,7 +139,7 @@ func (s *Store) FindQueryUsage(day string) (FindUsage, error) {
 	if err := validateFindDay(day); err != nil {
 		return FindUsage{}, err
 	}
-	usage := FindUsage{Day: day}
+	usage := FindUsage{}
 	err := s.db.QueryRow(`SELECT
 			(SELECT COUNT(*) FROM find_queries WHERE day = ?),
 			(SELECT COUNT(*) FROM find_query_reservations WHERE day = ?)`,
@@ -169,7 +168,7 @@ func (s *Store) ReserveFindQuery(day string, max int, at time.Time) (int64, Find
 	}
 	defer tx.Rollback()
 
-	usage := FindUsage{Day: day}
+	usage := FindUsage{}
 	if err := tx.QueryRow(`SELECT
 			(SELECT COUNT(*) FROM find_queries WHERE day = ?),
 			(SELECT COUNT(*) FROM find_query_reservations WHERE day = ?)`,

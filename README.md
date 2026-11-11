@@ -186,8 +186,9 @@ passquest find history
 passquest find show 1
 ```
 
-With no `PASSQUEST_SEARCH_ENDPOINT`, the command prints `no provider configured` and makes zero
-network calls. Fetched text is stored as data only: it is never an instruction, never sent to a model,
+With no `PASSQUEST_SEARCH_ENDPOINT` and an intent derived from stored evidence, the command prints
+`no provider configured` and makes zero network calls; an empty database reports `nothing_to_find`
+first. Fetched text is stored as data only: it is never an instruction, never sent to a model,
 and cannot change an attempt, grade or the next exercise. Details: [`docs/find.md`](docs/find.md).
 Measured evidence: [`docs/evidence/0008-find-fit-practice.md`](docs/evidence/0008-find-fit-practice.md).
 
