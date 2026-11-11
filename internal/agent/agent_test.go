@@ -2,6 +2,8 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -556,6 +558,56 @@ func TestHostResponseValidation(t *testing.T) {
 	response.State = "unknown"
 	if err := ValidateHostResponse(response, request); err == nil {
 		t.Fatal("unknown state accepted")
+	}
+}
+
+func TestProbeHeartbeatClassifiesAbsenceFreshnessAndReadErrors(t *testing.T) {
+	const runID = "run-20261110T100000Z-aaaaaaaa"
+	now := time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC)
+	fresh, _ := json.Marshal(Heartbeat{RunID: runID, PID: 42, Token: strings.Repeat("a", 32), At: now.Add(-time.Second).UnixMilli()})
+	stale, _ := json.Marshal(Heartbeat{RunID: runID, PID: 43, At: now.Add(-10 * time.Second).UnixMilli()})
+	// Windows surfaces a read or rename collision as ERROR_SHARING_VIOLATION.
+	// Classification only distinguishes absence from every other read error.
+	sharing := errors.New("sharing violation")
+	type readResult struct {
+		raw []byte
+		err error
+	}
+	cases := []struct {
+		name       string
+		results    []readResult
+		wantStatus HeartbeatStatus
+		wantLive   bool
+		wantPID    int
+		wantCalls  int
+	}{
+		{name: "absent file", results: []readResult{{err: fs.ErrNotExist}},
+			wantStatus: HeartbeatAbsent, wantLive: false, wantPID: 0, wantCalls: 1},
+		{name: "present and fresh", results: []readResult{{raw: fresh}},
+			wantStatus: HeartbeatFresh, wantLive: true, wantPID: 42, wantCalls: 1},
+		{name: "present and stale", results: []readResult{{raw: stale}},
+			wantStatus: HeartbeatStale, wantLive: false, wantPID: 43, wantCalls: 1},
+		{name: "read error that clears", results: []readResult{{err: sharing}, {err: sharing}, {raw: fresh}},
+			wantStatus: HeartbeatFresh, wantLive: true, wantPID: 42, wantCalls: 3},
+		{name: "read error that never clears", results: []readResult{{err: sharing}, {err: sharing}, {err: sharing}, {err: sharing}, {err: sharing}},
+			wantStatus: HeartbeatUnreadable, wantLive: true, wantPID: 0, wantCalls: heartbeatReadAttempts},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			read := func(string) ([]byte, error) {
+				calls++
+				if calls <= len(tc.results) {
+					return tc.results[calls-1].raw, tc.results[calls-1].err
+				}
+				return nil, sharing
+			}
+			heartbeat, status := probeHeartbeat(read, filepath.Join(t.TempDir(), "agent.host"), runID, now, 5*time.Second)
+			if status != tc.wantStatus || status.Live() != tc.wantLive || heartbeat.PID != tc.wantPID || calls != tc.wantCalls {
+				t.Fatalf("probe = heartbeat %+v status %v live=%v calls=%d, want %+v status %v live=%v calls=%d",
+					heartbeat, status, status.Live(), calls, tc.wantPID, tc.wantStatus, tc.wantLive, tc.wantCalls)
+			}
+		})
 	}
 }
 
