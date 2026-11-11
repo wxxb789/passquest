@@ -202,6 +202,22 @@ func TestFindStoresClassifiedCandidatesWithProvenance(t *testing.T) {
 	if doc.Provider.Name != "stub-search" || doc.Provider.EndpointHost != "127.0.0.1:18768" {
 		t.Fatalf("provider = %+v", doc.Provider)
 	}
+	// The first clock call is the command start (day and reservation); the
+	// second is captured after Search returns, so provenance records when the
+	// provider had answered, not when the command began.
+	retrieved := goldenBase.Add(2 * time.Second)
+	for index, candidate := range doc.Candidates {
+		if !candidate.RetrievedAt.Equal(retrieved) {
+			t.Fatalf("candidate %d retrieved_at = %s, want %s", index+1, candidate.RetrievedAt, retrieved)
+		}
+	}
+	storedQuery, _, found, err := storeFindQuery(db, doc.QueryID)
+	if err != nil || !found {
+		t.Fatalf("stored query = %t, %v", found, err)
+	}
+	if !storedQuery.CreatedAt.Equal(retrieved) {
+		t.Fatalf("query created_at = %s, want %s", storedQuery.CreatedAt, retrieved)
+	}
 	if doc.Intent.Query != "Vocabulary in context English exam practice for foundation level learners" {
 		t.Fatalf("query = %q", doc.Intent.Query)
 	}
@@ -264,6 +280,84 @@ func TestFindStoresClassifiedCandidatesWithProvenance(t *testing.T) {
 	}
 	if history.Queries[0].EndpointHost != "127.0.0.1:18768" || history.Queries[0].RequestSHA256 != strings.Repeat("c", 64) {
 		t.Fatalf("history provenance = %+v", history.Queries[0])
+	}
+}
+
+func TestFindHumanOutputSanitizesProviderMetadata(t *testing.T) {
+	doc := findDoc{
+		SchemaVersion: ProtocolVersion,
+		State:         "found",
+		Intent: &findIntentView{
+			SkillTitle: "Vocabulary in context", SkillID: "vocabulary-in-context",
+			Reason: "reason", Selection: "skill_error_ratio", ExamSection: "notice",
+			LearnerLevel: "early", CandidateLimit: 20, Query: "bounded query\x1b[2J",
+		},
+		Budget: findBudgetViewOf("2026-11-10", 5, 20, 1, 1),
+		Provider: findProviderView{
+			Configured:   true,
+			Name:         "stub\nBudget: 0/5 queries used",
+			EndpointHost: "127.0.0.1:18768",
+		},
+		Candidates: []findCandidateView{{
+			Provider: "stub\nprovider", Query: "q", Title: "Open\x1b]52;c;c2VjcmV0\x07\nInjected",
+			URL: "https://example.com/open", Classification: "local-usable",
+			License: "cc-by-4.0\x1b[2J", Reason: "license_not_open",
+			ContentSHA256: strings.Repeat("a", 64), Content: "line one\nline two", Displayable: true,
+		}},
+		Counts:  findCountsViewOf(find.Counts{Total: 1, LocalUsable: 1}),
+		Message: "message",
+	}
+	var out bytes.Buffer
+	writeFind(&out, doc)
+	text := out.String()
+	if strings.ContainsAny(text, "\x1b\x07") {
+		t.Fatalf("find output kept a terminal escape: %q", text)
+	}
+	if !strings.Contains(text, "Provider: stub Budget: 0/5 queries used (127.0.0.1:18768)\n") {
+		t.Fatalf("provider metadata was not flattened to one line: %q", text)
+	}
+	if !strings.Contains(text, "1. [local-usable] Open ]52;c;c2VjcmV0  Injected\n") {
+		t.Fatalf("title was not flattened to one line: %q", text)
+	}
+	if !strings.Contains(text, "   license: cc-by-4.0 [2J\n") {
+		t.Fatalf("license was not flattened to one line: %q", text)
+	}
+	if !strings.Contains(text, "   line one\n   line two\n") {
+		t.Fatalf("content newlines must be preserved: %q", text)
+	}
+
+	query := findQueryView{
+		ID: 1, CreatedAt: time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC), Status: "provider_error",
+		Query: "bounded query\nInjected", Provider: "stub\nprovider",
+		ErrorCode: "provider_error", ErrorMessage: "line one\nline two",
+	}
+	var history bytes.Buffer
+	writeFindHistory(&history, findHistoryDoc{
+		Queries: []findQueryView{query},
+		Budget:  findBudgetViewOf("2026-11-10", 5, 20, 1, 0),
+	})
+	if strings.ContainsAny(history.String(), "\x1b\x07") ||
+		!strings.Contains(history.String(), "bounded query Injected\n") ||
+		!strings.Contains(history.String(), "   provider_error: line one line two\n") {
+		t.Fatalf("history output kept a line break or escape: %q", history.String())
+	}
+
+	var show bytes.Buffer
+	writeFindShow(&show, findShowDoc{Query: query, Candidates: []findCandidateView{}, Budget: findBudgetViewOf("2026-11-10", 5, 20, 1, 0)})
+	if strings.ContainsAny(show.String(), "\x1b\x07") ||
+		!strings.Contains(show.String(), "Query 1: bounded query Injected\n") ||
+		!strings.Contains(show.String(), "provider: stub provider; status: provider_error") ||
+		!strings.Contains(show.String(), "Error: provider_error — line one line two\n") {
+		t.Fatalf("show output kept a line break or escape: %q", show.String())
+	}
+
+	var failure bytes.Buffer
+	code := findFailure(Options{Stderr: &failure, Stdout: &failure}, false, 3, "provider_error",
+		"provider said\nBudget: 0/5 queries used\x1b[2J", nil,
+		findBudgetViewOf("2026-11-10", 5, 20, 1, 0), findProviderView{}, 0)
+	if code != 3 || strings.ContainsAny(failure.String(), "\x1b\x07") ||
+		!strings.Contains(failure.String(), "passquest: provider said Budget: 0/5 queries used [2J\n") {
+		t.Fatalf("failure output kept a line break or escape (exit %d): %q", code, failure.String())
 	}
 }
 
@@ -502,6 +596,38 @@ func TestFindInvalidEndpointDoesNotReserveOrCall(t *testing.T) {
 	}
 	if adapter.calls != 0 {
 		t.Fatalf("provider calls = %d", adapter.calls)
+	}
+}
+
+func TestFindRejectsAnOverLongEndpointHostBeforeReserving(t *testing.T) {
+	db := newDB(t)
+	seedFindAttempts(t, db)
+	clock := &stepClock{base: goldenBase}
+	adapter := &fakeSearchAdapter{}
+	endpoint := "https://" + strings.Repeat("a", search.MaxEndpointHostChars+1) + "/search"
+	code, out, errOut := runFindCLI(t, db, clock, map[string]string{
+		search.EndpointEnv: endpoint,
+	}, adapter, "find", "--json")
+	if code != 2 {
+		t.Fatalf("exit = %d, stderr = %s", code, errOut)
+	}
+	if out != "" {
+		t.Fatalf("invalid endpoint wrote stdout: %s", out)
+	}
+	if !strings.Contains(errOut, "invalid_endpoint") || !strings.Contains(errOut, "longer than 300") {
+		t.Fatalf("stderr = %s", errOut)
+	}
+	if adapter.calls != 0 {
+		t.Fatalf("provider calls = %d", adapter.calls)
+	}
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	usage, err := st.FindQueryUsage(clock.base.Format("2006-01-02"))
+	if err != nil || usage.Used() != 0 {
+		t.Fatalf("usage = %+v, %v", usage, err)
 	}
 }
 

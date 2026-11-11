@@ -280,7 +280,7 @@ func writeFind(w io.Writer, doc findDoc) {
 	fmt.Fprintln(w, "Pass Quest — find practice")
 	fmt.Fprintln(w)
 	writeFindIntent(w, doc.Intent)
-	fmt.Fprintf(w, "Provider: %s (%s)\n", doc.Provider.Name, doc.Provider.EndpointHost)
+	fmt.Fprintf(w, "Provider: %s (%s)\n", find.SanitizeLine(doc.Provider.Name), doc.Provider.EndpointHost)
 	writeFindBudget(w, doc.Budget, true)
 	fmt.Fprintf(w, "Counts: %d stored — %d local-usable, %d link-only, %d generated-unverified.\n\n",
 		doc.Counts.Total, doc.Counts.LocalUsable, doc.Counts.LinkOnly, doc.Counts.GeneratedUnverified)
@@ -306,15 +306,15 @@ func writeFindIntent(w io.Writer, intent *findIntentView) {
 	fmt.Fprintf(w, "Learner level: %s (%d first independent attempt(s), %d correct, %d skipped; %s)\n",
 		intent.LearnerLevel, intent.LevelBasis.IndependentFirstAttempts, intent.LevelBasis.Correct,
 		intent.LevelBasis.Skipped, intent.LevelBasis.Rule)
-	fmt.Fprintf(w, "Query: %q (candidate limit %d)\n", intent.Query, intent.CandidateLimit)
+	fmt.Fprintf(w, "Query: %q (candidate limit %d)\n", find.SanitizeLine(intent.Query), intent.CandidateLimit)
 	fmt.Fprintln(w)
 }
 
 func writeFindCandidate(w io.Writer, number int, candidate findCandidateView) {
-	fmt.Fprintf(w, "%d. [%s] %s\n", number, candidate.Classification, find.SanitizeText(candidate.Title))
+	fmt.Fprintf(w, "%d. [%s] %s\n", number, candidate.Classification, find.SanitizeLine(candidate.Title))
 	fmt.Fprintf(w, "   %s\n", candidate.URL)
 	if candidate.License != "" {
-		fmt.Fprintf(w, "   license: %s\n", candidate.License)
+		fmt.Fprintf(w, "   license: %s\n", find.SanitizeLine(candidate.License))
 	}
 	if candidate.Reason != "" {
 		fmt.Fprintf(w, "   reason: %s\n", candidate.Reason)
@@ -345,9 +345,9 @@ func writeFindHistory(w io.Writer, doc findHistoryDoc) {
 		for _, query := range doc.Queries {
 			fmt.Fprintf(w, "%d  %s  %-20s  %d candidate(s)  %s\n",
 				query.ID, query.CreatedAt.UTC().Format(time.RFC3339), query.Status,
-				query.CandidateCount, query.Query)
+				query.CandidateCount, find.SanitizeLine(query.Query))
 			if query.ErrorMessage != "" {
-				fmt.Fprintf(w, "   %s: %s\n", query.ErrorCode, query.ErrorMessage)
+				fmt.Fprintf(w, "   %s: %s\n", find.SanitizeLine(query.ErrorCode), find.SanitizeLine(query.ErrorMessage))
 			}
 		}
 	}
@@ -359,14 +359,14 @@ func writeFindShow(w io.Writer, doc findShowDoc) {
 	query := doc.Query
 	fmt.Fprintln(w, "Pass Quest — stored search")
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Query %d: %s\n", query.ID, query.Query)
+	fmt.Fprintf(w, "Query %d: %s\n", query.ID, find.SanitizeLine(query.Query))
 	fmt.Fprintf(w, "Created: %s; provider: %s; status: %s; candidates: %d/%d\n",
-		query.CreatedAt.UTC().Format(time.RFC3339), query.Provider, query.Status,
+		query.CreatedAt.UTC().Format(time.RFC3339), find.SanitizeLine(query.Provider), query.Status,
 		query.CandidateCount, query.MaxCandidates)
 	fmt.Fprintf(w, "Endpoint host: %s; HTTP status: %d; latency: %d ms\n", query.EndpointHost, query.HTTPStatus, query.LatencyMS)
 	fmt.Fprintf(w, "Request: %d bytes, sha256 %s\n", query.RequestBytes, query.RequestSHA256)
 	if query.ErrorMessage != "" {
-		fmt.Fprintf(w, "Error: %s — %s\n", query.ErrorCode, query.ErrorMessage)
+		fmt.Fprintf(w, "Error: %s — %s\n", find.SanitizeLine(query.ErrorCode), find.SanitizeLine(query.ErrorMessage))
 	}
 	fmt.Fprintln(w)
 	if len(doc.Candidates) == 0 {

@@ -1,11 +1,155 @@
 package search
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// TestMain lets this test binary stand in for the Node host, so the transport
+// contract can be exercised without a Node runtime on any OS.
+func TestMain(m *testing.M) {
+	if os.Getenv("PASSQUEST_SEARCH_HELPER") == "1" {
+		os.Exit(runSearchHelper())
+	}
+	os.Exit(m.Run())
+}
+
+func runSearchHelper() int {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return 2
+	}
+	var request hostRequest
+	if err := json.Unmarshal(data, &request); err != nil {
+		return 3
+	}
+	switch os.Getenv("PASSQUEST_SEARCH_HELPER_MODE") {
+	case "exit-after-read":
+		return 1
+	case "record-body":
+		if err := os.WriteFile(os.Getenv("PASSQUEST_SEARCH_HELPER_BODY_FILE"), []byte(request.Body), 0o600); err != nil {
+			return 4
+		}
+		response := hostResponse{
+			ProtocolVersion: ProtocolVersion,
+			Status:          "ok",
+			HTTPStatus:      200,
+			LatencyMS:       1,
+			RequestSent:     true,
+			Body:            `{"provider":"helper","results":[]}`,
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(response); err != nil {
+			return 5
+		}
+		return 0
+	}
+	return 6
+}
+
+func helperTransport(t *testing.T, mode string) (HostTransport, string) {
+	t.Helper()
+	host := filepath.Join(t.TempDir(), "search-host.mjs")
+	if err := os.WriteFile(host, []byte("// the test binary is the host\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PASSQUEST_SEARCH_HELPER", "1")
+	t.Setenv("PASSQUEST_SEARCH_HELPER_MODE", mode)
+	bodyFile := filepath.Join(t.TempDir(), "request-body")
+	if mode == "record-body" {
+		t.Setenv("PASSQUEST_SEARCH_HELPER_BODY_FILE", bodyFile)
+	}
+	env := map[string]string{
+		HostEnv: host,
+		NodeEnv: os.Args[0],
+	}
+	return HostTransport{Getenv: func(key string) string { return env[key] }}, bodyFile
+}
+
+func TestHostTransportHashesTheBodyItPosted(t *testing.T) {
+	transport, bodyFile := helperTransport(t, "record-body")
+	result, err := transport.Search(context.Background(), Request{
+		Endpoint:  "https://api.example.com/search",
+		Query:     "  vocabulary   in context ",
+		Limit:     20,
+		TimeoutMS: 5000,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	body, err := os.ReadFile(bodyFile)
+	if err != nil {
+		t.Fatalf("read helper body: %v", err)
+	}
+	wantBody, err := BuildBody("  vocabulary   in context ", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != wantBody {
+		t.Fatalf("posted body = %q, want %q", body, wantBody)
+	}
+	sum := sha256.Sum256(body)
+	if result.RequestSHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("request hash = %s, want the hash of the posted body", result.RequestSHA256)
+	}
+	if result.RequestBytes != len(body) {
+		t.Fatalf("request bytes = %d, want %d", result.RequestBytes, len(body))
+	}
+}
+
+func TestHostTransportKeepsTheSlotWhenAStartedHostExits(t *testing.T) {
+	transport, _ := helperTransport(t, "exit-after-read")
+	_, err := transport.Search(context.Background(), Request{
+		Endpoint:  "https://api.example.com/search",
+		Query:     "vocabulary in context",
+		Limit:     5,
+		TimeoutMS: 5000,
+	})
+	failure, ok := AsProviderError(err)
+	if !ok {
+		t.Fatalf("error = %v, want a structured provider failure", err)
+	}
+	if failure.Code != "provider_error" || !failure.RequestSent {
+		t.Fatalf("failure = %+v; a started host may have posted the body", failure)
+	}
+	if len(failure.RequestSHA) != 64 || failure.RequestSize == 0 {
+		t.Fatalf("failure request identity = %+v", failure)
+	}
+}
+
+func TestHostTransportReportsAStartFailureAsUnsent(t *testing.T) {
+	host := filepath.Join(t.TempDir(), "search-host.mjs")
+	if err := os.WriteFile(host, []byte("// host\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{
+		HostEnv: host,
+		NodeEnv: filepath.Join(t.TempDir(), "missing-node"),
+	}
+	transport := HostTransport{Getenv: func(key string) string { return env[key] }}
+	_, err := transport.Search(context.Background(), Request{
+		Endpoint:  "https://api.example.com/search",
+		Query:     "vocabulary in context",
+		Limit:     5,
+		TimeoutMS: 5000,
+	})
+	failure, ok := AsProviderError(err)
+	if !ok {
+		t.Fatalf("error = %v, want a structured provider failure", err)
+	}
+	if failure.Code != "search_unavailable" || failure.RequestSent {
+		t.Fatalf("failure = %+v; a process that never started cannot have posted", failure)
+	}
+}
+
 func TestNormalizeEndpoint(t *testing.T) {
+	longHost := "https://" + strings.Repeat("a", MaxEndpointHostChars+1) + "/search"
 	cases := []struct {
 		name    string
 		raw     string
@@ -23,6 +167,7 @@ func TestNormalizeEndpoint(t *testing.T) {
 		{"fragment", "https://api.example.com/search#part", "", "fragment"},
 		{"ftp", "ftp://api.example.com/search", "", "not http or https"},
 		{"relative", "/search", "", "absolute"},
+		{"host too long", longHost, "", "host is longer"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -138,6 +283,12 @@ func TestEndpointHostKeepsOnlyHostAndPort(t *testing.T) {
 	}
 	if got := EndpointHost("https://api.example.com/search"); got != "api.example.com" {
 		t.Fatalf("host = %q", got)
+	}
+	if got := EndpointHost("https://" + strings.Repeat("a", MaxEndpointHostChars+1) + "/search"); got != "" {
+		t.Fatalf("over-long host = %q, want empty", got)
+	}
+	if got := EndpointHost("https://" + strings.Repeat("a", MaxEndpointHostChars) + "/search"); got != strings.Repeat("a", MaxEndpointHostChars) {
+		t.Fatalf("300-character host = %q", got)
 	}
 }
 

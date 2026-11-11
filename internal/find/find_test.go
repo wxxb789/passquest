@@ -106,9 +106,12 @@ func TestDeriveSelectsAnEligibleSkillWithNoObservedError(t *testing.T) {
 }
 
 func TestDeriveFallsBackToTheLatestWrongAnswersTactic(t *testing.T) {
-	record := wrong(7, "not-except-polarity")
-	record.TacticID = "not-except-polarity"
-	intent, ok := Derive([]Record{record, correct(8, "vocabulary-in-context")}, 20)
+	// Attempt 6 is earlier and wrongly answered but names no scoring tactic. A
+	// first-wrong implementation would select it and lose the fallback.
+	earlier := record(6, attempt.StatusIncorrect, "notice", "sentence-structure")
+	latest := wrong(7, "not-except-polarity")
+	latest.TacticID = "not-except-polarity"
+	intent, ok := Derive([]Record{earlier, latest, correct(8, "vocabulary-in-context")}, 20)
 	if !ok {
 		t.Fatal("Derive returned no intent")
 	}
@@ -118,11 +121,53 @@ func TestDeriveFallsBackToTheLatestWrongAnswersTactic(t *testing.T) {
 	if intent.SkillID != "not-except-polarity" || intent.TacticID != "not-except-polarity" {
 		t.Fatalf("intent = %+v", intent)
 	}
+	if intent.ExamSection != "mock-exam" {
+		t.Fatalf("section = %q, want the later attempt's section", intent.ExamSection)
+	}
 	if len(intent.Evidence.AttemptIDs) != 1 || intent.Evidence.AttemptIDs[0] != 7 {
 		t.Fatalf("evidence ids = %v", intent.Evidence.AttemptIDs)
 	}
-	if !strings.Contains(intent.Reason, "most recent wrong answer") {
+	if !strings.Contains(intent.Reason, "most recent wrong answer (attempt 7)") {
 		t.Fatalf("reason = %q", intent.Reason)
+	}
+}
+
+func TestDeriveCountsSkippedAttemptsAsErrorEvidence(t *testing.T) {
+	intent, ok := Derive([]Record{
+		skipped(1, "vocabulary-in-context"), skipped(2, "vocabulary-in-context"), skipped(3, "vocabulary-in-context"),
+		wrong(4, "sentence-structure"), correct(5, "sentence-structure"),
+		wrong(6, "sentence-structure"), correct(7, "sentence-structure"),
+	}, 20)
+	if !ok {
+		t.Fatal("Derive returned no intent")
+	}
+	if intent.SkillID != "vocabulary-in-context" {
+		t.Fatalf("selected %q, want the skipped-only skill", intent.SkillID)
+	}
+	if intent.Evidence.Attempts != 3 || intent.Evidence.Incorrect != 0 || intent.Evidence.Skipped != 3 {
+		t.Fatalf("evidence = %+v", intent.Evidence)
+	}
+}
+
+func TestDeriveCountsRepeatedAndAssistedAttempts(t *testing.T) {
+	repeat := wrong(10, "vocabulary-in-context")
+	repeat.AttemptNumber = 2
+	assisted := wrong(11, "vocabulary-in-context")
+	assisted.Assistance = attempt.AssistanceAssisted
+	intent, ok := Derive([]Record{
+		repeat, assisted, wrong(12, "vocabulary-in-context"), correct(13, "vocabulary-in-context"),
+	}, 20)
+	if !ok {
+		t.Fatal("Derive returned no intent")
+	}
+	if intent.SkillID != "vocabulary-in-context" {
+		t.Fatalf("selected %q", intent.SkillID)
+	}
+	if intent.Evidence.Attempts != 4 || intent.Evidence.Incorrect != 3 || intent.Evidence.Skipped != 0 {
+		t.Fatalf("evidence = %+v; repeats and assisted attempts must count", intent.Evidence)
+	}
+	if len(intent.Evidence.AttemptIDs) != 4 {
+		t.Fatalf("attempt ids = %v", intent.Evidence.AttemptIDs)
 	}
 }
 
@@ -274,6 +319,17 @@ func TestSanitizeTextKeepsNewlinesAndReplacesControlsAndBidi(t *testing.T) {
 	}
 	if !strings.Contains(got, "\n") || !strings.Contains(got, "\t") {
 		t.Fatalf("sanitize removed whitespace: %q", got)
+	}
+}
+
+func TestSanitizeLineReplacesLineBreaksEscapesAndBidi(t *testing.T) {
+	input := "stub\nBudget: 0/5 queries used\tcc-by-4.0\x1b]52;c;c2VjcmV0\x07\r\x7f\u202e"
+	got := SanitizeLine(input)
+	if strings.ContainsAny(got, "\n\r\t\x1b\x07\x7f") || strings.ContainsRune(got, '\u202e') {
+		t.Fatalf("sanitize left a line break, control or bidi override: %q", got)
+	}
+	if !strings.Contains(got, "Budget: 0/5 queries used") || !strings.Contains(got, "cc-by-4.0") {
+		t.Fatalf("sanitize removed visible text: %q", got)
 	}
 }
 

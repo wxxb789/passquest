@@ -5,8 +5,8 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 ## Design and development
 
 - [Core Design](docs/core-design.md) — product purpose, safety, quality and architecture principles.
-- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0008
-  are done; 0009 is next.
+- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0007
+  are done; 0008 is next.
 - [Harness](docs/harness.md) — the single `bun run gate` entry point and what each gate reads.
 - [Cross-platform rules](docs/cross-platform.md) — Windows, macOS and Linux: paths, processes, mode
   bits, goldens, and the path literals the `portable-paths` gate refuses.

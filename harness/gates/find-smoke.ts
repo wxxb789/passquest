@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -41,7 +41,9 @@ export const findSmoke: Gate = {
     let requests = 0;
     let pageRequests = 0;
     let lastBody: Record<string, unknown> = {};
+    let lastRawBody = "";
     let stub: Bun.Server<undefined> | undefined;
+    let tcpListener: Bun.TCPSocketListener<undefined> | undefined;
 
     try {
       stub = Bun.serve({
@@ -54,7 +56,9 @@ export const findSmoke: Gate = {
             return new Response("candidate page");
           }
           requests++;
-          const body = asRecord(parse(await request.text()));
+          const rawBody = await request.text();
+          lastRawBody = rawBody;
+          const body = asRecord(parse(rawBody));
           lastBody = body;
           const mode = url.pathname.split("/").pop() ?? "";
           const base = `http://127.0.0.1:${stub!.port}`;
@@ -147,11 +151,37 @@ export const findSmoke: Gate = {
       const db1 = path.join(temp, "find.sqlite");
       if (!(await seedReviewedSource(db1, "find", 3))) return fail(checks);
 
+      // A raw TCP listener counts accepts and returns no HTTP response. The
+      // probe proves the instrument sees a connection; the no-provider run
+      // must add none. A POST counter alone cannot see a connection that sends
+      // no request.
+      let accepted = 0;
+      tcpListener = Bun.listen({
+        hostname: "127.0.0.1",
+        port: 0,
+        socket: {
+          open() {
+            accepted++;
+          },
+          data() {},
+          close() {},
+        },
+      });
+      const probe = await Bun.connect({
+        hostname: "127.0.0.1",
+        port: tcpListener.port,
+        socket: { open() {}, data() {}, close() {} },
+      });
+      probe.end();
+      await Bun.sleep(10);
+      check(accepted === 1, `TCP accept probe recorded ${accepted} connection(s)`);
+
       const reportBefore = await call(db1, ["report", "--json"]);
       const nextBefore = await call(db1, ["next", "--json"]);
 
       // No endpoint: zero network I/O, an explicit message, exit 0, no query row.
       const requestsBeforeNoProvider = requests;
+      const acceptedBeforeNoProvider = accepted;
       const noProvider = await callJSON(db1, ["find"], {
         PASSQUEST_SEARCH_ENDPOINT: "",
         PASSQUEST_SEARCH_KEY: "",
@@ -166,6 +196,7 @@ export const findSmoke: Gate = {
       check(stringField(field(noProvider.doc, "intent"), "exam_section") === "notice", "no-provider intent section");
       check(stringField(field(noProvider.doc, "intent"), "skill_id") === "not-except-polarity", "no-provider intent skill");
       check(requests === requestsBeforeNoProvider, "no-provider run contacted the provider");
+      check(accepted === acceptedBeforeNoProvider, "no-provider run opened a TCP connection");
       const noProviderHistory = await history(db1);
       check(arrayField(noProviderHistory.doc, "queries").length === 0, "no-provider run stored a query");
 
@@ -218,12 +249,20 @@ export const findSmoke: Gate = {
 
       const mixQueryID = numberField(mix.doc, "query_id");
       if (!check(mixQueryID !== undefined && mixQueryID > 0, "mix query id")) return fail(checks);
+      const mixRawBody = lastRawBody;
       const show = await callJSON(db1, ["find", "show", String(mixQueryID)]);
       if (!check(show.code === 0, `find show exit = ${show.code}: ${show.stderr}`)) return fail(checks);
       const shownQuery = asRecord(field(show.doc, "query"));
       check(stringField(shownQuery, "status") === "ok", "shown query status");
       check(stringField(shownQuery, "provider") === "stub-search", "shown query provider");
-      check((stringField(shownQuery, "request_sha256") ?? "").length === 64, "shown request hash");
+      check(
+        stringField(shownQuery, "request_sha256") === createHash("sha256").update(mixRawBody).digest("hex"),
+        "shown request hash does not match the raw body the stub received",
+      );
+      check(
+        numberField(shownQuery, "request_bytes") === Buffer.byteLength(mixRawBody),
+        "shown request bytes do not match the raw body the stub received",
+      );
       const shownCandidates = arrayField(show.doc, "candidates");
       check(shownCandidates.length === 3, "shown candidates");
       check(stringField(asRecord(shownCandidates[0]), "content_sha256") === createHash("sha256").update(INJECTION).digest("hex"), "shown hash does not recompute");
@@ -326,6 +365,49 @@ export const findSmoke: Gate = {
       check(stringField(field(bad.failure, "error"), "code") === "invalid_response", "invalid-response code");
       check(field(bad.failure, "state") === "invalid_response", "invalid-response state");
 
+      // A host that posts and then exits nonzero may already have spent a
+      // query: the slot must be kept and a failed row stored. The start-failure
+      // case, where no request is possible, is pinned by the Go transport tests.
+      const db5 = path.join(temp, "host-exit.sqlite");
+      if (!(await seedReviewedSource(db5, "host-exit", 1))) return fail(checks);
+      const crashHost = path.join(temp, "crash-host.mjs");
+      writeFileSync(crashHost, [
+        'import { readFileSync } from "node:fs";',
+        "",
+        'const request = JSON.parse(readFileSync(0, "utf8"));',
+        "await fetch(request.endpoint, {",
+        '  method: "POST",',
+        '  headers: { "content-type": "application/json" },',
+        "  body: request.body,",
+        "});",
+        "process.exit(1);",
+        "",
+      ].join("\n"));
+      const requestsBeforeHostExit = requests;
+      const hostExit = await callJSON(db5, ["find"], {
+        PASSQUEST_SEARCH_ENDPOINT: endpoint("mix"),
+        PASSQUEST_SEARCH_KEY: "test-key-not-real",
+        PASSQUEST_SEARCH_HOST: crashHost,
+      });
+      check(hostExit.code === 3, `host-exit exit = ${hostExit.code}: ${hostExit.stderr}`);
+      check(stringField(field(hostExit.failure, "error"), "code") === "provider_error", "host-exit error code");
+      check(field(hostExit.failure, "state") === "provider_error", "host-exit state");
+      check(requests === requestsBeforeHostExit + 1, "host-exit did not reach the provider");
+      const hostExitRawBody = lastRawBody;
+      const hostExitQueryID = numberField(hostExit.failure, "query_id");
+      if (!check(hostExitQueryID !== undefined && hostExitQueryID > 0, "host-exit query id")) return fail(checks);
+      const hostExitShow = await callJSON(db5, ["find", "show", String(hostExitQueryID)]);
+      const hostExitQuery = asRecord(field(hostExitShow.doc, "query"));
+      check(stringField(hostExitQuery, "status") === "provider_error", "host-exit stored status");
+      check((stringField(hostExitQuery, "error_message") ?? "").length > 0, "host-exit stored no message");
+      check(
+        stringField(hostExitQuery, "request_sha256") === createHash("sha256").update(hostExitRawBody).digest("hex"),
+        "host-exit request hash does not match the posted body",
+      );
+      const hostExitHistory = await history(db5);
+      check(numberField(field(hostExitHistory.doc, "budget"), "queries_used") === 1, "host-exit released the budget slot");
+      check(arrayField(hostExitHistory.doc, "queries").length === 1, "host-exit stored no audit row");
+
       // The real host rejects a remote plain-http endpoint before any request.
       const hostCheck = await run(executable("node"), [hostPath], {
         cwd: ctx.root,
@@ -348,6 +430,7 @@ export const findSmoke: Gate = {
       checks.push(error instanceof Error ? error.message : String(error));
     } finally {
       stub?.stop(true);
+      tcpListener?.stop(true);
       rmSync(temp, { recursive: true, force: true });
     }
 

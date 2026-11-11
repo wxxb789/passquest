@@ -24,7 +24,7 @@ documents stayed under `/tmp`.
 | `agent/search-host.mjs` | The only search egress: one versioned document, `https` off-loopback, loopback `http` for a stub, optional bearer credential, redirect refusal, 1 MiB cap, no URL fetch. |
 | `internal/store` | Schema v13: transient `find_query_reservations`, append-only `find_queries` and `find_candidates`, with a CHECK that only `local-usable` rows can carry text. No write path into attempts, sources, questions, skills or recommendations. |
 | `internal/cli` | `find`, `find history`, `find show`, JSON/human documents, budget reservation/finalization, failure vocabulary, provenance display. |
-| `harness/gates/find-smoke.ts` | Real CLI + real search host + loopback search stub; 95 assertions over no evidence, no provider, three classifications, provenance, hash recomputation, no URL fetch, injection containment, empty/link-only/rate-limit outcomes, both budget limits and invalid response. |
+| `harness/gates/find-smoke.ts` | Real CLI + real search host + loopback search stub; 113 assertions over no evidence, no provider (stub POST counter plus a probed raw TCP accept counter), three classifications, provenance, content and request hash recomputation from the raw posted body, no URL fetch, injection containment, empty/link-only/rate-limit outcomes, both budget limits, a host that posts then exits nonzero, and invalid response. |
 
 ## Intent and the two CLI outcomes
 
@@ -85,7 +85,8 @@ No provider was configured for the first run (`PASSQUEST_SEARCH_ENDPOINT` empty,
 
 The stub's POST counter did not change across the no-provider run, so that path made no request. The
 `find-smoke` gate proves the same path with an unchanged stub request counter and a missing
-`PASSQUEST_SEARCH_HOST`.
+`PASSQUEST_SEARCH_HOST`. It also counts accepts on a raw TCP listener that returns no HTTP response:
+a connect probe proves the counter sees a connection, and the no-provider run adds zero accepts.
 
 A new empty database with a configured endpoint produced exit 0 and
 
@@ -143,6 +144,21 @@ The link-only row stores the SHA-256 of the empty returned text
 (`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`); the generated row stores the hash
 of its returned text while retaining no text. Both keep provider, query, retrieval time and URL.
 
+The request identity is recomputed, not just length-checked: `find-smoke` hashes the raw body the stub
+received and matches it to `request_sha256` and `request_bytes`, and a `HostTransport` test records the
+body its scripted host received and matches the returned hash. `retrieved_at` is captured after
+`Search` returns; the CLI clock test advances one second per call and asserts both the candidate
+retrieval time and the query creation time use the post-search call, so provenance records when the
+text was seen, not when the command began.
+
+Human output flattens provider-controlled metadata — provider, title, license, error code and message,
+and the stored query text — with `find.SanitizeLine`: every C0/C1 control including CR and LF and every
+bidi override becomes a space, while returned content keeps its newlines. A CLI test feeds an OSC-52
+escape and embedded newlines through `find`, `find history` and `find show` and asserts every metadata
+line stays single. An endpoint host longer than the 300-character `find_queries.endpoint_host` bound is
+refused by `NormalizeEndpoint` before a reservation or a provider request; `EndpointHost` returns empty
+for it, and the CLI exits 2 with `invalid_endpoint`.
+
 ## Outcomes that must be named as themselves
 
 | Run | Exit | State / message |
@@ -151,6 +167,7 @@ of its returned text while retaining no text. Both keep provider, query, retriev
 | `link-only` stub | 0 | `all_link_only` — `provider returned 2 candidate(s); all are link-only because no open license was declared, so no local study text is available.` |
 | `rate` stub (HTTP 429) | 3 | stderr `{"state":"rate_limited","error":{"code":"rate_limited","message":"provider rate limit reached (HTTP 429)"}}` |
 | `bad` stub (no provider field) | 3 | `invalid_response`, no candidate stored (`find-smoke`) |
+| host posts then exits 1 | 3 | `provider_error`; request reached the stub, a failed row is stored, budget usage 1 (`find-smoke`) |
 | missing Node/host | 3 | `search_unavailable`; reservation released, no query row (`TestFindMissingHostReleasesTheBudgetSlot`) |
 
 `find history --json` after five stored queries:
@@ -273,7 +290,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (16 packages, 663 tests, 0 skipped)
+PASS  go test (16 packages, 672 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -309,7 +326,7 @@ PASS  agent smoke (120 assertions, 11 scenarios, 25 provider requests, 2 permiss
 PASS  note smoke (806 assertions)
 
 == find smoke
-PASS  find smoke (95 assertions)
+PASS  find smoke (113 assertions)
 
 == portable paths
 PASS  portable paths (78 Go files, no platform-bound path literal)
@@ -326,8 +343,9 @@ GATE: PASS
 - **No real provider run.** This host has no search credential or endpoint and CI cannot reach a
   provider from any OS. The adapter and policy are proven against a loopback stub; a real provider run
   remains owner-supplied evidence and is unverified.
-- **3-OS CI not run here.** Only Linux was executed locally. The gate uses no POSIX-only assertion in
-  the find path; the repository workflow is the 3-OS proof.
+- **3-OS CI not run by this local verification.** Only Linux was executed locally. The gate uses no
+  POSIX-only assertion in the find path, and the repository workflow runs the same gate on ubuntu, macos
+  and windows; the matrix must be green on the merge head and is not claimed as produced here.
 - **License claims are provider-declared.** The allowlist rejects unrecognised and restrictive ids, but
   the app cannot verify the provider's rights statement.
 - **No URL fetch.** A local-usable candidate is only as good as the text the provider returned; the app
@@ -344,10 +362,10 @@ GATE: PASS
 | Clause | Evidence |
 |---|---|
 | 1. One evidence rule; bounded intent; no evidence → `nothing_to_find` | intent JSON above (`not-except-polarity`, notice, 3/3, attempts 1–3); empty DB run; `internal/find` unit tests for ratio, ties, fallback, no intent |
-| 2. No endpoint → no network I/O, explicit message, exit 0 | no-provider JSON, stub POST count unchanged, missing host, `find-smoke` unchanged request counter |
-| 3. Adapter protocol; query, parse, candidate limit | `find --json` request identity, stub body query/limit, 3 candidates parsed; `too-many` refusal with `--max-candidates 2` |
+| 2. No endpoint → no network I/O, explicit message, exit 0 | no-provider JSON; unchanged stub POST counter and zero accepts on the probed raw TCP listener; missing host; `find-smoke` |
+| 3. Adapter protocol; query, parse, candidate limit | request identity recomputed from the raw body the stub received (`find-smoke` and `TestHostTransportHashesTheBodyItPosted`); stub body query/limit; 3 candidates parsed; `too-many` refusal with `--max-candidates 2`; the 3-OS claim is the CI matrix on the merge head, not this Linux-only run |
 | 4. Every candidate classified; only `local-usable` displayable | counts 1/1/1; local content stored, link/generated empty; schema CHECK; `TestClassifyPrecedence` |
-| 5. Provenance stored and auditable | `find show 1` provider/query/retrieved_at/URL/SHA; recomputed hash matches; `TestAppendFindQueryStoresCandidatesAndReleasesReservation` |
+| 5. Provenance stored and auditable | `find show 1` provider/query/retrieved_at/URL/SHA; recomputed content hash; request SHA and bytes recomputed from the posted body; retrieval timestamp is the post-search clock call (`TestFindStoresClassifiedCandidatesWithProvenance`); `TestAppendFindQueryStoresCandidatesAndReleasesReservation` |
 | 6. Budget refuses 6th query and over-limit candidate response | sixth-run JSON with 0 remaining and no provider POST; candidate-limit JSON and zero candidates stored |
-| 7. Injected instruction changes no state | `cmp` report/next 0; attempt count 3; `find-smoke` 95 assertions |
+| 7. Injected instruction changes no state | `cmp` report/next 0; attempt count 3; `find-smoke` 113 assertions |
 | 8. Rate limit, empty and all-link-only reported as themselves | three outcome rows above; `find history` statuses |

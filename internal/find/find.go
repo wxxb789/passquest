@@ -400,11 +400,23 @@ func Count(candidates []Candidate) Counts {
 // tabs remain; other C0/C1 controls and bidi overrides become spaces. Stored
 // text is unchanged, so the provenance hash still matches the response.
 func SanitizeText(value string) string {
+	return sanitize(value, true)
+}
+
+// SanitizeLine makes provider-controlled metadata safe for one terminal line.
+// Every C0/C1 control (including CR, LF and tab) and every bidi override
+// becomes a space, so a stored newline or terminal escape cannot forge a
+// following line. Stored text is unchanged.
+func SanitizeLine(value string) string {
+	return sanitize(value, false)
+}
+
+func sanitize(value string, keepLineBreaks bool) string {
 	var builder strings.Builder
 	builder.Grow(len(value))
 	for _, r := range value {
 		switch {
-		case r == '\n' || r == '\t':
+		case keepLineBreaks && (r == '\n' || r == '\t'):
 			builder.WriteRune(r)
 		case r < 0x20 || (r >= 0x7f && r <= 0x9f):
 			builder.WriteRune(' ')

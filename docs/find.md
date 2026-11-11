@@ -66,7 +66,7 @@ request's `limit`, not as query text.
 
 | Variable | Meaning |
 |---|---|
-| `PASSQUEST_SEARCH_ENDPOINT` | Enables search. `https` off-loopback; plain `http` only for a loopback stub. A path such as `/v1/search` is allowed; userinfo, query and fragment are refused. |
+| `PASSQUEST_SEARCH_ENDPOINT` | Enables search. `https` off-loopback; plain `http` only for a loopback stub. A path such as `/v1/search` is allowed; userinfo, query and fragment are refused. The recordable host (host and port) is bounded at 300 characters; a longer endpoint is refused before any reservation or request. |
 | `PASSQUEST_SEARCH_KEY` | Optional credential. The host places it only in `Authorization: Bearer …`; it is never in the request document, argv, a stored row or an error. |
 | `PASSQUEST_SEARCH_HOST` | Overrides `agent/search-host.mjs`. |
 | `PASSQUEST_NODE` | Overrides the Node executable. |
@@ -123,25 +123,35 @@ reason `license_not_open`; a recognised license without returned text is link-on
 `no_returned_text`; no license is `no_open_license`. `nc` and `nd` variants are not accepted.
 
 Every stored candidate carries `provider`, `query`, `retrieved_at`, `url` and `content_sha256` directly,
-plus its classification, license and reason. The hash is SHA-256 of the returned text: `content` when
-non-empty, else `snippet` when non-empty, else the empty string. Text is retained only for
-`local-usable`; a schema CHECK rejects text on link-only or generated rows. Candidate and query rows are
-append-only, so an audit can tell what was seen and when.
+plus its classification, license and reason. `retrieved_at` is captured after the provider has answered,
+so it records when the text was seen, not when the command started. The hash is SHA-256 of the returned
+text: `content` when non-empty, else `snippet` when non-empty, else the empty string. Text is retained
+only for `local-usable`; a schema CHECK rejects text on link-only or generated rows. Candidate and query
+rows are append-only, so an audit can tell what was seen and when.
+
+Human output flattens provider-controlled metadata — provider, title, license, error code and error
+message, plus the stored query text — with a single-line sanitizer: every C0/C1 control (including CR and
+LF) and every bidi override becomes a space, so a stored newline or terminal escape cannot forge a
+following line. Only returned content keeps its newlines. Stored text is unchanged, so the provenance
+hash still matches the response.
 
 ## Budget
 
 - `--max-queries` (default 5, range 1–100) is a UTC-day cap. A row in `find_query_reservations` claims a
   slot inside an immediate transaction before the host runs; the final `find_queries` row replaces the
   claim in the same transaction that stores candidates. Counted usage is stored queries plus
-  outstanding reservations, so a crashed process can only under-spend. A request that provably never
-  left the machine releases its slot.
+  outstanding reservations. A request that provably never left the machine — the Node binary or host
+  file is missing before the process starts — releases its slot. A host process that starts and then
+  exits nonzero may already have posted the body, so its slot is kept and a `provider_error` query row
+  is stored; the failure is auditable rather than invisible.
 - `--max-candidates` (default 20, range 1–100) is the per-run cap sent as the provider `limit`. A
   response with more results is refused with `budget_exceeded`; no candidate is stored and no partial
   list is kept.
 
 Refusals name the limit, the used count, the remaining allowance and the UTC day. `find`, its refusal
-documents and `find history` show the budget. A crashed process can leave a reservation counted as used
-without a finalized query row; that is the intended under-spend, not a lost query.
+documents and `find history` show the budget. A CLI process killed between claiming a slot and storing
+its row can leave a reservation counted as used without a finalized query row; that is the intended
+under-spend, not a lost query.
 
 ## Failure vocabulary
 
@@ -157,6 +167,7 @@ without a finalized query row; that is the intended under-spend, not a lost quer
 | HTTP 401/403 | `auth_failed` | 3 | yes |
 | Provider timeout | `timeout` | 3 | yes |
 | Other provider/transport failure | `provider_error` / `unreachable` | 3 | yes when a request may have been sent |
+| Host process failed after starting | `provider_error` | 3 | yes; the slot is kept |
 | Malformed provider body | `invalid_response` | 3 | yes |
 | Missing Node or host before a request | `search_unavailable` | 3 | no; slot released |
 

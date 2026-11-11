@@ -47,6 +47,9 @@ const (
 	MaxContentRunes  = 20000
 	MaxLicenseRunes  = 100
 	MaxProviderRunes = 200
+	// MaxEndpointHostChars matches find_queries.endpoint_host. A longer host is
+	// refused before a reservation or a provider request.
+	MaxEndpointHostChars = 300
 )
 
 // Item is one raw provider result. Classification and provenance are policy
@@ -143,6 +146,8 @@ func NormalizeEndpoint(raw string) (string, error) {
 		return "", fmt.Errorf("search: endpoint scheme %q is not http or https", parsed.Scheme)
 	case parsed.Scheme == "http" && !Loopback(parsed.Hostname()):
 		return "", errors.New("search: endpoint uses http off-loopback; use https or a loopback address")
+	case len(parsed.Host) > MaxEndpointHostChars:
+		return "", fmt.Errorf("search: endpoint host is longer than %d characters", MaxEndpointHostChars)
 	}
 	return parsed.String(), nil
 }
@@ -161,7 +166,7 @@ func Loopback(host string) bool {
 // query, fragment and userinfo are never recorded.
 func EndpointHost(endpoint string) string {
 	parsed, err := url.Parse(strings.TrimSpace(endpoint))
-	if err != nil {
+	if err != nil || len(parsed.Host) > MaxEndpointHostChars {
 		return ""
 	}
 	return parsed.Host
@@ -387,12 +392,22 @@ func (t HostTransport) Search(ctx context.Context, req Request) (Result, error) 
 		if detail == "" {
 			detail = runErr.Error()
 		}
-		return Result{}, &ProviderError{
+		failure := &ProviderError{
 			Code:        "search_unavailable",
 			Message:     redact(detail, key),
 			RequestSHA:  requestSHA,
 			RequestSize: requestBytes,
 		}
+		// A started process may have posted the body before it failed, so the
+		// budget slot and a failed audit row must be kept. Only a start
+		// failure (for example a missing Node binary) proves no request.
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) {
+			failure.Code = "provider_error"
+			failure.Message = "search host exited after starting; a request may have been sent: " + redact(detail, key)
+			failure.RequestSent = true
+		}
+		return Result{}, failure
 	}
 	if stdout.truncated {
 		return Result{}, &ProviderError{

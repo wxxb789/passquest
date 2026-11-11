@@ -143,6 +143,10 @@ func runFindQuery(args []string, opt Options) int {
 		Limit:     *maxCandidatesFlag,
 		TimeoutMS: *timeoutFlag * 1000,
 	})
+	// now is the command start and owns the UTC day and the reservation;
+	// retrieved_at is when the provider had answered, which is what provenance
+	// must record. The two differ by the request duration.
+	retrieved := opt.Now().UTC()
 	if searchErr != nil {
 		failure, structured := search.AsProviderError(searchErr)
 		if !structured {
@@ -162,7 +166,7 @@ func runFindQuery(args []string, opt Options) int {
 		}
 		code := findErrorCode(failure.Code)
 		status := code
-		query := findStoredQuery(now, day, intent, intentView, failure.RequestSHA, failure.RequestSize,
+		query := findStoredQuery(retrieved, day, intent, intentView, failure.RequestSHA, failure.RequestSize,
 			"", status, code, failure.Message, failure.HTTPStatus, failure.LatencyMS)
 		query.EndpointHost = provider.EndpointHost
 		stored, appendErr := st.AppendFindQuery(query, nil, reservationID)
@@ -181,7 +185,7 @@ func runFindQuery(args []string, opt Options) int {
 			"candidate budget exceeded: provider returned %d candidate(s) for a limit of %d; no candidates were stored (%d of %d remain).",
 			len(result.Items), *maxCandidatesFlag, *maxCandidatesFlag, *maxCandidatesFlag,
 		)
-		query := findStoredQuery(now, day, intent, intentView, result.RequestSHA256, result.RequestBytes,
+		query := findStoredQuery(retrieved, day, intent, intentView, result.RequestSHA256, result.RequestBytes,
 			result.Provider, "candidate_limit_exceeded", "budget_exceeded", message,
 			result.HTTPStatus, result.LatencyMS)
 		query.EndpointHost = provider.EndpointHost
@@ -194,7 +198,7 @@ func runFindQuery(args []string, opt Options) int {
 
 	classified := find.Classify(result.Items)
 	counts := find.Count(classified)
-	storedCandidates := findStoredCandidates(classified, result.Provider, intent.Query, now)
+	storedCandidates := findStoredCandidates(classified, result.Provider, intent.Query, retrieved)
 	status := "ok"
 	state := "found"
 	message := fmt.Sprintf(
@@ -214,7 +218,7 @@ func runFindQuery(args []string, opt Options) int {
 			counts.Total,
 		)
 	}
-	query := findStoredQuery(now, day, intent, intentView, result.RequestSHA256, result.RequestBytes,
+	query := findStoredQuery(retrieved, day, intent, intentView, result.RequestSHA256, result.RequestBytes,
 		result.Provider, status, "", "", result.HTTPStatus, result.LatencyMS)
 	query.EndpointHost = provider.EndpointHost
 	stored, err := st.AppendFindQuery(query, storedCandidates, reservationID)
@@ -391,7 +395,7 @@ func findExamSection(st *store.Store, cache map[string]string, sources map[strin
 	return section, nil
 }
 
-func findStoredQuery(now time.Time, day string, intent find.Intent, view findIntentView, requestSHA string, requestBytes int,
+func findStoredQuery(at time.Time, day string, intent find.Intent, view findIntentView, requestSHA string, requestBytes int,
 	provider, status, code, message string, httpStatus int, latency int64) store.FindQuery {
 	// The output document carries every contributing attempt id. The stored
 	// audit bounds the list so a long-running learner cannot outgrow the row
@@ -404,7 +408,7 @@ func findStoredQuery(now time.Time, day string, intent find.Intent, view findInt
 	intentJSON, _ := json.Marshal(storedView)
 	return store.FindQuery{
 		Day:           day,
-		CreatedAt:     now,
+		CreatedAt:     at,
 		IntentJSON:    string(intentJSON),
 		SkillID:       intent.SkillID,
 		TacticID:      intent.TacticID,
@@ -488,7 +492,7 @@ func findFailure(opt Options, jsonMode bool, exitCode int, code, message string,
 		})
 		return exitCode
 	}
-	fmt.Fprintf(opt.Stderr, "passquest: %s\n", message)
+	fmt.Fprintf(opt.Stderr, "passquest: %s\n", find.SanitizeLine(message))
 	writeFindBudget(opt.Stderr, budget, true)
 	if queryID > 0 {
 		fmt.Fprintf(opt.Stderr, "Stored query: %d (inspect with `passquest find show %d`).\n", queryID, queryID)
