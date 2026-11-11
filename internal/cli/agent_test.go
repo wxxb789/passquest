@@ -833,14 +833,25 @@ func TestAgentCancelKeepsTerminalOffALiveHost(t *testing.T) {
 		defer close(done)
 		ticker := time.NewTicker(50 * time.Millisecond)
 		defer ticker.Stop()
-		first := true
-		for {
+		publish := func() bool {
 			raw, _ := json.Marshal(agent.Heartbeat{
 				RunID: runID, PID: 0, Token: strings.Repeat("b", 32), At: time.Now().UnixMilli(),
 			})
-			_ = os.WriteFile(heartbeatPath+".tmp", raw, 0o600)
-			_ = os.Rename(heartbeatPath+".tmp", heartbeatPath)
-			if first {
+			if err := os.WriteFile(heartbeatPath+".tmp", raw, 0o600); err != nil {
+				return false
+			}
+			if err := os.Rename(heartbeatPath+".tmp", heartbeatPath); err != nil {
+				// A concurrent probe can hold the destination open on Windows,
+				// so replacement fails with a sharing violation. Retry next tick;
+				// the heartbeat stays fresh as long as one replacement wins.
+				_ = os.Remove(heartbeatPath + ".tmp")
+				return false
+			}
+			return true
+		}
+		first := true
+		for {
+			if publish() && first {
 				close(ready)
 				first = false
 			}
