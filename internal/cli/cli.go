@@ -21,6 +21,7 @@ import (
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
+	"github.com/wxxb789/passquest/internal/search"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/tutor"
@@ -44,6 +45,9 @@ type Options struct {
 	// AnkiTransport isolates the AnkiConnect host. Tests inject a fake;
 	// production spawns agent/anki-host.mjs.
 	AnkiTransport anki.Transport
+	// SearchTransport isolates the search host. Tests inject a fake;
+	// production spawns agent/search-host.mjs.
+	SearchTransport search.Adapter
 	// AgentRunner isolates the durable-agent host. Tests inject a fake;
 	// production spawns agent/durable-host.mjs with the Pi runtime.
 	AgentRunner agent.Runner
@@ -78,6 +82,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.AnkiTransport == nil {
 		o.AnkiTransport = anki.HostTransport{Getenv: o.Getenv, Environ: os.Environ}
+	}
+	if o.SearchTransport == nil {
+		o.SearchTransport = search.HostTransport{Getenv: o.Getenv, Environ: os.Environ}
 	}
 	if o.AgentRunner == nil {
 		o.AgentRunner = agent.HostRunner{Getenv: o.Getenv, Environ: os.Environ}
@@ -127,6 +134,8 @@ func Run(args []string, options Options) int {
 		return runAgent(args[1:], opt)
 	case "note":
 		return runNote(args[1:], opt)
+	case "find":
+		return runFind(args[1:], opt)
 	case "version":
 		return runVersion(opt)
 	case "help", "-h", "--help":
@@ -188,6 +197,10 @@ Usage:
   passquest note model   [--json]
   passquest note export  [--out PATH] [--db PATH] [--json]
   passquest note push    [--endpoint URL] [--timeout-seconds N] [--force] [--db PATH] [--json]
+  passquest find     [--max-queries N] [--max-candidates N] [--timeout-seconds N]
+                     [--db PATH] [--json]
+  passquest find history [--limit N] [--max-queries N] [--db PATH] [--json]
+  passquest find show QUERY [--db PATH] [--json]
   passquest report   [--db PATH] [--json]
   passquest version
   passquest help

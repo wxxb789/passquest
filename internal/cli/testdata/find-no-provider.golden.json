@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "state": "no_provider",
+  "intent": {
+    "selection": "skill_error_ratio",
+    "skill_id": "vocabulary-in-context",
+    "skill_title": "Vocabulary in context",
+    "kind": "language",
+    "tactic_id": "",
+    "exam_section": "embedded",
+    "learner_level": "foundation",
+    "level_basis": {
+      "independent_first_attempts": 3,
+      "correct": 0,
+      "skipped": 0,
+      "rule": "first independent attempts, skips included in the denominator"
+    },
+    "candidate_limit": 20,
+    "query": "Vocabulary in context English exam practice for foundation level learners",
+    "evidence": {
+      "attempts": 3,
+      "incorrect": 3,
+      "skipped": 0,
+      "attempt_ids": [
+        1,
+        2,
+        3
+      ]
+    },
+    "reason": "3 of 3 attempt(s) for vocabulary-in-context are wrong or skipped (3 incorrect, 0 skipped); this is the highest error ratio among skills with at least three attempts."
+  },
+  "budget": {
+    "day": "2026-11-10",
+    "max_queries": 5,
+    "queries_used": 0,
+    "queries_remaining": 5,
+    "max_candidates": 20,
+    "candidates_allowed": 20,
+    "candidates_stored": 0
+  },
+  "provider": {
+    "configured": false,
+    "endpoint_host": ""
+  },
+  "candidates": [],
+  "counts": {
+    "link_only": 0,
+    "local_usable": 0,
+    "generated_unverified": 0,
+    "total": 0
+  },
+  "unclassified_attempts": 0,
+  "message": "no provider configured: set PASSQUEST_SEARCH_ENDPOINT (and optionally PASSQUEST_SEARCH_KEY). No network request was made.",
+  "limitations": [
+    "Fetched text is untrusted data: it is never treated as an instruction, never sent to a model, and cannot change an attempt, grade, score or the next exercise.",
+    "No candidate URL is fetched; only text the provider returned in its response is stored.",
+    "A search candidate is not a verified exam item or answer key.",
+    "An open license is provider-declared, not independently verified.",
+    "The learner level is an evidence-derived bucket, not a CEFR, junior-high or exam-readiness measurement."
+  ]
+}

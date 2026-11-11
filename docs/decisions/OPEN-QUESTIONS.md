@@ -621,6 +621,51 @@ Entry format:
   property to prove.
 - Revisit when: fetched text is ever fed to an agent prompt.
 
+### Q-0008-06 — How is "the learner's level" derived without a stored profile?
+- Status: decided(default taken)
+- Context: contract clause 1 requires the bounded search intent to carry the learner's level, but no
+  learner profile, CEFR assessment or exam-readiness measure exists or should be invented. Goal 0009
+  owns defensible readiness evidence.
+- Options considered: (A) an evidence-derived bucket over first, independent attempts, with its counts
+  printed; (B) a fixed "junior-high" profile from the core design; (C) require the learner to choose a
+  level before searching.
+- Default taken: (A). Fewer than three first independent attempts is `early`; otherwise the correct
+  ratio is `foundation` below 0.40, `developing` below 0.70 and `consolidating` at or above 0.70,
+  with skips in the denominator. The document carries `level_basis` and a limitation stating this is
+  not a CEFR, junior-high or exam-readiness measurement. Reverse by changing `find.InferLevel`; no
+  stored data changes.
+- Revisit when: goal 0009 defines a readiness measure, or the owner supplies a real learner level.
+
+### Q-0008-07 — Which license identifiers count as an explicit open license?
+- Status: decided(default taken)
+- Context: contract clause 3 makes `local-usable` depend on "an explicit open-license field", but a
+  provider can send any string in that field. Accepting every non-empty value would treat
+  `all-rights-reserved` as permission to reproduce text.
+- Options considered: (A) a small allowlist of open text licenses, with an unrecognised value
+  downgraded to `link-only`; (B) accept any non-empty license string; (C) require the owner to approve
+  each provider license manually before any candidate is usable.
+- Default taken: (A). The allowlist is `cc0-1.0`, `pdm-1.0`, `public-domain`, `cc-by-3.0`,
+  `cc-by-4.0`, `cc-by-sa-3.0` and `cc-by-sa-4.0`; `nc` and `nd` variants are excluded because they
+  are not open for unrestricted local study. A present but unrecognised license is stored as
+  link-only with reason `license_not_open`. The license remains provider-declared, not independently
+  verified. Reverse by editing the allowlist in `internal/find`.
+- Revisit when: a supported provider uses a different documented open-license vocabulary, or a
+  curated source is added on purpose.
+
+### Q-0008-08 — What is an embedded skill's "exam section"?
+- Status: decided(default taken)
+- Context: contract clause 1 requires the intent to carry an exam section. Imported source pages carry
+  a stored section (`notice`, `mock-exam`, …), but first-party sample and skill passages have no exam
+  section and the app must not invent an exam blueprint.
+- Options considered: (A) use the source page's stored section, `embedded` for first-party content and
+  `unavailable` when the page cannot be read; (B) invent a section from the skill kind; (C) omit the
+  field for embedded content.
+- Default taken: (A). The field is metadata from the attempt's content, not a claim about the live
+  examination; `embedded` keeps the document complete without inventing one. Reverse by changing the
+  CLI section resolver; persisted queries keep the value they recorded.
+- Revisit when: an Exam Profile with real section definitions exists, or first-party content is
+  deliberately tagged with a section.
+
 ### Q-0007-07 — Must AnkiConnect be reached through a Node host?
 - Status: decided(default taken)
 - Context: the local-only gate forbids `net/http` in first-party packages, a note can contain private

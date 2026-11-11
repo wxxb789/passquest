@@ -5,8 +5,8 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 ## Design and development
 
 - [Core Design](docs/core-design.md) — product purpose, safety, quality and architecture principles.
-- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0007
-  are done; 0008 is next.
+- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0008
+  are done; 0009 is next.
 - [Harness](docs/harness.md) — the single `bun run gate` entry point and what each gate reads.
 - [Cross-platform rules](docs/cross-platform.md) — Windows, macOS and Linux: paths, processes, mode
   bits, goldens, and the path literals the `portable-paths` gate refuses.
@@ -16,11 +16,13 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
   with pause/resume, cancellation, idempotent steps and an independent durable history.
 - [Anki notes](docs/notes.md) — a deterministic note from a stored attempt or a learner mark,
   consent-gated private text, revision history, atomic export and a loopback AnkiConnect push.
+- [Find practice](docs/find.md) — one evidence rule, a bounded search intent, candidate rights and
+  provenance, a visible query/candidate budget and inert fetched text.
 
 **Implementation order:** verified headless practice → private local baseline → scoring tactic
 practice → evidence-driven adaptation → user-supplied text coaching and durable agent work → Anki
-integration and on-demand resources → functional MyGo desktop → Opus-led high-fidelity UX →
-packaging.
+integration and on-demand resources → unseen assessment → functional MyGo desktop → Opus-led
+high-fidelity UX → packaging.
 
 ## Try the practice slice
 
@@ -167,6 +169,27 @@ the note queued for exactly one later drain. A skipped attempt and an unanswered
 the correct option or its explanation. AnkiWeb and mobile synchronization remain the learner's own
 manual action; Pass Quest never contacts AnkiWeb or a phone. Details: [`docs/notes.md`](docs/notes.md).
 Measured evidence: [`docs/evidence/0007-anki-from-learning.md`](docs/evidence/0007-anki-from-learning.md).
+
+## Find practice when evidence needs it
+
+Goal 0008 turns one observed gap into a bounded search intent. The rule is fixed: the highest
+`(incorrect + skipped) / attempts` among skills with at least three attempts, else the most recent
+wrong answer's tactic, else `nothing_to_find`. Candidate classification decides what may be shown:
+`local-usable` only when the provider declares a recognised open license and returns text;
+`generated-unverified` is advisory; everything else is `link-only`. Every candidate keeps provider,
+query, retrieval time, URL and a content SHA-256. A query budget (5/day) and a candidate budget
+(20/run) are flags and are persisted; exceeding either refuses instead of truncating.
+
+```bash
+passquest find --json
+passquest find history
+passquest find show 1
+```
+
+With no `PASSQUEST_SEARCH_ENDPOINT`, the command prints `no provider configured` and makes zero
+network calls. Fetched text is stored as data only: it is never an instruction, never sent to a model,
+and cannot change an attempt, grade or the next exercise. Details: [`docs/find.md`](docs/find.md).
+Measured evidence: [`docs/evidence/0008-find-fit-practice.md`](docs/evidence/0008-find-fit-practice.md).
 
 ## Run the gates
 

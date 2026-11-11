@@ -4,6 +4,7 @@ import { adaptiveSmoke } from "./adaptive-smoke.ts";
 import { agentSmoke } from "./agent-smoke.ts";
 import { baseline } from "./baseline.ts";
 import { docsLinks } from "./docs-links.ts";
+import { findSmoke } from "./find-smoke.ts";
 import { goBuild } from "./go-build.ts";
 import { goTest } from "./go-test.ts";
 import { goTidy } from "./go-tidy.ts";
@@ -36,6 +37,7 @@ export const gates: Gate[] = [
   tutorSmoke,
   agentSmoke,
   noteSmoke,
+  findSmoke,
   portablePaths,
   selfTest,
 ];

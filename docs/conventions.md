@@ -18,10 +18,11 @@ Binding project conventions. Read this before writing code for any goal.
   One process is the writer/authority for each logical state domain; migrations are versioned and
   idempotent.
 - **Node/TypeScript** exists only for the narrow hosts under `agent/`: the single-call BYOK tutor
-  (goal 0005), the Pi Durable study brief (goal 0006) and the loopback AnkiConnect transport
-  (goal 0007). The core CLI, note drafting/preview/accept/export and every verified local practice
-  path must work with Node absent; only `tutor ask`, `agent` work, `note propose --refine` and
-  `note push` when it has pending work need it.
+  (goal 0005), the bounded search transport (goal 0008), the Pi Durable study brief (goal 0006) and
+  the loopback AnkiConnect transport (goal 0007). The core CLI, note drafting/preview/accept/export
+  and every verified local practice path must work with Node absent; only `tutor ask`, `agent` work,
+  `note propose --refine`, `note push` when it has pending work, and `find` with a configured search
+  endpoint need it.
 - **MyGo + WebView** desktop shell arrives at goal 0011. Until then the access surface is a real,
   scriptable CLI plus a test harness — screenshots and mock UIs are not evidence.
 - **Bun + TypeScript** is the harness runtime (`harness/`, gate modules under `harness/gates/`), not
@@ -49,7 +50,7 @@ Binding project conventions. Read this before writing code for any goal.
 ```text
 cmd/passquest/          CLI entry point (the pre-0011 access surface)
 internal/<domain>/      Go packages by domain truth, not by layer
-agent/                  Node/TypeScript BYOK tutor, AnkiConnect and Pi Durable hosts (`docs/agent.md`)
+agent/                  Node/TypeScript tutor, search, AnkiConnect and Pi Durable hosts (`docs/agent.md`)
 data/baselines/         owner-directed public parsed text (unreviewed; see its README)
 data/private/, data/local/, local-data/, .passquest/   never committed
 docs/goals/             numbered contracts; docs/goals/archive/ after close
