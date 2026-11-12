@@ -27,3 +27,6 @@ build/
 .bun/
 coverage/
 *.tsbuildinfo
+
+# CI watcher scratch output
+ci-watch-*.log
