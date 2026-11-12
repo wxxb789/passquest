@@ -83,20 +83,13 @@ func noteDraftFor(st *store.Store, id int64) (store.NoteDraft, error) {
 	return draft, nil
 }
 
-// consentGranted reports whether the latest recorded consent for a source and
-// provider is a grant. A lookup error is treated as no consent.
-func consentGranted(st *store.Store, sourceID, providerID string) bool {
-	event, ok, err := st.TutorConsent(sourceID, providerID)
+// consentGranted reports whether the latest recorded global consent for a
+// source is a grant. Note text and its Anki export are a different destination
+// from provider inference, so a provider-scoped tutor grant never authorizes
+// them; only the global decision does. A lookup error is treated as no consent.
+func consentGranted(st *store.Store, sourceID string) bool {
+	event, ok, err := st.TutorConsent(sourceID, "")
 	return err == nil && ok && event.Granted
-}
-
-// noteConsentProvider resolves the active provider once for an export or push.
-func noteConsentProvider(st *store.Store) string {
-	cfg, configured, err := st.TutorConfig()
-	if err != nil || !configured {
-		return ""
-	}
-	return cfg.Provider
 }
 
 func noteInputFromDraft(st *store.Store, draft store.NoteDraft) (note.Input, error) {
@@ -130,7 +123,7 @@ func noteInputFromDraft(st *store.Store, draft store.NoteDraft) (note.Input, err
 		}
 		record = &got
 	}
-	consent := loaded.Private && sourceID != "" && consentGranted(st, sourceID, noteConsentProvider(st))
+	consent := loaded.Private && sourceID != "" && consentGranted(st, sourceID)
 	return note.Input{
 		Target: note.Target{
 			ContentID:      draft.ContentID,
@@ -324,7 +317,7 @@ func noteProposeInput(st *store.Store, attemptFlag int64, contentFlag, questionF
 			},
 			Question:       &loaded.Question,
 			PassageText:    loaded.Content.Passage.Text,
-			ConsentGranted: loaded.Private && loaded.SourceID != "" && consentGranted(st, loaded.SourceID, noteConsentProvider(st)),
+			ConsentGranted: loaded.Private && loaded.SourceID != "" && consentGranted(st, loaded.SourceID),
 		}, nil
 	}
 
@@ -359,7 +352,7 @@ func noteProposeInput(st *store.Store, attemptFlag int64, contentFlag, questionF
 		Attempt:        &record,
 		Question:       &loaded.Question,
 		PassageText:    loaded.Content.Passage.Text,
-		ConsentGranted: loaded.Private && loaded.SourceID != "" && consentGranted(st, loaded.SourceID, noteConsentProvider(st)),
+		ConsentGranted: loaded.Private && loaded.SourceID != "" && consentGranted(st, loaded.SourceID),
 	}, nil
 }
 
@@ -661,6 +654,13 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 	if !configured {
 		return draft, nil, usageError(opt, jsonMode, "not_configured",
 			"no tutor provider is configured; run passquest tutor config --endpoint URL --model NAME, or omit --refine")
+	}
+	registry, _, err := provider.Load(opt.Getenv)
+	if err != nil {
+		return draft, nil, usageError(opt, jsonMode, "invalid_registry", err.Error())
+	}
+	if code := requireVerifiedTextChat(st, registry, opt, cfg.Provider, cfg.Model, jsonMode); code != 0 {
+		return draft, nil, code
 	}
 	env, key, present := provider.CredentialValue(opt.Getenv, cfg.Provider)
 	if !present {

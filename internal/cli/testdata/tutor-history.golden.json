@@ -54,8 +54,8 @@
       }
     ],
     "total_calls": 2,
-    "total_limit": 100,
-    "ceiling": "5 providers × 20 = 100"
+    "total_limit": 120,
+    "ceiling": "6 providers × 20 = 120"
   },
   "calls": [
     {

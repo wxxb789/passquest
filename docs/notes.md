@@ -89,9 +89,12 @@ passquest tutor consent SOURCE --reviewer NAME
 passquest tutor revoke SOURCE --reviewer NAME
 ```
 
-Consent is the existing append-only per-source ledger. `revoke` withholds the source on the next
-preview and blocks a new export or push; it does not delete a note the learner already accepted.
-First-party sample and skill content needs no consent.
+Consent is the existing append-only per-source ledger. The note body and its Anki export are a
+destination separate from provider payloads, so these paths require the global decision: a
+`--provider`-scoped grant authorizes that provider's inference payload only and never satisfies a
+note export or push. `revoke` withholds the source on the next preview and blocks a new export or
+push; it does not delete a note the learner already accepted. First-party sample and skill content
+needs no consent.
 
 ## Identity and revisions
 

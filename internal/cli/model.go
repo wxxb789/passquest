@@ -647,8 +647,16 @@ func buildBudgetView(st *store.Store, cfg tutor.Config, registry provider.Regist
 		}
 		add(p.ID, p.Name, true)
 	}
-	if activeID == "" && cfg.Endpoint != "" && countByProvider[""] == 0 {
-		add("legacy", "Manual tutor configuration", true)
+	if activeID == "" && cfg.Endpoint != "" {
+		if countByProvider[""] == 0 {
+			add("legacy", "Manual tutor configuration", true)
+		} else {
+			// Usage rows are rendered as unattributed below; the legacy
+			// allowance is still granted by ReserveTutorCall, so it counts in
+			// the totals without a second synthetic zero-usage row.
+			view.TotalLimit += limit
+			view.ProviderCount++
+		}
 	}
 	for id, calls := range countByProvider {
 		if !seen[id] {

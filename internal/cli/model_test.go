@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -241,6 +242,65 @@ func TestModelTestBudgetRefusesEachProviderAtItsOwnLimit(t *testing.T) {
 	}
 	if budget.Budget.Ceiling != "2 providers × 1 = 2" {
 		t.Fatalf("ceiling = %q", budget.Budget.Ceiling)
+	}
+}
+
+func TestModelBudgetCountsLegacyAllowanceWithoutUsageBranch(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	transport := &fakeTutorTransport{response: fixedTutorResponse("Focus on the Saturday sentence.")}
+	practiceSample(t, db, clock)
+	configureTutor(t, db, clock, transport, true)
+	mustTutorRun(t, db, clock, transport, true, "tutor", "ask", "--attempt", "1", "--json")
+
+	decodeBudget := func() modelBudgetView {
+		t.Helper()
+		code, out, errOut := modelRun(t, db, clock, nil, nil, "model", "budget", "--json")
+		if code != 0 {
+			t.Fatalf("model budget exit = %d: %s", code, errOut)
+		}
+		var doc modelBudgetDoc
+		if err := json.Unmarshal([]byte(out), &doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc.Budget
+	}
+
+	registry, err := provider.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerCount := 1 // the active legacy allowance
+	for _, p := range registry.Providers {
+		if !p.Custom {
+			providerCount++
+		}
+	}
+	legacyCeiling := fmt.Sprintf("%d providers × %d = %d", providerCount, tutor.DefaultDailyCalls, providerCount*tutor.DefaultDailyCalls)
+	one := decodeBudget()
+	if one.TotalCalls != 1 || one.TotalLimit != providerCount*tutor.DefaultDailyCalls || one.ProviderCount != providerCount || one.Ceiling != legacyCeiling {
+		t.Fatalf("legacy budget after one call = %+v", one)
+	}
+	usageRows := 0
+	for _, row := range one.Providers {
+		if row.Provider == "" {
+			usageRows++
+			if row.Label != "unattributed (legacy)" || row.Calls != 1 {
+				t.Fatalf("legacy usage row = %+v", row)
+			}
+		}
+		if row.Provider == "legacy" {
+			t.Fatalf("legacy allowance printed a synthetic zero-usage row: %+v", row)
+		}
+	}
+	if usageRows != 1 {
+		t.Fatalf("legacy usage rows = %d, providers = %+v", usageRows, one.Providers)
+	}
+
+	mustTutorRun(t, db, clock, transport, true, "tutor", "ask", "--attempt", "1", "--json")
+	two := decodeBudget()
+	if two.TotalCalls != 2 || two.TotalLimit != providerCount*tutor.DefaultDailyCalls || two.ProviderCount != providerCount || two.Ceiling != legacyCeiling {
+		t.Fatalf("legacy budget after two calls = %+v", two)
 	}
 }
 

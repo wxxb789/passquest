@@ -100,9 +100,10 @@ the real ceiling:
 ceiling = providers × per-provider limit
 ```
 
-A refusal at one provider's own limit leaves every other provider's budget usable. Legacy rows with
-no provider are shown as `unattributed`; they count in the sum but are not charged to a named
-provider. A reservation that is never finalized keeps its slot for the rest of the UTC day, which can
+A refusal at one provider's own limit leaves every other provider's budget usable. An active legacy
+configuration counts as one provider allowance whether or not it has recorded a call; its usage rows
+carry no provider and are shown as `unattributed`, count in the sum but are not charged to a second
+allowance. A reservation that is never finalized keeps its slot for the rest of the UTC day, which can
 under-spend and never over-spend.
 
 ## Bounded failover
