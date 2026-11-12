@@ -277,7 +277,11 @@ export const assessSmoke: Gate = {
       await resumeCollected;
       // The copy was created fresh, so the interrupted run is id 1.
       const resumeReportID = 1;
-      const resumed = await callJSON(resumeDB, ["assess", "resume", String(resumeReportID)], "B\n".repeat(15));
+      // The kill point is platform-dependent: POSIX lets the CLI flush and record
+      // the interrupted state after the five written answers, while Windows may
+      // commit fewer. Feed more lines than the 20-item run can possibly consume so
+      // the resume never hits stdin EOF; lines past the last item are never read.
+      const resumed = await callJSON(resumeDB, ["assess", "resume", String(resumeReportID)], "B\n".repeat(40));
       if (!check(resumed.code === 0, `resume exit = ${resumed.code}: ${resumed.stderr}`)) return fail(checks);
       const resumedReport = await callJSON(resumeDB, ["assess", "report", String(resumeReportID)]);
       check(numberField(asRecord(field(resumedReport.doc, "run")), "resume_count") === 1, "resume count");
