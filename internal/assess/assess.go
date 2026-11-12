@@ -294,7 +294,11 @@ type Annotations struct {
 	Evidence        string
 	Reasoning       string
 	OptionReasoning map[string]string
-	Glossary        []exam.GlossaryEntry
+	// OptionReasoningMissing lists the sorted labels with no authored
+	// explanation. Absence is normal for imported book material; the report
+	// prints a fixed sentence for it and never stores that sentence as data.
+	OptionReasoningMissing []string
+	Glossary               []exam.GlossaryEntry
 }
 
 // Counts is the recorded side of the report.

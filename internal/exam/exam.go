@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -226,8 +227,10 @@ func GlossaryProblems(entries []GlossaryEntry) []string {
 }
 
 // OptionProblems reports structural problems in options and their per-label
-// explanations. Source questions allow an empty answer until review; the
-// caller checks answer membership separately.
+// explanations. An explanation may be absent: imported book material normally
+// explains only the keyed option. An explanation for a label that is not an
+// option is still rejected. Source questions allow an empty answer until
+// review; the caller checks answer membership separately.
 func OptionProblems(options []Option, reasoning map[string]string) []string {
 	var problems []string
 	// Authored items are 2..8 options. Two is the minimum for a choice; eight
@@ -248,17 +251,29 @@ func OptionProblems(options []Option, reasoning map[string]string) []string {
 			problems = append(problems, fmt.Sprintf("option %s text is empty", opt.Label))
 		}
 	}
-	for label := range labels {
-		if strings.TrimSpace(reasoning[label]) == "" {
-			problems = append(problems, fmt.Sprintf("option %s has no explanation", label))
-		}
-	}
+	// An absent per-option explanation is legal: imported book material
+	// explains only the keyed option and normally leaves distractors
+	// unexplained. Presentation prints the absence; validation does not.
 	for label := range reasoning {
 		if !labels[label] {
 			problems = append(problems, fmt.Sprintf("explains unknown option %q", label))
 		}
 	}
 	return problems
+}
+
+// MissingOptionReasoning returns the sorted labels whose explanation is absent
+// or blank. Callers emit this list with option_reasoning so a consumer can tell
+// an unexplained option from an empty string without inventing text.
+func MissingOptionReasoning(options []Option, reasoning map[string]string) []string {
+	var missing []string
+	for _, opt := range options {
+		if strings.TrimSpace(reasoning[opt.Label]) == "" {
+			missing = append(missing, opt.Label)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 // Question returns the question with the given stable id and its position.

@@ -67,6 +67,12 @@ evidence is a verbatim substring of the current page text.
 }
 ```
 
+Per-option explanations are optional. Imported book material normally explains the correct option
+and often leaves distractors unexplained; a missing explanation is stored as an absent entry, not a
+placeholder, and does not block review or practice. `questions --json` lists those labels in
+`option_reasoning_missing`, and the CLI prints `原书未提供该选项的解析。` when a learner sees an
+unexplained option.
+
 ```bash
 passquest question add SOURCE 24 --file question-q26.json
 passquest page review SOURCE 24 --reviewer owner

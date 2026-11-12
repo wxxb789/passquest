@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wxxb789/passquest/internal/exam"
 )
 
 var testNow = time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
@@ -544,7 +546,6 @@ func TestParseQuestionJSONRejectsBadInput(t *testing.T) {
 		{"empty options", `{"id":"q1","stem":"s","options":[],"answer":"","evidence":"e","reasoning":"r","option_reasoning":{}}`, "has 0 options, want 2..8"},
 		{"answer not in options", validQuestionJSON("C"), `answer "C" is not one of its options`},
 		{"duplicate label", strings.Replace(base, `{"label": "B", "text": "At 4 p.m."}`, `{"label": "A", "text": "At 4 p.m."}`, 1), `option label "A" is duplicated`},
-		{"missing explanation", strings.Replace(base, `"A": "That is the weekday closing time.",`, "", 1), "option A has no explanation"},
 		{"unknown explanation", strings.Replace(base, `"B": "The notice gives 4 p.m. for Saturdays."`, `"B": "The notice gives 4 p.m. for Saturdays.", "C": "x"`, 1), `explains unknown option "C"`},
 		{"unregistered tactic", strings.Replace(base, `"reasoning"`, `"tactics": ["evidence-location"], "reasoning"`, 1), "not registered"},
 		{"malformed tactic", strings.Replace(base, `"reasoning"`, `"tactics": ["Not Except"], "reasoning"`, 1), "lowercase slug"},
@@ -560,6 +561,21 @@ func TestParseQuestionJSONRejectsBadInput(t *testing.T) {
 				t.Fatalf("error = %v, want fragment %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseQuestionJSONAllowsMissingOptionExplanation(t *testing.T) {
+	raw := strings.Replace(validQuestionJSON("B"), `"A": "That is the weekday closing time.",`, "", 1)
+	q, err := ParseQuestionJSON([]byte(raw), "src-test", 1, testNow, "")
+	if err != nil {
+		t.Fatalf("a missing distractor explanation is legal: %v", err)
+	}
+	if _, ok := q.OptionReasoning["A"]; ok {
+		t.Fatalf("missing explanation was synthesised: %+v", q.OptionReasoning)
+	}
+	missing := exam.MissingOptionReasoning(q.Options, q.OptionReasoning)
+	if len(missing) != 1 || missing[0] != "A" {
+		t.Fatalf("missing labels = %v, want [A]", missing)
 	}
 }
 

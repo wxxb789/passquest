@@ -124,12 +124,14 @@ type assessSkillView struct {
 }
 
 type assessAnnotationView struct {
-	Withheld        bool                `json:"withheld,omitempty"`
-	Available       bool                `json:"available"`
-	Evidence        string              `json:"evidence,omitempty"`
-	Reasoning       string              `json:"reasoning,omitempty"`
-	OptionReasoning map[string]string   `json:"option_reasoning,omitempty"`
-	Glossary        []glossaryEntryView `json:"glossary,omitempty"`
+	Withheld        bool              `json:"withheld,omitempty"`
+	Available       bool              `json:"available"`
+	Evidence        string            `json:"evidence,omitempty"`
+	Reasoning       string            `json:"reasoning,omitempty"`
+	OptionReasoning map[string]string `json:"option_reasoning,omitempty"`
+	// OptionReasoningMissing lists labels with no authored explanation, sorted.
+	OptionReasoningMissing []string            `json:"option_reasoning_missing,omitempty"`
+	Glossary               []glossaryEntryView `json:"glossary,omitempty"`
 }
 
 type assessReportItemView struct {
@@ -353,6 +355,7 @@ func reportDocOf(report assess.Report) assessReportDoc {
 }
 
 func reportItemViewOf(item assess.ItemReport) assessReportItemView {
+	reasoning := optionReasoningWithText(item.Annotations.OptionReasoning)
 	view := assessReportItemView{
 		Position:    item.Position,
 		ContentID:   item.ContentID,
@@ -365,12 +368,13 @@ func reportItemViewOf(item assess.ItemReport) assessReportItemView {
 		Scored:      item.Scored,
 		Reasons:     append([]string(nil), item.Reasons...),
 		Annotations: assessAnnotationView{
-			Withheld:        item.Annotations.Withheld,
-			Available:       item.Annotations.Evidence != "" || item.Annotations.Reasoning != "" || len(item.Annotations.Glossary) > 0 || len(item.Annotations.OptionReasoning) > 0,
-			Evidence:        item.Annotations.Evidence,
-			Reasoning:       item.Annotations.Reasoning,
-			OptionReasoning: item.Annotations.OptionReasoning,
-			Glossary:        glossaryViews(item.Annotations.Glossary),
+			Withheld:               item.Annotations.Withheld,
+			Available:              item.Annotations.Evidence != "" || item.Annotations.Reasoning != "" || len(item.Annotations.Glossary) > 0 || len(reasoning) > 0,
+			Evidence:               item.Annotations.Evidence,
+			Reasoning:              item.Annotations.Reasoning,
+			OptionReasoning:        reasoning,
+			OptionReasoningMissing: append([]string(nil), item.Annotations.OptionReasoningMissing...),
+			Glossary:               glossaryViews(item.Annotations.Glossary),
 		},
 	}
 	return view
@@ -558,13 +562,18 @@ func writeAssessmentReport(w io.Writer, doc assessReportDoc, dbPath string) {
 		}
 		fmt.Fprintf(w, "    Evidence: %s\n", item.Annotations.Evidence)
 		fmt.Fprintf(w, "    Reasoning: %s\n", item.Annotations.Reasoning)
-		labels := make([]string, 0, len(item.Annotations.OptionReasoning))
+		labels := make([]string, 0, len(item.Annotations.OptionReasoning)+len(item.Annotations.OptionReasoningMissing))
 		for label := range item.Annotations.OptionReasoning {
 			labels = append(labels, label)
 		}
+		labels = append(labels, item.Annotations.OptionReasoningMissing...)
 		sort.Strings(labels)
 		for _, label := range labels {
-			fmt.Fprintf(w, "    Option %s: %s\n", label, item.Annotations.OptionReasoning[label])
+			text, ok := optionExplanation(item.Annotations.OptionReasoning, label)
+			if !ok {
+				text = missingOptionExplanation
+			}
+			fmt.Fprintf(w, "    Option %s: %s\n", label, text)
 		}
 		if len(item.Annotations.Glossary) == 0 {
 			fmt.Fprintln(w, "    Glossary: none")

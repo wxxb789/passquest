@@ -353,6 +353,40 @@ func TestAssessReportWithholdsAnnotationsUntilRunFinishes(t *testing.T) {
 	}
 }
 
+func TestAssessmentReportPrintsMissingOptionExplanation(t *testing.T) {
+	item := assess.ItemReport{
+		Position:   0,
+		ContentID:  "content-1",
+		QuestionID: "q1",
+		State:      assess.StateAnswered,
+		Scored:     true,
+		Annotations: assess.Annotations{
+			Evidence:               "closes at 4 p.m.",
+			Reasoning:              "The notice states the time.",
+			OptionReasoning:        map[string]string{"B": "The key is 4 p.m."},
+			OptionReasoningMissing: []string{"A", "C"},
+		},
+	}
+	view := reportItemViewOf(item)
+	if got := strings.Join(view.Annotations.OptionReasoningMissing, ","); got != "A,C" {
+		t.Fatalf("option_reasoning_missing = %q, want A,C", got)
+	}
+	if len(view.Annotations.OptionReasoning) != 1 || view.Annotations.OptionReasoning["B"] == "" {
+		t.Fatalf("option_reasoning = %v, want only B", view.Annotations.OptionReasoning)
+	}
+	var out bytes.Buffer
+	writeAssessmentReport(&out, assessReportDoc{Items: []assessReportItemView{view}}, "test.sqlite")
+	text := out.String()
+	for _, label := range []string{"A", "C"} {
+		if !strings.Contains(text, "    Option "+label+": "+missingOptionExplanation+"\n") {
+			t.Fatalf("report does not print the missing explanation for %s:\n%s", label, text)
+		}
+	}
+	if !strings.Contains(text, "    Option B: The key is 4 p.m.\n") {
+		t.Fatalf("report does not print the authored explanation:\n%s", text)
+	}
+}
+
 func TestAssessAbandonedRunWithholdsUnfinalizedAnnotations(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
