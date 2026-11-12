@@ -16,16 +16,23 @@ import (
 
 func modelRegistryFile(t *testing.T, providers ...map[string]any) string {
 	t.Helper()
+	path := filepath.Join(t.TempDir(), "registry.json")
+	writeModelRegistry(t, path, providers...)
+	return path
+}
+
+// writeModelRegistry replaces the document at path, so a test can change a
+// provider's endpoint between two commands.
+func writeModelRegistry(t *testing.T, path string, providers ...map[string]any) {
+	t.Helper()
 	doc := map[string]any{"version": 1, "providers": providers}
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "registry.json")
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return path
 }
 
 func modelProvider(id, endpoint string) map[string]any {
