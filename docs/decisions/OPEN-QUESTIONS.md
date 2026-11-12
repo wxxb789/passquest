@@ -736,3 +736,115 @@ Entry format:
   transaction. `tutor history` reports the shared daily count but lists coaching calls only. Reverse
   by adding a dedicated note budget display or removing the flag; deterministic drafts are unaffected.
 - Revisit when: goal 0010 introduces provider/capability choice or per-task budgets.
+
+### Q-0009-01 — What item count and time window does an assessment use?
+- Status: resolved
+- Resolution: (owner, 2026-11-12) option (B) confirmed: `--size 40 --minutes 60` as visible flags, with the
+  values used always printed in the report. The real CRSC item count and duration remain unknown, so a
+  learned spec is a two-argument change, not a code change.
+- Context: the whole report shape depends on the window, and no authoritative exam spec is available here.
+- Options considered: (A) the owner supplies the real numbers now; (B) 40/60 as explicit flags; (C) a small
+  first pass at 20 items / 30 minutes.
+- Default taken: (B).
+
+### Q-0009-02 — Does the report show a pass threshold?
+- Status: resolved
+- Resolution: (owner, 2026-11-12) option (A) confirmed: no threshold. The report prints accuracy and speed
+  bands plus `pass threshold: unknown`, and never a pass probability.
+- Context: the real passing score is unknown; a fabricated threshold is the most damaging false claim the
+  product could make.
+- Options considered: (A) none, accuracy and speed bands only; (B) a dual track with an owner-set target;
+  (C) a fixed target line such as 70%.
+- Default taken: (A).
+
+### Q-0009-03 — What is the minimum viable holdout pool?
+- Status: resolved
+- Resolution: (owner, 2026-11-12) option (A) confirmed: refuse to start below 20 qualifying unseen items and
+  report the shortfall. A looser practice pool that also feeds assessments is out of scope; if the pool is
+  exhausted the next step is a separate goal, not a weaker exposure rule.
+- Context: at 20 items one item is 5% of the score, which is the smallest count that is still readable.
+- Options considered: (A) 20 items; (B) 40 items; (C) no floor, warn only.
+- Default taken: (A).
+
+### Q-0009-04 — What counts as prior exposure to an item?
+- Status: resolved
+- Resolution: (owner, 2026-11-12) option (A) confirmed: any presentation — `practice`, `next`, `show` or a
+  derived note — spends the item for assessment purposes, whether or not it was answered.
+- Context: counting only wrong answers keeps the pool alive but admits items whose key the learner already
+  saw, which inflates the independent score.
+- Options considered: (A) any presentation; (B) only an incorrect or assisted attempt; (C) two pools, a strict
+  assessment pool and a loose practice pool.
+- Default taken: (A). Option (C) is the natural successor if the pool proves too small in real use.
+
+### Q-0009-05 — Are glossary and reasoning visible during a run?
+- Status: resolved
+- Resolution: (owner, 2026-11-12) option (A) confirmed: hidden during the run (`--annotations none` is the
+  only value this goal accepts), printed in the report afterwards.
+- Context: the real examination has no glossary, but early learners may not recognise the stem vocabulary.
+- Options considered: (A) hide everything; (B) keep the glossary, hide the reasoning; (C) show everything.
+- Default taken: (A).
+
+### Q-0010-01 — Which providers get real credentials in this goal?
+- Status: resolved
+- Resolution: (owner, 2026-11-12) option (A) confirmed: none. The registry, a loopback stub and every typed
+  failure are proven without a key; a real provider call is owner evidence recorded in the goal report.
+- Context: CI cannot reach a provider from any OS, and a key in this environment adds a secret surface without
+  adding gate coverage.
+- Options considered: (A) none, stub only; (B) one or two providers the owner already holds; (C) the cheapest
+  single provider.
+- Default taken: (A).
+
+### Q-0010-02 — Is account-based login supported?
+- Status: resolved
+- Resolution: (owner, 2026-11-12) option (A) confirmed: BYOK keys only. No account login, no pasted session
+  token, no subscription-token extraction in this goal.
+- Context: login is the only part of this goal with a terms-of-service and credential-custody risk.
+- Options considered: (A) BYOK only; (B) documented device-code OAuth for named providers; (C) pasted token.
+- Default taken: (A).
+
+### Q-0010-03 — How many models does the registry declare per provider?
+- Status: resolved
+- Resolution: (owner, 2026-11-12) option (A) confirmed: one cheapest documented text model per provider, with
+  every other model listed `declared, unverified` and never offered as working until `model test` verifies it.
+- Context: a hand-maintained registry with many entries goes stale quickly and turns `model_missing` into the
+  normal experience.
+- Options considered: (A) one model per provider; (B) three to five tiers per provider; (C) only the providers
+  the owner will actually use.
+- Default taken: (A).
+
+### Q-0010-04 — Is the daily call budget shared or per provider?
+- Status: resolved
+- Resolution: (owner, 2026-11-12) option (B) confirmed: **one counter per provider**, each at the goal-0005
+  daily value. Because N providers therefore allow N times the calls, `model list` and the call report print
+  every per-provider counter and their sum, and the goal report states the ceiling as
+  `providers × per-provider limit` rather than as one global cap.
+- Context: this number is the real spending ceiling; a shared counter is predictable but blocks every provider
+  once one is exhausted, which the owner judged worse than the multiplicative ceiling.
+- Options considered: (A) one shared counter; (B) independent per-provider counters; (C) shared total with a
+  per-provider soft cap.
+- Default taken: (B). Reverse by changing the counter key back to the provider-agnostic ledger.
+
+### Q-0010-05 — May a failed call retry on a different provider?
+- Status: resolved
+- Resolution: (owner, 2026-11-12) option (B) confirmed, with the consent condition made explicit: one retry on
+  another provider is allowed only when the target model is verified for every capability the request needs,
+  the target's recorded consent scope is exactly equal to the failing request's consent scope, the target has
+  budget left, and it is not the provider that already failed. Every failover prints
+  `failover: <from> → <to> (reason: <type>)` and is recorded on the call ledger; any consent difference
+  refuses failover and names the difference. Failover never widens what private text can reach.
+- Context: the question is a privacy question, not an availability question — an automatic retry can move the
+  same private passage to a vendor the learner did not choose for it.
+- Options considered: (A) no automatic failover; (B) failover to a verified provider with an equal consent
+  scope, printed; (C) failover only for requests that carry no private text.
+- Default taken: (B). Reverse by disabling the retry branch in the host; the ledger keeps every attempt.
+
+### Q-0010-06 — What does the desktop learner see when every provider is unusable?
+- Status: open
+- Context: clause 5 requires one action per failure type, but a learner can be in a state where all configured
+  providers are `no_credential` or over budget. The goal does not yet say whether that state is one aggregated
+  message or a per-provider list.
+- Options considered: (A) one line naming the cheapest recoverable action across all providers; (B) the full
+  per-provider table; (C) the aggregated line plus the table behind `--verbose`.
+- Default taken: (C) — the short line stays actionable, the table stays inspectable. Revisit when goal 0011
+  renders this in the desktop workspace.
+- Revisit when: the desktop workspace lands, or a learner reports the aggregate line as unclear.
