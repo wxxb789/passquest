@@ -76,6 +76,10 @@ presentations, and spend nothing.
   `assistance='none'` and `elapsed_ms` equal to the item deadline minus its first presentation.
   No correctness feedback is shown during the run. A terminal command cannot interrupt a blocked
   read, so the deadline is enforced when input returns.
+- When the whole-run window elapses while an item is on screen, that item is recorded as a
+  timed-out `skipped` attempt at its stored item deadline (already clamped to the run deadline)
+  before the run is abandoned. It therefore counts in `timed_out` and stays in the score
+  denominator; the command still exits 2 with `run_abandoned` and points at `assess report`.
 - A process killed or interrupted between items leaves the run `active`. `assess resume RUN`
   increments `resume_count`, appends a `resumed` event and continues at the first unfinished item.
   The original `presented_at` is kept, so an interruption does not reset the item clock. An EOF or

@@ -531,7 +531,7 @@ func runAssessmentLoop(opt Options, st *store.Store, run assess.Run, items []ass
 		}
 		now := opt.Now()
 		if !now.Before(run.DeadlineAt) {
-			return abandonElapsedRun(opt, st, run, jsonMode)
+			return abandonElapsedRun(opt, st, run, item, jsonMode)
 		}
 		content, question, ok := assessmentQuestion(st, item)
 		if !ok {
@@ -546,7 +546,7 @@ func runAssessmentLoop(opt Options, st *store.Store, run assess.Run, items []ass
 		if item.State == assess.StatePending {
 			presented, err := st.MarkAssessmentPresented(run.ID, item.Position, now)
 			if errors.Is(err, store.ErrAssessmentWindowElapsed) {
-				return abandonElapsedRun(opt, st, run, jsonMode)
+				return abandonElapsedRun(opt, st, run, item, jsonMode)
 			}
 			if err != nil {
 				return internalError(opt, jsonMode, err)
@@ -583,7 +583,7 @@ func runAssessmentLoop(opt Options, st *store.Store, run assess.Run, items []ass
 			parsed, parseErr := attempt.ParseSelection(question, strings.TrimSpace(line))
 			now = opt.Now()
 			if !now.Before(run.DeadlineAt) {
-				return abandonElapsedRun(opt, st, run, jsonMode)
+				return abandonElapsedRun(opt, st, run, item, jsonMode)
 			}
 			if !now.Before(item.DeadlineAt) {
 				if code := recordAssessmentTimeout(opt, st, run, item, question, jsonMode); code != 0 {
@@ -692,12 +692,23 @@ func readAssessLine(reader *bufio.Reader) (string, bool, error) {
 	return line, errors.Is(err, io.EOF), nil
 }
 
-func abandonElapsedRun(opt Options, st *store.Store, run assess.Run, jsonMode bool) int {
+// abandonElapsedRun abandons a run whose window has passed. An item that is on
+// screen has no recorded outcome yet; recording it as a timed-out attempt at
+// its stored deadline keeps it in the timeout count and the score denominator
+// instead of leaving it presented forever. A finalized item is not re-recorded.
+func abandonElapsedRun(opt Options, st *store.Store, run assess.Run, item assess.Item, jsonMode bool) int {
+	if item.State == assess.StatePresented {
+		if _, question, ok := assessmentQuestion(st, item); ok {
+			if code := recordAssessmentTimeout(opt, st, run, item, question, jsonMode); code != 0 {
+				return code
+			}
+		}
+	}
 	if _, err := st.AbandonAssessmentRun(run.ID, opt.Now(), "window_elapsed"); err != nil && !errors.Is(err, store.ErrAssessmentRunState) {
 		return internalError(opt, jsonMode, err)
 	}
 	return usageError(opt, jsonMode, "run_abandoned",
-		fmt.Sprintf("assessment run %d passed its %d-minute window and was recorded abandoned; answered items remain readable with `passquest assess report %d`",
+		fmt.Sprintf("assessment run %d passed its %d-minute window and was recorded abandoned; finalized items remain readable with `passquest assess report %d`",
 			run.ID, run.WindowMinutes, run.ID))
 }
 

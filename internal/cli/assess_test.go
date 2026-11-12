@@ -524,6 +524,76 @@ func TestAssessForcedItemTimeout(t *testing.T) {
 	}
 }
 
+func TestAssessRunWindowElapseRecordsOpenItemTimeout(t *testing.T) {
+	db := newDB(t)
+	seedAssessmentSource(t, db, 20, 1)
+	now := goldenBase
+	reader := &lineAdvanceReader{
+		lines:     []string{"B\n", "B\n", "B\n", "B\n"},
+		advanceAt: 3,
+		advance:   func() { now = goldenBase.Add(2 * time.Minute) },
+	}
+	var stdout, stderr bytes.Buffer
+	opt := Options{
+		Stdin:      reader,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		Now:        func() time.Time { return now },
+		NewSession: func() string { return "sess-test" },
+		Getenv:     func(string) string { return "" },
+	}
+	code := Run([]string{"assess", "start", "--size", "4", "--minutes", "1", "--json", "--db", db}, opt)
+	if code != 2 || !strings.Contains(stderr.String(), `"code": "run_abandoned"`) || !strings.Contains(stderr.String(), "assess report") {
+		t.Fatalf("expired run = %d, stdout: %s, stderr: %s", code, stdout.String(), stderr.String())
+	}
+	report := decodeAssessReport(t, mustRun(t, db, &stepClock{base: goldenBase.Add(time.Hour)}, "", "assess", "report", "1", "--json"))
+	if report.Run.Status != "abandoned" || report.Run.AbandonedReason != "window_elapsed" {
+		t.Fatalf("abandoned run = %+v", report.Run)
+	}
+	answered, timedOut, presented := 0, 0, 0
+	for _, item := range report.Items {
+		switch item.State {
+		case "answered":
+			answered++
+		case "timed_out":
+			timedOut++
+		case "presented":
+			presented++
+		case "pending", "unavailable":
+		default:
+			t.Fatalf("item %d has unknown state %q", item.Position, item.State)
+		}
+	}
+	if presented != 0 || answered != 3 || timedOut != 1 {
+		t.Fatalf("item states: answered=%d timed_out=%d presented=%d, items=%+v", answered, timedOut, presented, report.Items)
+	}
+	if report.Counts.Presented != 4 || report.Counts.TimedOut != 1 || report.Counts.Finalized != 4 {
+		t.Fatalf("counts = %+v", report.Counts)
+	}
+	if report.Accuracy.Correct != 3 || report.Accuracy.Total != 4 || report.Accuracy.Ratio >= 1 {
+		t.Fatalf("accuracy = %+v", report.Accuracy)
+	}
+}
+
+type lineAdvanceReader struct {
+	lines     []string
+	advanceAt int
+	advance   func()
+	index     int
+}
+
+func (r *lineAdvanceReader) Read(p []byte) (int, error) {
+	if r.index >= len(r.lines) {
+		return 0, io.EOF
+	}
+	if r.index == r.advanceAt {
+		r.advance()
+	}
+	n := copy(p, r.lines[r.index])
+	r.index++
+	return n, nil
+}
+
 func TestAssessResumeMarksResumedPortion(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
