@@ -23,14 +23,15 @@ var ErrNotPracticeable = errors.New("source material is not practiceable")
 var questionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 type questionFile struct {
-	ID              string            `json:"id"`
-	Stem            string            `json:"stem"`
-	Options         []exam.Option     `json:"options"`
-	Answer          string            `json:"answer"`
-	Evidence        string            `json:"evidence"`
-	Reasoning       string            `json:"reasoning"`
-	OptionReasoning map[string]string `json:"option_reasoning"`
-	Tactics         []string          `json:"tactics"`
+	ID              string               `json:"id"`
+	Stem            string               `json:"stem"`
+	Options         []exam.Option        `json:"options"`
+	Answer          string               `json:"answer"`
+	Evidence        string               `json:"evidence"`
+	Reasoning       string               `json:"reasoning"`
+	OptionReasoning map[string]string    `json:"option_reasoning"`
+	Tactics         []string             `json:"tactics"`
+	Glossary        []exam.GlossaryEntry `json:"glossary"`
 }
 
 // ParseQuestionJSON decodes a locally authored question file. The question is
@@ -64,6 +65,7 @@ func ParseQuestionJSON(data []byte, sourceID string, page int, now time.Time, ex
 		Reasoning:       file.Reasoning,
 		OptionReasoning: file.OptionReasoning,
 		Tactics:         append([]string(nil), file.Tactics...),
+		Glossary:        append([]exam.GlossaryEntry(nil), file.Glossary...),
 		AnswerStatus:    AnswerUnmapped,
 		Review:          Unreviewed,
 		CreatedAt:       nowUTC(now),
@@ -110,6 +112,9 @@ func (q Question) Validate() error {
 		seenTag[tag] = true
 	}
 	for _, problem := range exam.OptionProblems(q.Options, q.OptionReasoning) {
+		problems = append(problems, problem)
+	}
+	for _, problem := range exam.GlossaryProblems(q.Glossary) {
 		problems = append(problems, problem)
 	}
 	if q.Answer != "" {
@@ -238,6 +243,7 @@ func BuildPracticeExam(src Source, page Page, questions []Question) (exam.Exam, 
 			Reasoning:       q.Reasoning,
 			OptionReasoning: copyReasoning(q.OptionReasoning),
 			Tactics:         append([]string(nil), q.Tactics...),
+			Glossary:        append([]exam.GlossaryEntry(nil), q.Glossary...),
 		})
 		readyMeta = append(readyMeta, q)
 	}

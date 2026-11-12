@@ -40,8 +40,8 @@ unreadable source page is `unavailable`; a page whose stored section is blank is
 `embedded`, `unavailable` and `unspecified` are omitted from the query text.
 
 **Learner level** is not a stored profile and is not a CEFR or exam-readiness measurement. It is a
-bucket over first, independent attempts (attempt number 1, `assistance=independent`), with skips in the
-denominator:
+bucket over first, independent attempts (attempt number 1, `assistance=independent` or `none` from a
+timed assessment), with skips in the denominator:
 
 | Bucket | Rule |
 |---|---|

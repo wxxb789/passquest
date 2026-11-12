@@ -19,6 +19,7 @@ import (
 
 	"github.com/wxxb789/passquest/internal/agent"
 	"github.com/wxxb789/passquest/internal/anki"
+	"github.com/wxxb789/passquest/internal/assess"
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/search"
@@ -56,6 +57,10 @@ type Options struct {
 	NewRunID func() (string, error)
 	// NewHostToken isolates heartbeat identity for tests.
 	NewHostToken func() (string, error)
+	// PresentationNow stamps side-effect-only exposure rows. It is separate
+	// from Now so a command that writes no timestamp into its protocol
+	// document does not consume a deterministic test clock reading.
+	PresentationNow func() time.Time
 }
 
 func (o Options) withDefaults() Options {
@@ -94,6 +99,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.NewHostToken == nil {
 		o.NewHostToken = agent.NewHostToken
+	}
+	if o.PresentationNow == nil {
+		o.PresentationNow = time.Now
 	}
 	return o
 }
@@ -136,6 +144,8 @@ func Run(args []string, options Options) int {
 		return runNote(args[1:], opt)
 	case "find":
 		return runFind(args[1:], opt)
+	case "assess":
+		return runAssess(args[1:], opt)
 	case "version":
 		return runVersion(opt)
 	case "help", "-h", "--help":
@@ -201,6 +211,12 @@ Usage:
                      [--db PATH] [--json]
   passquest find history [--limit N] [--max-queries N] [--db PATH] [--json]
   passquest find show QUERY [--db PATH] [--json]
+  passquest assess pool   [--db PATH] [--json]
+  passquest assess start  [--size N] [--minutes M] [--annotations none] [--db PATH] [--json]
+  passquest assess resume RUN [--db PATH] [--json]
+  passquest assess abandon RUN [--db PATH] [--json]
+  passquest assess report RUN [--db PATH] [--json]
+  passquest assess compare RUN_A RUN_B [--db PATH] [--json]
   passquest report   [--db PATH] [--json]
   passquest version
   passquest help
@@ -212,6 +228,11 @@ answer-verified question with no hint. The shipped exercise is a self-authored
 sample. No exam score, pass threshold or readiness probability is computed.
 Notes are local revisions; AnkiWeb and mobile synchronization are the learner's
 own manual actions, and Pass Quest never contacts AnkiWeb or a phone.
+Assessments run only on reviewed imported items the learner has never been
+shown. Presenting any question spends its whole content unit. During an active
+run, tutor, skill and find are refused; no glossary, reasoning, evidence or
+correctness feedback is shown. The real pass threshold, item count and time
+limit are unknown, so no pass probability is produced.
 Default database: $PASSQUEST_DB or ./.passquest/passquest.sqlite
 `
 
@@ -342,14 +363,24 @@ func runPractice(args []string, opt Options) int {
 				Question:      questionViewOf(selection),
 			})
 		}
-		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true)
+		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true, assess.SurfacePractice)
 	}
-	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
+	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false, assess.SurfacePractice)
 }
 
-func answerQuestion(opt Options, selection practiceSelection, st *store.Store, answerFlag *string, answerSet, skip, jsonMode bool) int {
+func answerQuestion(opt Options, selection practiceSelection, st *store.Store, answerFlag *string, answerSet, skip, jsonMode bool, surface string) int {
 	started := opt.Now()
+	recordPresentation := func() int {
+		if err := st.RecordPresentation(selection.Content.ID, selection.Question.ID, surface, started); err != nil {
+			return internalError(opt, jsonMode, err)
+		}
+		return 0
+	}
 	if !jsonMode {
+		if code := recordPresentation(); code != 0 {
+			return code
+		}
+
 		if selection.Tactic != nil {
 			if err := recordGuidedExposure(st, selection.Tactic, selection.Content.ID, selection.Question.ID, started); err != nil {
 				return internalError(opt, jsonMode, err)
@@ -360,6 +391,10 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 			writeSkillPreamble(opt.Stdout, selection.Skill)
 		}
 		writePrompt(opt.Stdout, selection.Content, selection.Question, selection.Number)
+	} else if !answerSet && !skip {
+		if code := recordPresentation(); code != 0 {
+			return code
+		}
 	}
 
 	chosen := attempt.Selection{Skip: skip}
@@ -400,6 +435,11 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 	feedback := attempt.Explain(selection.Question, record)
 
 	if jsonMode {
+		if answerSet || skip {
+			if code := recordPresentation(); code != 0 {
+				return code
+			}
+		}
 		return writeJSON(opt, answeredDoc{
 			SchemaVersion: ProtocolVersion,
 			State:         "answered",
@@ -490,6 +530,12 @@ func writePrompt(w io.Writer, content exam.Exam, question exam.Question, number 
 	for _, opt := range question.Options {
 		fmt.Fprintf(w, "  %s. %s\n", opt.Label, opt.Text)
 	}
+	if len(question.Glossary) > 0 {
+		fmt.Fprintln(w, "Glossary:")
+		for _, entry := range question.Glossary {
+			fmt.Fprintf(w, "  %s — %s\n", entry.Term, entry.Meaning)
+		}
+	}
 	fmt.Fprintln(w)
 }
 
@@ -518,6 +564,8 @@ func writeFeedback(w io.Writer, record attempt.Attempt, feedback attempt.Feedbac
 		if record.TacticID != "" {
 			fmt.Fprintln(w, "Independent attempt: no hint was shown and this question had no earlier attempt.")
 		}
+	case attempt.AssistanceNone:
+		fmt.Fprintln(w, "Assessment attempt: timed and unassisted; no coaching was available during the run.")
 	}
 	condition := fmt.Sprintf("assistance %s", record.Assistance)
 	if record.TacticID != "" {
@@ -920,8 +968,9 @@ func questionViewOf(selection practiceSelection) questionView {
 			Title: selection.Content.Passage.Title,
 			Text:  selection.Content.Passage.Text,
 		},
-		Stem:    selection.Question.Stem,
-		Options: optionViews(selection.Question.Options),
+		Stem:     selection.Question.Stem,
+		Options:  optionViews(selection.Question.Options),
+		Glossary: glossaryViews(selection.Question.Glossary),
 	}
 	if selection.Page != nil && selection.Review != nil {
 		view.Review = &reviewView{
@@ -944,6 +993,14 @@ func optionViews(options []exam.Option) []optionView {
 	return views
 }
 
+func glossaryViews(entries []exam.GlossaryEntry) []glossaryEntryView {
+	views := make([]glossaryEntryView, 0, len(entries))
+	for _, entry := range entries {
+		views = append(views, glossaryEntryView{Term: entry.Term, Meaning: entry.Meaning})
+	}
+	return views
+}
+
 func attemptViewOf(record attempt.Attempt) attemptView {
 	var selectedLabel, selectedText *string
 	if record.SelectedLabel != "" {
@@ -955,25 +1012,26 @@ func attemptViewOf(record attempt.Attempt) attemptView {
 		selectedText = &text
 	}
 	return attemptView{
-		ID:             record.ID,
-		SessionID:      record.SessionID,
-		QuestionID:     record.QuestionID,
-		AttemptNumber:  record.AttemptNumber,
-		PriorAttempts:  record.PriorAttempts,
-		Repeat:         record.Repeat(),
-		Assistance:     string(record.Assistance),
-		TacticID:       record.TacticID,
-		Skills:         append([]string(nil), record.Skills...),
-		Status:         string(record.Status),
-		SelectedLabel:  selectedLabel,
-		SelectedText:   selectedText,
-		CorrectLabel:   record.CorrectLabel,
-		CorrectText:    record.CorrectText,
-		StartedAt:      record.StartedAt.UTC().Format(time.RFC3339Nano),
-		AnsweredAt:     record.AnsweredAt.UTC().Format(time.RFC3339Nano),
-		ElapsedMS:      record.ElapsedMS,
-		ContentID:      record.ContentID,
-		ContentVersion: record.ContentVersion,
+		ID:              record.ID,
+		SessionID:       record.SessionID,
+		QuestionID:      record.QuestionID,
+		AttemptNumber:   record.AttemptNumber,
+		PriorAttempts:   record.PriorAttempts,
+		Repeat:          record.Repeat(),
+		Assistance:      string(record.Assistance),
+		TacticID:        record.TacticID,
+		Skills:          append([]string(nil), record.Skills...),
+		Status:          string(record.Status),
+		SelectedLabel:   selectedLabel,
+		SelectedText:    selectedText,
+		CorrectLabel:    record.CorrectLabel,
+		CorrectText:     record.CorrectText,
+		StartedAt:       record.StartedAt.UTC().Format(time.RFC3339Nano),
+		AnsweredAt:      record.AnsweredAt.UTC().Format(time.RFC3339Nano),
+		ElapsedMS:       record.ElapsedMS,
+		ContentID:       record.ContentID,
+		ContentVersion:  record.ContentVersion,
+		AssessmentRunID: record.AssessmentRunID,
 	}
 }
 
@@ -1017,14 +1075,20 @@ type optionView struct {
 	Text  string `json:"text"`
 }
 
+type glossaryEntryView struct {
+	Term    string `json:"term"`
+	Meaning string `json:"meaning"`
+}
+
 type questionView struct {
-	ID      string       `json:"id"`
-	Number  int          `json:"number"`
-	Total   int          `json:"total"`
-	Passage passageView  `json:"passage"`
-	Stem    string       `json:"stem"`
-	Options []optionView `json:"options"`
-	Review  *reviewView  `json:"review,omitempty"`
+	ID       string              `json:"id"`
+	Number   int                 `json:"number"`
+	Total    int                 `json:"total"`
+	Passage  passageView         `json:"passage"`
+	Stem     string              `json:"stem"`
+	Options  []optionView        `json:"options"`
+	Glossary []glossaryEntryView `json:"glossary,omitempty"`
+	Review   *reviewView         `json:"review,omitempty"`
 }
 
 type reviewView struct {
@@ -1047,25 +1111,26 @@ type awaitingDoc struct {
 }
 
 type attemptView struct {
-	ID             int64    `json:"id"`
-	SessionID      string   `json:"session_id"`
-	QuestionID     string   `json:"question_id"`
-	AttemptNumber  int      `json:"attempt_number"`
-	PriorAttempts  int      `json:"prior_attempts"`
-	Repeat         bool     `json:"repeat"`
-	Assistance     string   `json:"assistance"`
-	TacticID       string   `json:"tactic_id,omitempty"`
-	Skills         []string `json:"skills,omitempty"`
-	Status         string   `json:"status"`
-	SelectedLabel  *string  `json:"selected_label"`
-	SelectedText   *string  `json:"selected_text"`
-	CorrectLabel   string   `json:"correct_label"`
-	CorrectText    string   `json:"correct_text"`
-	StartedAt      string   `json:"started_at"`
-	AnsweredAt     string   `json:"answered_at"`
-	ElapsedMS      int64    `json:"elapsed_ms"`
-	ContentID      string   `json:"content_id"`
-	ContentVersion string   `json:"content_version"`
+	ID              int64    `json:"id"`
+	SessionID       string   `json:"session_id"`
+	QuestionID      string   `json:"question_id"`
+	AttemptNumber   int      `json:"attempt_number"`
+	PriorAttempts   int      `json:"prior_attempts"`
+	Repeat          bool     `json:"repeat"`
+	Assistance      string   `json:"assistance"`
+	TacticID        string   `json:"tactic_id,omitempty"`
+	Skills          []string `json:"skills,omitempty"`
+	Status          string   `json:"status"`
+	SelectedLabel   *string  `json:"selected_label"`
+	SelectedText    *string  `json:"selected_text"`
+	CorrectLabel    string   `json:"correct_label"`
+	CorrectText     string   `json:"correct_text"`
+	StartedAt       string   `json:"started_at"`
+	AnsweredAt      string   `json:"answered_at"`
+	ElapsedMS       int64    `json:"elapsed_ms"`
+	ContentID       string   `json:"content_id"`
+	ContentVersion  string   `json:"content_version"`
+	AssessmentRunID int64    `json:"assessment_run_id,omitempty"`
 }
 
 type feedbackView struct {

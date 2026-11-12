@@ -21,6 +21,9 @@ import (
 )
 
 func runTutor(args []string, opt Options) int {
+	if code := guardAssessmentCommand(args, opt, "tutor"); code != 0 {
+		return code
+	}
 	if len(args) == 0 {
 		return usageError(opt, jsonFlagRequested(args), "invalid_input",
 			"tutor requires config, preview, ask, history, show, consent, revoke or consents")

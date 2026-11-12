@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/wxxb789/passquest/internal/assess"
 	"io"
 	"strings"
 	"time"
@@ -226,9 +227,9 @@ func runTacticPractice(args []string, opt Options) int {
 				Question:      questionViewOf(selection),
 			})
 		}
-		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true)
+		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true, assess.SurfaceTactic)
 	}
-	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
+	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false, assess.SurfaceTactic)
 }
 
 func tacticError(opt Options, jsonMode bool, err error) int {

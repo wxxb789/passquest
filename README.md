@@ -5,8 +5,8 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 ## Design and development
 
 - [Core Design](docs/core-design.md) — product purpose, safety, quality and architecture principles.
-- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0007
-  are done; 0008 is next.
+- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0009
+  are done; 0010 is active.
 - [Harness](docs/harness.md) — the single `bun run gate` entry point and what each gate reads.
 - [Cross-platform rules](docs/cross-platform.md) — Windows, macOS and Linux: paths, processes, mode
   bits, goldens, and the path literals the `portable-paths` gate refuses.
@@ -18,6 +18,8 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
   consent-gated private text, revision history, atomic export and a loopback AnkiConnect push.
 - [Find practice](docs/find.md) — one evidence rule, a bounded search intent, candidate rights and
   provenance, a visible query/candidate budget and inert fetched text.
+- [Timed unseen assessment](docs/assess.md) — a holdout pool per content unit, a timed unassisted
+  run, withheld annotations, a contamination-aware report and a like-for-like comparison.
 
 **Implementation order:** verified headless practice → private local baseline → scoring tactic
 practice → evidence-driven adaptation → user-supplied text coaching and durable agent work → Anki
@@ -191,6 +193,28 @@ With no `PASSQUEST_SEARCH_ENDPOINT` and an intent derived from stored evidence, 
 first. Fetched text is stored as data only: it is never an instruction, never sent to a model,
 and cannot change an attempt, grade or the next exercise. Details: [`docs/find.md`](docs/find.md).
 Measured evidence: [`docs/evidence/0008-find-fit-practice.md`](docs/evidence/0008-find-fit-practice.md).
+
+## Show independent readiness on unseen items
+
+Goal 0009 measures timed, unassisted performance on reviewed imported items the learner has never
+been shown. Presenting any question on a page spends the whole page, because reading the passage
+removes the independence of its sibling questions.
+
+```bash
+passquest assess pool
+passquest assess start --size 40 --minutes 60 --annotations none
+passquest assess resume RUN
+passquest assess report RUN
+passquest assess compare RUN_A RUN_B
+```
+
+The pool is reported in both items and content units. A run refuses below 20 unseen items, records
+per-item elapsed time and a per-item timeout, hides the glossary, reasoning and evidence until the
+report, and leaves an interrupted run resumable. The report prints correct/total, per-skill accuracy,
+median/p90 time, timed-out and contaminated items, and `pass threshold: unknown`; it never prints a
+pass probability or verdict. A comparison refuses unlike item counts, windows or pool families.
+Details: [`docs/assess.md`](docs/assess.md). Measured evidence:
+[`docs/evidence/0009-unseen-exam-assessment.md`](docs/evidence/0009-unseen-exam-assessment.md).
 
 ## Run the gates
 

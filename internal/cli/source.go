@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wxxb789/passquest/internal/assess"
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
@@ -242,6 +243,10 @@ func runShow(args []string, opt Options) int {
 		page = &candidate
 	}
 
+	if code := recordSourceQuestionPresentations(opt, st, sourceID, questions, page, 0, assess.SurfaceShow); code != 0 {
+		return code
+	}
+
 	if *jsonFlag {
 		doc := showDoc{
 			SchemaVersion: ProtocolVersion,
@@ -324,6 +329,10 @@ func runQuestions(args []string, opt Options) int {
 		if _, ok := findPage(src, *pageFlag); !ok {
 			return usageError(opt, *jsonFlag, "not_found", fmt.Sprintf("page %d is not in source %s", *pageFlag, src.ID))
 		}
+	}
+
+	if code := recordSourceQuestionPresentations(opt, st, src.ID, questions, nil, *pageFlag, assess.SurfaceQuestion); code != 0 {
+		return code
 	}
 
 	if *jsonFlag {

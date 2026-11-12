@@ -243,7 +243,7 @@ func Recommend(input Input) Result {
 			if record.AttemptNumber > 1 {
 				ev.Revisits++
 			}
-			if record.AttemptNumber == 1 && record.Assistance == attempt.AssistanceIndependent {
+			if record.AttemptNumber == 1 && record.Assistance.IndependentEvidence() {
 				if firstOnContent {
 					ev.IndependentAttempts++
 					ev.IndependentAttemptIDs = append(ev.IndependentAttemptIDs, record.AttemptID)

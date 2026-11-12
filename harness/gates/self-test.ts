@@ -10,6 +10,7 @@ import type { Gate, GateContext } from "../lib/types.ts";
 
 import { adaptiveSmoke } from "./adaptive-smoke.ts";
 import { agentSmoke } from "./agent-smoke.ts";
+import { assessSmoke } from "./assess-smoke.ts";
 import { baseline } from "./baseline.ts";
 import { docsLinks } from "./docs-links.ts";
 import { findSmoke } from "./find-smoke.ts";
@@ -482,6 +483,14 @@ function brokenCases(): BrokenCase[] {
     {
       gate: findSmoke,
       label: "CLI whose find output is not the protocol",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
+      },
+    },
+    {
+      gate: assessSmoke,
+      label: "CLI whose assess output is not the protocol",
       files: {
         "go.mod": GO_MOD,
         "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',

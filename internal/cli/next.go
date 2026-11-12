@@ -38,6 +38,9 @@ func runNext(args []string, opt Options) int {
 	}
 
 	result := adaptive.Recommend(input)
+	if err := recordNextPresentation(st, result.Recommendation, opt.PresentationNow()); err != nil {
+		return internalError(opt, *jsonFlag, err)
+	}
 	doc := nextDocOf(result, unclassified, *sourceFlag, catalog.sourceTaggedQuestions, nextDatabaseArgument(*dbFlag, opt))
 	if *jsonFlag {
 		return writeJSON(opt, doc)

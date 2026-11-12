@@ -851,3 +851,65 @@ Entry format:
 - Default taken: (C) — the short line stays actionable, the table stays inspectable. Revisit when goal 0011
   renders this in the desktop workspace.
 - Revisit when: the desktop workspace lands, or a learner reports the aggregate line as unclear.
+
+### Q-0009-06 — Does `next` spend the assessment unit it names?
+- Status: decided(default taken)
+- Context: Q-0009-04 lists `next` among the presentation surfaces, but `next` prints only a
+  recommendation command, not the question stem or passage. Treating it as non-spending would keep
+  the pool larger; treating it as spending is the literal contract reading.
+- Options considered: (A) spend the recommended content unit; (B) spend nothing until
+  `practice`/`skill practice` renders the question.
+- Default taken: (A). `runNext` appends one `next` presentation for the material the recommendation
+  names. This is conservative and reversible by deleting that single `recordPresentation` call; no
+  stored attempt or answer changes. `skill show` and `tactic show` remain non-spending lessons.
+- Revisit when: the owner wants adaptive recommendation to stop shrinking the holdout pool.
+
+### Q-0009-07 — How is the per-item clock derived, and what happens to a late answer?
+- Status: decided(default taken)
+- Context: the contract requires a per-item timeout but supplies only `--size` and `--minutes`.
+  A terminal command can block on input, so it cannot preempt a read portably.
+- Options considered: (A) `floor(minutes × 60000 / actual_items)` ms, checked when input returns;
+  (B) a fixed per-item default independent of the window; (C) no item clock, only the whole window.
+- Default taken: (A). The value is stored on the run and each item, and a late answer is recorded as
+  a timed-out `skipped` attempt with `elapsed_ms` equal to the item deadline minus its first
+  presentation. The original presentation time survives a resume. Reverse by changing
+  `assess.PerItemTimeout` and the loop's deadline checks; stored attempts keep their elapsed values.
+- Revisit when: the real examination timing is known, or the desktop shell can enforce a live timer.
+
+### Q-0009-08 — What exactly is a comparison "pool family"?
+- Status: decided(default taken)
+- Context: the contract refuses a comparison when the pool family differs but does not define the
+  family. Item-level identity would refuse any two runs that selected different units, which is
+  almost every pair; source text alone would ignore a newly imported corpus.
+- Options considered: (A) SHA-256 of the sorted `source_id@source_sha256` lines of every imported
+  source at run start; (B) the exact selected content ids; (C) only the source count.
+- Default taken: (A). Importing or removing a source changes the family; a page correction inside a
+  source does not, because the correction changes the item, not the corpus. Reverse by storing
+  another digest in `assessment_runs.pool_family`; historical run rows keep the value they recorded.
+- Revisit when: a source review changes enough items that two runs on the same corpus are no longer
+  like-for-like, or a curated content family is introduced.
+
+### Q-0009-09 — Is the glossary a new authored field?
+- Status: decided(default taken)
+- Context: the contract says a run renders the question without "glossary or reasoning", but the
+  authored question format had reasoning, option reasoning and evidence and no glossary. The owner's
+  Q-0009-05 notes that early learners may not recognise stem vocabulary.
+- Options considered: (A) add an optional `glossary` array of `{term, meaning}` entries to the
+  authored question file; (B) treat option reasoning as the glossary; (C) leave glossary undefined.
+- Default taken: (A). It is optional, bounded (20 entries, 80/300 characters) and stored in
+  `source_questions.glossary_json`; existing fixtures are unchanged, and a question without one
+  prints `glossary: none`. The run withholds it and the report prints it. Reverse by ignoring the
+  field; stored questions keep their JSON.
+- Revisit when: imported source material supplies a real bilingual glossary that should be attached
+  automatically rather than authored per question.
+
+### Q-0009-10 — May a run exceed the requested `--size`?
+- Status: decided(default taken)
+- Context: a content unit is the holdout boundary. Selecting exactly N items could split a unit,
+  spending it while leaving its siblings unpresented and unusable for any later run.
+- Options considered: (A) take whole units until at least N items are selected, storing and printing
+  the actual count; (B) stop before N to avoid overshoot; (C) split the final unit.
+- Default taken: (A). The actual item count is stored on the run, printed in the report, and used by
+  `assess compare`; the per-item clock uses the actual count. Reverse by changing `Pool.Select`.
+- Revisit when: the owner wants an exact item count more than whole-unit holdout semantics.
+
