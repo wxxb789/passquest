@@ -3,7 +3,6 @@ package cli
 import (
 	"flag"
 	"fmt"
-	"github.com/wxxb789/passquest/internal/assess"
 	"io"
 	"strings"
 
@@ -178,9 +177,9 @@ func runSkillPractice(args []string, opt Options) int {
 				Question:      questionViewOf(selection),
 			})
 		}
-		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true, assess.SurfaceSkill)
+		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true)
 	}
-	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false, assess.SurfaceSkill)
+	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
 }
 
 func skillCandidates(st *store.Store, lesson skill.Skill, sourceID string) ([]practiceCandidate, error) {

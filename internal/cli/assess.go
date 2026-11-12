@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +41,20 @@ func runAssess(args []string, opt Options) int {
 	}
 }
 
+// openAssessmentStore opens the selected database and reconciles expired runs.
+// Every assess subcommand gets one write path for that reconcile.
+func openAssessmentStore(dbFlag *string, opt Options, jsonMode bool) (*store.Store, int) {
+	st, err := openDatabase(*dbFlag, opt)
+	if err != nil {
+		return nil, internalError(opt, jsonMode, err)
+	}
+	if _, err := st.ReconcileAssessmentRuns(opt.Now()); err != nil {
+		st.Close()
+		return nil, internalError(opt, jsonMode, err)
+	}
+	return st, 0
+}
+
 func runAssessPool(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
 	args = reorderArgs(args, map[string]bool{"db": true})
@@ -50,14 +64,11 @@ func runAssessPool(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	st, err := openDatabase(*dbFlag, opt)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+	st, code := openAssessmentStore(dbFlag, opt, *jsonFlag)
+	if code != 0 {
+		return code
 	}
 	defer st.Close()
-	if _, err := st.ReconcileAssessmentRuns(opt.Now()); err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
 	pool, identities, err := assessmentPool(st)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
@@ -85,14 +96,11 @@ func runAssessStart(args []string, opt Options) int {
 	if code := validateAssessmentFlags(*sizeFlag, *minutesFlag, *annotationsFlag, opt, *jsonFlag); code != 0 {
 		return code
 	}
-	st, err := openDatabase(*dbFlag, opt)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+	st, code := openAssessmentStore(dbFlag, opt, *jsonFlag)
+	if code != 0 {
+		return code
 	}
 	defer st.Close()
-	if _, err := st.ReconcileAssessmentRuns(opt.Now()); err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
 	if active, found, err := st.ActiveAssessmentRun(); err != nil {
 		return internalError(opt, *jsonFlag, err)
 	} else if found {
@@ -159,15 +167,12 @@ func runAssessResume(args []string, opt Options) int {
 	if code != 0 {
 		return code
 	}
-	st, err := openDatabase(*dbFlag, opt)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+	st, code := openAssessmentStore(dbFlag, opt, *jsonFlag)
+	if code != 0 {
+		return code
 	}
 	defer st.Close()
-	if _, err := st.ReconcileAssessmentRuns(opt.Now()); err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	run, items, _, err := st.AssessmentRun(runID)
+	run, items, err := st.AssessmentRunItems(runID)
 	if err != nil {
 		return assessmentError(opt, *jsonFlag, err)
 	}
@@ -177,7 +182,7 @@ func runAssessResume(args []string, opt Options) int {
 				run.ID, run.AbandonedReason, run.ID))
 	}
 	if run.Status == assess.StatusCompleted {
-		doc, err := assessmentRunDocFor(st, run, items, opt)
+		doc, err := assessmentRunDocFor(st, run, items)
 		if err != nil {
 			return internalError(opt, *jsonFlag, err)
 		}
@@ -211,14 +216,11 @@ func runAssessAbandon(args []string, opt Options) int {
 	if code != 0 {
 		return code
 	}
-	st, err := openDatabase(*dbFlag, opt)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+	st, code := openAssessmentStore(dbFlag, opt, *jsonFlag)
+	if code != 0 {
+		return code
 	}
 	defer st.Close()
-	if _, err := st.ReconcileAssessmentRuns(opt.Now()); err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
 	run, err := st.AbandonAssessmentRun(runID, opt.Now(), "learner_abandoned")
 	if errors.Is(err, store.ErrAssessmentRunState) {
 		return usageError(opt, *jsonFlag, "run_completed",
@@ -249,14 +251,11 @@ func runAssessReport(args []string, opt Options) int {
 	if code != 0 {
 		return code
 	}
-	st, err := openDatabase(*dbFlag, opt)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+	st, code := openAssessmentStore(dbFlag, opt, *jsonFlag)
+	if code != 0 {
+		return code
 	}
 	defer st.Close()
-	if _, err := st.ReconcileAssessmentRuns(opt.Now()); err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
 	report, err := assessmentReport(st, runID)
 	if err != nil {
 		return assessmentError(opt, *jsonFlag, err)
@@ -286,19 +285,20 @@ func runAssessCompare(args []string, opt Options) int {
 	if code != 0 {
 		return code
 	}
-	st, err := openDatabase(*dbFlag, opt)
+	st, code := openAssessmentStore(dbFlag, opt, *jsonFlag)
+	if code != 0 {
+		return code
+	}
+	defer st.Close()
+	material, err := loadAssessmentMaterial(st)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	defer st.Close()
-	if _, err := st.ReconcileAssessmentRuns(opt.Now()); err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	a, err := assessmentReport(st, first)
+	a, err := assessmentReportFrom(st, first, material)
 	if err != nil {
 		return assessmentError(opt, *jsonFlag, err)
 	}
-	b, err := assessmentReport(st, second)
+	b, err := assessmentReportFrom(st, second, material)
 	if err != nil {
 		return assessmentError(opt, *jsonFlag, err)
 	}
@@ -333,8 +333,8 @@ func validateAssessmentFlags(size, minutes int, annotations string, opt Options,
 }
 
 func parseRunID(raw string, opt Options, jsonMode bool) (int64, int) {
-	id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-	if err != nil || id <= 0 {
+	id, err := parsePositiveInt64(raw)
+	if err != nil {
 		return 0, usageError(opt, jsonMode, "invalid_input", fmt.Sprintf("invalid assessment run id %q", raw))
 	}
 	return id, 0
@@ -384,8 +384,12 @@ func assessmentUnits(st *store.Store) ([]assess.Unit, []assess.SourceIdentity, e
 		if err != nil {
 			return nil, nil, err
 		}
+		byPage := make(map[int][]source.Question, len(src.Pages))
+		for _, question := range questions {
+			byPage[question.Page] = append(byPage[question.Page], question)
+		}
 		for _, page := range src.Pages {
-			content, _, err := source.BuildPracticeExam(src, page, questions)
+			content, _, err := source.BuildPracticeExam(src, page, byPage[page.Number])
 			if err != nil {
 				continue
 			}
@@ -394,7 +398,6 @@ func assessmentUnits(st *store.Store) ([]assess.Unit, []assess.SourceIdentity, e
 				SourceID:  src.ID,
 				Page:      page.Number,
 				Version:   content.Version,
-				Title:     content.Title,
 				Passage:   content.Passage.Text,
 				Questions: content.Questions,
 			})
@@ -424,17 +427,21 @@ func assessmentItems(units []assess.Unit) []assess.Item {
 	return items
 }
 
-func poolFloorMessage(pool assess.Pool) string {
+func poolShortfall(pool assess.Pool) int {
 	shortfall := assess.MinPoolItems - pool.ItemCount
 	if shortfall < 0 {
 		shortfall = 0
 	}
-	return fmt.Sprintf(
-		"assessment pool has %d qualifying item(s) on %d unseen content unit(s); at least %d are required, so %d more reviewed item(s) must be imported (the unit count is the binding constraint on independent assessments)",
-		pool.ItemCount, pool.UnitCount, assess.MinPoolItems, shortfall)
+	return shortfall
 }
 
-func assessmentRunDocFor(st *store.Store, run assess.Run, items []assess.Item, opt Options) (assessmentRunResultDoc, error) {
+func poolFloorMessage(pool assess.Pool) string {
+	return fmt.Sprintf(
+		"assessment pool has %d qualifying item(s) on %d unseen content unit(s); at least %d are required, so %d more reviewed item(s) must be imported (the unit count is the binding constraint on independent assessments)",
+		pool.ItemCount, pool.UnitCount, assess.MinPoolItems, poolShortfall(pool))
+}
+
+func assessmentRunDocFor(st *store.Store, run assess.Run, items []assess.Item) (assessmentRunResultDoc, error) {
 	attempts, err := st.AssessmentAttempts(run.ID)
 	if err != nil {
 		return assessmentRunResultDoc{}, err
@@ -448,7 +455,32 @@ func assessmentRunDocFor(st *store.Store, run assess.Run, items []assess.Item, o
 	}, nil
 }
 
+type assessmentMaterial struct {
+	spends []assess.Spend
+	units  []assess.Unit
+}
+
+func loadAssessmentMaterial(st *store.Store) (assessmentMaterial, error) {
+	spends, err := st.Spends()
+	if err != nil {
+		return assessmentMaterial{}, err
+	}
+	units, _, err := assessmentUnits(st)
+	if err != nil {
+		return assessmentMaterial{}, err
+	}
+	return assessmentMaterial{spends: spends, units: units}, nil
+}
+
 func assessmentReport(st *store.Store, runID int64) (assess.Report, error) {
+	material, err := loadAssessmentMaterial(st)
+	if err != nil {
+		return assess.Report{}, err
+	}
+	return assessmentReportFrom(st, runID, material)
+}
+
+func assessmentReportFrom(st *store.Store, runID int64, material assessmentMaterial) (assess.Report, error) {
 	run, items, events, err := st.AssessmentRun(runID)
 	if err != nil {
 		return assess.Report{}, err
@@ -457,16 +489,8 @@ func assessmentReport(st *store.Store, runID int64) (assess.Report, error) {
 	if err != nil {
 		return assess.Report{}, err
 	}
-	spends, err := st.Spends()
-	if err != nil {
-		return assess.Report{}, err
-	}
-	units, _, err := assessmentUnits(st)
-	if err != nil {
-		return assess.Report{}, err
-	}
-	byContent := make(map[string]assess.Unit, len(units))
-	for _, unit := range units {
+	byContent := make(map[string]assess.Unit, len(material.units))
+	for _, unit := range material.units {
 		byContent[unit.ContentID] = unit
 	}
 	annotations := make(map[attempt.QuestionKey]assess.Annotations, len(items))
@@ -482,21 +506,13 @@ func assessmentReport(st *store.Store, runID int64) (assess.Report, error) {
 			annotations[attempt.QuestionKey{ContentID: item.ContentID, QuestionID: item.QuestionID}] = assess.Annotations{
 				Evidence:        question.Evidence,
 				Reasoning:       question.Reasoning,
-				OptionReasoning: copyReasoningMap(question.OptionReasoning),
+				OptionReasoning: maps.Clone(question.OptionReasoning),
 				Glossary:        append([]exam.GlossaryEntry(nil), question.Glossary...),
 			}
 			break
 		}
 	}
-	return assess.BuildReport(run, items, attempts, events, spends, annotations), nil
-}
-
-func copyReasoningMap(in map[string]string) map[string]string {
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
+	return assess.BuildReport(run, items, attempts, events, material.spends, annotations), nil
 }
 
 // runAssessmentLoop presents items in order, enforces the stored clocks and
@@ -517,7 +533,7 @@ func runAssessmentLoop(opt Options, st *store.Store, run assess.Run, items []ass
 		if !now.Before(run.DeadlineAt) {
 			return abandonElapsedRun(opt, st, run, jsonMode)
 		}
-		unit, question, ok := assessmentQuestion(st, item)
+		content, question, ok := assessmentQuestion(st, item)
 		if !ok {
 			if err := st.MarkAssessmentUnavailable(run.ID, item.Position, now, "content is no longer practiceable at the recorded version"); err != nil {
 				return internalError(opt, jsonMode, err)
@@ -545,13 +561,16 @@ func runAssessmentLoop(opt Options, st *store.Store, run assess.Run, items []ass
 		}
 		if !jsonMode {
 			if currentUnit != item.ContentID {
-				writeAssessmentUnit(opt.Stdout, unit)
+				writeAssessmentUnit(opt.Stdout, item, content)
 				currentUnit = item.ContentID
 			}
 			writeAssessmentQuestion(opt.Stdout, item, question, len(items), item.DeadlineAt.Sub(opt.Now()))
 		}
 		for {
-			line, eof := readAssessLine(reader)
+			line, eof, err := readAssessLine(reader)
+			if err != nil {
+				return internalError(opt, jsonMode, err)
+			}
 			if eof && strings.TrimSpace(line) == "" {
 				return assessmentInterrupted(opt, run, jsonMode)
 			}
@@ -607,7 +626,7 @@ func runAssessmentLoop(opt Options, st *store.Store, run assess.Run, items []ass
 	if err != nil {
 		return internalError(opt, jsonMode, err)
 	}
-	doc, err := assessmentRunDocFor(st, completed, updatedItems, opt)
+	doc, err := assessmentRunDocFor(st, completed, updatedItems)
 	if err != nil {
 		return internalError(opt, jsonMode, err)
 	}
@@ -641,26 +660,36 @@ func recordAssessmentTimeout(opt Options, st *store.Store, run assess.Run, item 
 	return 0
 }
 
-func assessmentQuestion(st *store.Store, item assess.Item) (assess.Unit, exam.Question, bool) {
-	loaded, err := loadTutorContent(st, item.ContentID, item.QuestionID)
-	if err != nil || !loaded.Found || loaded.Content.Version != item.ContentVersion {
-		return assess.Unit{}, exam.Question{}, false
+func assessmentQuestion(st *store.Store, item assess.Item) (exam.Exam, exam.Question, bool) {
+	src, err := st.SourceMeta(item.SourceID)
+	if err != nil {
+		return exam.Exam{}, exam.Question{}, false
 	}
-	return assess.Unit{
-		ContentID: item.ContentID,
-		Page:      item.Page,
-		Version:   loaded.Content.Version,
-		Title:     loaded.Content.Title,
-		Passage:   loaded.Content.Passage.Text,
-	}, loaded.Question, true
+	page, err := st.Page(item.SourceID, item.Page)
+	if err != nil {
+		return exam.Exam{}, exam.Question{}, false
+	}
+	questions, err := st.Questions(item.SourceID)
+	if err != nil {
+		return exam.Exam{}, exam.Question{}, false
+	}
+	content, _, err := source.BuildPracticeExam(src, page, questions)
+	if err != nil || content.Version != item.ContentVersion {
+		return exam.Exam{}, exam.Question{}, false
+	}
+	question, _, found := content.Question(item.QuestionID)
+	if !found {
+		return exam.Exam{}, exam.Question{}, false
+	}
+	return content, question, true
 }
 
-func readAssessLine(reader *bufio.Reader) (string, bool) {
+func readAssessLine(reader *bufio.Reader) (string, bool, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
-		return "", true
+		return line, false, err
 	}
-	return line, errors.Is(err, io.EOF)
+	return line, errors.Is(err, io.EOF), nil
 }
 
 func abandonElapsedRun(opt Options, st *store.Store, run assess.Run, jsonMode bool) int {
@@ -674,14 +703,7 @@ func abandonElapsedRun(opt Options, st *store.Store, run assess.Run, jsonMode bo
 
 func assessmentInterrupted(opt Options, run assess.Run, jsonMode bool) int {
 	message := fmt.Sprintf("assessment run %d interrupted; resume it with `passquest assess resume %d`", run.ID, run.ID)
-	if jsonMode {
-		_ = writeJSONTo(opt.Stderr, errorDoc{
-			SchemaVersion: ProtocolVersion,
-			Error:         errorBody{Code: "run_interrupted", Message: message},
-		})
-	} else {
-		fmt.Fprintf(opt.Stderr, "passquest: %s\n", message)
-	}
+	writeError(opt, jsonMode, "run_interrupted", message)
 	return 4
 }
 
@@ -698,6 +720,7 @@ func assessmentRunLimitations() []string {
 // a whole-source listing spends every unit whose question stem is shown.
 func recordSourceQuestionPresentations(opt Options, st *store.Store, sourceID string, questions []source.Question, page *source.Page, pageFilter int, surface string) int {
 	at := opt.PresentationNow()
+	entries := make([]store.Presentation, 0, len(questions))
 	for _, q := range questions {
 		if page != nil && q.Page != page.Number {
 			continue
@@ -705,9 +728,15 @@ func recordSourceQuestionPresentations(opt Options, st *store.Store, sourceID st
 		if pageFilter != 0 && q.Page != pageFilter {
 			continue
 		}
-		if err := st.RecordPresentation(source.ContentID(sourceID, q.Page), q.ID, surface, at); err != nil {
-			return internalError(opt, false, err)
-		}
+		entries = append(entries, store.Presentation{
+			ContentID:  source.ContentID(sourceID, q.Page),
+			QuestionID: q.ID,
+			Surface:    surface,
+			At:         at,
+		})
+	}
+	if err := st.RecordPresentations(entries); err != nil {
+		return internalError(opt, false, err)
 	}
 	return 0
 }
@@ -746,16 +775,6 @@ func guardAssessmentCommand(args []string, opt Options, command string) int {
 		return internalError(opt, jsonMode, err)
 	}
 	defer st.Close()
-	active, err := st.HasActiveAssessmentRun()
-	if err != nil {
-		return internalError(opt, jsonMode, err)
-	}
-	if !active {
-		return 0
-	}
-	if _, err := st.ReconcileAssessmentRuns(opt.Now()); err != nil {
-		return internalError(opt, jsonMode, err)
-	}
 	run, found, err := st.ActiveAssessmentRun()
 	if err != nil {
 		return internalError(opt, jsonMode, err)
@@ -763,13 +782,18 @@ func guardAssessmentCommand(args []string, opt Options, command string) int {
 	if !found {
 		return 0
 	}
+	now := opt.Now()
+	if !now.Before(run.DeadlineAt) {
+		if _, err := st.AbandonAssessmentRun(run.ID, now, "window_elapsed"); err != nil && !errors.Is(err, store.ErrAssessmentRunState) {
+			return internalError(opt, jsonMode, err)
+		}
+		return 0
+	}
 	return usageError(opt, jsonMode, "assessment_active",
 		fmt.Sprintf("%s is unavailable while assessment run %d is active (deadline %s); complete it, or record `passquest assess abandon %d`, before using coaching",
 			command, run.ID, run.DeadlineAt.UTC().Format(time.RFC3339), run.ID))
 }
 
-// flagValue reads the last --name=value or --name value pair without parsing
-// the command's own flag set. It is used only by the pre-dispatch guard.
 func flagValue(args []string, name string) string {
 	value := ""
 	for index := 0; index < len(args); index++ {

@@ -4,7 +4,8 @@ import path from "node:path";
 
 import { runGo } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
-import { run } from "../lib/process.ts";
+import { executable, run } from "../lib/process.ts";
+import type { RunResult } from "../lib/process.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
@@ -20,26 +21,22 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-interface SpawnResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-
 function fixturePageText(page: number): string {
   return `Page ${page}. The library closes at 4 p.m. on Saturdays. It opens at 9 a.m. on weekdays.\n`;
 }
 
-function writeFixtureTree(dir: string, pages: number, firstPageQuestions: number): void {
+function writeFixtureTree(dir: string, pages: number, firstPageQuestions: number): Array<{ page: number; id: string }> {
   const pagesDir = path.join(dir, "pages");
   const questionsDir = path.join(dir, "questions");
   mkdirSync(pagesDir, { recursive: true });
   mkdirSync(questionsDir, { recursive: true });
+  const written: Array<{ page: number; id: string }> = [];
   for (let page = 1; page <= pages; page++) {
     writeFileSync(path.join(pagesDir, `page-${String(page).padStart(3, "0")}.txt`), fixturePageText(page));
     const count = page === 1 ? firstPageQuestions : 1;
     for (let index = 1; index <= count; index++) {
       const id = `p${String(page).padStart(2, "0")}-q${index}`;
+      written.push({ page, id });
       writeFileSync(
         path.join(questionsDir, `${id}.json`),
         JSON.stringify({
@@ -62,24 +59,14 @@ function writeFixtureTree(dir: string, pages: number, firstPageQuestions: number
       );
     }
   }
-}
-
-function questionIDs(pages: number, firstPageQuestions: number): Array<{ page: number; id: string }> {
-  const out: Array<{ page: number; id: string }> = [];
-  for (let page = 1; page <= pages; page++) {
-    const count = page === 1 ? firstPageQuestions : 1;
-    for (let index = 1; index <= count; index++) {
-      out.push({ page, id: `p${String(page).padStart(2, "0")}-q${index}` });
-    }
-  }
-  return out;
+  return written;
 }
 
 export const assessSmoke: Gate = {
   id: "assess-smoke",
   title: "assess smoke",
   async run(ctx: GateContext) {
-    const binaryName = process.platform === "win32" ? "passquest.exe" : "passquest";
+    const binaryName = executable("passquest");
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-assess-smoke-"));
     const binary = path.join(temp, binaryName);
     const checks: string[] = [];
@@ -96,13 +83,14 @@ export const assessSmoke: Gate = {
         return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
       }
 
-      const call = async (db: string, args: string[], stdin?: string): Promise<SpawnResult> =>
+      const call = async (db: string, args: string[], stdin?: string): Promise<RunResult> =>
         run(binary, [...args, "--db", db], { cwd: ctx.root, stdin });
       const callJSON = async (db: string, args: string[], stdin?: string) => {
         const result = await call(db, [...args, "--json"], stdin);
         return { ...result, doc: parse(result.stdout), failure: parse(result.stderr) };
       };
-      const spawnWithStdin = (db: string, args: string[]) =>
+      type PipedProcess = Bun.Subprocess<"pipe", "pipe", "pipe">;
+      const spawnWithStdin = (db: string, args: string[]): PipedProcess =>
         Bun.spawn({
           cmd: [binary, ...args, "--db", db],
           cwd: ctx.root,
@@ -110,7 +98,7 @@ export const assessSmoke: Gate = {
           stdout: "pipe",
           stderr: "pipe",
         });
-      const collect = async (proc: ReturnType<typeof spawnWithStdin>): Promise<SpawnResult> => {
+      const collect = async (proc: PipedProcess): Promise<RunResult> => {
         const [stdout, stderr] = await Promise.all([
           new Response(proc.stdout).text(),
           new Response(proc.stderr).text(),
@@ -120,7 +108,7 @@ export const assessSmoke: Gate = {
       };
 
       const seedSource = async (db: string, dir: string, pages: number, firstPageQuestions: number): Promise<string | null> => {
-        writeFixtureTree(dir, pages, firstPageQuestions);
+        const questions = writeFixtureTree(dir, pages, firstPageQuestions);
         const imported = await callJSON(db, ["import", "--path", dir]);
         if (!check(imported.code === 0, `import ${dir} exit = ${imported.code}: ${imported.stderr}`)) return null;
         const sourceID = stringField(field(imported.doc, "source"), "id");
@@ -128,7 +116,6 @@ export const assessSmoke: Gate = {
           check(false, `import ${dir} returned no source id`);
           return null;
         }
-        const questions = questionIDs(pages, firstPageQuestions);
         for (const question of questions) {
           const added = await callJSON(db, ["question", "add", sourceID, String(question.page), "--file", path.join(dir, "questions", `${question.id}.json`)]);
           if (!check(added.code === 0, `question add ${question.id} exit = ${added.code}: ${added.stderr}`)) return null;

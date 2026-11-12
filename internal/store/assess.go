@@ -155,22 +155,55 @@ const assessmentRunSelect = `SELECT
 	last_resumed_at, completed_at, abandoned_at, abandoned_reason
 	FROM assessment_runs`
 
+const assessmentItemSelect = `SELECT
+	run_id, position, content_id, source_id, page, content_version, question_id,
+	skills_json, state, presented_at, item_deadline_at, answered_at, attempt_id
+	FROM assessment_items`
+
+// Presentation is one question presentation to append.
+type Presentation struct {
+	ContentID  string
+	QuestionID string
+	Surface    string
+	At         time.Time
+}
+
 // RecordPresentation appends one question presentation to the holdout ledger.
 // It is evidence of exposure, not an attempt: no answer or grade is implied.
 func (s *Store) RecordPresentation(contentID, questionID, surface string, at time.Time) error {
-	contentID = strings.TrimSpace(contentID)
-	if contentID == "" {
-		return errors.New("store: presentation content id is required")
+	return s.RecordPresentations([]Presentation{{ContentID: contentID, QuestionID: questionID, Surface: surface, At: at}})
+}
+
+// RecordPresentations appends presentations in one transaction. A listing that
+// prints many stems spends every printed unit with one write.
+func (s *Store) RecordPresentations(entries []Presentation) error {
+	if len(entries) == 0 {
+		return nil
 	}
-	if !assess.ValidSurface(surface) {
-		return fmt.Errorf("store: invalid presentation surface %q", surface)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("store: begin presentations: %w", err)
 	}
-	if at.IsZero() {
-		at = time.Now().UTC()
+	defer tx.Rollback()
+	for _, entry := range entries {
+		contentID := strings.TrimSpace(entry.ContentID)
+		if contentID == "" {
+			return errors.New("store: presentation content id is required")
+		}
+		if !assess.ValidSurface(entry.Surface) {
+			return fmt.Errorf("store: invalid presentation surface %q", entry.Surface)
+		}
+		at := entry.At
+		if at.IsZero() {
+			at = time.Now().UTC()
+		}
+		if _, err := tx.Exec(`INSERT INTO content_presentations (content_id, question_id, surface, at)
+			VALUES (?, ?, ?, ?)`, contentID, entry.QuestionID, entry.Surface, at.UTC().Format(time.RFC3339Nano)); err != nil {
+			return fmt.Errorf("store: record presentation: %w", err)
+		}
 	}
-	if _, err := s.db.Exec(`INSERT INTO content_presentations (content_id, question_id, surface, at)
-		VALUES (?, ?, ?, ?)`, contentID, questionID, surface, at.UTC().Format(time.RFC3339Nano)); err != nil {
-		return fmt.Errorf("store: record presentation: %w", err)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit presentations: %w", err)
 	}
 	return nil
 }
@@ -207,7 +240,7 @@ func (s *Store) Spends() ([]assess.Spend, error) {
 			return nil, fmt.Errorf("store: scan spend: %w", err)
 		}
 		spend.Surface = surface
-		if spend.At, err = time.Parse(time.RFC3339Nano, at); err != nil {
+		if spend.At, err = parseTime(at); err != nil {
 			return nil, fmt.Errorf("store: parse spend time: %w", err)
 		}
 		out = append(out, spend)
@@ -321,16 +354,22 @@ func (s *Store) CreateAssessmentRun(run assess.Run, items []assess.Item) (assess
 	return run, nil
 }
 
-// AssessmentRun reads one run, its items in order and its event trail.
-func (s *Store) AssessmentRun(id int64) (assess.Run, []assess.Item, []assess.Event, error) {
-	run, err := scanAssessmentRun(s.db.QueryRow(assessmentRunSelect+` WHERE id = ?`, id))
+// AssessmentRunItems reads one run and its items without the event trail.
+func (s *Store) AssessmentRunItems(id int64) (assess.Run, []assess.Item, error) {
+	run, err := readAssessmentRun(s.db, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return assess.Run{}, nil, nil, fmt.Errorf("%w: assessment run %d", ErrNotFound, id)
-		}
-		return assess.Run{}, nil, nil, fmt.Errorf("store: read assessment run %d: %w", id, err)
+		return assess.Run{}, nil, err
 	}
 	items, err := s.assessmentItems(id)
+	if err != nil {
+		return assess.Run{}, nil, err
+	}
+	return run, items, nil
+}
+
+// AssessmentRun reads one run, its items in order and its event trail.
+func (s *Store) AssessmentRun(id int64) (assess.Run, []assess.Item, []assess.Event, error) {
+	run, items, err := s.AssessmentRunItems(id)
 	if err != nil {
 		return assess.Run{}, nil, nil, err
 	}
@@ -339,17 +378,6 @@ func (s *Store) AssessmentRun(id int64) (assess.Run, []assess.Item, []assess.Eve
 		return assess.Run{}, nil, nil, err
 	}
 	return run, items, events, nil
-}
-
-// HasActiveAssessmentRun reports whether a run is active without reading the
-// clock. Guards use it so an ordinary coaching command is not charged a clock
-// tick when no assessment is running.
-func (s *Store) HasActiveAssessmentRun() (bool, error) {
-	var active int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM assessment_runs WHERE status = 'active'`).Scan(&active); err != nil {
-		return false, fmt.Errorf("store: count active assessment runs: %w", err)
-	}
-	return active > 0, nil
 }
 
 // ActiveAssessmentRun returns the one active run, if any.
@@ -382,7 +410,7 @@ func (s *Store) ReconcileAssessmentRuns(now time.Time) ([]int64, error) {
 			rows.Close()
 			return nil, fmt.Errorf("store: scan active assessment run: %w", err)
 		}
-		at, err := time.Parse(time.RFC3339Nano, deadline)
+		at, err := parseTime(deadline)
 		if err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("store: parse assessment deadline: %w", err)
@@ -412,7 +440,7 @@ func (s *Store) MarkAssessmentPresented(runID int64, position int, at time.Time)
 		return assess.Item{}, fmt.Errorf("store: begin assessment presentation: %w", err)
 	}
 	defer tx.Rollback()
-	run, err := assessmentRunTx(tx, runID)
+	run, err := readAssessmentRun(tx, runID)
 	if err != nil {
 		return assess.Item{}, err
 	}
@@ -460,7 +488,7 @@ func (s *Store) AppendAssessmentAttempt(runID int64, position int, record attemp
 		return attempt.Attempt{}, fmt.Errorf("store: begin assessment answer: %w", err)
 	}
 	defer tx.Rollback()
-	run, err := assessmentRunTx(tx, runID)
+	run, err := readAssessmentRun(tx, runID)
 	if err != nil {
 		return attempt.Attempt{}, err
 	}
@@ -511,12 +539,24 @@ func (s *Store) MarkAssessmentUnavailable(runID int64, position int, at time.Tim
 		return fmt.Errorf("store: begin unavailable item: %w", err)
 	}
 	defer tx.Rollback()
-	if _, err := assessmentRunTx(tx, runID); err != nil {
+	run, err := readAssessmentRun(tx, runID)
+	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE assessment_items SET state = 'unavailable'
-		WHERE run_id = ? AND position = ? AND state IN ('pending', 'presented')`, runID, position); err != nil {
+	if run.Status != assess.StatusActive {
+		return ErrAssessmentRunState
+	}
+	res, err := tx.Exec(`UPDATE assessment_items SET state = 'unavailable'
+		WHERE run_id = ? AND position = ? AND state IN ('pending', 'presented')`, runID, position)
+	if err != nil {
 		return fmt.Errorf("store: mark assessment item unavailable: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: mark assessment item unavailable: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%w: assessment item %d is not open", ErrAssessmentRunState, position)
 	}
 	if err := appendAssessmentEvent(tx, runID, assess.EventUnavailable, position, at, detail); err != nil {
 		return err
@@ -536,7 +576,7 @@ func (s *Store) ResumeAssessmentRun(runID int64, at time.Time) (assess.Run, erro
 		return assess.Run{}, fmt.Errorf("store: begin assessment resume: %w", err)
 	}
 	defer tx.Rollback()
-	run, err := assessmentRunTx(tx, runID)
+	run, err := readAssessmentRun(tx, runID)
 	if err != nil {
 		return assess.Run{}, err
 	}
@@ -577,7 +617,7 @@ func (s *Store) CompleteAssessmentRun(runID int64, at time.Time) (assess.Run, er
 		return assess.Run{}, fmt.Errorf("store: begin assessment completion: %w", err)
 	}
 	defer tx.Rollback()
-	run, err := assessmentRunTx(tx, runID)
+	run, err := readAssessmentRun(tx, runID)
 	if err != nil {
 		return assess.Run{}, err
 	}
@@ -615,7 +655,7 @@ func (s *Store) AbandonAssessmentRun(runID int64, at time.Time, reason string) (
 		return assess.Run{}, fmt.Errorf("store: begin assessment abandonment: %w", err)
 	}
 	defer tx.Rollback()
-	run, err := assessmentRunTx(tx, runID)
+	run, err := readAssessmentRun(tx, runID)
 	if err != nil {
 		return assess.Run{}, err
 	}
@@ -642,12 +682,7 @@ func (s *Store) AbandonAssessmentRun(runID int64, at time.Time, reason string) (
 
 // AssessmentAttempts returns the attempts recorded by one run.
 func (s *Store) AssessmentAttempts(runID int64) ([]attempt.Attempt, error) {
-	rows, err := s.db.Query(`SELECT
-		id, session_id, question_id, content_id, content_version, status,
-		selected_label, selected_text, correct_label, correct_text,
-		started_at, answered_at, elapsed_ms, assistance, tactic_id, skills_json,
-		assessment_run_id
-		FROM attempts WHERE assessment_run_id = ? ORDER BY id`, runID)
+	rows, err := s.db.Query(attemptSelect+` WHERE assessment_run_id = ? ORDER BY id`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list assessment attempts: %w", err)
 	}
@@ -667,8 +702,8 @@ func (s *Store) AssessmentAttempts(runID int64) ([]attempt.Attempt, error) {
 	return out, nil
 }
 
-func assessmentRunTx(tx *sql.Tx, id int64) (assess.Run, error) {
-	run, err := scanAssessmentRun(tx.QueryRow(assessmentRunSelect+` WHERE id = ?`, id))
+func readAssessmentRun(row rowQuerier, id int64) (assess.Run, error) {
+	run, err := scanAssessmentRun(row.QueryRow(assessmentRunSelect+` WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return assess.Run{}, fmt.Errorf("%w: assessment run %d", ErrNotFound, id)
 	}
@@ -700,10 +735,7 @@ func appendAssessmentEvent(tx *sql.Tx, runID int64, kind string, position int, a
 }
 
 func (s *Store) assessmentItems(runID int64) ([]assess.Item, error) {
-	rows, err := s.db.Query(`SELECT
-		run_id, position, content_id, source_id, page, content_version, question_id,
-		skills_json, state, presented_at, item_deadline_at, answered_at, attempt_id
-		FROM assessment_items WHERE run_id = ? ORDER BY position`, runID)
+	rows, err := s.db.Query(assessmentItemSelect+` WHERE run_id = ? ORDER BY position`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list assessment items: %w", err)
 	}
@@ -723,10 +755,7 @@ func (s *Store) assessmentItems(runID int64) ([]assess.Item, error) {
 }
 
 func assessmentItemTx(tx *sql.Tx, runID int64, position int) (assess.Item, error) {
-	item, err := scanAssessmentItem(tx.QueryRow(`SELECT
-		run_id, position, content_id, source_id, page, content_version, question_id,
-		skills_json, state, presented_at, item_deadline_at, answered_at, attempt_id
-		FROM assessment_items WHERE run_id = ? AND position = ?`, runID, position))
+	item, err := scanAssessmentItem(tx.QueryRow(assessmentItemSelect+` WHERE run_id = ? AND position = ?`, runID, position))
 	if errors.Is(err, sql.ErrNoRows) {
 		return assess.Item{}, fmt.Errorf("%w: assessment item %d of run %d", ErrNotFound, position, runID)
 	}
@@ -753,7 +782,7 @@ func (s *Store) assessmentEvents(runID int64) ([]assess.Event, error) {
 			return nil, fmt.Errorf("store: scan assessment event: %w", err)
 		}
 		var err error
-		if event.At, err = time.Parse(time.RFC3339Nano, at); err != nil {
+		if event.At, err = parseTime(at); err != nil {
 			return nil, fmt.Errorf("store: parse assessment event time: %w", err)
 		}
 		out = append(out, event)
@@ -777,13 +806,13 @@ func scanAssessmentRun(row rowScanner) (assess.Run, error) {
 		return assess.Run{}, err
 	}
 	var err error
-	if run.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
+	if run.CreatedAt, err = parseTime(created); err != nil {
 		return assess.Run{}, err
 	}
-	if run.StartedAt, err = time.Parse(time.RFC3339Nano, started); err != nil {
+	if run.StartedAt, err = parseTime(started); err != nil {
 		return assess.Run{}, err
 	}
-	if run.DeadlineAt, err = time.Parse(time.RFC3339Nano, deadline); err != nil {
+	if run.DeadlineAt, err = parseTime(deadline); err != nil {
 		return assess.Run{}, err
 	}
 	if run.LastResumedAt, err = parseOptionalTime(lastResumed); err != nil {

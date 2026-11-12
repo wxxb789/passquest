@@ -308,12 +308,7 @@ func insertAttempt(tx *sql.Tx, a attempt.Attempt) (attempt.Attempt, error) {
 // List returns all attempts in insertion order with content-scoped question
 // attempt numbers recomputed from that order.
 func (s *Store) List() ([]attempt.Attempt, error) {
-	rows, err := s.db.Query(`SELECT
-			id, session_id, question_id, content_id, content_version, status,
-			selected_label, selected_text, correct_label, correct_text,
-			started_at, answered_at, elapsed_ms, assistance, tactic_id, skills_json,
-			assessment_run_id
-		FROM attempts ORDER BY id`)
+	rows, err := s.db.Query(attemptSelect + ` ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list attempts: %w", err)
 	}

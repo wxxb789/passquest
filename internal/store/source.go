@@ -230,7 +230,8 @@ func (s *Store) Sources() ([]source.Summary, error) {
 	return out, nil
 }
 
-func (s *Store) Source(id string) (source.Source, error) {
+// SourceMeta reads one source's metadata without its page texts.
+func (s *Store) SourceMeta(id string) (source.Source, error) {
 	var (
 		src     source.Source
 		origin  string
@@ -250,6 +251,14 @@ func (s *Store) Source(id string) (source.Source, error) {
 	src.Import = source.ImportOrigin(origin)
 	if src.CreatedAt, err = parseTime(created); err != nil {
 		return source.Source{}, fmt.Errorf("store: parse source %s created_at: %w", id, err)
+	}
+	return src, nil
+}
+
+func (s *Store) Source(id string) (source.Source, error) {
+	src, err := s.SourceMeta(id)
+	if err != nil {
+		return source.Source{}, err
 	}
 
 	rows, err := s.db.Query(pageSelect+` ORDER BY p.page`, id)
@@ -284,6 +293,13 @@ const (
 			answer_status, review_status, reviewed_by, reviewed_at, created_at, updated_at, tactics_json,
 			glossary_json
 		FROM source_questions`
+
+	attemptSelect = `SELECT
+			id, session_id, question_id, content_id, content_version, status,
+			selected_label, selected_text, correct_label, correct_text,
+			started_at, answered_at, elapsed_ms, assistance, tactic_id, skills_json,
+			assessment_run_id
+		FROM attempts`
 )
 
 type rowScanner interface {

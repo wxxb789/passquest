@@ -10,6 +10,7 @@ import (
 	"github.com/wxxb789/passquest/internal/assess"
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
+	"github.com/wxxb789/passquest/internal/source"
 )
 
 type poolUnitView struct {
@@ -66,7 +67,7 @@ type assessmentItemOutcomeView struct {
 	State      string `json:"state"`
 	Status     string `json:"status,omitempty"`
 	TimedOut   bool   `json:"timed_out"`
-	ElapsedMS  int64  `json:"elapsed_ms,omitempty"`
+	ElapsedMS  int64  `json:"elapsed_ms"`
 	AttemptID  int64  `json:"attempt_id,omitempty"`
 }
 
@@ -137,7 +138,7 @@ type assessReportItemView struct {
 	State       string               `json:"state"`
 	Status      string               `json:"status,omitempty"`
 	TimedOut    bool                 `json:"timed_out"`
-	ElapsedMS   int64                `json:"elapsed_ms,omitempty"`
+	ElapsedMS   int64                `json:"elapsed_ms"`
 	AfterResume bool                 `json:"after_resume"`
 	Scored      bool                 `json:"scored"`
 	Reasons     []string             `json:"contamination_reasons,omitempty"`
@@ -191,8 +192,8 @@ func runViewOf(run assess.Run) assessmentRunView {
 	return assessmentRunView{
 		ID:               run.ID,
 		Status:           run.Status,
-		StartedAt:        sourceTime(run.StartedAt),
-		DeadlineAt:       sourceTime(run.DeadlineAt),
+		StartedAt:        source.FormatTime(run.StartedAt),
+		DeadlineAt:       source.FormatTime(run.DeadlineAt),
 		WindowMinutes:    run.WindowMinutes,
 		RequestedSize:    run.RequestedSize,
 		ActualSize:       run.ActualSize,
@@ -201,25 +202,14 @@ func runViewOf(run assess.Run) assessmentRunView {
 		PoolFamily:       run.PoolFamily,
 		SourceCount:      run.SourceCount,
 		ResumeCount:      run.ResumeCount,
-		LastResumedAt:    sourceTime(run.LastResumedAt),
-		CompletedAt:      sourceTime(run.CompletedAt),
-		AbandonedAt:      sourceTime(run.AbandonedAt),
+		LastResumedAt:    source.FormatTime(run.LastResumedAt),
+		CompletedAt:      source.FormatTime(run.CompletedAt),
+		AbandonedAt:      source.FormatTime(run.AbandonedAt),
 		AbandonedReason:  run.AbandonedReason,
 	}
 }
 
-func sourceTime(value time.Time) string {
-	if value.IsZero() {
-		return ""
-	}
-	return value.UTC().Format(time.RFC3339Nano)
-}
-
 func poolDocOf(pool assess.Pool, identities []assess.SourceIdentity) poolDoc {
-	shortfall := assess.MinPoolItems - pool.ItemCount
-	if shortfall < 0 {
-		shortfall = 0
-	}
 	doc := poolDoc{
 		SchemaVersion:     ProtocolVersion,
 		State:             "pool",
@@ -230,7 +220,7 @@ func poolDocOf(pool assess.Pool, identities []assess.SourceIdentity) poolDoc {
 		SpentUnits:        pool.SpentUnits,
 		FloorItems:        assess.MinPoolItems,
 		FloorMet:          pool.ItemCount >= assess.MinPoolItems,
-		ShortfallItems:    shortfall,
+		ShortfallItems:    poolShortfall(pool),
 		DefaultSize:       assess.DefaultSize,
 		DefaultMinutes:    assess.DefaultMinutes,
 		SourceCount:       len(identities),
@@ -249,7 +239,7 @@ func poolDocOf(pool assess.Pool, identities []assess.SourceIdentity) poolDoc {
 			QuestionCount: len(unit.Questions),
 			Spent:         unit.Spent,
 			SpentBy:       append([]string(nil), unit.SpentBy...),
-			FirstSpentAt:  sourceTime(unit.FirstSpentAt),
+			FirstSpentAt:  source.FormatTime(unit.FirstSpentAt),
 		})
 	}
 	sort.SliceStable(doc.ContentUnits, func(i, j int) bool {
@@ -282,38 +272,63 @@ func itemOutcomeViews(items []assess.Item, attempts []attempt.Attempt) []assessm
 	return out
 }
 
+func countsViewOf(counts assess.Counts) assessCountsView {
+	return assessCountsView{
+		Selected:            counts.Selected,
+		Presented:           counts.Presented,
+		Finalized:           counts.Finalized,
+		Scored:              counts.Scored,
+		Correct:             counts.Correct,
+		Total:               counts.Total,
+		Contaminated:        counts.Contaminated,
+		TimedOut:            counts.TimedOut,
+		Skipped:             counts.Skipped,
+		Unavailable:         counts.Unavailable,
+		Pending:             counts.Pending,
+		AnsweredAfterResume: counts.AnsweredAfterResume,
+	}
+}
+
+func accuracyViewOf(accuracy assess.Accuracy) assessAccuracyView {
+	return assessAccuracyView{
+		Correct: accuracy.Correct,
+		Total:   accuracy.Total,
+		Ratio:   accuracy.Ratio,
+		Band:    accuracy.Band,
+	}
+}
+
+func speedViewOf(speed assess.Speed) assessSpeedView {
+	return assessSpeedView{
+		MedianMS:         speed.MedianMS,
+		P90MS:            speed.P90MS,
+		PerItemTimeoutMS: speed.PerItemTimeoutMS,
+		Basis:            speed.Basis,
+		Band:             speed.Band,
+	}
+}
+
+func skillViewsOf(skills []assess.SkillAccuracy) []assessSkillView {
+	if len(skills) == 0 {
+		return nil
+	}
+	out := make([]assessSkillView, 0, len(skills))
+	for _, skill := range skills {
+		out = append(out, assessSkillView{
+			SkillID: skill.SkillID, Correct: skill.Correct, Total: skill.Total, Ratio: skill.Ratio,
+		})
+	}
+	return out
+}
+
 func reportDocOf(report assess.Report) assessReportDoc {
 	doc := assessReportDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         "report",
 		Run:           runViewOf(report.Run),
-		Counts: assessCountsView{
-			Selected:            report.Counts.Selected,
-			Presented:           report.Counts.Presented,
-			Finalized:           report.Counts.Finalized,
-			Scored:              report.Counts.Scored,
-			Correct:             report.Counts.Correct,
-			Total:               report.Counts.Total,
-			Contaminated:        report.Counts.Contaminated,
-			TimedOut:            report.Counts.TimedOut,
-			Skipped:             report.Counts.Skipped,
-			Unavailable:         report.Counts.Unavailable,
-			Pending:             report.Counts.Pending,
-			AnsweredAfterResume: report.Counts.AnsweredAfterResume,
-		},
-		Accuracy: assessAccuracyView{
-			Correct: report.Accuracy.Correct,
-			Total:   report.Accuracy.Total,
-			Ratio:   report.Accuracy.Ratio,
-			Band:    report.Accuracy.Band,
-		},
-		Speed: assessSpeedView{
-			MedianMS:         report.Speed.MedianMS,
-			P90MS:            report.Speed.P90MS,
-			PerItemTimeoutMS: report.Speed.PerItemTimeoutMS,
-			Basis:            report.Speed.Basis,
-			Band:             report.Speed.Band,
-		},
+		Counts:        countsViewOf(report.Counts),
+		Accuracy:      accuracyViewOf(report.Accuracy),
+		Speed:         speedViewOf(report.Speed),
 		Contamination: assessContaminationView{
 			PriorExposure:      report.Contamination.PriorExposure,
 			RepeatedVariant:    report.Contamination.RepeatedVariant,
@@ -321,14 +336,10 @@ func reportDocOf(report assess.Report) assessReportDoc {
 			ResumedAfterWindow: report.Contamination.ResumedAfterWindow,
 			ExcludedItems:      make([]assessReportItemView, 0, len(report.Contamination.Excluded)),
 		},
+		Skills:      skillViewsOf(report.Skills),
 		Items:       make([]assessReportItemView, 0, len(report.Items)),
 		Unknowns:    append([]string(nil), report.Unknowns...),
 		Limitations: append([]string(nil), report.Limitations...),
-	}
-	for _, skill := range report.Skills {
-		doc.Skills = append(doc.Skills, assessSkillView{
-			SkillID: skill.SkillID, Correct: skill.Correct, Total: skill.Total, Ratio: skill.Ratio,
-		})
 	}
 	for _, item := range report.Items {
 		view := reportItemViewOf(item)
@@ -388,31 +399,13 @@ func comparisonDocOf(a, b assess.Report) assessComparisonDoc {
 }
 
 func compareRunViewOf(report assess.Report) assessCompareRunView {
-	view := assessCompareRunView{
-		Run: runViewOf(report.Run),
-		Counts: assessCountsView{
-			Selected: report.Counts.Selected, Presented: report.Counts.Presented,
-			Finalized: report.Counts.Finalized, Scored: report.Counts.Scored,
-			Correct: report.Counts.Correct, Total: report.Counts.Total,
-			Contaminated: report.Counts.Contaminated, TimedOut: report.Counts.TimedOut,
-			Skipped: report.Counts.Skipped, Unavailable: report.Counts.Unavailable,
-			Pending: report.Counts.Pending, AnsweredAfterResume: report.Counts.AnsweredAfterResume,
-		},
-		Accuracy: assessAccuracyView{
-			Correct: report.Accuracy.Correct, Total: report.Accuracy.Total,
-			Ratio: report.Accuracy.Ratio, Band: report.Accuracy.Band,
-		},
-		Speed: assessSpeedView{
-			MedianMS: report.Speed.MedianMS, P90MS: report.Speed.P90MS,
-			PerItemTimeoutMS: report.Speed.PerItemTimeoutMS, Basis: report.Speed.Basis, Band: report.Speed.Band,
-		},
+	return assessCompareRunView{
+		Run:      runViewOf(report.Run),
+		Counts:   countsViewOf(report.Counts),
+		Accuracy: accuracyViewOf(report.Accuracy),
+		Speed:    speedViewOf(report.Speed),
+		Skills:   skillViewsOf(report.Skills),
 	}
-	for _, skill := range report.Skills {
-		view.Skills = append(view.Skills, assessSkillView{
-			SkillID: skill.SkillID, Correct: skill.Correct, Total: skill.Total, Ratio: skill.Ratio,
-		})
-	}
-	return view
 }
 
 func writePool(w io.Writer, doc poolDoc, dbPath string) {
@@ -447,9 +440,9 @@ func writeAssessmentPreamble(w io.Writer, run assess.Run, itemCount int) {
 	fmt.Fprintln(w)
 }
 
-func writeAssessmentUnit(w io.Writer, unit assess.Unit) {
-	fmt.Fprintf(w, "Unit %s (page %d)\n", unit.ContentID, unit.Page)
-	fmt.Fprintf(w, "%s\n\n", unit.Passage)
+func writeAssessmentUnit(w io.Writer, item assess.Item, content exam.Exam) {
+	fmt.Fprintf(w, "Unit %s (page %d)\n", content.ID, item.Page)
+	fmt.Fprintf(w, "%s\n\n", content.Passage.Text)
 }
 
 func writeAssessmentQuestion(w io.Writer, item assess.Item, question exam.Question, total int, remaining time.Duration) {

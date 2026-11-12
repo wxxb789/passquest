@@ -363,12 +363,19 @@ func runPractice(args []string, opt Options) int {
 				Question:      questionViewOf(selection),
 			})
 		}
-		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true, assess.SurfacePractice)
+		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true)
 	}
-	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false, assess.SurfacePractice)
+	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
 }
 
-func answerQuestion(opt Options, selection practiceSelection, st *store.Store, answerFlag *string, answerSet, skip, jsonMode bool, surface string) int {
+func answerQuestion(opt Options, selection practiceSelection, st *store.Store, answerFlag *string, answerSet, skip, jsonMode bool) int {
+	surface := assess.SurfacePractice
+	if selection.Tactic != nil {
+		surface = assess.SurfaceTactic
+	}
+	if selection.Skill != nil {
+		surface = assess.SurfaceSkill
+	}
 	started := opt.Now()
 	recordPresentation := func() int {
 		if err := st.RecordPresentation(selection.Content.ID, selection.Question.ID, surface, started); err != nil {
@@ -906,7 +913,7 @@ func runVersion(opt Options) int {
 	return 0
 }
 
-func usageError(opt Options, jsonMode bool, code, message string) int {
+func writeError(opt Options, jsonMode bool, code, message string) {
 	if jsonMode {
 		_ = writeJSONTo(opt.Stderr, errorDoc{
 			SchemaVersion: ProtocolVersion,
@@ -915,6 +922,10 @@ func usageError(opt Options, jsonMode bool, code, message string) int {
 	} else {
 		fmt.Fprintf(opt.Stderr, "passquest: %s\n", message)
 	}
+}
+
+func usageError(opt Options, jsonMode bool, code, message string) int {
+	writeError(opt, jsonMode, code, message)
 	return 2
 }
 

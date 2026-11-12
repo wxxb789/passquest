@@ -84,6 +84,19 @@ func attemptRecord(id int64, status attempt.Status, elapsed int64, answered time
 	}
 }
 
+func TestReportMarksMissingAttemptUnavailable(t *testing.T) {
+	run := baseRun()
+	start := run.StartedAt
+	items := []Item{{RunID: 1, Position: 0, ContentID: "src-p001", QuestionID: "q0", State: StateAnswered, PresentedAt: start.Add(time.Minute), DeadlineAt: start.Add(90 * time.Second), AnsweredAt: start.Add(20 * time.Second), AttemptID: 99}}
+	report := BuildReport(run, items, nil, nil, nil, nil)
+	if report.Counts.Unavailable != 1 || report.Counts.Scored != 0 {
+		t.Fatalf("counts = %+v", report.Counts)
+	}
+	if report.Items[0].State != StateUnavailable {
+		t.Fatalf("item state = %q", report.Items[0].State)
+	}
+}
+
 func TestReportExcludesContaminatedItems(t *testing.T) {
 	run := baseRun()
 	start := run.StartedAt
@@ -98,10 +111,9 @@ func TestReportExcludesContaminatedItems(t *testing.T) {
 		attemptRecord(3, attempt.StatusCorrect, 30_000, start.Add(210*time.Second)),
 	}
 	spends := []Spend{
-		// Before the first presentation: prior exposure on q0's unit.
 		{ContentID: "src-p001", QuestionID: "old", Surface: SurfacePractice, At: start.Add(-time.Minute)},
-		// After q1's presentation but before its answer: a hint during the run.
 		{ContentID: "src-p001", QuestionID: "hint", Surface: SurfaceShow, At: start.Add(2*time.Minute + 10*time.Second)},
+		{ContentID: "src-p001", QuestionID: "q0", Surface: "attempt", At: start.Add(10 * time.Second), RunID: run.ID},
 	}
 	report := BuildReport(run, items, attempts, nil, spends, nil)
 	if report.Counts.Scored != 1 || report.Counts.Contaminated != 2 || report.Counts.Total != 1 {
@@ -111,8 +123,6 @@ func TestReportExcludesContaminatedItems(t *testing.T) {
 		t.Fatalf("accuracy = %+v", report.Accuracy)
 	}
 	if report.Contamination.PriorExposure != 2 || report.Contamination.HintsDuringRun != 1 {
-		// Both items share the content unit, so the prior spend marks each of
-		// them; only q1 is still open when the hint arrives.
 		t.Fatalf("contamination = %+v", report.Contamination)
 	}
 	if len(report.Contamination.Excluded) != 2 {

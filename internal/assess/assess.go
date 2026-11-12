@@ -15,7 +15,6 @@ import (
 	"github.com/wxxb789/passquest/internal/exam"
 )
 
-// Defaults and the disclosed owner decisions.
 const (
 	// MinPoolItems is Q-0009-03: a run refuses below this many qualifying
 	// unseen items.
@@ -29,14 +28,12 @@ const (
 	AnnotationsNone = "none"
 )
 
-// Run status values.
 const (
 	StatusActive    = "active"
 	StatusCompleted = "completed"
 	StatusAbandoned = "abandoned"
 )
 
-// Item state values.
 const (
 	StatePending     = "pending"
 	StatePresented   = "presented"
@@ -58,7 +55,6 @@ const (
 	EventUnavailable = "unavailable"
 )
 
-// Presentation surfaces recorded in content_presentations.
 const (
 	SurfacePractice = "practice"
 	SurfaceTactic   = "tactic"
@@ -88,7 +84,6 @@ type Unit struct {
 	SourceID  string
 	Page      int
 	Version   string
-	Title     string
 	Passage   string
 	Questions []exam.Question
 }

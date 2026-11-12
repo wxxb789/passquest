@@ -12,13 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wxxb789/passquest/internal/adaptive"
 	"github.com/wxxb789/passquest/internal/assess"
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 )
 
-func assessmentFixtureDir(t *testing.T, pages int, firstPageQuestions int) string {
+func assessmentFixtureDir(t *testing.T, pages int) string {
 	t.Helper()
 	dir := t.TempDir()
 	pagesDir := filepath.Join(dir, "pages")
@@ -34,12 +35,9 @@ func assessmentFixtureDir(t *testing.T, pages int, firstPageQuestions int) strin
 	return dir
 }
 
-// seedAssessmentSource imports and reviews a generated source. Page 1 may
-// carry several questions so the unit-spending rule is observable; every later
-// page carries one question.
 func seedAssessmentSource(t *testing.T, db string, pages int, firstPageQuestions int) string {
 	t.Helper()
-	dir := assessmentFixtureDir(t, pages, firstPageQuestions)
+	dir := assessmentFixtureDir(t, pages)
 	src, err := source.ImportPath(dir, source.ImportOptions{Title: "assessment fixture", Now: goldenBase})
 	if err != nil {
 		t.Fatalf("import fixture: %v", err)
@@ -115,13 +113,13 @@ func decodePool(t *testing.T, raw string) poolDoc {
 	return doc
 }
 
-func decodeRunResult(t *testing.T, raw string) (assessmentRunResultDoc, assess.Report) {
+func decodeRunResult(t *testing.T, raw string) assessmentRunResultDoc {
 	t.Helper()
 	var doc assessmentRunResultDoc
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 		t.Fatalf("decode run result: %v\n%s", err, raw)
 	}
-	return doc, assess.Report{}
+	return doc
 }
 
 func decodeAssessReport(t *testing.T, raw string) assessReportDoc {
@@ -145,6 +143,48 @@ func activeAssessmentID(t *testing.T, db string) int64 {
 		t.Fatalf("active run = %+v, %v", run, err)
 	}
 	return run.ID
+}
+
+func TestAssessNextSpendsRecommendedUnit(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	seedAssessmentSource(t, db, 4, 1)
+	mustRun(t, db, clock, "", "next", "--json")
+
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	input, _, _, err := buildAdaptiveInput(st, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := adaptive.Recommend(input)
+	if result.Recommendation == nil {
+		t.Fatal("no recommendation")
+	}
+	material := result.Recommendation.FreshMaterial
+	if material == nil {
+		material = result.Recommendation.ReviewMaterial
+	}
+	if material == nil {
+		t.Fatal("recommendation names no material")
+	}
+
+	spends, err := st.Spends()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var next []assess.Spend
+	for _, spend := range spends {
+		if spend.Surface == assess.SurfaceNext {
+			next = append(next, spend)
+		}
+	}
+	if len(next) != 1 || next[0].ContentID != material.ContentID || next[0].QuestionID != material.QuestionID {
+		t.Fatalf("next spends = %+v, recommended %s/%s", next, material.ContentID, material.QuestionID)
+	}
 }
 
 func TestAssessPoolSpendsWholeContentUnit(t *testing.T) {
@@ -217,7 +257,7 @@ func TestAssessRunHidesAnnotationsAndReportsThem(t *testing.T) {
 	if strings.Contains(out, "Reasoning for") || strings.Contains(out, "shuts") || strings.Contains(out, "closes at 4 p.m.") {
 		t.Fatalf("run transcript exposed annotations:\n%s", out)
 	}
-	runDoc, _ := decodeRunResult(t, out)
+	runDoc := decodeRunResult(t, out)
 	if runDoc.State != "completed" || len(runDoc.Items) != 20 {
 		t.Fatalf("run = %+v", runDoc)
 	}
@@ -314,7 +354,7 @@ func TestAssessForcedItemTimeout(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("timeout run = %d, %s", code, stderr.String())
 	}
-	runDoc, _ := decodeRunResult(t, stdout.String())
+	runDoc := decodeRunResult(t, stdout.String())
 	report := decodeAssessReport(t, mustRun(t, db, &stepClock{base: goldenBase.Add(time.Hour)}, "", "assess", "report", fmt.Sprintf("%d", runDoc.Run.ID), "--json"))
 	if report.Counts.TimedOut != 1 || report.Counts.Total != 4 || report.Accuracy.Correct != 3 {
 		t.Fatalf("timeout report = %+v accuracy=%+v", report.Counts, report.Accuracy)
@@ -331,7 +371,7 @@ func TestAssessResumeMarksResumedPortion(t *testing.T) {
 	}
 	runID := activeAssessmentID(t, db)
 	out := mustRun(t, db, clock, strings.Repeat("B\n", 15), "assess", "resume", fmt.Sprintf("%d", runID), "--json")
-	runDoc, _ := decodeRunResult(t, out)
+	runDoc := decodeRunResult(t, out)
 	if runDoc.Run.ResumeCount != 1 || runDoc.State != "completed" {
 		t.Fatalf("resumed run = %+v", runDoc.Run)
 	}
@@ -390,7 +430,7 @@ func TestAssessContaminationFromShowDuringRun(t *testing.T) {
 	if code != 0 || !showDone {
 		t.Fatalf("contaminated run = %d, showDone=%t, %s", code, showDone, stderr.String())
 	}
-	runDoc, _ := decodeRunResult(t, stdout.String())
+	runDoc := decodeRunResult(t, stdout.String())
 	report := decodeAssessReport(t, mustRun(t, db, clock, "", "assess", "report", fmt.Sprintf("%d", runDoc.Run.ID), "--json"))
 	if report.Counts.Contaminated != 1 || report.Counts.Scored != 19 || report.Counts.Total != 19 {
 		t.Fatalf("contamination counts = %+v", report.Counts)
@@ -442,7 +482,7 @@ func TestAssessCompareRefusesUnlikeRuns(t *testing.T) {
 
 func decodeAssessRun(t *testing.T, raw string) int64 {
 	t.Helper()
-	doc, _ := decodeRunResult(t, raw)
+	doc := decodeRunResult(t, raw)
 	if doc.Run.ID == 0 {
 		t.Fatalf("run result has no id: %s", raw)
 	}

@@ -8,7 +8,6 @@ import (
 	"github.com/wxxb789/passquest/internal/attempt"
 )
 
-// Contamination reason names, printed verbatim.
 const (
 	ReasonPriorExposure      = "prior_exposure"
 	ReasonRepeatedVariant    = "repeated_variant"
@@ -82,8 +81,6 @@ func BuildReport(run Run, items []Item, attempts []attempt.Attempt, events []Eve
 		}
 		record, found := byAttempt[item.AttemptID]
 		if !found || item.AttemptID == 0 {
-			// A finalized item without its attempt is a storage inconsistency,
-			// not a result. Report it as unavailable instead of scoring it.
 			entry.State = StateUnavailable
 			counts.Unavailable++
 			report.Items = append(report.Items, entry)
@@ -96,9 +93,7 @@ func BuildReport(run Run, items []Item, attempts []attempt.Attempt, events []Eve
 		if entry.TimedOut {
 			counts.TimedOut++
 		}
-		switch record.Status {
-		case attempt.StatusCorrect:
-		case attempt.StatusSkipped:
+		if record.Status == attempt.StatusSkipped {
 			counts.Skipped++
 		}
 		entry.AfterResume = !firstResume.IsZero() && !item.AnsweredAt.Before(firstResume)
@@ -107,7 +102,6 @@ func BuildReport(run Run, items []Item, attempts []attempt.Attempt, events []Eve
 		}
 		entry.Reasons = contaminationReasons(run, item, spendsByContent[item.ContentID], spendsByQuestion[item.QuestionID], resumedAfterWindow)
 		if len(entry.Reasons) > 0 {
-			entry.Scored = false
 			counts.Contaminated++
 			addReasons(&report.Contamination, entry.Reasons)
 			report.Contamination.Excluded = append(report.Contamination.Excluded, entry)
@@ -116,7 +110,6 @@ func BuildReport(run Run, items []Item, attempts []attempt.Attempt, events []Eve
 		}
 		entry.Scored = true
 		counts.Scored++
-		counts.Total++
 		elapsed = append(elapsed, record.ElapsedMS)
 		if record.Status == attempt.StatusCorrect {
 			counts.Correct++
@@ -147,6 +140,7 @@ func BuildReport(run Run, items []Item, attempts []attempt.Attempt, events []Eve
 		report.Items = append(report.Items, entry)
 	}
 
+	counts.Total = counts.Scored
 	counts.Pending = counts.Selected - counts.Finalized - counts.Unavailable
 	report.Counts = counts
 	report.Accuracy = Accuracy{Correct: counts.Correct, Total: counts.Total}
@@ -180,15 +174,12 @@ func contaminationReasons(run Run, item Item, byContent, byQuestion []Spend, res
 	var prior, repeated, hints bool
 	for _, spend := range byContent {
 		if spend.RunID == run.ID {
-			// This run's own presentations and answers are the measurement,
-			// not contamination of it. Sibling questions legitimately share a
-			// unit, so the exclusion is by run id, not by question id.
 			continue
 		}
 		if !item.PresentedAt.IsZero() && spend.At.Before(item.PresentedAt) {
 			prior = true
 		}
-		if spend.Surface == SurfaceAssess && spend.RunID != run.ID && spend.At.Before(run.StartedAt) {
+		if spend.Surface == SurfaceAssess && spend.At.Before(run.StartedAt) {
 			repeated = true
 		}
 		if spend.Surface != SurfaceAssess &&
@@ -231,8 +222,6 @@ func addReasons(totals *Contamination, reasons []string) {
 			totals.RepeatedVariant++
 		case ReasonHintsDuringRun:
 			totals.HintsDuringRun++
-		case ReasonResumedAfterWindow:
-			totals.ResumedAfterWindow++
 		}
 	}
 }
@@ -343,14 +332,4 @@ func shortHash(value string) string {
 		return value[:12]
 	}
 	return value
-}
-
-// SkillByID returns the per-skill row for id, or a zero row.
-func SkillByID(report Report, id string) SkillAccuracy {
-	for _, row := range report.Skills {
-		if row.SkillID == id {
-			return row
-		}
-	}
-	return SkillAccuracy{SkillID: id}
 }

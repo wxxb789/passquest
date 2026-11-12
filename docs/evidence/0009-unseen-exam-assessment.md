@@ -227,7 +227,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (17 packages, 699 tests, 0 skipped)
+PASS  go test (17 packages, 702 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy

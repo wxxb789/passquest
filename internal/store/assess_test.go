@@ -54,7 +54,6 @@ func TestMigrationFromVersionThirteenKeepsAttemptsAndAddsAssessment(t *testing.T
 		t.Fatal("attempt delete was accepted after the table rebuild")
 	}
 
-	// The widened CHECK admits a timed assessment answer only with its run.
 	if _, err := st.db.Exec(`INSERT INTO attempts (
 			session_id, question_id, content_id, content_version, status,
 			selected_label, selected_text, correct_label, correct_text,
@@ -198,6 +197,52 @@ func TestAssessmentRunResumeAbandonAndReconcile(t *testing.T) {
 	loaded, _, _, err := st.AssessmentRun(expired.ID)
 	if err != nil || loaded.Status != assess.StatusAbandoned || loaded.AbandonedReason != "window_elapsed" {
 		t.Fatalf("expired run = %+v, %v", loaded, err)
+	}
+}
+
+func TestMarkAssessmentUnavailableOnlyForOpenItems(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "unavailable.sqlite"))
+	run, items := assessmentRunFixture(2)
+	created, err := st.CreateAssessmentRun(run, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := created.StartedAt.Add(time.Minute)
+	if err := st.MarkAssessmentUnavailable(created.ID, 0, at, "content changed"); err != nil {
+		t.Fatalf("first unavailable: %v", err)
+	}
+	if err := st.MarkAssessmentUnavailable(created.ID, 0, at.Add(time.Second), "content changed"); !errors.Is(err, ErrAssessmentRunState) {
+		t.Fatalf("repeated unavailable = %v", err)
+	}
+
+	presented, err := st.MarkAssessmentPresented(created.ID, 1, at.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	answered := assessmentAttemptFixture(presented.ContentID, presented.QuestionID, attempt.StatusCorrect,
+		presented.PresentedAt, presented.PresentedAt.Add(10*time.Second))
+	if _, err := st.AppendAssessmentAttempt(created.ID, 1, answered, false, answered.AnsweredAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkAssessmentUnavailable(created.ID, 1, at.Add(3*time.Minute), "content changed"); !errors.Is(err, ErrAssessmentRunState) {
+		t.Fatalf("unavailable after answer = %v", err)
+	}
+
+	_, loaded, events, err := st.AssessmentRun(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded[1].State != assess.StateAnswered {
+		t.Fatalf("answered item was overwritten: %+v", loaded[1])
+	}
+	unavailableEvents := 0
+	for _, event := range events {
+		if event.Kind == assess.EventUnavailable {
+			unavailableEvents++
+		}
+	}
+	if unavailableEvents != 1 {
+		t.Fatalf("unavailable events = %d", unavailableEvents)
 	}
 }
 
