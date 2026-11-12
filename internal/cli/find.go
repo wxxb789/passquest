@@ -20,6 +20,9 @@ const (
 )
 
 func runFind(args []string, opt Options) int {
+	if code := guardAssessmentCommand(args, opt, "find"); code != 0 {
+		return code
+	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "history":

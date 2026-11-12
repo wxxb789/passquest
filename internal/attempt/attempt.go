@@ -53,11 +53,22 @@ const (
 	// and in the answered document, so a one-shot client still receives it. It
 	// is never independent evidence.
 	AssistanceAssisted Assistance = "assisted"
+	// AssistanceNone means a timed assessment run allowed no coaching of any
+	// kind. It is separate from independent ordinary practice so a report can
+	// tell an assessment observation from a practice observation.
+	AssistanceNone Assistance = "none"
 )
 
 // Valid reports whether a is a recorded assistance condition.
 func (a Assistance) Valid() bool {
-	return a == AssistanceIndependent || a == AssistanceAssisted
+	return a == AssistanceIndependent || a == AssistanceAssisted || a == AssistanceNone
+}
+
+// IndependentEvidence reports whether the condition can support independent
+// first-attempt evidence. A timed assessment answer is unassisted even though
+// its condition is named "none" rather than "independent".
+func (a Assistance) IndependentEvidence() bool {
+	return a == AssistanceIndependent || a == AssistanceNone
 }
 
 // ValidSkillID reports whether id is a lowercase slug usable as a skill id.
@@ -107,6 +118,9 @@ type Attempt struct {
 	// may fall back to the question's current tags. The distinction is stored
 	// as NULL versus a JSON array.
 	SkillsRecorded bool
+	// AssessmentRunID links a timed assessment answer to its run. It is zero
+	// for ordinary practice, tactic practice and skill practice.
+	AssessmentRunID int64
 }
 
 // Key returns the content-scoped identity used for numbering and repeats.
@@ -212,6 +226,21 @@ func (a Attempt) WithAssistance(assistance Assistance) (Attempt, error) {
 		return Attempt{}, errors.New("attempt: annotate a graded record")
 	}
 	a.Assistance = assistance
+	return a, nil
+}
+
+// WithAssessment marks a graded record as one timed assessment answer. A run
+// answer is never assisted and must name its run; the pair is enforced by the
+// store as well.
+func (a Attempt) WithAssessment(runID int64) (Attempt, error) {
+	if runID <= 0 {
+		return Attempt{}, errors.New("attempt: assessment run id must be positive")
+	}
+	if a.QuestionID == "" || a.ContentID == "" {
+		return Attempt{}, errors.New("attempt: annotate a graded record")
+	}
+	a.Assistance = AssistanceNone
+	a.AssessmentRunID = runID
 	return a, nil
 }
 

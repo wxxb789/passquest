@@ -148,7 +148,10 @@ type Question struct {
 	// Tactics holds the question's skill tags. The JSON field keeps its
 	// goal-0003 name; values may be any registered skill, including the
 	// language prerequisites.
-	Tactics      []string
+	Tactics []string
+	// Glossary is an optional authored reading aid. It is withheld during a
+	// timed assessment and printed in the report afterwards.
+	Glossary     []exam.GlossaryEntry
 	AnswerStatus AnswerStatus
 	Review       ReviewStatus
 	ReviewedBy   string

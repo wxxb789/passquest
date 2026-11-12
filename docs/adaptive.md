@@ -50,6 +50,7 @@ The policy classifies every attempt against a skill:
 | Independent transfer | `assistance=independent`, attempt number 1, and no earlier attempt on the same content id | Yes |
 | Passage re-exposure | `assistance=independent`, attempt number 1, but an earlier attempt exists on the same content id | No |
 | Assisted | `assistance=assisted` (walkthrough or other help visible) | No |
+| Assessment | `assistance=none` from a timed unseen run, attempt number 1, fresh passage | Yes (timed and unassisted) |
 | Revisit | attempt number greater than 1 on the same content-scoped question | No |
 
 The passage rule is deliberately stricter than goal 0003's question-level assistance rule. Feedback
@@ -175,4 +176,6 @@ it, and the attempt is listed as unclassified.
   removed, historical attempts remain evidence but the review command may not be available.
 - Tutor output is advisory text in a separate append-only table. It is never read by `next` or
   `report`, never counted as an attempt and cannot change a skill state. See [tutor.md](tutor.md).
-- Nothing here is a held-out, delayed or timed assessment; those belong to goal 0009.
+- Timed assessment answers are ordinary attempts with `assistance=none` and an `assessment_run_id`.
+  They are counted as independent first-attempt evidence here; the contaminated-item rules belong to
+  [`assess.md`](assess.md), not to this recomputation.

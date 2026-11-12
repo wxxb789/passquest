@@ -266,7 +266,7 @@ func wrongTactic(record Record) string {
 func InferLevel(records []Record) (Level, LevelBasis) {
 	basis := LevelBasis{Rule: "first independent attempts, skips included in the denominator"}
 	for _, record := range records {
-		if record.AttemptNumber != 1 || record.Assistance != attempt.AssistanceIndependent {
+		if record.AttemptNumber != 1 || !record.Assistance.IndependentEvidence() {
 			continue
 		}
 		basis.IndependentFirstAttempts++

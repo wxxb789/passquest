@@ -52,6 +52,16 @@ type Question struct {
 	// Tactics names the scoring tactics this question exercises. Tags are
 	// lowercase slugs; the tactic registry decides which ids are usable.
 	Tactics []string `json:"tactics,omitempty"`
+	// Glossary is an optional annotation shown with ordinary practice and
+	// withheld during a timed assessment. It is not a claim about the live
+	// examination.
+	Glossary []GlossaryEntry `json:"glossary,omitempty"`
+}
+
+// GlossaryEntry is one authored term and its short local meaning.
+type GlossaryEntry struct {
+	Term    string `json:"term"`
+	Meaning string `json:"meaning"`
 }
 
 // Option is one selectable answer.
@@ -148,6 +158,9 @@ func (e Exam) Validate() error {
 			}
 			tags[tag] = true
 		}
+		for _, problem := range GlossaryProblems(q.Glossary) {
+			add("%s %s", where, problem)
+		}
 		if _, ok := q.Option(q.Answer); !ok {
 			add("%s answer %q is not one of its options", where, q.Answer)
 		}
@@ -175,6 +188,41 @@ func ValidSkillTag(tag string) bool {
 		}
 	}
 	return true
+}
+
+// GlossaryProblems reports structural problems in an optional glossary. A
+// glossary is a small reading aid, not a second answer key; empty entries and
+// unbounded text are rejected so the assessment renderer cannot hide a large
+// payload in an annotation.
+func GlossaryProblems(entries []GlossaryEntry) []string {
+	const maxEntries = 20
+	const maxTermRunes = 80
+	const maxMeaningRunes = 300
+	var problems []string
+	if len(entries) > maxEntries {
+		problems = append(problems, fmt.Sprintf("has %d glossary entries, want at most %d", len(entries), maxEntries))
+	}
+	seen := make(map[string]bool, len(entries))
+	for i, entry := range entries {
+		term := strings.TrimSpace(entry.Term)
+		meaning := strings.TrimSpace(entry.Meaning)
+		if term == "" {
+			problems = append(problems, fmt.Sprintf("glossary[%d].term is empty", i))
+		} else if len([]rune(term)) > maxTermRunes {
+			problems = append(problems, fmt.Sprintf("glossary[%d].term is longer than %d characters", i, maxTermRunes))
+		}
+		if meaning == "" {
+			problems = append(problems, fmt.Sprintf("glossary[%d].meaning is empty", i))
+		} else if len([]rune(meaning)) > maxMeaningRunes {
+			problems = append(problems, fmt.Sprintf("glossary[%d].meaning is longer than %d characters", i, maxMeaningRunes))
+		}
+		key := strings.ToLower(term)
+		if seen[key] {
+			problems = append(problems, fmt.Sprintf("glossary repeats term %q", term))
+		}
+		seen[key] = true
+	}
+	return problems
 }
 
 // OptionProblems reports structural problems in options and their per-label

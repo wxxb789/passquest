@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
 )
 
@@ -229,7 +230,8 @@ func (s *Store) Sources() ([]source.Summary, error) {
 	return out, nil
 }
 
-func (s *Store) Source(id string) (source.Source, error) {
+// SourceMeta reads one source's metadata without its page texts.
+func (s *Store) SourceMeta(id string) (source.Source, error) {
 	var (
 		src     source.Source
 		origin  string
@@ -249,6 +251,14 @@ func (s *Store) Source(id string) (source.Source, error) {
 	src.Import = source.ImportOrigin(origin)
 	if src.CreatedAt, err = parseTime(created); err != nil {
 		return source.Source{}, fmt.Errorf("store: parse source %s created_at: %w", id, err)
+	}
+	return src, nil
+}
+
+func (s *Store) Source(id string) (source.Source, error) {
+	src, err := s.SourceMeta(id)
+	if err != nil {
+		return source.Source{}, err
 	}
 
 	rows, err := s.db.Query(pageSelect+` ORDER BY p.page`, id)
@@ -280,8 +290,16 @@ const (
 
 	questionSelect = `SELECT
 			source_id, id, page, stem, options_json, answer, evidence, reasoning, option_reasoning_json,
-			answer_status, review_status, reviewed_by, reviewed_at, created_at, updated_at, tactics_json
+			answer_status, review_status, reviewed_by, reviewed_at, created_at, updated_at, tactics_json,
+			glossary_json
 		FROM source_questions`
+
+	attemptSelect = `SELECT
+			id, session_id, question_id, content_id, content_version, status,
+			selected_label, selected_text, correct_label, correct_text,
+			started_at, answered_at, elapsed_ms, assistance, tactic_id, skills_json,
+			assessment_run_id
+		FROM attempts`
 )
 
 type rowScanner interface {
@@ -316,6 +334,7 @@ func scanQuestion(row rowScanner) (source.Question, error) {
 		optionsJSON   string
 		reasoningJSON string
 		tacticsJSON   string
+		glossaryJSON  string
 		answerStatus  string
 		reviewStatus  string
 		reviewedAt    string
@@ -324,7 +343,7 @@ func scanQuestion(row rowScanner) (source.Question, error) {
 	)
 	if err := row.Scan(&q.SourceID, &q.ID, &q.Page, &q.Stem, &optionsJSON, &q.Answer,
 		&q.Evidence, &q.Reasoning, &reasoningJSON, &answerStatus, &reviewStatus,
-		&q.ReviewedBy, &reviewedAt, &createdAt, &updatedAt, &tacticsJSON); err != nil {
+		&q.ReviewedBy, &reviewedAt, &createdAt, &updatedAt, &tacticsJSON, &glossaryJSON); err != nil {
 		return source.Question{}, err
 	}
 	if err := json.Unmarshal([]byte(optionsJSON), &q.Options); err != nil {
@@ -335,6 +354,9 @@ func scanQuestion(row rowScanner) (source.Question, error) {
 	}
 	if err := json.Unmarshal([]byte(tacticsJSON), &q.Tactics); err != nil {
 		return source.Question{}, fmt.Errorf("decode tactic tags of question %s/%s: %w", q.SourceID, q.ID, err)
+	}
+	if err := json.Unmarshal([]byte(glossaryJSON), &q.Glossary); err != nil {
+		return source.Question{}, fmt.Errorf("decode glossary of question %s/%s: %w", q.SourceID, q.ID, err)
 	}
 	q.AnswerStatus = source.AnswerStatus(answerStatus)
 	q.Review = source.ReviewStatus(reviewStatus)
@@ -508,7 +530,7 @@ func (s *Store) AddQuestion(q source.Question) error {
 	if q.Review != source.Unreviewed || q.AnswerStatus != source.AnswerUnmapped || q.ReviewedBy != "" || !q.ReviewedAt.IsZero() {
 		return fmt.Errorf("store: new question %s must start unreviewed with an unmapped answer", q.ID)
 	}
-	optionsJSON, reasoningJSON, tacticsJSON, err := encodeQuestionParts(q)
+	optionsJSON, reasoningJSON, tacticsJSON, glossaryJSON, err := encodeQuestionParts(q)
 	if err != nil {
 		return err
 	}
@@ -527,15 +549,16 @@ func (s *Store) AddQuestion(q source.Question) error {
 	}
 	if _, err := tx.Exec(`INSERT INTO source_questions (
 			source_id, id, page, stem, options_json, answer, evidence, reasoning, option_reasoning_json,
-			answer_status, review_status, reviewed_by, reviewed_at, created_at, updated_at, tactics_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			answer_status, review_status, reviewed_by, reviewed_at, created_at, updated_at, tactics_json,
+			glossary_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		q.SourceID, q.ID, q.Page, q.Stem, optionsJSON, q.Answer, q.Evidence, q.Reasoning, reasoningJSON,
 		string(q.AnswerStatus), string(q.Review), q.ReviewedBy, source.FormatTime(q.ReviewedAt),
-		source.FormatTime(q.CreatedAt), source.FormatTime(q.UpdatedAt), tacticsJSON,
+		source.FormatTime(q.CreatedAt), source.FormatTime(q.UpdatedAt), tacticsJSON, glossaryJSON,
 	); err != nil {
 		return fmt.Errorf("store: insert question %s: %w", q.ID, err)
 	}
-	detail, err := questionDetail(q, optionsJSON, reasoningJSON, tacticsJSON)
+	detail, err := questionDetail(q, optionsJSON, reasoningJSON, tacticsJSON, glossaryJSON)
 	if err != nil {
 		return err
 	}
@@ -561,7 +584,7 @@ func (s *Store) SaveQuestion(q source.Question, kind string) error {
 	if err := q.Validate(); err != nil {
 		return err
 	}
-	optionsJSON, reasoningJSON, tacticsJSON, err := encodeQuestionParts(q)
+	optionsJSON, reasoningJSON, tacticsJSON, glossaryJSON, err := encodeQuestionParts(q)
 	if err != nil {
 		return err
 	}
@@ -582,11 +605,11 @@ func (s *Store) SaveQuestion(q source.Question, kind string) error {
 	res, err := tx.Exec(`UPDATE source_questions SET
 			page = ?, stem = ?, options_json = ?, answer = ?, evidence = ?, reasoning = ?,
 			option_reasoning_json = ?, answer_status = ?, review_status = ?, reviewed_by = ?,
-			reviewed_at = ?, updated_at = ?, tactics_json = ?
+			reviewed_at = ?, updated_at = ?, tactics_json = ?, glossary_json = ?
 		WHERE source_id = ? AND id = ?`,
 		q.Page, q.Stem, optionsJSON, q.Answer, q.Evidence, q.Reasoning, reasoningJSON,
 		string(q.AnswerStatus), string(q.Review), q.ReviewedBy, source.FormatTime(q.ReviewedAt),
-		source.FormatTime(q.UpdatedAt), tacticsJSON, q.SourceID, q.ID,
+		source.FormatTime(q.UpdatedAt), tacticsJSON, glossaryJSON, q.SourceID, q.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("store: save question %s: %w", q.ID, err)
@@ -596,7 +619,7 @@ func (s *Store) SaveQuestion(q source.Question, kind string) error {
 	} else if affected == 0 {
 		return fmt.Errorf("%w: question %q in source %s", ErrNotFound, q.ID, q.SourceID)
 	}
-	detail, err := questionDetail(q, optionsJSON, reasoningJSON, tacticsJSON)
+	detail, err := questionDetail(q, optionsJSON, reasoningJSON, tacticsJSON, glossaryJSON)
 	if err != nil {
 		return err
 	}
@@ -609,10 +632,10 @@ func (s *Store) SaveQuestion(q source.Question, kind string) error {
 	return nil
 }
 
-func encodeQuestionParts(q source.Question) (string, string, string, error) {
+func encodeQuestionParts(q source.Question) (string, string, string, string, error) {
 	optionsJSON, err := json.Marshal(q.Options)
 	if err != nil {
-		return "", "", "", fmt.Errorf("store: encode options: %w", err)
+		return "", "", "", "", fmt.Errorf("store: encode options: %w", err)
 	}
 	reasoning := q.OptionReasoning
 	if reasoning == nil {
@@ -620,7 +643,7 @@ func encodeQuestionParts(q source.Question) (string, string, string, error) {
 	}
 	reasoningJSON, err := json.Marshal(reasoning)
 	if err != nil {
-		return "", "", "", fmt.Errorf("store: encode option reasoning: %w", err)
+		return "", "", "", "", fmt.Errorf("store: encode option reasoning: %w", err)
 	}
 	tactics := q.Tactics
 	if tactics == nil {
@@ -628,15 +651,23 @@ func encodeQuestionParts(q source.Question) (string, string, string, error) {
 	}
 	tacticsJSON, err := json.Marshal(tactics)
 	if err != nil {
-		return "", "", "", fmt.Errorf("store: encode tactic tags: %w", err)
+		return "", "", "", "", fmt.Errorf("store: encode tactic tags: %w", err)
 	}
-	return string(optionsJSON), string(reasoningJSON), string(tacticsJSON), nil
+	glossary := q.Glossary
+	if glossary == nil {
+		glossary = []exam.GlossaryEntry{}
+	}
+	glossaryJSON, err := json.Marshal(glossary)
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("store: encode glossary: %w", err)
+	}
+	return string(optionsJSON), string(reasoningJSON), string(tacticsJSON), string(glossaryJSON), nil
 }
 
 // questionDetail encodes the complete question snapshot appended to the audit
 // trail. Options and option reasoning arrive already encoded so the event and
 // the stored row cannot disagree about what was added, reviewed or edited.
-func questionDetail(q source.Question, optionsJSON, reasoningJSON, tacticsJSON string) (string, error) {
+func questionDetail(q source.Question, optionsJSON, reasoningJSON, tacticsJSON, glossaryJSON string) (string, error) {
 	payload := struct {
 		ID           string          `json:"id"`
 		Page         int             `json:"page"`
@@ -651,12 +682,13 @@ func questionDetail(q source.Question, optionsJSON, reasoningJSON, tacticsJSON s
 		Reasoning    string          `json:"reasoning"`
 		OptionReason json.RawMessage `json:"option_reasoning"`
 		Tactics      json.RawMessage `json:"tactics"`
+		Glossary     json.RawMessage `json:"glossary"`
 	}{
 		ID: q.ID, Page: q.Page, Stem: q.Stem, Options: json.RawMessage(optionsJSON),
 		Answer: q.Answer, AnswerStatus: string(q.AnswerStatus),
 		Review: string(q.Review), ReviewedBy: q.ReviewedBy, ReviewedAt: source.FormatTime(q.ReviewedAt),
 		Evidence: q.Evidence, Reasoning: q.Reasoning, OptionReason: json.RawMessage(reasoningJSON),
-		Tactics: json.RawMessage(tacticsJSON),
+		Tactics: json.RawMessage(tacticsJSON), Glossary: json.RawMessage(glossaryJSON),
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

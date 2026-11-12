@@ -1,0 +1,39 @@
+[2026-11-12T15:31:01+08:00] watching PR #18 at head 0821bd2 (log: /home/azureuser/repos/passquest/ci-watch-0821bd2.log)
+[2026-11-12T15:31:01+08:00] poll 1
+gate (macos-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534536	
+gate (ubuntu-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534625	
+gate (windows-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534164	
+[2026-11-12T15:31:32+08:00] poll 2
+gate (macos-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534536	
+gate (ubuntu-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534625	
+gate (windows-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534164	
+[2026-11-12T15:32:03+08:00] poll 3
+gate (ubuntu-latest)	pass	1m19s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534625	
+gate (windows-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534164	
+gate (macos-latest)	pass	1m24s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534536	
+[2026-11-12T15:32:34+08:00] poll 4
+gate (ubuntu-latest)	pass	1m19s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534625	
+gate (windows-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534164	
+gate (macos-latest)	pass	1m24s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534536	
+[2026-11-12T15:33:05+08:00] poll 5
+gate (ubuntu-latest)	pass	1m19s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534625	
+gate (windows-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534164	
+gate (macos-latest)	pass	1m24s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534536	
+[2026-11-12T15:33:36+08:00] poll 6
+gate (ubuntu-latest)	pass	1m19s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534625	
+gate (windows-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534164	
+gate (macos-latest)	pass	1m24s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534536	
+[2026-11-12T15:34:07+08:00] poll 7
+gate (ubuntu-latest)	pass	1m19s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534625	
+gate (windows-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534164	
+gate (macos-latest)	pass	1m24s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534536	
+[2026-11-12T15:34:38+08:00] poll 8
+gate (ubuntu-latest)	pass	1m19s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534625	
+gate (windows-latest)	pending	0	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534164	
+gate (macos-latest)	pass	1m24s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534536	
+[2026-11-12T15:35:09+08:00] poll 9
+gate (macos-latest)	pass	1m24s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534536	
+gate (ubuntu-latest)	pass	1m19s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534625	
+gate (windows-latest)	pass	4m21s	https://github.com/wxxb789/passquest/actions/runs/43175767973/job/131039534164	
+MERGEABLE CLEAN 0821bd2d12c214ba078103554c921c9cfe254d5b
+[2026-11-12T15:35:09+08:00] CI green

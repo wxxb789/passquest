@@ -21,7 +21,7 @@ import (
 )
 
 // SchemaVersion is the persisted schema this build understands.
-const SchemaVersion = 13
+const SchemaVersion = 14
 
 // schemaV1 is the original version-1 shape. Migrations apply each version in
 // order, so a version-0 database gets both steps and a version-1 database gets
@@ -104,6 +104,7 @@ var migrations = []struct {
 	{11, schemaV11},
 	{12, schemaV12},
 	{13, schemaV13},
+	{14, schemaV14},
 }
 
 // Store is a handle to one attempts database.
@@ -239,6 +240,25 @@ func (s *Store) Close() error { return s.db.Close() }
 // Append stores one graded attempt and returns it with its row id, prior count
 // and content-scoped question attempt number filled in.
 func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return attempt.Attempt{}, fmt.Errorf("store: begin append: %w", err)
+	}
+	defer tx.Rollback()
+	stored, err := insertAttempt(tx, a)
+	if err != nil {
+		return attempt.Attempt{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return attempt.Attempt{}, fmt.Errorf("store: commit attempt: %w", err)
+	}
+	return stored, nil
+}
+
+// insertAttempt validates and stores one attempt inside an existing
+// transaction. Assessment answers call it together with their item update so a
+// crash cannot leave an answer without its run position or the reverse.
+func insertAttempt(tx *sql.Tx, a attempt.Attempt) (attempt.Attempt, error) {
 	// Records built before the assistance dimension existed carry no value. They
 	// predate tactic help, so independent is the truthful default rather than an
 	// unknown state.
@@ -253,12 +273,6 @@ func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 		return attempt.Attempt{}, err
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return attempt.Attempt{}, fmt.Errorf("store: begin append: %w", err)
-	}
-	defer tx.Rollback()
-
 	var prior int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM attempts WHERE content_id = ? AND question_id = ?`,
 		a.ContentID, a.QuestionID).Scan(&prior); err != nil {
@@ -268,12 +282,13 @@ func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 	res, err := tx.Exec(`INSERT INTO attempts (
 			session_id, question_id, content_id, content_version, status,
 			selected_label, selected_text, correct_label, correct_text,
-			started_at, answered_at, elapsed_ms, assistance, tactic_id, skills_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			started_at, answered_at, elapsed_ms, assistance, tactic_id, skills_json,
+			assessment_run_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.SessionID, a.QuestionID, a.ContentID, a.ContentVersion, string(a.Status),
 		nullIfEmpty(a.SelectedLabel), nullIfEmpty(a.SelectedText), a.CorrectLabel, a.CorrectText,
 		a.StartedAt.UTC().Format(time.RFC3339Nano), a.AnsweredAt.UTC().Format(time.RFC3339Nano), a.ElapsedMS,
-		string(a.Assistance), a.TacticID, skillsJSON,
+		string(a.Assistance), a.TacticID, skillsJSON, a.AssessmentRunID,
 	)
 	if err != nil {
 		return attempt.Attempt{}, fmt.Errorf("store: insert attempt: %w", err)
@@ -281,9 +296,6 @@ func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 	id, err := res.LastInsertId()
 	if err != nil {
 		return attempt.Attempt{}, fmt.Errorf("store: read attempt id: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return attempt.Attempt{}, fmt.Errorf("store: commit attempt: %w", err)
 	}
 
 	a.ID = id
@@ -296,11 +308,7 @@ func (s *Store) Append(a attempt.Attempt) (attempt.Attempt, error) {
 // List returns all attempts in insertion order with content-scoped question
 // attempt numbers recomputed from that order.
 func (s *Store) List() ([]attempt.Attempt, error) {
-	rows, err := s.db.Query(`SELECT
-			id, session_id, question_id, content_id, content_version, status,
-			selected_label, selected_text, correct_label, correct_text,
-			started_at, answered_at, elapsed_ms, assistance, tactic_id, skills_json
-		FROM attempts ORDER BY id`)
+	rows, err := s.db.Query(attemptSelect + ` ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list attempts: %w", err)
 	}
@@ -309,53 +317,64 @@ func (s *Store) List() ([]attempt.Attempt, error) {
 	var out []attempt.Attempt
 	seen := make(map[attempt.QuestionKey]int)
 	for rows.Next() {
-		var (
-			a           attempt.Attempt
-			status      string
-			assistance  string
-			selectedLbl sql.NullString
-			selectedTxt sql.NullString
-			started     string
-			answered    string
-			skillsRaw   sql.NullString
-		)
-		if err := rows.Scan(
-			&a.ID, &a.SessionID, &a.QuestionID, &a.ContentID, &a.ContentVersion, &status,
-			&selectedLbl, &selectedTxt, &a.CorrectLabel, &a.CorrectText,
-			&started, &answered, &a.ElapsedMS, &assistance, &a.TacticID, &skillsRaw,
-		); err != nil {
-			return nil, fmt.Errorf("store: scan attempt: %w", err)
+		a, err := scanAttemptRow(rows, seen)
+		if err != nil {
+			return nil, err
 		}
-		a.Status = attempt.Status(status)
-		a.Assistance = attempt.Assistance(assistance)
-		if skillsRaw.Valid {
-			a.SkillsRecorded = true
-			if a.Skills, err = decodeSkills(skillsRaw.String); err != nil {
-				return nil, fmt.Errorf("store: decode skills of attempt %d: %w", a.ID, err)
-			}
-		}
-		if selectedLbl.Valid {
-			a.SelectedLabel = selectedLbl.String
-		}
-		if selectedTxt.Valid {
-			a.SelectedText = selectedTxt.String
-		}
-		if a.StartedAt, err = time.Parse(time.RFC3339Nano, started); err != nil {
-			return nil, fmt.Errorf("store: parse started_at of attempt %d: %w", a.ID, err)
-		}
-		if a.AnsweredAt, err = time.Parse(time.RFC3339Nano, answered); err != nil {
-			return nil, fmt.Errorf("store: parse answered_at of attempt %d: %w", a.ID, err)
-		}
-		key := a.Key()
-		seen[key]++
-		a.AttemptNumber = seen[key]
-		a.PriorAttempts = a.AttemptNumber - 1
 		out = append(out, a)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: iterate attempts: %w", err)
 	}
 	return out, nil
+}
+
+func scanAttemptRow(row rowScanner, seen map[attempt.QuestionKey]int) (attempt.Attempt, error) {
+	var (
+		a           attempt.Attempt
+		status      string
+		assistance  string
+		selectedLbl sql.NullString
+		selectedTxt sql.NullString
+		started     string
+		answered    string
+		skillsRaw   sql.NullString
+	)
+	if err := row.Scan(
+		&a.ID, &a.SessionID, &a.QuestionID, &a.ContentID, &a.ContentVersion, &status,
+		&selectedLbl, &selectedTxt, &a.CorrectLabel, &a.CorrectText,
+		&started, &answered, &a.ElapsedMS, &assistance, &a.TacticID, &skillsRaw,
+		&a.AssessmentRunID,
+	); err != nil {
+		return attempt.Attempt{}, fmt.Errorf("store: scan attempt: %w", err)
+	}
+	a.Status = attempt.Status(status)
+	a.Assistance = attempt.Assistance(assistance)
+	if skillsRaw.Valid {
+		a.SkillsRecorded = true
+		var err error
+		if a.Skills, err = decodeSkills(skillsRaw.String); err != nil {
+			return attempt.Attempt{}, fmt.Errorf("store: decode skills of attempt %d: %w", a.ID, err)
+		}
+	}
+	if selectedLbl.Valid {
+		a.SelectedLabel = selectedLbl.String
+	}
+	if selectedTxt.Valid {
+		a.SelectedText = selectedTxt.String
+	}
+	var err error
+	if a.StartedAt, err = time.Parse(time.RFC3339Nano, started); err != nil {
+		return attempt.Attempt{}, fmt.Errorf("store: parse started_at of attempt %d: %w", a.ID, err)
+	}
+	if a.AnsweredAt, err = time.Parse(time.RFC3339Nano, answered); err != nil {
+		return attempt.Attempt{}, fmt.Errorf("store: parse answered_at of attempt %d: %w", a.ID, err)
+	}
+	key := a.Key()
+	seen[key]++
+	a.AttemptNumber = seen[key]
+	a.PriorAttempts = a.AttemptNumber - 1
+	return a, nil
 }
 
 func validateForInsert(a attempt.Attempt) error {
@@ -391,6 +410,12 @@ func validateForInsert(a attempt.Attempt) error {
 	}
 	if !a.Assistance.Valid() {
 		add("assistance %q is invalid", a.Assistance)
+	}
+	if a.Assistance == attempt.AssistanceNone && a.AssessmentRunID <= 0 {
+		add("assistance %q requires an assessment run id", a.Assistance)
+	}
+	if a.Assistance != attempt.AssistanceNone && a.AssessmentRunID > 0 {
+		add("assessment run id %d requires assistance %q", a.AssessmentRunID, attempt.AssistanceNone)
 	}
 	// An assisted attempt need not name a tactic: ordinary practice on a
 	// question whose guided walkthrough was already delivered is assisted

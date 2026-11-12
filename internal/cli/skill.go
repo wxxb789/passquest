@@ -27,6 +27,9 @@ type skillRun struct {
 }
 
 func runSkill(args []string, opt Options) int {
+	if code := guardAssessmentCommand(args, opt, "skill"); code != 0 {
+		return code
+	}
 	if len(args) == 0 {
 		return usageError(opt, jsonFlagRequested(args), "invalid_input", "skill requires list, show or practice")
 	}
