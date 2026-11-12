@@ -427,6 +427,59 @@ func TestQuestionEditResetsReviewAndDuplicateIsRejected(t *testing.T) {
 	}
 }
 
+func TestPracticeRendersMissingDistractorExplanation(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	imported := decodeImport(t, mustRun(t, db, clock, "", "import", "--path", assessmentFixtureDir(t, 1), "--json"))
+	sourceID := imported.Source.ID
+
+	questionPath := filepath.Join(t.TempDir(), "question-missing.json")
+	question := `{
+  "id": "q-missing",
+  "stem": "When does the library close on Saturdays?",
+  "options": [
+    {"label": "A", "text": "At 9 a.m."},
+    {"label": "B", "text": "At 4 p.m."},
+    {"label": "C", "text": "At noon."}
+  ],
+  "answer": "B",
+  "evidence": "closes at 4 p.m. on Saturdays",
+  "reasoning": "The notice gives the Saturday closing time directly.",
+  "option_reasoning": {
+    "B": "The notice states 4 p.m. on Saturdays."
+  }
+}`
+	if err := os.WriteFile(questionPath, []byte(question), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	added := decodeQuestionCommand(t, mustRun(t, db, clock, "", "question", "add", sourceID, "1", "--file", questionPath, "--json"))
+	if got := added.Question.OptionReasoningMissing; len(got) != 2 || got[0] != "A" || got[1] != "C" {
+		t.Fatalf("option_reasoning_missing = %v, want [A C]", got)
+	}
+	if len(added.Question.OptionReasoning) != 1 || added.Question.OptionReasoning["B"] == "" {
+		t.Fatalf("option_reasoning = %v, want only B", added.Question.OptionReasoning)
+	}
+
+	mustRun(t, db, clock, "", "page", "review", sourceID, "1", "--reviewer", "fixture-reviewer", "--json")
+	mustRun(t, db, clock, "", "question", "review", sourceID, "q-missing", "--answer", "B", "--reviewer", "fixture-reviewer", "--json")
+
+	code, out, errOut := runCLI(t, db, clock, "", "practice", "--source", sourceID, "--question", "q-missing", "--answer", "A")
+	if code != 0 {
+		t.Fatalf("practice with a missing distractor explanation = %d\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
+	}
+	if !strings.Contains(out, "Why your answer is wrong: "+missingOptionExplanation) {
+		t.Fatalf("practice output does not render the missing explanation:\n%s", out)
+	}
+	if strings.Contains(out, "Why your answer is wrong: \n") {
+		t.Fatalf("practice output left the explanation blank:\n%s", out)
+	}
+
+	answered := decodeAnswered(t, mustRun(t, db, clock, "", "practice", "--json", "--source", sourceID, "--question", "q-missing", "--answer", "C"))
+	if answered.Feedback.SelectedReasoning != "" {
+		t.Fatalf("JSON synthesised a distractor explanation: %q", answered.Feedback.SelectedReasoning)
+	}
+}
+
 func TestSourceCommandsRejectBadInput(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}

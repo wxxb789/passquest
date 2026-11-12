@@ -133,7 +133,6 @@ func TestValidateRejects(t *testing.T) {
 		{"evidence absent from passage", func(e *Exam) { e.Questions[0].Evidence = "closes at noon" }, "not a verbatim passage substring"},
 		{"empty evidence", func(e *Exam) { e.Questions[0].Evidence = "" }, "evidence is empty"},
 		{"empty reasoning", func(e *Exam) { e.Questions[0].Reasoning = "" }, "reasoning is empty"},
-		{"missing option explanation", func(e *Exam) { delete(e.Questions[0].OptionReasoning, "B") }, "option B has no explanation"},
 		{"extra option explanation", func(e *Exam) { e.Questions[0].OptionReasoning["C"] = "extra" }, "explains unknown option"},
 		{"malformed tactic tag", func(e *Exam) { e.Questions[0].Tactics = []string{"Not Except"} }, "not a lowercase slug"},
 		{"duplicate tactic tag", func(e *Exam) { e.Questions[0].Tactics = []string{"not-except-polarity", "not-except-polarity"} }, "repeats tactic tag"},
@@ -158,6 +157,19 @@ func TestValidateRejects(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateAllowsMissingOptionExplanation(t *testing.T) {
+	e := validExam()
+	delete(e.Questions[0].OptionReasoning, "B")
+	if err := e.Validate(); err != nil {
+		t.Fatalf("a missing distractor explanation is legal: %v", err)
+	}
+	q := e.Questions[0]
+	missing := MissingOptionReasoning(q.Options, q.OptionReasoning)
+	if len(missing) != 1 || missing[0] != "B" {
+		t.Fatalf("missing labels = %v, want [B]", missing)
 	}
 }
 

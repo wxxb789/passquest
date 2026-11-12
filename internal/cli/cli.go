@@ -463,7 +463,7 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 	if selection.Skill != nil {
 		skillID = selection.Skill.Skill.ID
 	}
-	writeFeedback(opt.Stdout, record, feedback, st.Path(), skillID)
+	writeFeedback(opt.Stdout, selection.Question, record, feedback, st.Path(), skillID)
 	if selection.Skill != nil {
 		writeSkillExposureLine(opt.Stdout, selection.Skill, record)
 	}
@@ -546,7 +546,7 @@ func writePrompt(w io.Writer, content exam.Exam, question exam.Question, number 
 	fmt.Fprintln(w)
 }
 
-func writeFeedback(w io.Writer, record attempt.Attempt, feedback attempt.Feedback, dbPath, skillID string) {
+func writeFeedback(w io.Writer, question exam.Question, record attempt.Attempt, feedback attempt.Feedback, dbPath, skillID string) {
 	if record.Status == attempt.StatusSkipped {
 		fmt.Fprintln(w, "Result: SKIPPED (no answer chosen)")
 	} else {
@@ -554,7 +554,11 @@ func writeFeedback(w io.Writer, record attempt.Attempt, feedback attempt.Feedbac
 		fmt.Fprintf(w, "Your answer: %s — %s\n", record.SelectedLabel, record.SelectedText)
 	}
 	if record.Status == attempt.StatusIncorrect {
-		fmt.Fprintf(w, "Why your answer is wrong: %s\n", feedback.SelectedReasoning)
+		text, ok := optionExplanation(question.OptionReasoning, record.SelectedLabel)
+		if !ok {
+			text = missingOptionExplanation
+		}
+		fmt.Fprintf(w, "Why your answer is wrong: %s\n", text)
 	}
 	fmt.Fprintf(w, "Correct answer: %s — %s\n", feedback.CorrectLabel, feedback.CorrectText)
 	fmt.Fprintf(w, "Evidence: %q\n", feedback.Evidence)

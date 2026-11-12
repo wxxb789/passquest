@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
 )
 
@@ -36,22 +37,24 @@ type pageDetailView struct {
 }
 
 type sourceQuestionView struct {
-	ID              string              `json:"id"`
-	SourceID        string              `json:"source_id"`
-	Page            int                 `json:"page"`
-	Stem            string              `json:"stem"`
-	Options         []optionView        `json:"options"`
-	Answer          *string             `json:"answer"`
-	AnswerStatus    string              `json:"answer_status"`
-	ReviewStatus    string              `json:"review_status"`
-	Evidence        string              `json:"evidence"`
-	Reasoning       string              `json:"reasoning"`
-	OptionReasoning map[string]string   `json:"option_reasoning"`
-	Tactics         []string            `json:"tactics,omitempty"`
-	Glossary        []glossaryEntryView `json:"glossary,omitempty"`
-	ReviewedBy      string              `json:"reviewed_by"`
-	ReviewedAt      string              `json:"reviewed_at"`
-	Flags           []string            `json:"flags"`
+	ID              string            `json:"id"`
+	SourceID        string            `json:"source_id"`
+	Page            int               `json:"page"`
+	Stem            string            `json:"stem"`
+	Options         []optionView      `json:"options"`
+	Answer          *string           `json:"answer"`
+	AnswerStatus    string            `json:"answer_status"`
+	ReviewStatus    string            `json:"review_status"`
+	Evidence        string            `json:"evidence"`
+	Reasoning       string            `json:"reasoning"`
+	OptionReasoning map[string]string `json:"option_reasoning"`
+	// OptionReasoningMissing lists labels with no authored explanation, sorted.
+	OptionReasoningMissing []string            `json:"option_reasoning_missing,omitempty"`
+	Tactics                []string            `json:"tactics,omitempty"`
+	Glossary               []glossaryEntryView `json:"glossary,omitempty"`
+	ReviewedBy             string              `json:"reviewed_by"`
+	ReviewedAt             string              `json:"reviewed_at"`
+	Flags                  []string            `json:"flags"`
 }
 
 type importDoc struct {
@@ -139,21 +142,22 @@ func sourceQuestionViewOf(q source.Question, page source.Page) sourceQuestionVie
 		reasoning = map[string]string{}
 	}
 	return sourceQuestionView{
-		ID:              q.ID,
-		SourceID:        q.SourceID,
-		Page:            q.Page,
-		Stem:            q.Stem,
-		Options:         optionViews(q.Options),
-		Answer:          answer,
-		AnswerStatus:    string(q.AnswerStatus),
-		ReviewStatus:    string(q.Review),
-		Evidence:        q.Evidence,
-		Reasoning:       q.Reasoning,
-		OptionReasoning: reasoning,
-		Tactics:         append([]string(nil), q.Tactics...),
-		Glossary:        glossaryViews(q.Glossary),
-		ReviewedBy:      q.ReviewedBy,
-		ReviewedAt:      source.FormatTime(q.ReviewedAt),
-		Flags:           source.FlagStrings(q.Flags(page)),
+		ID:                     q.ID,
+		SourceID:               q.SourceID,
+		Page:                   q.Page,
+		Stem:                   q.Stem,
+		Options:                optionViews(q.Options),
+		Answer:                 answer,
+		AnswerStatus:           string(q.AnswerStatus),
+		ReviewStatus:           string(q.Review),
+		Evidence:               q.Evidence,
+		Reasoning:              q.Reasoning,
+		OptionReasoning:        optionReasoningWithText(reasoning),
+		OptionReasoningMissing: exam.MissingOptionReasoning(q.Options, reasoning),
+		Tactics:                append([]string(nil), q.Tactics...),
+		Glossary:               glossaryViews(q.Glossary),
+		ReviewedBy:             q.ReviewedBy,
+		ReviewedAt:             source.FormatTime(q.ReviewedAt),
+		Flags:                  source.FlagStrings(q.Flags(page)),
 	}
 }

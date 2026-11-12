@@ -504,10 +504,11 @@ func assessmentReportFrom(st *store.Store, runID int64, material assessmentMater
 				continue
 			}
 			annotations[attempt.QuestionKey{ContentID: item.ContentID, QuestionID: item.QuestionID}] = assess.Annotations{
-				Evidence:        question.Evidence,
-				Reasoning:       question.Reasoning,
-				OptionReasoning: maps.Clone(question.OptionReasoning),
-				Glossary:        append([]exam.GlossaryEntry(nil), question.Glossary...),
+				Evidence:               question.Evidence,
+				Reasoning:              question.Reasoning,
+				OptionReasoning:        maps.Clone(question.OptionReasoning),
+				OptionReasoningMissing: exam.MissingOptionReasoning(question.Options, question.OptionReasoning),
+				Glossary:               append([]exam.GlossaryEntry(nil), question.Glossary...),
 			}
 			break
 		}

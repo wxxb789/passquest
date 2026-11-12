@@ -118,6 +118,11 @@ item the run finalized (`answered`, `timed_out` or `skipped`):
   `option_reasoning` and `glossary` entirely rather than printing empty strings. Once the item is
   finalized in a finished run, the keys carry their values and `withheld` is absent.
 
+A missing per-option explanation is normal for imported book material: the correct option usually
+has one and distractors usually do not. The report prints `原书未提供该选项的解析。` for each
+unexplained option, and `--json` lists those labels in `option_reasoning_missing` (omitted when the
+list is empty).
+
 A question without a glossary prints `glossary: none` once its annotations are shown. Annotations
 that cannot be attached because the content changed print as unavailable, not as an empty value.
 
