@@ -3,6 +3,9 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
+
+	"github.com/wxxb789/passquest/internal/provider"
 )
 
 // Model JSON documents. Field names are protocol; the four axes stay separate:
@@ -139,8 +142,7 @@ func writeModelList(w io.Writer, doc modelListDoc) {
 	fmt.Fprintf(w, "Registry: %s version %d\n", doc.RegistrySource, doc.RegistryVersion)
 	fmt.Fprintln(w, "Axes: provider | model | capability | authorization")
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "%-10s %-20s %-14s %-24s %-18s %-12s %-10s %-18s\n",
-		"PROVIDER", "MODEL", "AUTH", "TEXT.CHAT", "TOOL.CALLS", "VISION", "SEARCH", "SPEECH.SYNTHESIS")
+	writeCapabilityHeader(w)
 	for _, p := range doc.Providers {
 		if len(p.Models) == 0 {
 			marker := " "
@@ -164,13 +166,7 @@ func writeModelList(w io.Writer, doc modelListDoc) {
 			for _, c := range m.Capabilities {
 				caps[c.ID] = c
 			}
-			fmt.Fprintf(w, "%s%-9s %-20s %-14s %-24s %-18s %-12s %-10s %-18s\n",
-				marker, id, m.ID, p.Auth,
-				renderCapability(caps[string(capTextChat)]),
-				renderCapability(caps[string(capToolCalls)]),
-				renderCapability(caps[string(capVision)]),
-				renderCapability(caps[string(capSearch)]),
-				renderCapability(caps[string(capSpeech)]))
+			writeCapabilityRow(w, marker, id, m.ID, p.Auth, caps)
 		}
 	}
 	fmt.Fprintln(w)
@@ -182,27 +178,77 @@ func writeModelList(w io.Writer, doc modelListDoc) {
 		if item.Active {
 			marker = " *active"
 		}
-		fmt.Fprintf(w, "  %-12s %3d / %3d%s\n", item.Provider, item.Calls, item.Limit, marker)
+		fmt.Fprintf(w, "  %-12s %3d / %3d%s\n", budgetProviderName(item), item.Calls, item.Limit, marker)
 	}
 	fmt.Fprintf(w, "  %-12s %3d / %3d  (%s)\n", "TOTAL", doc.Budget.TotalCalls, doc.Budget.TotalLimit, doc.Budget.Ceiling)
 	fmt.Fprintf(w, "\nSwitch with: passquest model use <provider>/<model>\n")
 	fmt.Fprintf(w, "Verify with: passquest model test <provider>/<model>\n")
 }
 
-func renderCapability(c modelCapabilityView) string {
+var modelCapabilityWidths = map[provider.Capability]int{
+	provider.CapTextChat:        24,
+	provider.CapToolCalls:       18,
+	provider.CapVision:          12,
+	provider.CapSearch:          10,
+	provider.CapSpeechSynthesis: 18,
+}
+
+func writeCapabilityHeader(w io.Writer) {
+	fmt.Fprintf(w, "%-10s %-20s %-14s", "PROVIDER", "MODEL", "AUTH")
+	for _, capability := range provider.Capabilities {
+		fmt.Fprintf(w, " %-*s", modelCapabilityWidths[capability], strings.ToUpper(string(capability)))
+	}
+	fmt.Fprintln(w)
+}
+
+func writeCapabilityRow(w io.Writer, marker, providerID, modelID, auth string, caps map[string]modelCapabilityView) {
+	fmt.Fprintf(w, "%s%-9s %-20s %-14s", marker, providerID, modelID, auth)
+	for _, capability := range provider.Capabilities {
+		fmt.Fprintf(w, " %-*s", modelCapabilityWidths[capability], renderCapability(caps[string(capability)]))
+	}
+	fmt.Fprintln(w)
+}
+
+// capabilityState renders the state without the table's timestamp. The list
+// and the preview both derive their wording from here.
+func capabilityState(c modelCapabilityView) string {
 	if c.ID == "" || !c.Declared {
 		return "unsupported"
 	}
 	switch c.State {
 	case "verified":
-		return "verified@" + shortTimestamp(c.CheckedAt)
+		return "verified"
 	case "failed":
-		return "failed:" + c.FailureType + "@" + shortTimestamp(c.CheckedAt)
+		return "failed:" + c.FailureType
 	case "legacy":
 		return "legacy,unverified"
 	default:
 		return "declared,unverified"
 	}
+}
+
+func renderCapability(c modelCapabilityView) string {
+	state := capabilityState(c)
+	if (c.State == "verified" || c.State == "failed") && c.CheckedAt != "" {
+		return state + "@" + shortTimestamp(c.CheckedAt)
+	}
+	return state
+}
+
+func authState(present bool) string {
+	if present {
+		return "present"
+	}
+	return "no_credential"
+}
+
+// budgetProviderName shows the recorded label for an unattributed legacy row,
+// which has no provider id to print.
+func budgetProviderName(item modelBudgetProviderView) string {
+	if item.Provider == "" {
+		return item.Label
+	}
+	return item.Provider
 }
 
 func shortTimestamp(value string) string {
@@ -259,19 +305,9 @@ func writeModelBudget(w io.Writer, doc modelBudgetDoc) {
 		if item.Active {
 			marker = " *active"
 		}
-		fmt.Fprintf(w, "%-14s %6d %6d %s\n", item.Provider, item.Calls, item.Limit, marker)
+		fmt.Fprintf(w, "%-14s %6d %6d %s\n", budgetProviderName(item), item.Calls, item.Limit, marker)
 	}
 	fmt.Fprintf(w, "%-14s %6d %6d\n", "TOTAL", doc.Budget.TotalCalls, doc.Budget.TotalLimit)
 	fmt.Fprintf(w, "Ceiling: %s provider calls per day; the sum, not one global cap.\n", doc.Budget.Ceiling)
 	fmt.Fprintln(w, "A refusal at one provider's limit leaves every other provider's budget usable.")
 }
-
-// Aliases keep the table renderer independent of the registry package import
-// cycle that a direct provider.Capability map key would create in this file.
-const (
-	capTextChat  = "text.chat"
-	capToolCalls = "tool.calls"
-	capVision    = "vision"
-	capSearch    = "search"
-	capSpeech    = "speech.synthesis"
-)

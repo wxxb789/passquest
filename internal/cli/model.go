@@ -90,21 +90,78 @@ func providerConfig(base tutor.Config, registry provider.Registry, providerID, m
 }
 
 // activeProvider refreshes the endpoint from the registry so a data edit drives
-// behaviour on the next call. The active model id stays the stored setting.
-func activeProvider(cfg tutor.Config, registry provider.Registry) (provider.Provider, provider.Model, bool, error) {
+// behaviour on the next call. The active model id stays the stored setting. The
+// returned configuration is the one every caller should use.
+func activeProvider(cfg tutor.Config, registry provider.Registry) (provider.Provider, provider.Model, tutor.Config, bool, error) {
 	providerID := strings.TrimSpace(cfg.Provider)
 	if providerID == "" {
-		return provider.Provider{}, provider.Model{}, false, nil
+		return provider.Provider{}, provider.Model{}, cfg, false, nil
 	}
 	p, m, ok := registry.Find(providerID, cfg.Model)
 	if !ok {
-		return provider.Provider{}, provider.Model{}, true,
+		return provider.Provider{}, provider.Model{}, cfg, true,
 			fmt.Errorf("active model %s/%s is no longer in the provider registry", providerID, cfg.Model)
 	}
 	if !p.Custom {
 		cfg.Endpoint = p.Endpoint
 	}
-	return p, m, true, nil
+	return p, m, cfg, true, nil
+}
+
+// resolveActive loads the registry, resolves the active registry provider and
+// refreshes the endpoint from registry data. It refuses a pair that does not
+// declare text.chat, which every text surface requires. A legacy configuration
+// (no provider) passes through with active=false.
+func resolveActive(cfg tutor.Config, opt Options, jsonMode bool) (tutor.Config, provider.Registry, bool, int) {
+	registry, _, err := provider.Load(opt.Getenv)
+	if err != nil {
+		return cfg, provider.Registry{}, false, usageError(opt, jsonMode, "invalid_registry", err.Error())
+	}
+	providerID := strings.TrimSpace(cfg.Provider)
+	if providerID == "" {
+		return cfg, registry, false, 0
+	}
+	_, model, refreshed, _, err := activeProvider(cfg, registry)
+	if err != nil {
+		return cfg, registry, false, usageError(opt, jsonMode, "unknown_model", err.Error())
+	}
+	if !model.Has(provider.CapTextChat) {
+		return cfg, registry, false, usageError(opt, jsonMode, "capability_not_declared",
+			fmt.Sprintf("%s/%s does not declare text.chat", providerID, cfg.Model))
+	}
+	return refreshed, registry, true, 0
+}
+
+// requireVerifiedTextChat refuses a registry pair whose text.chat has no
+// verified evidence. The legacy hand-configured path needs no verification.
+func requireVerifiedTextChat(st *store.Store, registry provider.Registry, opt Options, providerID, modelID string, jsonMode bool) int {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return 0
+	}
+	_, model, ok := registry.Find(providerID, modelID)
+	if !ok {
+		return usageError(opt, jsonMode, "unknown_model",
+			fmt.Sprintf("%s/%s is no longer in the provider registry", providerID, modelID))
+	}
+	if !model.Has(provider.CapTextChat) {
+		return usageError(opt, jsonMode, "capability_not_declared",
+			fmt.Sprintf("%s/%s does not declare text.chat", providerID, modelID))
+	}
+	verification, found, err := st.LatestProviderVerification(providerID, modelID, string(provider.CapTextChat))
+	if err != nil {
+		return internalError(opt, jsonMode, err)
+	}
+	if !found || verification.Status != "verified" {
+		detail := "text.chat is declared but unverified"
+		if found && verification.Status == "failed" {
+			detail = "the last text.chat test failed: " + verification.FailureType
+		}
+		return usageError(opt, jsonMode, "capability_unverified",
+			fmt.Sprintf("%s/%s: %s; run passquest model test %s/%s before asking",
+				providerID, modelID, detail, providerID, modelID))
+	}
+	return 0
 }
 
 func credentialState(opt Options, providerID string) (string, bool) {
@@ -112,18 +169,33 @@ func credentialState(opt Options, providerID string) (string, bool) {
 	return env, present
 }
 
-func verificationState(st *store.Store, providerID, modelID string) (map[provider.Capability]store.ProviderVerification, error) {
+// verificationIndex groups the latest verification per provider, model and
+// capability. A model's evidence is never applied to a sibling.
+type verificationIndex map[modelRef]map[provider.Capability]store.ProviderVerification
+
+type modelRef struct {
+	provider string
+	model    string
+}
+
+func loadVerificationIndex(st *store.Store) (verificationIndex, error) {
 	all, err := st.ProviderVerifications()
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[provider.Capability]store.ProviderVerification)
+	index := verificationIndex{}
 	for _, event := range all {
-		if event.Provider == providerID && event.Model == modelID {
-			out[provider.Capability(event.Capability)] = event
+		ref := modelRef{provider: event.Provider, model: event.Model}
+		if index[ref] == nil {
+			index[ref] = map[provider.Capability]store.ProviderVerification{}
 		}
+		index[ref][provider.Capability(event.Capability)] = event
 	}
-	return out, nil
+	return index, nil
+}
+
+func (index verificationIndex) forModel(providerID, modelID string) map[provider.Capability]store.ProviderVerification {
+	return index[modelRef{provider: providerID, model: modelID}]
 }
 
 func capabilityView(capability provider.Capability, declared bool, verifications map[provider.Capability]store.ProviderVerification) modelCapabilityView {
@@ -147,7 +219,7 @@ func capabilityView(capability provider.Capability, declared bool, verifications
 	return view
 }
 
-func modelViewsOf(p provider.Provider, active bool, activeModel string, verifications map[provider.Capability]store.ProviderVerification) []modelView {
+func modelViewsOf(providerID string, p provider.Provider, active bool, activeModel string, index verificationIndex) []modelView {
 	models := make([]modelView, 0, len(p.Models))
 	for _, m := range p.Models {
 		item := modelView{
@@ -156,6 +228,7 @@ func modelViewsOf(p provider.Provider, active bool, activeModel string, verifica
 			Default: m.Default,
 			Active:  active && activeModel == m.ID,
 		}
+		verifications := index.forModel(providerID, m.ID)
 		for _, c := range provider.Capabilities {
 			item.Capabilities = append(item.Capabilities, capabilityView(c, m.Has(c), verifications))
 		}
@@ -185,26 +258,17 @@ func runModelList(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	byProvider := map[string]map[provider.Capability]store.ProviderVerification{}
-	all, err := st.ProviderVerifications()
+	index, err := loadVerificationIndex(st)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	for _, event := range all {
-		if byProvider[event.Provider] == nil {
-			byProvider[event.Provider] = map[provider.Capability]store.ProviderVerification{}
-		}
-		byProvider[event.Provider][provider.Capability(event.Capability)] = event
-	}
 
 	activeID := strings.TrimSpace(cfg.Provider)
-	if _, _, ok, err := activeProvider(cfg, registry); err != nil {
+	_, _, refreshed, _, err := activeProvider(cfg, registry)
+	if err != nil {
 		return usageError(opt, *jsonFlag, "unknown_model", err.Error())
-	} else if ok {
-		if p, _, _ := registry.Find(activeID, cfg.Model); !p.Custom {
-			cfg.Endpoint = p.Endpoint
-		}
 	}
+	cfg = refreshed
 	doc := modelListDoc{
 		SchemaVersion:   ProtocolVersion,
 		State:           "models",
@@ -220,40 +284,32 @@ func runModelList(args []string, opt Options) int {
 	}
 	for _, p := range registry.Providers {
 		env, present := credentialState(opt, p.ID)
-		auth := "no_credential"
-		if present {
-			auth = "present"
-		}
 		item := modelProviderView{
 			ID:            p.ID,
 			Name:          p.Name,
 			EndpointShape: p.EndpointShape,
 			CredentialEnv: env,
-			Auth:          auth,
+			Auth:          authState(present),
 			Custom:        p.Custom,
 			Active:        activeID == p.ID,
 		}
-		models := modelViewsOf(p, activeID == p.ID, cfg.Model, byProvider[p.ID])
+		models := modelViewsOf(p.ID, p, activeID == p.ID, cfg.Model, index)
 		if p.Custom && activeID == p.ID {
 			custom := provider.Model{ID: cfg.Model, Capabilities: []provider.Capability{provider.CapTextChat}}
-			models = modelViewsOf(provider.Provider{Models: []provider.Model{custom}}, true, cfg.Model, byProvider[p.ID])
+			models = modelViewsOf(p.ID, provider.Provider{Models: []provider.Model{custom}}, true, cfg.Model, index)
 		}
 		item.Models = models
 		doc.Providers = append(doc.Providers, item)
 	}
 	if configured && activeID == "" {
 		env, present := credentialState(opt, "")
-		auth := "no_credential"
-		if present {
-			auth = "present"
-		}
 		doc.Active.Legacy = true
 		doc.Providers = append(doc.Providers, modelProviderView{
 			ID:            "legacy",
 			Name:          "Manual tutor configuration",
 			EndpointShape: provider.EndpointShape,
 			CredentialEnv: env,
-			Auth:          auth,
+			Auth:          authState(present),
 			Active:        true,
 			Models: []modelView{{
 				ID:     cfg.Model,
@@ -276,112 +332,137 @@ func runModelList(args []string, opt Options) int {
 	return 0
 }
 
-func runModelUse(args []string, opt Options) int {
-	wantJSON := jsonFlagRequested(args)
+type modelTarget struct {
+	st         *store.Store
+	registry   provider.Registry
+	cfg        tutor.Config
+	providerID string
+	modelID    string
+	jsonMode   bool
+}
+
+// resolveModelTarget parses <provider>/<model> and resolves it against the
+// registry and the stored configuration. It opens the database; the caller
+// closes it.
+func resolveModelTarget(command string, args []string, opt Options, wantJSON bool) (modelTarget, int) {
 	args = reorderArgs(args, map[string]bool{"endpoint": true, "db": true})
-	fs := newFlagSet("model use", opt, wantJSON)
+	fs := newFlagSet(command, opt, wantJSON)
 	endpointFlag := fs.String("endpoint", "", "custom provider endpoint ending in /chat/completions")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if code := parseArgs(fs, args, opt, wantJSON, 1, "model use requires <provider>/<model>"); code != 0 {
-		return code
+	if code := parseArgs(fs, args, opt, wantJSON, 1, command+" requires <provider>/<model>"); code != 0 {
+		return modelTarget{}, code
 	}
 	providerID, modelID, err := provider.ParseRef(fs.Arg(0))
 	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_input", err.Error())
+		return modelTarget{}, usageError(opt, *jsonFlag, "invalid_input", err.Error())
 	}
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return modelTarget{}, internalError(opt, *jsonFlag, err)
 	}
-	defer st.Close()
 	registry, _, code := registryOrError(opt, *jsonFlag)
 	if code != 0 {
-		return code
+		st.Close()
+		return modelTarget{}, code
 	}
 	base, _, err := configuredTutor(st)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		st.Close()
+		return modelTarget{}, internalError(opt, *jsonFlag, err)
 	}
 	cfg, err := providerConfig(base, registry, providerID, modelID, *endpointFlag)
 	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_model", err.Error())
+		st.Close()
+		return modelTarget{}, usageError(opt, *jsonFlag, "invalid_model", err.Error())
 	}
-	if err := st.SaveTutorConfig(cfg, opt.Now()); err != nil {
-		return internalError(opt, *jsonFlag, err)
+	return modelTarget{
+		st:         st,
+		registry:   registry,
+		cfg:        cfg,
+		providerID: providerID,
+		modelID:    modelID,
+		jsonMode:   *jsonFlag,
+	}, 0
+}
+
+func runModelUse(args []string, opt Options) int {
+	wantJSON := jsonFlagRequested(args)
+	target, code := resolveModelTarget("model use", args, opt, wantJSON)
+	if code != 0 {
+		return code
 	}
-	env, present := credentialState(opt, providerID)
-	auth := "no_credential"
-	if present {
-		auth = "present"
+	defer target.st.Close()
+	if err := target.st.SaveTutorConfig(target.cfg, opt.Now()); err != nil {
+		return internalError(opt, target.jsonMode, err)
 	}
-	verifications, err := verificationState(st, providerID, modelID)
+	env, present := credentialState(opt, target.providerID)
+	index, err := loadVerificationIndex(target.st)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return internalError(opt, target.jsonMode, err)
 	}
-	p, m, _ := registry.Find(providerID, modelID)
-	capView := capabilityView(provider.CapTextChat, m.Has(provider.CapTextChat), verifications)
+	p, m, _ := target.registry.Find(target.providerID, target.modelID)
+	capView := capabilityView(provider.CapTextChat, m.Has(provider.CapTextChat), index.forModel(target.providerID, target.modelID))
 	doc := modelUseDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         "selected",
 		Active: modelActiveView{
 			Configured: true,
-			Provider:   cfg.Provider,
-			Model:      cfg.Model,
-			Endpoint:   cfg.Endpoint,
+			Provider:   target.cfg.Provider,
+			Model:      target.cfg.Model,
+			Endpoint:   target.cfg.Endpoint,
 		},
 		ProviderName:      p.Name,
 		CredentialEnv:     env,
 		CredentialPresent: present,
 		TextChat:          capView,
-		Auth:              auth,
+		Auth:              authState(present),
 		Limits:            modelLimits,
 	}
-	if *jsonFlag {
+	if target.jsonMode {
 		return writeJSON(opt, doc)
 	}
 	writeModelUse(opt.Stdout, doc)
 	return 0
 }
 
+// finishModelTestFailure appends one failed verification and writes the
+// document. The missing-credential path passes callMade=false and reservation
+// 0 because it never reaches the host.
+func finishModelTestFailure(opt Options, jsonMode bool, st *store.Store, doc modelTestDoc, failure provider.Failure,
+	at time.Time, callMade bool, reservation int64, code int) int {
+	if _, err := appendVerification(st, doc.Provider, doc.Model, failure, at, doc.LatencyMS, doc.HTTPStatus, callMade); err != nil {
+		return internalError(opt, jsonMode, err)
+	}
+	if reservation != 0 {
+		_ = st.ReleaseTutorCallReservation(reservation)
+	}
+	doc.Failure = &modelFailureView{Type: failure.Type, Message: failure.Message, Action: failure.Action}
+	doc.Result = "failed:" + failure.Type
+	doc.CheckedAt = at.UTC().Format(time.RFC3339)
+	if jsonMode {
+		_ = writeJSONTo(opt.Stdout, doc)
+	} else {
+		writeModelTest(opt.Stdout, doc)
+	}
+	return code
+}
+
 func runModelTest(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
-	args = reorderArgs(args, map[string]bool{"endpoint": true, "db": true})
-	fs := newFlagSet("model test", opt, wantJSON)
-	endpointFlag := fs.String("endpoint", "", "custom provider endpoint ending in /chat/completions")
-	dbFlag := fs.String("db", "", "SQLite database path")
-	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if code := parseArgs(fs, args, opt, wantJSON, 1, "model test requires <provider>/<model>"); code != 0 {
-		return code
-	}
-	providerID, modelID, err := provider.ParseRef(fs.Arg(0))
-	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_input", err.Error())
-	}
-	st, err := openDatabase(*dbFlag, opt)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	defer st.Close()
-	registry, _, code := registryOrError(opt, *jsonFlag)
+	target, code := resolveModelTarget("model test", args, opt, wantJSON)
 	if code != 0 {
 		return code
 	}
-	base, _, err := configuredTutor(st)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	cfg, err := providerConfig(base, registry, providerID, modelID, *endpointFlag)
-	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_model", err.Error())
-	}
-	p, m, _ := registry.Find(providerID, modelID)
+	defer target.st.Close()
+	providerID, modelID := target.providerID, target.modelID
+	cfg := target.cfg
+	p, m, _ := target.registry.Find(providerID, modelID)
 	if !m.Has(provider.CapTextChat) {
-		return usageError(opt, *jsonFlag, "capability_not_declared",
+		return usageError(opt, target.jsonMode, "capability_not_declared",
 			fmt.Sprintf("%s/%s does not declare text.chat", providerID, modelID))
 	}
-	env, _ := credentialState(opt, providerID)
-	_, key, present := provider.CredentialValue(opt.Getenv, providerID)
+	env, key, present := provider.CredentialValue(opt.Getenv, providerID)
 	now := opt.Now()
 	doc := modelTestDoc{
 		SchemaVersion: ProtocolVersion,
@@ -397,38 +478,27 @@ func runModelTest(args []string, opt Options) int {
 	if !present {
 		failure := provider.Classify(provider.FailureNoCredential, 0, "")
 		failure.Action = "export " + env + " (it is never stored)"
-		if _, err := appendVerification(st, providerID, modelID, failure, now, 0, 0, false); err != nil {
-			return internalError(opt, *jsonFlag, err)
-		}
-		doc.Failure = &modelFailureView{Type: failure.Type, Message: failure.Message, Action: failure.Action}
-		doc.Result = "failed:" + failure.Type
-		doc.CheckedAt = now.UTC().Format(time.RFC3339)
-		if *jsonFlag {
-			_ = writeJSONTo(opt.Stdout, doc)
-		} else {
-			writeModelTest(opt.Stdout, doc)
-		}
-		return 2
+		return finishModelTestFailure(opt, target.jsonMode, target.st, doc, failure, now, false, 0, 2)
 	}
 	budgetNow := opt.Now()
-	reservation, used, err := st.ReserveTutorCall(providerID, tutorDayStart(budgetNow), budgetNow, cfg.DailyCalls)
+	reservation, used, err := target.st.ReserveTutorCall(providerID, tutorDayStart(budgetNow), budgetNow, cfg.DailyCalls)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return internalError(opt, target.jsonMode, err)
 	}
 	if reservation == 0 {
-		return usageError(opt, *jsonFlag, "budget_exhausted",
+		return usageError(opt, target.jsonMode, "budget_exhausted",
 			fmt.Sprintf("%s has used %d of %d provider calls today (UTC); raise the budget with passquest tutor config --daily-calls N",
 				providerID, used, cfg.DailyCalls))
 	}
 	sendStarted := false
 	defer func() {
 		if !sendStarted {
-			_ = st.ReleaseTutorCallReservation(reservation)
+			_ = target.st.ReleaseTutorCallReservation(reservation)
 		}
 	}()
 	request, sha, bytes, err := tutor.ProbeRequest(cfg.Endpoint, cfg.Model, cfg.TimeoutMS)
 	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_model", err.Error())
+		return usageError(opt, target.jsonMode, "invalid_model", err.Error())
 	}
 	request.CredentialEnv = env
 	doc.RequestSHA256 = sha
@@ -442,53 +512,17 @@ func runModelTest(args []string, opt Options) int {
 	if transportErr != nil {
 		failure := provider.ClassifyTransport(transportErr)
 		failure.Message = tutorMessage(failure.Message, key)
-		if _, err := appendVerification(st, providerID, modelID, failure, now, latency, response.HTTPStatus, true); err != nil {
-			return internalError(opt, *jsonFlag, err)
-		}
-		_ = st.ReleaseTutorCallReservation(reservation)
-		doc.Failure = &modelFailureView{Type: failure.Type, Message: failure.Message, Action: failure.Action}
-		doc.Result = "failed:" + failure.Type
-		doc.CheckedAt = now.UTC().Format(time.RFC3339)
-		if *jsonFlag {
-			_ = writeJSONTo(opt.Stdout, doc)
-		} else {
-			writeModelTest(opt.Stdout, doc)
-		}
-		return 3
+		return finishModelTestFailure(opt, target.jsonMode, target.st, doc, failure, now, true, reservation, 3)
 	}
 	if response.Status == "error" {
 		failure := provider.ClassifyResponse(response)
 		failure.Message = tutorMessage(failure.Message, key)
-		if _, err := appendVerification(st, providerID, modelID, failure, now, latency, response.HTTPStatus, true); err != nil {
-			return internalError(opt, *jsonFlag, err)
-		}
-		_ = st.ReleaseTutorCallReservation(reservation)
-		doc.Failure = &modelFailureView{Type: failure.Type, Message: failure.Message, Action: failure.Action}
-		doc.Result = "failed:" + failure.Type
-		doc.CheckedAt = now.UTC().Format(time.RFC3339)
-		if *jsonFlag {
-			_ = writeJSONTo(opt.Stdout, doc)
-		} else {
-			writeModelTest(opt.Stdout, doc)
-		}
-		return 3
+		return finishModelTestFailure(opt, target.jsonMode, target.st, doc, failure, now, true, reservation, 3)
 	}
 	text := strings.TrimSpace(response.Text)
 	if text == "" || !validTutorText(text) {
 		failure := provider.Classify(provider.FailureInvalidResponse, response.HTTPStatus, "the capability probe returned no valid text")
-		if _, err := appendVerification(st, providerID, modelID, failure, now, latency, response.HTTPStatus, true); err != nil {
-			return internalError(opt, *jsonFlag, err)
-		}
-		_ = st.ReleaseTutorCallReservation(reservation)
-		doc.Failure = &modelFailureView{Type: failure.Type, Message: failure.Message, Action: failure.Action}
-		doc.Result = "failed:" + failure.Type
-		doc.CheckedAt = now.UTC().Format(time.RFC3339)
-		if *jsonFlag {
-			_ = writeJSONTo(opt.Stdout, doc)
-		} else {
-			writeModelTest(opt.Stdout, doc)
-		}
-		return 3
+		return finishModelTestFailure(opt, target.jsonMode, target.st, doc, failure, now, true, reservation, 3)
 	}
 	verified := store.ProviderVerification{
 		Provider:   providerID,
@@ -500,14 +534,14 @@ func runModelTest(args []string, opt Options) int {
 		HTTPStatus: response.HTTPStatus,
 		CheckedAt:  now,
 	}
-	if _, err := st.AppendProviderVerification(verified); err != nil {
-		return internalError(opt, *jsonFlag, err)
+	if _, err := target.st.AppendProviderVerification(verified); err != nil {
+		return internalError(opt, target.jsonMode, err)
 	}
-	_ = st.ReleaseTutorCallReservation(reservation)
+	_ = target.st.ReleaseTutorCallReservation(reservation)
 	doc.State = "verified"
 	doc.Result = "verified"
 	doc.CheckedAt = now.UTC().Format(time.RFC3339)
-	if *jsonFlag {
+	if target.jsonMode {
 		return writeJSON(opt, doc)
 	}
 	writeModelTest(opt.Stdout, doc)
@@ -611,15 +645,9 @@ func buildBudgetView(st *store.Store, cfg tutor.Config, registry provider.Regist
 		if p.Custom && p.ID != activeID {
 			continue
 		}
-		if p.Custom && p.ID == activeID {
-			add(p.ID, p.Name, true)
-			continue
-		}
-		if p.TextModel() {
-			add(p.ID, p.Name, true)
-		}
+		add(p.ID, p.Name, true)
 	}
-	if activeID == "" && cfg.Provider == "" && cfg.Endpoint != "" {
+	if activeID == "" && cfg.Endpoint != "" && countByProvider[""] == 0 {
 		add("legacy", "Manual tutor configuration", true)
 	}
 	for id, calls := range countByProvider {

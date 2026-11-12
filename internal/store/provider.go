@@ -284,22 +284,79 @@ func (s *Store) ProviderFailovers() ([]ProviderFailover, error) {
 	return out, nil
 }
 
+// providerCallSources lists every ledger that consumes the daily provider
+// budget. A new ledger is added here once, so every counter sees it.
+var providerCallSources = []providerCallSource{
+	{table: "tutor_calls", at: "created_at"},
+	{table: "tutor_call_reservations", at: "created_at"},
+	{table: "note_refinements", at: "created_at"},
+	{table: "provider_verification_events", at: "checked_at", condition: "call_made = 1"},
+}
+
+type providerCallSource struct {
+	table     string
+	at        string
+	condition string
+}
+
+func usedProviderCallSources(includeReservations bool) []providerCallSource {
+	sources := make([]providerCallSource, 0, len(providerCallSources))
+	for _, source := range providerCallSources {
+		if !includeReservations && source.table == "tutor_call_reservations" {
+			continue
+		}
+		sources = append(sources, source)
+	}
+	return sources
+}
+
+// providerCallCountSQL counts one provider's used calls. TutorCallCountSince
+// omits in-flight reservations, which are budget slots rather than calls.
+func providerCallCountSQL(includeReservations bool) string {
+	sources := usedProviderCallSources(includeReservations)
+	parts := make([]string, 0, len(sources))
+	for _, source := range sources {
+		where := "provider = ? AND julianday(" + source.at + ") >= julianday(?)"
+		if source.condition != "" {
+			where += " AND " + source.condition
+		}
+		parts = append(parts, "(SELECT COUNT(*) FROM "+source.table+" WHERE "+where+")")
+	}
+	return "SELECT " + strings.Join(parts, " + ")
+}
+
+func providerCallCountArgs(providerID, boundary string, includeReservations bool) []any {
+	sources := usedProviderCallSources(includeReservations)
+	args := make([]any, 0, 2*len(sources))
+	for range sources {
+		args = append(args, providerID, boundary)
+	}
+	return args
+}
+
+// providerCallGroupSQL counts used calls grouped by provider.
+func providerCallGroupSQL(boundary string) (string, []any) {
+	selects := make([]string, 0, len(providerCallSources))
+	args := make([]any, 0, len(providerCallSources))
+	for _, source := range providerCallSources {
+		where := "julianday(" + source.at + ") >= julianday(?)"
+		if source.condition != "" {
+			where += " AND " + source.condition
+		}
+		selects = append(selects, "SELECT provider FROM "+source.table+" WHERE "+where)
+		args = append(args, boundary)
+	}
+	return "SELECT provider, COUNT(*) FROM (" + strings.Join(selects, " UNION ALL ") +
+		") GROUP BY provider ORDER BY provider", args
+}
+
 // ProviderCallCountsSince counts every provider call recorded at or after at:
 // tutor calls (including failures), in-flight reservations and note
 // refinements, grouped by provider. The legacy empty provider is returned as
 // "", which the CLI renders as unattributed.
 func (s *Store) ProviderCallCountsSince(at time.Time) ([]ProviderCallCount, error) {
-	boundary := at.UTC().Format(time.RFC3339Nano)
-	rows, err := s.db.Query(`SELECT provider, COUNT(*) FROM (
-			SELECT provider FROM tutor_calls WHERE julianday(created_at) >= julianday(?)
-			UNION ALL
-			SELECT provider FROM tutor_call_reservations WHERE julianday(created_at) >= julianday(?)
-			UNION ALL
-			SELECT provider FROM note_refinements WHERE julianday(created_at) >= julianday(?)
-			UNION ALL
-			SELECT provider FROM provider_verification_events
-				WHERE call_made = 1 AND julianday(checked_at) >= julianday(?)
-		) GROUP BY provider ORDER BY provider`, boundary, boundary, boundary, boundary)
+	query, args := providerCallGroupSQL(at.UTC().Format(time.RFC3339Nano))
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: count provider calls: %w", err)
 	}

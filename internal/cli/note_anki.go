@@ -601,8 +601,9 @@ func classifyWriteResult(item *notePushWork, result anki.ActionResult, action st
 // and push share this policy; verb states what was refused.
 func noteConsentRefusal(st *store.Store, notes []store.Note, verb string) (string, bool) {
 	var denied []string
+	providerID := noteConsentProvider(st)
 	for _, n := range notes {
-		if n.Restricted && n.SourceID != "" && !consentGranted(st, n.SourceID) {
+		if n.Restricted && n.SourceID != "" && !consentGranted(st, n.SourceID, providerID) {
 			denied = appendUnique(denied, n.SourceID)
 		}
 	}

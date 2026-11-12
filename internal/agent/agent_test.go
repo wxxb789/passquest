@@ -90,6 +90,8 @@ func TestValidateEndpoint(t *testing.T) {
 		{"http://127.0.0.1:11434/v1/chat/completions", true},
 		{"http://localhost:8080/chat/completions", true},
 		{"http://[::1]:8080/v1/chat/completions", true},
+		{"http://[0:0:0:0:0:0:0:1]:8080/v1/chat/completions", true},
+		{"https://api.example.com/v1/chat/completions/", true},
 		{"http://api.example.com/v1/chat/completions", false},
 		{"https://user:pass@api.example.com/v1/chat/completions", false},
 		{"https://api.example.com/v1/chat/completions?x=1", false},

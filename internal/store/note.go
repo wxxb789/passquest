@@ -869,12 +869,7 @@ func (s *Store) ReserveNoteRefinement(providerID string, since, at time.Time, li
 	}
 	defer tx.Rollback()
 	var used int
-	if err := tx.QueryRow(`SELECT
-			(SELECT COUNT(*) FROM tutor_calls WHERE provider = ? AND julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM tutor_call_reservations WHERE provider = ? AND julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM note_refinements WHERE provider = ? AND julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM provider_verification_events WHERE provider = ? AND call_made = 1 AND julianday(checked_at) >= julianday(?))`,
-		providerID, boundary, providerID, boundary, providerID, boundary, providerID, boundary).Scan(&used); err != nil {
+	if err := tx.QueryRow(providerCallCountSQL(true), providerCallCountArgs(providerID, boundary, true)...).Scan(&used); err != nil {
 		return 0, 0, fmt.Errorf("store: count provider budget: %w", err)
 	}
 	if used >= limit {

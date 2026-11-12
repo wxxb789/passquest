@@ -38,8 +38,8 @@ func TestEmbeddedRegistryIsValidAndCoversRequiredProviders(t *testing.T) {
 		t.Fatalf("version = %d", registry.Version)
 	}
 	custom, _ := registry.Provider(CustomProvider)
-	if !custom.Custom || custom.Endpoint != "" || len(custom.Models) != 0 {
-		t.Fatalf("custom provider shape = %+v", custom)
+	if !custom.Custom {
+		t.Fatalf("custom provider is not marked custom: %+v", custom)
 	}
 }
 
@@ -90,6 +90,9 @@ func TestRegistryValidationRejectsUnsafeData(t *testing.T) {
 			r.Providers[0].Endpoint = "https://api.example.com/v1/responses"
 		}, "/chat/completions"},
 		{"bad env", func(r *Registry) { r.Providers[0].CredentialEnv = "lower-case" }, "environment variable"},
+		{"credential env not the provider variable", func(r *Registry) {
+			r.Providers[0].CredentialEnv = "MY_ALPHA_KEY"
+		}, "must be"},
 		{"custom with models", func(r *Registry) {
 			r.Providers = append(r.Providers, Provider{
 				ID: CustomProvider, Name: "Custom", EndpointShape: EndpointShape,

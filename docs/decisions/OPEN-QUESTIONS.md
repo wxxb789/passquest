@@ -980,10 +980,28 @@ Entry format:
   registry id would break the 0005 surface and every 0005 test.
 - Options considered: (A) keep the legacy path permissive and mark it `legacy,unverified` in
   `model list`; (B) require `model test` for every configured endpoint; (C) delete the legacy path.
-- Default taken: (A). `model use` clears the provider field and becomes strict; a manual
+- Default taken: (A). `model use` sets the provider field and is strict; a manual
   `tutor config --endpoint --model` clears the provider field and remains the documented exception.
   `model list` labels it `legacy`. Reverse by requiring verification whenever an endpoint is
   configured.
 - Revisit when: goal 0011 can migrate every stored legacy configuration into the registry.
+
+### Q-0010-13 — Does a legacy agent run bind its endpoint at start?
+- Status: open
+- Context: `agentProviderConfig` (`internal/cli/agent.go`) refreshes `cfg.Endpoint` from the current
+  active registry provider, but `runAgentResume` skips the recorded-provider block when the run has no
+  provider (a goal-0005 legacy run). After `model use beta/...`, resuming a legacy run therefore sends
+  beta's endpoint with the run's legacy model id and `PASSQUEST_TUTOR_API_KEY`.
+- Repro: configure a hand-edited endpoint, start an agent run that pauses, run
+  `model use beta/<model>`, then `agent resume RUN`: the resume document keeps `run.model` (the legacy
+  id), while the host request targets beta's endpoint.
+- Options considered: (A) bind the endpoint at start for legacy runs and keep it on resume; (B) keep
+  the current endpoint as Q-0006-05 deliberately says; (C) refuse resume when the endpoint no longer
+  matches the run's recorded provider.
+- Default taken: (B), unchanged in goal 0010 — this record names the behaviour so it is not mistaken
+  for a verified provider/model pairing. Reverse by storing the endpoint on a legacy run or refusing
+  the mismatch.
+- Revisit when: the owner decides whether Q-0006-05's "endpoint is current" rule extends to a run that
+  predates registry providers.
 
 

@@ -7,12 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/wxxb789/passquest/internal/provider"
 )
 
 // Host request modes.
@@ -390,35 +391,12 @@ func ValidateModelConfig(model ModelConfig) error {
 	return nil
 }
 
-// ValidateEndpoint accepts one OpenAI-compatible chat-completions URL. https is
-// required except on loopback; userinfo, query and fragment are refused so a
-// credential cannot be smuggled into stored configuration.
+// ValidateEndpoint accepts one OpenAI-compatible chat-completions URL. It
+// delegates to the registry validator so a stored endpoint cannot pass one
+// surface and fail another; https is required except on loopback and the
+// endpoint must end in /chat/completions.
 func ValidateEndpoint(raw string) error {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("endpoint is not a URL: %w", err)
-	}
-	if parsed.Scheme != "https" && parsed.Scheme != "http" {
-		return errors.New("endpoint must use https (http is allowed only on loopback)")
-	}
-	host := parsed.Hostname()
-	if host == "" {
-		return errors.New("endpoint has no host")
-	}
-	if parsed.User != nil {
-		return fmt.Errorf("endpoint must not contain userinfo; the credential belongs only in %s", CredentialEnv)
-	}
-	if parsed.RawQuery != "" || parsed.Fragment != "" {
-		return errors.New("endpoint must not contain a query or fragment")
-	}
-	loopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
-	if parsed.Scheme == "http" && !loopback {
-		return errors.New("endpoint must use https outside loopback")
-	}
-	if !strings.HasSuffix(parsed.Path, "/chat/completions") {
-		return errors.New("endpoint must end in /chat/completions")
-	}
-	return nil
+	return provider.ValidateEndpoint(raw)
 }
 
 // ValidateHostResponse checks the document identity and known state.

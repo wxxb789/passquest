@@ -112,11 +112,11 @@ func runAgentStart(args []string, opt Options) int {
 	}
 	defer st.Close()
 
-	cfg, code := agentProviderConfig(st, opt, *flags.json)
+	cfg, registry, code := agentProviderConfig(st, opt, *flags.json)
 	if code != 0 {
 		return code
 	}
-	if code := agentRequireVerified(st, opt, cfg.Provider, cfg.Model, *flags.json); code != 0 {
+	if code := requireVerifiedTextChat(st, registry, opt, cfg.Provider, cfg.Model, *flags.json); code != 0 {
 		return code
 	}
 	if existing, ok, err := st.LatestAgentRun(true); err != nil {
@@ -168,15 +168,9 @@ func runAgentStart(args []string, opt Options) int {
 		return internalError(opt, *flags.json, err)
 	}
 
-	env, _, present := agentRunCredential(opt, run.Provider)
+	env, _, present := provider.CredentialValue(opt.Getenv, run.Provider)
 	if !present {
-		failure := agent.FailureForCode(agent.CodeMissingCredential)
-		failure.Message = fmt.Sprintf("%s is not set", env)
-		detail := agentFailureDetail(failure, agent.StateNeedsAction, "")
-		if _, err := st.AppendAgentRunEvent(runID, store.AgentEventNeedsAction, detail, opt.Now()); err != nil {
-			return internalError(opt, *flags.json, err)
-		}
-		return writeAgentFailure(opt, *flags.json, run, agent.StateNeedsAction, failure, nil)
+		return agentMissingCredential(opt, *flags.json, st, run, env)
 	}
 
 	// start binds the model recorded with the run; a model rename needs
@@ -250,15 +244,18 @@ func runAgentResume(args []string, opt Options) int {
 			return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s answered without steps; start a new run", run.RunID))
 		}
 	}
-	cfg, code := agentProviderConfig(st, opt, *flags.json)
+	cfg, registry, code := agentProviderConfig(st, opt, *flags.json)
 	if code != 0 {
 		return code
 	}
-	env := agent.CredentialEnv
+	env := provider.CredentialEnvFor(run.Provider)
 	if strings.TrimSpace(run.Provider) != "" {
-		registry, _, err := provider.Load(opt.Getenv)
-		if err != nil {
-			return usageError(opt, *flags.json, "invalid_registry", err.Error())
+		if len(registry.Providers) == 0 {
+			loaded, _, err := provider.Load(opt.Getenv)
+			if err != nil {
+				return usageError(opt, *flags.json, "invalid_registry", err.Error())
+			}
+			registry = loaded
 		}
 		recorded, _, ok := registry.Find(run.Provider, run.Model)
 		if !ok {
@@ -274,19 +271,13 @@ func runAgentResume(args []string, opt Options) int {
 		} else {
 			cfg.Endpoint = recorded.Endpoint
 		}
-		if code := agentRequireVerified(st, opt, run.Provider, run.Model, *flags.json); code != 0 {
+		if code := requireVerifiedTextChat(st, registry, opt, run.Provider, run.Model, *flags.json); code != 0 {
 			return code
 		}
 		var present bool
-		env, _, present = agentRunCredential(opt, run.Provider)
+		env, _, present = provider.CredentialValue(opt.Getenv, run.Provider)
 		if !present {
-			failure := agent.FailureForCode(agent.CodeMissingCredential)
-			failure.Message = fmt.Sprintf("%s is not set", env)
-			if _, err := st.AppendAgentRunEvent(run.RunID, store.AgentEventNeedsAction,
-				agentFailureDetail(failure, agent.StateNeedsAction, ""), opt.Now()); err != nil {
-				return internalError(opt, *flags.json, err)
-			}
-			return writeAgentFailure(opt, *flags.json, run, agent.StateNeedsAction, failure, nil)
+			return agentMissingCredential(opt, *flags.json, st, run, env)
 		}
 	}
 	if err := agent.PrepareStorePath(run.StorePath); err != nil {
@@ -316,8 +307,6 @@ func runAgentResume(args []string, opt Options) int {
 			return internalError(opt, *flags.json, err)
 		}
 	}
-	// resume keeps the run's recorded model and provider; the endpoint, timeout
-	// and credential are current (Q-0006-05).
 	request, err := agentHostRequest(st, run, agent.ModeResume, run.Model, prompt, token, cfg, *timeoutFlag, env)
 	if err != nil {
 		return internalError(opt, *flags.json, err)
@@ -326,72 +315,46 @@ func runAgentResume(args []string, opt Options) int {
 }
 
 // agentProviderConfig applies the provider preconditions start and resume
-// share: a configured endpoint and the agent's endpoint rule.
-func agentProviderConfig(st *store.Store, opt Options, jsonMode bool) (tutor.Config, int) {
+// share: a configured endpoint, the active registry endpoint and the agent's
+// endpoint rule. The loaded registry is returned so a run resolves it once.
+func agentProviderConfig(st *store.Store, opt Options, jsonMode bool) (tutor.Config, provider.Registry, int) {
 	cfg, configured, err := st.TutorConfig()
 	if err != nil {
-		return tutor.Config{}, internalError(opt, jsonMode, err)
+		return tutor.Config{}, provider.Registry{}, internalError(opt, jsonMode, err)
 	}
 	if !configured {
-		return tutor.Config{}, usageError(opt, jsonMode, "not_configured",
+		return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "not_configured",
 			"no provider is configured; run passquest tutor config --endpoint URL --model NAME")
 	}
+	var registry provider.Registry
 	if strings.TrimSpace(cfg.Provider) != "" {
-		registry, _, err := provider.Load(opt.Getenv)
+		var err error
+		registry, _, err = provider.Load(opt.Getenv)
 		if err != nil {
-			return tutor.Config{}, usageError(opt, jsonMode, "invalid_registry", err.Error())
+			return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "invalid_registry", err.Error())
 		}
-		active, _, _, err := activeProvider(cfg, registry)
+		_, _, refreshed, _, err := activeProvider(cfg, registry)
 		if err != nil {
-			return tutor.Config{}, usageError(opt, jsonMode, "unknown_model", err.Error())
+			return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "unknown_model", err.Error())
 		}
-		if !active.Custom {
-			cfg.Endpoint = active.Endpoint
-		}
+		cfg = refreshed
 	}
 	if err := agent.ValidateEndpoint(cfg.Endpoint); err != nil {
-		return tutor.Config{}, usageError(opt, jsonMode, "invalid_config", err.Error())
+		return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "invalid_config", err.Error())
 	}
-	return cfg, 0
+	return cfg, registry, 0
 }
 
-// agentRequireVerified refuses a registry run whose text.chat capability has
-// no verified evidence. The legacy hand-configured path is unchanged.
-func agentRequireVerified(st *store.Store, opt Options, providerID, modelID string, jsonMode bool) int {
-	if strings.TrimSpace(providerID) == "" {
-		return 0
-	}
-	registry, _, err := provider.Load(opt.Getenv)
-	if err != nil {
-		return usageError(opt, jsonMode, "invalid_registry", err.Error())
-	}
-	if _, model, ok := registry.Find(providerID, modelID); !ok {
-		return usageError(opt, jsonMode, "unknown_model",
-			fmt.Sprintf("%s/%s is no longer in the provider registry", providerID, modelID))
-	} else if !model.Has(provider.CapTextChat) {
-		return usageError(opt, jsonMode, "capability_not_declared",
-			fmt.Sprintf("%s/%s does not declare text.chat", providerID, modelID))
-	}
-	verification, found, err := st.LatestProviderVerification(providerID, modelID, string(provider.CapTextChat))
-	if err != nil {
+// agentMissingCredential records the one needs_action event every missing-key
+// path shares.
+func agentMissingCredential(opt Options, jsonMode bool, st *store.Store, run store.AgentRun, env string) int {
+	failure := agent.FailureForCode(agent.CodeMissingCredential)
+	failure.Message = fmt.Sprintf("%s is not set", env)
+	detail := agentFailureDetail(failure, agent.StateNeedsAction, "")
+	if _, err := st.AppendAgentRunEvent(run.RunID, store.AgentEventNeedsAction, detail, opt.Now()); err != nil {
 		return internalError(opt, jsonMode, err)
 	}
-	if !found || verification.Status != "verified" {
-		return usageError(opt, jsonMode, "capability_unverified",
-			fmt.Sprintf("%s/%s: text.chat is not verified; run passquest model test %s/%s",
-				providerID, modelID, providerID, modelID))
-	}
-	return 0
-}
-
-// agentRunCredential resolves the credential variable a run's provider uses,
-// keeping a legacy run on the goal-0005 variable.
-func agentRunCredential(opt Options, providerID string) (string, string, bool) {
-	if strings.TrimSpace(providerID) == "" {
-		value := strings.TrimSpace(opt.Getenv(agent.CredentialEnv))
-		return agent.CredentialEnv, value, value != ""
-	}
-	return provider.CredentialValue(opt.Getenv, providerID)
+	return writeAgentFailure(opt, jsonMode, run, agent.StateNeedsAction, failure, nil)
 }
 
 // agentHostRequest builds the one host request shape start and resume share.

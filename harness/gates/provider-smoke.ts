@@ -5,6 +5,7 @@ import path from "node:path";
 import { runGo } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
+import { sseText, sseTool } from "../lib/sse.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
@@ -52,34 +53,6 @@ async function chatResponse(mode: ChatMode, model: string): Promise<Response> {
   });
 }
 
-function sseText(text: string, model: string): Response {
-  const base = { id: "chatcmpl-provider-smoke", object: "chat.completion.chunk", created: 1, model };
-  const body = [
-    { ...base, choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }] },
-    { ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
-  ]
-    .map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`)
-    .join("");
-  return new Response(`${body}data: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
-}
-
-function sseTool(index: number, kind: string, title: string, body: string, model: string): Response {
-  const base = { id: "chatcmpl-provider-smoke", object: "chat.completion.chunk", created: 1, model };
-  const call = {
-    index: 0,
-    id: `call_${index}`,
-    type: "function",
-    function: { name: "record_study_step", arguments: JSON.stringify({ index, kind, title, body }) },
-  };
-  const chunks = [
-    { ...base, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [call] }, finish_reason: null }] },
-    { ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
-  ];
-  return new Response(`${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`, {
-    headers: { "content-type": "text/event-stream" },
-  });
-}
-
 function agentSse(body: unknown, model: string): Response {
   const messages = Array.isArray(asRecord(body).messages)
     ? (asRecord(body).messages as { role?: string; content?: unknown }[])
@@ -89,12 +62,12 @@ function agentSse(body: unknown, model: string): Response {
     .map((message) => String(message.content ?? ""))
     .join("\n");
   if (!/step 1/i.test(toolText)) {
-    return sseTool(1, "diagnosis", "Provider smoke step 1", "Mark the polarity cue before comparing options.", model);
+    return sseTool(1, "diagnosis", "Provider smoke step 1", "Mark the polarity cue before comparing options.", model, "chatcmpl-provider-smoke");
   }
   if (!/step 2/i.test(toolText)) {
-    return sseTool(2, "tactic", "Provider smoke step 2", "A word match alone is not evidence; check the negation.", model);
+    return sseTool(2, "tactic", "Provider smoke step 2", "A word match alone is not evidence; check the negation.", model, "chatcmpl-provider-smoke");
   }
-  return sseText("Two advisory steps recorded.", model);
+  return sseText("Two advisory steps recorded.", model, "chatcmpl-provider-smoke");
 }
 
 function providerDoc(id: string, endpoint: string, models: Array<Record<string, unknown>>) {
@@ -317,7 +290,7 @@ export const providerSmoke: Gate = {
       const verified = await callJSON(db, ["model", "test", "alpha/alpha-text"], alphaEnv);
       if (!check(verified.code === 0, `verified test exit = ${verified.code}: ${verified.stderr}`)) return fail(checks);
       check(stringField(verified.doc, "result") === "verified", "loopback test did not record verified");
-      check(stringField(verified.doc, "checked_at") !== "", "verified test has no timestamp");
+      check((stringField(verified.doc, "checked_at") ?? "") !== "", "verified test has no timestamp");
       const testList = await callJSON(db, ["model", "list"], alphaEnv);
       const testedAlpha = arrayField(asRecord(arrayField(testList.doc, "providers").find((p) => stringField(p, "id") === "alpha")), "models").find(
         (m) => stringField(m, "id") === "alpha-text",
@@ -329,7 +302,7 @@ export const providerSmoke: Gate = {
       const deadTest = await callJSON(db, ["model", "test", "dead/dead-text"], deadEnv);
       check(deadTest.code === 3, `dead endpoint exit = ${deadTest.code}`);
       check(stringField(deadTest.doc, "result") === "failed:endpoint_unreachable", "dead endpoint is not endpoint_unreachable");
-      check(stringField(deadTest.doc, "checked_at") !== "", "dead endpoint failure has no timestamp");
+      check((stringField(deadTest.doc, "checked_at") ?? "") !== "", "dead endpoint failure has no timestamp");
       check((await callJSON(db, ["model", "use", "alpha/alpha-text"], alphaEnv)).code === 0, "model use before copies failed");
       const verifiedDB = copy(db, "verified");
 
@@ -352,7 +325,7 @@ export const providerSmoke: Gate = {
           stringField(result.doc, "result") === `failed:${failureCase.type}`,
           `${failureCase.type} result = ${stringField(result.doc, "result")}`,
         );
-        check(stringField(field(result.doc, "failure"), "action") !== "", `${failureCase.type} has no next action`);
+        check((stringField(field(result.doc, "failure"), "action") ?? "") !== "", `${failureCase.type} has no next action`);
       }
       const reportAfterFailures = await callJSON(failureDB, ["report"]);
       check(

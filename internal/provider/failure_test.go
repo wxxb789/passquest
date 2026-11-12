@@ -1,6 +1,9 @@
 package provider
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestClassifyMapsEveryNamedFailureAndAction(t *testing.T) {
 	tests := []struct {
@@ -35,7 +38,7 @@ func TestClassifyMapsEveryNamedFailureAndAction(t *testing.T) {
 			if failure.Action == "" || failure.Message == "" {
 				t.Fatalf("failure has no action/message: %+v", failure)
 			}
-			if !contains(failure.Action, test.action) {
+			if !strings.Contains(failure.Action, test.action) {
 				t.Fatalf("action %q does not contain %q", failure.Action, test.action)
 			}
 		})
@@ -53,13 +56,4 @@ func TestRetryableOnlyTransportQuotaAndServerFailures(t *testing.T) {
 			t.Fatalf("%s must not be retryable", kind)
 		}
 	}
-}
-
-func contains(value, part string) bool {
-	for i := 0; i+len(part) <= len(value); i++ {
-		if value[i:i+len(part)] == part {
-			return true
-		}
-	}
-	return false
 }

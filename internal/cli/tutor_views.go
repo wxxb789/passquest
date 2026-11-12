@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"strings"
 	"time"
 
 	"github.com/wxxb789/passquest/internal/attempt"
@@ -56,21 +55,13 @@ type tutorProviderView struct {
 
 func tutorProviderViewOf(cfg tutor.Config, opt Options) tutorProviderView {
 	env, _, present := provider.CredentialValue(opt.Getenv, cfg.Provider)
-	auth := "no_credential"
-	if present {
-		auth = "present"
-	}
 	return tutorProviderView{
 		tutorConfigView:   tutorConfigViewOf(cfg),
 		Provider:          cfg.Provider,
-		Auth:              auth,
+		Auth:              authState(present),
 		CredentialEnv:     env,
 		CredentialPresent: present,
 	}
-}
-
-func credentialPresent(opt Options) bool {
-	return strings.TrimSpace(opt.Getenv(tutor.CredentialEnv)) != ""
 }
 
 type tutorContextView struct {
@@ -223,8 +214,6 @@ func tutorCallViewOf(call store.TutorCall, includeText bool) tutorCallView {
 	return view
 }
 
-// tutorFailoverView is one bounded retry decision. Applied is true only when
-// the target call was made; Refusal names the precondition that failed.
 type tutorFailoverView struct {
 	FromProvider string `json:"from_provider"`
 	FromModel    string `json:"from_model"`
@@ -319,5 +308,5 @@ var tutorLimits = []string{
 	"Raw prompt text is not stored: a call records the SHA-256 and byte size of the exact serialized request body plus scope flags. Run `passquest tutor preview` to inspect the exact text before sending.",
 	"Private imported source text is withheld until a recorded `tutor consent` event for that source; first-party material needs no consent.",
 	"A failed or malformed provider response is recorded as a failure and cannot append an attempt, change a grade or edit an answer key.",
-	"The daily call budget counts failed calls and resets at 00:00 UTC. No retry is attempted automatically.",
+	"The daily call budget counts failed calls and resets at 00:00 UTC. `tutor ask` retries at most once, only on another verified provider with the same recorded consent scope and remaining budget.",
 }

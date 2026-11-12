@@ -6,9 +6,6 @@ import (
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
-// Failure types are stable protocol values. The first six are the contract's
-// named failures; provider_error covers a 5xx and the two local failures name
-// a local cause instead of pretending the endpoint answered.
 const (
 	FailureNoCredential     = "no_credential"
 	FailureUnauthorized     = "unauthorized"
@@ -50,8 +47,6 @@ func Classify(code string, httpStatus int, message string) Failure {
 		return failure(FailureAgentUnavailable, message)
 	case code == "config_error":
 		return failure(FailureConfig, message)
-	case httpStatus >= 500:
-		return failure(FailureProviderError, message)
 	default:
 		return failure(FailureProviderError, message)
 	}

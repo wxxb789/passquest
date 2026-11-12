@@ -82,12 +82,17 @@ func TestModelListSeparatesProviderModelCapabilityAndAuthorization(t *testing.T)
 	if model.ID != "alpha-text" || len(model.Capabilities) != len(provider.Capabilities) {
 		t.Fatalf("model row = %+v", model)
 	}
-	chat := model.Capabilities[0]
-	if chat.ID != string(provider.CapTextChat) || chat.State != "declared" || !chat.Declared {
+	capabilities := map[string]modelCapabilityView{}
+	for _, capability := range model.Capabilities {
+		capabilities[capability.ID] = capability
+	}
+	chat, found := capabilities[string(provider.CapTextChat)]
+	if !found || chat.State != "declared" || !chat.Declared {
 		t.Fatalf("text.chat capability = %+v", chat)
 	}
-	if model.Capabilities[3].State != "unsupported" {
-		t.Fatalf("undeclared search capability = %+v", model.Capabilities[3])
+	search, found := capabilities[string(provider.CapSearch)]
+	if !found || search.State != "unsupported" {
+		t.Fatalf("undeclared search capability = %+v, found = %t", search, found)
 	}
 }
 
@@ -281,10 +286,18 @@ func TestModelListRendersDeclaredOptionalCapabilitiesAsUnverified(t *testing.T) 
 		t.Fatalf("model list exit = %d: %s", code, errOut)
 	}
 	doc := decodeModelList(t, out)
+	capabilities := map[string]modelCapabilityView{}
 	for _, capability := range doc.Providers[0].Models[0].Capabilities {
-		if capability.ID == string(provider.CapSearch) || capability.ID == string(provider.CapSpeechSynthesis) {
+		capabilities[capability.ID] = capability
+	}
+	for _, id := range []provider.Capability{provider.CapTextChat, provider.CapSearch, provider.CapSpeechSynthesis} {
+		capability, found := capabilities[string(id)]
+		if !found {
+			t.Fatalf("%s row is absent", id)
+		}
+		if id == provider.CapSearch || id == provider.CapSpeechSynthesis {
 			if capability.State != "declared" || capability.Verified {
-				t.Fatalf("%s = %+v; want declared, unverified", capability.ID, capability)
+				t.Fatalf("%s = %+v; want declared, unverified", id, capability)
 			}
 		}
 	}
@@ -309,7 +322,42 @@ func TestModelTestTimestampUsesTheClock(t *testing.T) {
 		t.Fatal(err)
 	}
 	parsed, err := time.Parse(time.RFC3339, doc.CheckedAt)
-	if err != nil || !parsed.After(base) {
-		t.Fatalf("checked_at = %q (%v)", doc.CheckedAt, err)
+	if err != nil || parsed.Before(base) || !parsed.Before(base.Add(time.Minute)) {
+		t.Fatalf("checked_at = %q (%v); want within one minute of %s", doc.CheckedAt, err, base)
+	}
+}
+
+func TestModelListKeepsVerificationPerModel(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	providerDoc := modelProvider("alpha", "https://alpha.example.com/v1/chat/completions")
+	providerDoc["models"] = []map[string]any{
+		{"id": "alpha-one", "default": true, "capabilities": []string{"text.chat"}},
+		{"id": "alpha-two", "capabilities": []string{"text.chat"}},
+	}
+	registry := modelRegistryFile(t, providerDoc)
+	env := map[string]string{
+		provider.RegistryEnv:      registry,
+		"PASSQUEST_ALPHA_API_KEY": fakeTutorKey,
+	}
+	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
+	if code, _, errOut := modelRun(t, db, clock, transport, env, "model", "test", "alpha/alpha-one", "--json"); code != 0 {
+		t.Fatalf("model test exit = %d: %s", code, errOut)
+	}
+	code, out, errOut := modelRun(t, db, clock, nil, env, "model", "list", "--json")
+	if code != 0 {
+		t.Fatalf("model list exit = %d: %s", code, errOut)
+	}
+	doc := decodeModelList(t, out)
+	states := map[string]string{}
+	for _, model := range doc.Providers[0].Models {
+		for _, capability := range model.Capabilities {
+			if capability.ID == string(provider.CapTextChat) {
+				states[model.ID] = capability.State
+			}
+		}
+	}
+	if states["alpha-one"] != "verified" || states["alpha-two"] != "declared" {
+		t.Fatalf("per-model verification = %+v; want alpha-one verified, alpha-two declared", states)
 	}
 }

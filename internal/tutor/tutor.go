@@ -516,23 +516,14 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 		Temperature: 0,
 		Stream:      false,
 	}
-	encoded, err := json.Marshal(chat)
+	request, requestSHA, requestBytes, err := hostRequestFor(cfg.Endpoint, cfg.TimeoutMS, chat)
 	if err != nil {
-		return Preview{}, fmt.Errorf("tutor: encode chat: %w", err)
-	}
-	sum := sha256.Sum256(encoded)
-	request := HostRequest{
-		ProtocolVersion:  ProtocolVersion,
-		Endpoint:         strings.TrimSpace(cfg.Endpoint),
-		TimeoutMS:        cfg.TimeoutMS,
-		MaxResponseChars: MaxResponseChars,
-		Chat:             chat,
-		Body:             string(encoded),
+		return Preview{}, err
 	}
 	return Preview{
 		Request:      request,
-		RequestSHA:   hex.EncodeToString(sum[:]),
-		RequestBytes: len(encoded),
+		RequestSHA:   requestSHA,
+		RequestBytes: requestBytes,
 		Context: Context{
 			PrivateSource:               target.PrivateSource,
 			SourceID:                    target.SourceID,
@@ -551,6 +542,25 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 			PromptVersion:               PromptVersion,
 		},
 	}, nil
+}
+
+// hostRequestFor serializes one chat document once and derives the host
+// request and its identity from those same bytes.
+func hostRequestFor(endpoint string, timeoutMS int64, chat Chat) (HostRequest, string, int, error) {
+	encoded, err := json.Marshal(chat)
+	if err != nil {
+		return HostRequest{}, "", 0, fmt.Errorf("tutor: encode chat: %w", err)
+	}
+	sum := sha256.Sum256(encoded)
+	request := HostRequest{
+		ProtocolVersion:  ProtocolVersion,
+		Endpoint:         strings.TrimSpace(endpoint),
+		TimeoutMS:        timeoutMS,
+		MaxResponseChars: MaxResponseChars,
+		Chat:             chat,
+		Body:             string(encoded),
+	}
+	return request, hex.EncodeToString(sum[:]), len(encoded), nil
 }
 
 // ProbeRequest builds one minimal non-streaming chat request for a capability
@@ -577,20 +587,7 @@ func ProbeRequest(endpoint, model string, timeoutMS int64) (HostRequest, string,
 		Temperature: 0,
 		Stream:      false,
 	}
-	encoded, err := json.Marshal(chat)
-	if err != nil {
-		return HostRequest{}, "", 0, fmt.Errorf("tutor: encode probe: %w", err)
-	}
-	sum := sha256.Sum256(encoded)
-	request := HostRequest{
-		ProtocolVersion:  ProtocolVersion,
-		Endpoint:         strings.TrimSpace(endpoint),
-		TimeoutMS:        cfg.TimeoutMS,
-		MaxResponseChars: MaxResponseChars,
-		Chat:             chat,
-		Body:             string(encoded),
-	}
-	return request, hex.EncodeToString(sum[:]), len(encoded), nil
+	return hostRequestFor(endpoint, cfg.TimeoutMS, chat)
 }
 
 func attemptLine(target Target) string {

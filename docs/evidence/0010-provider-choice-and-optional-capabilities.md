@@ -11,7 +11,7 @@ owner evidence (Q-0010-01).
 
 | Command | Result |
 |---|---|
-| `go test ./...` | PASS, 18 packages, 751 tests, 0 skipped |
+| `go test ./...` | PASS, 18 packages, 753 tests, 0 skipped |
 | `bash scripts/gate.sh` | PASS, 21/21 gates, 0 failed, 0 skipped |
 | `provider-smoke` alone | PASS, 92 assertions |
 | `harness self-test` | PASS, 32 cases, 20/20 gates |

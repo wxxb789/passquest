@@ -48,8 +48,7 @@ const (
 	CapSpeechSynthesis Capability = "speech.synthesis"
 )
 
-// Capabilities is the rendering order used by every view. The contract names
-// the first four; speech is the fifth discoverable axis required by clause 7.
+// Capabilities is the capability order the views render.
 var Capabilities = []Capability{
 	CapTextChat,
 	CapToolCalls,
@@ -118,16 +117,6 @@ func (p Provider) Model(id string) (Model, bool) {
 		}
 	}
 	return Model{}, false
-}
-
-// TextModel reports whether the provider declares at least one text-chat model.
-func (p Provider) TextModel() bool {
-	for _, model := range p.Models {
-		if model.Has(CapTextChat) {
-			return true
-		}
-	}
-	return false
 }
 
 // Registry is the versioned data file.
@@ -305,6 +294,9 @@ func (r Registry) Validate() error {
 		}
 		if !envPattern.MatchString(p.CredentialEnv) {
 			add("provider %q: credential_env %q is not an environment variable name", label, p.CredentialEnv)
+		}
+		if want := CredentialEnvFor(p.ID); p.CredentialEnv != want {
+			add("provider %q: credential_env %q must be %q", label, p.CredentialEnv, want)
 		}
 		if p.Custom {
 			if p.Endpoint != "" {

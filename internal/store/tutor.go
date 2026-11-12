@@ -208,21 +208,10 @@ func (s *Store) AppendTutorConsent(event TutorConsentEvent) (TutorConsentEvent, 
 // global events. A source with no event means private text is withheld.
 func (s *Store) TutorConsent(sourceID, providerID string) (TutorConsentEvent, bool, error) {
 	providerID = strings.TrimSpace(providerID)
-	if providerID != "" {
-		row := s.db.QueryRow(`SELECT id, source_id, provider, granted, reviewer, at
-			FROM tutor_consent_events WHERE source_id = ? AND provider = ?
-			ORDER BY id DESC LIMIT 1`, sourceID, providerID)
-		event, err := scanTutorConsent(row)
-		if err == nil {
-			return event, true, nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return TutorConsentEvent{}, false, fmt.Errorf("store: read tutor consent: %w", err)
-		}
-	}
 	row := s.db.QueryRow(`SELECT id, source_id, provider, granted, reviewer, at
-		FROM tutor_consent_events WHERE source_id = ? AND provider = ''
-		ORDER BY id DESC LIMIT 1`, sourceID)
+		FROM tutor_consent_events
+		WHERE source_id = ? AND (provider = ? OR provider = '')
+		ORDER BY (provider = ?) DESC, id DESC LIMIT 1`, sourceID, providerID, providerID)
 	event, err := scanTutorConsent(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TutorConsentEvent{}, false, nil
@@ -299,12 +288,7 @@ func (s *Store) ReserveTutorCall(providerID string, since, at time.Time, limit i
 	}
 	defer tx.Rollback()
 	var used int
-	err = tx.QueryRow(`SELECT
-			(SELECT COUNT(*) FROM tutor_calls WHERE provider = ? AND julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM tutor_call_reservations WHERE provider = ? AND julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM note_refinements WHERE provider = ? AND julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM provider_verification_events WHERE provider = ? AND call_made = 1 AND julianday(checked_at) >= julianday(?))`,
-		providerID, boundary, providerID, boundary, providerID, boundary, providerID, boundary).Scan(&used)
+	err = tx.QueryRow(providerCallCountSQL(true), providerCallCountArgs(providerID, boundary, true)...).Scan(&used)
 	if err != nil {
 		return 0, 0, fmt.Errorf("store: count tutor budget: %w", err)
 	}
@@ -449,12 +433,8 @@ func (s *Store) TutorCall(id int64) (TutorCall, error) {
 func (s *Store) TutorCallCountSince(providerID string, at time.Time) (int, error) {
 	providerID = strings.TrimSpace(providerID)
 	var count int
-	err := s.db.QueryRow(`SELECT
-			(SELECT COUNT(*) FROM tutor_calls WHERE provider = ? AND julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM note_refinements WHERE provider = ? AND julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM provider_verification_events WHERE provider = ? AND call_made = 1 AND julianday(checked_at) >= julianday(?))`,
-		providerID, at.UTC().Format(time.RFC3339Nano), providerID, at.UTC().Format(time.RFC3339Nano),
-		providerID, at.UTC().Format(time.RFC3339Nano)).Scan(&count)
+	args := providerCallCountArgs(providerID, at.UTC().Format(time.RFC3339Nano), false)
+	err := s.db.QueryRow(providerCallCountSQL(false), args...).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("store: count tutor calls: %w", err)
 	}

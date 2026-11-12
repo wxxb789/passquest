@@ -83,15 +83,20 @@ func noteDraftFor(st *store.Store, id int64) (store.NoteDraft, error) {
 	return draft, nil
 }
 
-// consentGranted reports whether the latest recorded consent for a source is a
-// grant. A lookup error is treated as no consent.
-func consentGranted(st *store.Store, sourceID string) bool {
-	providerID := ""
-	if cfg, configured, err := st.TutorConfig(); err == nil && configured {
-		providerID = cfg.Provider
-	}
+// consentGranted reports whether the latest recorded consent for a source and
+// provider is a grant. A lookup error is treated as no consent.
+func consentGranted(st *store.Store, sourceID, providerID string) bool {
 	event, ok, err := st.TutorConsent(sourceID, providerID)
 	return err == nil && ok && event.Granted
+}
+
+// noteConsentProvider resolves the active provider once for an export or push.
+func noteConsentProvider(st *store.Store) string {
+	cfg, configured, err := st.TutorConfig()
+	if err != nil || !configured {
+		return ""
+	}
+	return cfg.Provider
 }
 
 func noteInputFromDraft(st *store.Store, draft store.NoteDraft) (note.Input, error) {
@@ -125,7 +130,7 @@ func noteInputFromDraft(st *store.Store, draft store.NoteDraft) (note.Input, err
 		}
 		record = &got
 	}
-	consent := loaded.Private && sourceID != "" && consentGranted(st, sourceID)
+	consent := loaded.Private && sourceID != "" && consentGranted(st, sourceID, noteConsentProvider(st))
 	return note.Input{
 		Target: note.Target{
 			ContentID:      draft.ContentID,
@@ -319,7 +324,7 @@ func noteProposeInput(st *store.Store, attemptFlag int64, contentFlag, questionF
 			},
 			Question:       &loaded.Question,
 			PassageText:    loaded.Content.Passage.Text,
-			ConsentGranted: loaded.Private && loaded.SourceID != "" && consentGranted(st, loaded.SourceID),
+			ConsentGranted: loaded.Private && loaded.SourceID != "" && consentGranted(st, loaded.SourceID, noteConsentProvider(st)),
 		}, nil
 	}
 
@@ -354,7 +359,7 @@ func noteProposeInput(st *store.Store, attemptFlag int64, contentFlag, questionF
 		Attempt:        &record,
 		Question:       &loaded.Question,
 		PassageText:    loaded.Content.Passage.Text,
-		ConsentGranted: loaded.Private && loaded.SourceID != "" && consentGranted(st, loaded.SourceID),
+		ConsentGranted: loaded.Private && loaded.SourceID != "" && consentGranted(st, loaded.SourceID, noteConsentProvider(st)),
 	}, nil
 }
 

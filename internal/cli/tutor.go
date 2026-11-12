@@ -201,24 +201,11 @@ func runTutorPreview(args []string, opt Options) int {
 	if err != nil {
 		return tutorCommandError(opt, *jsonFlag, err)
 	}
-	registry, _, err := provider.Load(opt.Getenv)
-	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_registry", err.Error())
+	cfg, _, _, code = resolveActive(cfg, opt, *jsonFlag)
+	if code != 0 {
+		return code
 	}
 	providerID := strings.TrimSpace(cfg.Provider)
-	if providerID != "" {
-		active, model, _, err := activeProvider(cfg, registry)
-		if err != nil {
-			return usageError(opt, *jsonFlag, "unknown_model", err.Error())
-		}
-		if !model.Has(provider.CapTextChat) {
-			return usageError(opt, *jsonFlag, "capability_not_declared",
-				fmt.Sprintf("%s/%s does not declare text.chat", providerID, cfg.Model))
-		}
-		if !active.Custom {
-			cfg.Endpoint = active.Endpoint
-		}
-	}
 	target, err := loadTutorTargetForProvider(st, record, providerID)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
@@ -240,18 +227,13 @@ func runTutorPreview(args []string, opt Options) int {
 		Limits:        tutorLimits,
 	}
 	if providerID != "" {
-		verification, found, err := st.LatestProviderVerification(providerID, cfg.Model, string(provider.CapTextChat))
+		index, err := loadVerificationIndex(st)
 		if err != nil {
 			return internalError(opt, *jsonFlag, err)
 		}
-		switch {
-		case found && verification.Status == "verified":
-			doc.Provider.TextChatState = "verified@" + verification.CheckedAt.UTC().Format(time.RFC3339)
-		case found && verification.Status == "failed":
-			doc.Provider.TextChatState = "failed:" + verification.FailureType
-			doc.Provider.TextChatAction = fmt.Sprintf("passquest model test %s/%s", providerID, cfg.Model)
-		default:
-			doc.Provider.TextChatState = "declared,unverified"
+		state := capabilityView(provider.CapTextChat, true, index.forModel(providerID, cfg.Model))
+		doc.Provider.TextChatState = renderCapability(state)
+		if !state.Verified {
 			doc.Provider.TextChatAction = fmt.Sprintf("passquest model test %s/%s", providerID, cfg.Model)
 		}
 	}
@@ -378,37 +360,16 @@ func runTutorAsk(args []string, opt Options) int {
 		return usageError(opt, *jsonFlag, "not_configured",
 			"no tutor provider is configured; run passquest tutor config --endpoint URL --model NAME")
 	}
-	registry, _, err := provider.Load(opt.Getenv)
-	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_registry", err.Error())
+	cfg, registry, hasProvider, code := resolveActive(cfg, opt, *jsonFlag)
+	if code != 0 {
+		return code
 	}
 	providerID := strings.TrimSpace(cfg.Provider)
 	env := tutor.CredentialEnv
 	key := strings.TrimSpace(opt.Getenv(env))
-	if providerID != "" {
-		active, model, _, err := activeProvider(cfg, registry)
-		if err != nil {
-			return usageError(opt, *jsonFlag, "unknown_model", err.Error())
-		}
-		if !model.Has(provider.CapTextChat) {
-			return usageError(opt, *jsonFlag, "capability_not_declared",
-				fmt.Sprintf("%s/%s does not declare text.chat", providerID, cfg.Model))
-		}
-		if !active.Custom {
-			cfg.Endpoint = active.Endpoint
-		}
-		verification, found, err := st.LatestProviderVerification(providerID, cfg.Model, string(provider.CapTextChat))
-		if err != nil {
-			return internalError(opt, *jsonFlag, err)
-		}
-		if !found || verification.Status != "verified" {
-			detail := "text.chat is declared but unverified"
-			if found && verification.Status == "failed" {
-				detail = "the last text.chat test failed: " + verification.FailureType
-			}
-			return usageError(opt, *jsonFlag, "capability_unverified",
-				fmt.Sprintf("%s/%s: %s; run passquest model test %s/%s before asking",
-					providerID, cfg.Model, detail, providerID, cfg.Model))
+	if hasProvider {
+		if code := requireVerifiedTextChat(st, registry, opt, providerID, cfg.Model, *jsonFlag); code != 0 {
+			return code
 		}
 		env, key, _ = provider.CredentialValue(opt.Getenv, providerID)
 		if key == "" {
@@ -453,20 +414,7 @@ func runTutorAsk(args []string, opt Options) int {
 	}
 	preview.Request.CredentialEnv = env
 
-	call := store.TutorCall{
-		CreatedAt:     now,
-		AttemptID:     record.ID,
-		Mode:          string(mode),
-		Provider:      providerID,
-		ProviderHost:  cfg.ProviderHost(),
-		Model:         cfg.Model,
-		PromptVersion: preview.Context.PromptVersion,
-		SourceID:      preview.Context.SourceID,
-		ContentID:     record.ContentID,
-		QuestionID:    record.QuestionID,
-		RequestSHA256: preview.RequestSHA,
-		RequestBytes:  preview.RequestBytes,
-	}
+	call := tutorCallRecord(record, preview, cfg, mode, providerID, cfg.Model, "", now)
 	sendStarted = true
 	saved, text, failure, ok, code := sendTutorCall(opt, st, call, preview, key, reservation)
 	if code != 0 {
@@ -526,6 +474,27 @@ func budgetLabel(providerID string) string {
 		return "the manual provider"
 	}
 	return providerID
+}
+
+// tutorCallRecord builds one ledger row from the resolved target and preview so
+// the first call and the failover call cannot drift apart when a field is added.
+func tutorCallRecord(record attempt.Attempt, preview tutor.Preview, cfg tutor.Config, mode tutor.Mode,
+	providerID, modelID, failoverFrom string, at time.Time) store.TutorCall {
+	return store.TutorCall{
+		CreatedAt:     at,
+		AttemptID:     record.ID,
+		Mode:          string(mode),
+		Provider:      providerID,
+		ProviderHost:  cfg.ProviderHost(),
+		FailoverFrom:  failoverFrom,
+		Model:         modelID,
+		PromptVersion: preview.Context.PromptVersion,
+		SourceID:      preview.Context.SourceID,
+		ContentID:     record.ContentID,
+		QuestionID:    record.QuestionID,
+		RequestSHA256: preview.RequestSHA,
+		RequestBytes:  preview.RequestBytes,
+	}
 }
 
 // sendTutorCall sends one prepared advisory request and records its outcome.
@@ -637,9 +606,14 @@ func attemptFailover(opt Options, st *store.Store, registry provider.Registry, c
 			keepReason(p.ID, "no_credential", env+" is not set")
 			continue
 		}
-		target, err := loadTutorTargetForProvider(st, record, p.ID)
-		if err != nil {
-			return store.TutorCall{}, "", provider.Failure{}, false, nil, 1
+		target := sourceTarget
+		target.ConsentGranted = false
+		if target.PrivateSource && target.SourceID != "" {
+			event, ok, err := st.TutorConsent(target.SourceID, p.ID)
+			if err != nil {
+				return store.TutorCall{}, "", provider.Failure{}, false, nil, 1
+			}
+			target.ConsentGranted = ok && event.Granted
 		}
 		if consentScopeKey(target) != sourceScope {
 			detail := "consent scope differs"
@@ -670,21 +644,7 @@ func attemptFailover(opt Options, st *store.Store, registry provider.Registry, c
 			keepReason(p.ID, "budget_exhausted", "the target has no provider budget left today")
 			continue
 		}
-		targetCall := store.TutorCall{
-			CreatedAt:     opt.Now(),
-			AttemptID:     record.ID,
-			Mode:          string(mode),
-			Provider:      p.ID,
-			ProviderHost:  targetCfg.ProviderHost(),
-			FailoverFrom:  cfg.Provider,
-			Model:         model.ID,
-			PromptVersion: preview.Context.PromptVersion,
-			SourceID:      preview.Context.SourceID,
-			ContentID:     record.ContentID,
-			QuestionID:    record.QuestionID,
-			RequestSHA256: preview.RequestSHA,
-			RequestBytes:  preview.RequestBytes,
-		}
+		targetCall := tutorCallRecord(record, preview, targetCfg, mode, p.ID, model.ID, cfg.Provider, opt.Now())
 		saved, text, failure, ok, code := sendTutorCall(opt, st, targetCall, preview, key, reservation)
 		if code != 0 {
 			return store.TutorCall{}, "", provider.Failure{}, false, nil, 1
@@ -928,10 +888,7 @@ func writeTutorHistory(w io.Writer, doc tutorHistoryDoc, dbPath string) {
 			case call.SourceID != "":
 				privacy = "source-text-withheld"
 			}
-			providerLabel := call.Provider
-			if providerLabel == "" {
-				providerLabel = "manual"
-			}
+			providerLabel := providerLabelOrManual(call.Provider)
 			if call.FailoverFrom != "" {
 				providerLabel += " (failover from " + call.FailoverFrom + ")"
 			}
@@ -1281,14 +1238,6 @@ func tutorEmbedded(content exam.Exam, questionID string) tutorLoadedContent {
 		return tutorLoadedContent{}
 	}
 	return tutorLoadedContent{Found: true, Content: content, Question: question}
-}
-
-func loadTutorTarget(st *store.Store, record attempt.Attempt) (tutor.Target, error) {
-	cfg, _, err := st.TutorConfig()
-	if err != nil {
-		return tutor.Target{}, err
-	}
-	return loadTutorTargetForProvider(st, record, cfg.Provider)
 }
 
 func loadTutorTargetForProvider(st *store.Store, record attempt.Attempt, providerID string) (tutor.Target, error) {
