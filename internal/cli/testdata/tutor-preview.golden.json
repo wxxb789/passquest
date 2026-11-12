@@ -21,6 +21,7 @@
     "timeout_ms": 30000,
     "max_output_tokens": 350,
     "daily_calls": 20,
+    "auth": "present",
     "credential_env": "PASSQUEST_TUTOR_API_KEY",
     "credential_present": true
   },

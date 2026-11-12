@@ -887,7 +887,7 @@ func TestNoteRefineUsesProviderAndRecordsIt(t *testing.T) {
 	if err != nil || len(refinements) != 1 || refinements[0].Status != "ok" || refinements[0].PromptTokens == nil || *refinements[0].PromptTokens != 10 {
 		t.Fatalf("refinements = %+v, %v", refinements, err)
 	}
-	count, err := st.TutorCallCountSince(tutorDayStart(clock.Now()))
+	count, err := st.TutorCallCountSince("", tutorDayStart(clock.Now()))
 	if err != nil || count != 1 {
 		t.Fatalf("daily count = %d, %v", count, err)
 	}

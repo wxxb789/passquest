@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "providers": [
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "endpoint": "https://api.openai.com/v1/chat/completions",
+      "endpoint_shape": "openai-chat-completions",
+      "credential_env": "PASSQUEST_OPENAI_API_KEY",
+      "models": [
+        {
+          "id": "gpt-4o-mini",
+          "label": "GPT-4o mini",
+          "default": true,
+          "capabilities": ["text.chat", "tool.calls", "vision"]
+        },
+        {
+          "id": "gpt-4o",
+          "label": "GPT-4o",
+          "capabilities": ["text.chat", "tool.calls", "vision"]
+        }
+      ]
+    },
+    {
+      "id": "qwen",
+      "name": "Qwen (DashScope)",
+      "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      "endpoint_shape": "openai-chat-completions",
+      "credential_env": "PASSQUEST_QWEN_API_KEY",
+      "models": [
+        {
+          "id": "qwen-turbo",
+          "label": "Qwen Turbo",
+          "default": true,
+          "capabilities": ["text.chat", "tool.calls"]
+        },
+        {
+          "id": "qwen-plus",
+          "label": "Qwen Plus",
+          "capabilities": ["text.chat", "tool.calls"]
+        }
+      ]
+    },
+    {
+      "id": "doubao",
+      "name": "Doubao (Volcengine Ark)",
+      "endpoint": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      "endpoint_shape": "openai-chat-completions",
+      "credential_env": "PASSQUEST_DOUBAO_API_KEY",
+      "models": [
+        {
+          "id": "doubao-lite-32k",
+          "label": "Doubao Lite 32K",
+          "default": true,
+          "capabilities": ["text.chat", "tool.calls"]
+        },
+        {
+          "id": "doubao-pro-32k",
+          "label": "Doubao Pro 32K",
+          "capabilities": ["text.chat", "tool.calls"]
+        }
+      ]
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "endpoint": "https://api.deepseek.com/v1/chat/completions",
+      "endpoint_shape": "openai-chat-completions",
+      "credential_env": "PASSQUEST_DEEPSEEK_API_KEY",
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "label": "DeepSeek Chat",
+          "default": true,
+          "capabilities": ["text.chat", "tool.calls"]
+        },
+        {
+          "id": "deepseek-reasoner",
+          "label": "DeepSeek Reasoner",
+          "capabilities": ["text.chat"]
+        }
+      ]
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini (OpenAI compatibility)",
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "endpoint_shape": "openai-chat-completions",
+      "credential_env": "PASSQUEST_GEMINI_API_KEY",
+      "models": [
+        {
+          "id": "gemini-2.5-flash",
+          "label": "Gemini 2.5 Flash",
+          "default": true,
+          "capabilities": ["text.chat", "tool.calls", "vision"]
+        },
+        {
+          "id": "gemini-2.5-pro",
+          "label": "Gemini 2.5 Pro",
+          "capabilities": ["text.chat", "tool.calls", "vision"]
+        }
+      ]
+    },
+    {
+      "id": "custom",
+      "name": "Custom compatible endpoint",
+      "endpoint": "",
+      "endpoint_shape": "openai-chat-completions",
+      "credential_env": "PASSQUEST_CUSTOM_API_KEY",
+      "custom": true,
+      "models": []
+    }
+  ]
+}

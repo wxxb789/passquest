@@ -56,9 +56,10 @@ per-request output tokens are fixed before the run. Provider-request count is at
 The packet contains no passage, stem, option, evidence, reasoning, title, path, content id, question
 id, answer key or learner identity. Imported source text is not read into the packet at all. The Pi
 store holds the prompt, attempt facts, authored lesson text and model output; it is `0600` on POSIX
-and next to the application database. The provider credential is read only from
-`PASSQUEST_TUTOR_API_KEY` by the host, is never in the request document, and is removed from the
-`record-step` child's environment.
+and next to the application database. The provider credential is read by the host from the active
+provider's variable (`PASSQUEST_OPENAI_API_KEY`, …) or `PASSQUEST_TUTOR_API_KEY` for a legacy manual
+configuration. It is never in the request document and is removed from the `record-step` child's
+environment. See [providers.md](providers.md#credentials).
 
 ## Runtime and provider
 
@@ -66,11 +67,17 @@ and next to the application database. The provider credential is read only from
   `@earendil-works/pi-ai`, `@earendil-works/chord` and `@earendil-works/pi-schema`, all pinned exactly
   in `agent/package.json`. `bun install` at the repository root installs the workspace.
 - The provider is the goal-0005 `tutor_config`: one OpenAI-compatible endpoint, model, timeout and
-  output bound. The endpoint must end in `/chat/completions`; `https` is required except on loopback
-  (`localhost`, `127.0.0.1` or `[::1]`, which the Go validator and the Node host both accept).
-- A run is bound to the model recorded at `start`. `resume` uses that model with the current endpoint,
-  timeout and credential. Changing the model name needs `cancel` + `start`; a changed endpoint or fixed
-  credential is picked up by `resume`.
+  output bound. A registry-selected provider supplies its endpoint; a custom provider keeps the
+  learner's endpoint. The endpoint must end in `/chat/completions`; `https` is required except on
+  loopback (`localhost`, `127.0.0.1` or `[::1]`, which the Go validator and the Node host both
+  accept).
+- `agent start` requires `text.chat = verified` for a registry-selected model (`passquest model test
+  <provider>/<model>`); the legacy hand-configured path is unchanged. A run records the provider and
+  the model. `resume` uses that recorded pair with the current timeout and credential; switching
+  providers between start and resume does not silently move the run to the new model. A custom
+  provider run requires the custom endpoint to be selected again before resume.
+- Agent runs never fail over to another provider. Goal 0006's recorded-model rule is stronger than a
+  silent mid-run switch; `resume` is the retry mechanism.
 - There is one run at a time per application database. A second `start` while any run is unfinished is
   refused with `agent_busy`, because two Pi hosts writing one store is unsupported.
 - One conversation per run. A session-scoped Pi document maps `run_id` → `conversation_id` and is

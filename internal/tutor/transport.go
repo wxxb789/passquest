@@ -39,6 +39,35 @@ func (t HostTransport) environ() []string {
 	return os.Environ()
 }
 
+func (t HostTransport) environFor(req HostRequest) []string {
+	env := t.environ()
+	envName := strings.TrimSpace(req.CredentialEnv)
+	if envName == "" || envName == CredentialEnv {
+		return env
+	}
+	value := strings.TrimSpace(t.getenv(envName))
+	if value == "" {
+		return env
+	}
+	out := make([]string, 0, len(env)+1)
+	prefix := CredentialEnv + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, prefix+value)
+}
+
+func (t HostTransport) credentialFor(req HostRequest) string {
+	envName := strings.TrimSpace(req.CredentialEnv)
+	if envName == "" {
+		envName = CredentialEnv
+	}
+	return strings.TrimSpace(t.getenv(envName))
+}
+
 func (t HostTransport) getwd() (string, error) {
 	if t.Getwd != nil {
 		return t.Getwd()
@@ -137,7 +166,7 @@ func (t HostTransport) Call(ctx context.Context, req HostRequest) (HostResponse,
 	defer cancel()
 
 	cmd := exec.CommandContext(callCtx, node, host)
-	cmd.Env = t.environ()
+	cmd.Env = t.environFor(req)
 	cmd.Stdin = bytes.NewReader(payload)
 	var stdout, stderr limitedBuffer
 	stdout.limit = MaxHostResponseByte
@@ -146,7 +175,7 @@ func (t HostTransport) Call(ctx context.Context, req HostRequest) (HostResponse,
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = 2 * time.Second
 
-	key := strings.TrimSpace(t.getenv(CredentialEnv))
+	key := t.credentialFor(req)
 	runErr := cmd.Run()
 	if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
 		return HostResponse{}, fmt.Errorf("tutor: agent host did not finish within %d ms", req.TimeoutMS+5000)

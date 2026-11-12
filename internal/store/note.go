@@ -310,6 +310,7 @@ type NoteRefinement struct {
 	Status           string
 	ErrorCode        string
 	ErrorMessage     string
+	Provider         string
 	ProviderHost     string
 	Model            string
 	PromptVersion    string
@@ -856,10 +857,11 @@ func (s *Store) RecordAnkiAttempt(a AnkiAttempt) error {
 // ReserveNoteRefinement claims one slot in the shared daily provider budget.
 // It uses the tutor reservation table, so a tutor ask and a note refinement
 // cannot both pass the same limit.
-func (s *Store) ReserveNoteRefinement(since, at time.Time, limit int) (int64, int, error) {
+func (s *Store) ReserveNoteRefinement(providerID string, since, at time.Time, limit int) (int64, int, error) {
 	if limit <= 0 {
 		return 0, 0, errors.New("store: provider daily call limit must be positive")
 	}
+	providerID = strings.TrimSpace(providerID)
 	boundary := since.UTC().Format(time.RFC3339Nano)
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -868,17 +870,18 @@ func (s *Store) ReserveNoteRefinement(since, at time.Time, limit int) (int64, in
 	defer tx.Rollback()
 	var used int
 	if err := tx.QueryRow(`SELECT
-			(SELECT COUNT(*) FROM tutor_calls WHERE julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM tutor_call_reservations WHERE julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM note_refinements WHERE julianday(created_at) >= julianday(?))`,
-		boundary, boundary, boundary).Scan(&used); err != nil {
+			(SELECT COUNT(*) FROM tutor_calls WHERE provider = ? AND julianday(created_at) >= julianday(?)) +
+			(SELECT COUNT(*) FROM tutor_call_reservations WHERE provider = ? AND julianday(created_at) >= julianday(?)) +
+			(SELECT COUNT(*) FROM note_refinements WHERE provider = ? AND julianday(created_at) >= julianday(?)) +
+			(SELECT COUNT(*) FROM provider_verification_events WHERE provider = ? AND call_made = 1 AND julianday(checked_at) >= julianday(?))`,
+		providerID, boundary, providerID, boundary, providerID, boundary, providerID, boundary).Scan(&used); err != nil {
 		return 0, 0, fmt.Errorf("store: count provider budget: %w", err)
 	}
 	if used >= limit {
 		return 0, used, nil
 	}
-	res, err := tx.Exec(`INSERT INTO tutor_call_reservations (created_at) VALUES (?)`,
-		at.UTC().Format(time.RFC3339Nano))
+	res, err := tx.Exec(`INSERT INTO tutor_call_reservations (provider, created_at) VALUES (?, ?)`,
+		providerID, at.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return 0, 0, fmt.Errorf("store: reserve refinement: %w", err)
 	}
@@ -918,13 +921,14 @@ func (s *Store) FinalizeNoteRefinement(r NoteRefinement, reservationID int64) (N
 		return NoteRefinement{}, fmt.Errorf("store: refinement reservation %d is not held", reservationID)
 	}
 	res, err := tx.Exec(`INSERT INTO note_refinements (
-			draft_id, created_at, status, error_code, error_message, provider_host, model, prompt_version,
+			draft_id, created_at, status, error_code, error_message, provider, provider_host, model, prompt_version,
 			request_sha256, request_bytes, output_front, output_back, prompt_tokens, completion_tokens,
 			http_status, latency_ms
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.DraftID, r.CreatedAt.UTC().Format(time.RFC3339Nano), r.Status, r.ErrorCode, r.ErrorMessage,
-		r.ProviderHost, r.Model, r.PromptVersion, r.RequestSHA256, r.RequestBytes, r.OutputFront,
-		r.OutputBack, nullableInt(r.PromptTokens), nullableInt(r.CompletionTokens), r.HTTPStatus, r.LatencyMS)
+		r.Provider, r.ProviderHost, r.Model, r.PromptVersion, r.RequestSHA256, r.RequestBytes,
+		r.OutputFront, r.OutputBack, nullableInt(r.PromptTokens), nullableInt(r.CompletionTokens),
+		r.HTTPStatus, r.LatencyMS)
 	if err != nil {
 		return NoteRefinement{}, fmt.Errorf("store: append refinement: %w", err)
 	}
@@ -990,7 +994,7 @@ func validateNoteRefinement(r NoteRefinement) error {
 // NoteRefinements returns recorded refinements in insertion order.
 func (s *Store) NoteRefinements() ([]NoteRefinement, error) {
 	rows, err := s.db.Query(`SELECT id, draft_id, created_at, status, error_code, error_message,
-			provider_host, model, prompt_version, request_sha256, request_bytes, output_front,
+			provider, provider_host, model, prompt_version, request_sha256, request_bytes, output_front,
 			output_back, prompt_tokens, completion_tokens, http_status, latency_ms
 		FROM note_refinements ORDER BY id`)
 	if err != nil {
@@ -1006,7 +1010,7 @@ func (s *Store) NoteRefinements() ([]NoteRefinement, error) {
 			completionTokens sql.NullInt64
 		)
 		if err := rows.Scan(&r.ID, &r.DraftID, &created, &r.Status, &r.ErrorCode, &r.ErrorMessage,
-			&r.ProviderHost, &r.Model, &r.PromptVersion, &r.RequestSHA256, &r.RequestBytes,
+			&r.Provider, &r.ProviderHost, &r.Model, &r.PromptVersion, &r.RequestSHA256, &r.RequestBytes,
 			&r.OutputFront, &r.OutputBack, &promptTokens, &completionTokens, &r.HTTPStatus, &r.LatencyMS); err != nil {
 			return nil, fmt.Errorf("store: scan refinement: %w", err)
 		}

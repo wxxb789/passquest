@@ -49,7 +49,7 @@ func sampleTutorCall() TutorCall {
 // production pairing.
 func appendTutorCall(t *testing.T, st *Store, call TutorCall) (TutorCall, error) {
 	t.Helper()
-	reservation, _, err := st.ReserveTutorCall(
+	reservation, _, err := st.ReserveTutorCall("",
 		time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC), call.CreatedAt, 200)
 	if err != nil {
 		return TutorCall{}, err
@@ -185,18 +185,18 @@ func TestTutorConsentLatestWinsAndIsAppendOnly(t *testing.T) {
 	if _, err := st.AppendTutorConsent(TutorConsentEvent{SourceID: "src-a", Granted: false, Reviewer: "owner", At: base.Add(time.Second)}); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
-	latest, ok, err := st.TutorConsent("src-a")
+	latest, ok, err := st.TutorConsent("src-a", "")
 	if err != nil || !ok || latest.Granted {
 		t.Fatalf("latest consent = %+v, ok %v, err %v", latest, ok, err)
 	}
 	if _, err := st.AppendTutorConsent(TutorConsentEvent{SourceID: "src-a", Granted: true, Reviewer: "owner", At: base.Add(2 * time.Second)}); err != nil {
 		t.Fatalf("second grant: %v", err)
 	}
-	latest, _, err = st.TutorConsent("src-a")
+	latest, _, err = st.TutorConsent("src-a", "")
 	if err != nil || !latest.Granted || latest.Reviewer != "owner" {
 		t.Fatalf("latest consent = %+v, err %v", latest, err)
 	}
-	if _, ok, err := st.TutorConsent("src-missing"); err != nil || ok {
+	if _, ok, err := st.TutorConsent("src-missing", ""); err != nil || ok {
 		t.Fatalf("missing consent = ok %v, err %v", ok, err)
 	}
 	consents, err := st.TutorConsents()
@@ -290,7 +290,7 @@ func TestTutorCallCountSinceUsesTheDayBoundary(t *testing.T) {
 	if _, err := appendTutorCall(t, st, late); err != nil {
 		t.Fatal(err)
 	}
-	count, err := st.TutorCallCountSince(time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC))
+	count, err := st.TutorCallCountSince("", time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC))
 	if err != nil || count != 2 {
 		t.Fatalf("count = %d, err %v; want 2", count, err)
 	}
@@ -301,15 +301,15 @@ func TestTutorReservationCountsInFlightCallsAndFinalizeReplacesIt(t *testing.T) 
 	day := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
 	at := day.Add(9 * time.Hour)
 
-	first, used, err := st.ReserveTutorCall(day, at, 2)
+	first, used, err := st.ReserveTutorCall("", day, at, 2)
 	if err != nil || first == 0 || used != 1 {
 		t.Fatalf("first reservation = %d, %d, %v; want a slot and count 1", first, used, err)
 	}
-	second, used, err := st.ReserveTutorCall(day, at, 2)
+	second, used, err := st.ReserveTutorCall("", day, at, 2)
 	if err != nil || second == 0 || used != 2 {
 		t.Fatalf("second reservation = %d, %d, %v; want a slot and count 2", second, used, err)
 	}
-	if refused, used, err := st.ReserveTutorCall(day, at, 2); err != nil || refused != 0 || used != 2 {
+	if refused, used, err := st.ReserveTutorCall("", day, at, 2); err != nil || refused != 0 || used != 2 {
 		t.Fatalf("in-flight reservations did not consume the budget: %d, %d, %v", refused, used, err)
 	}
 
@@ -318,17 +318,17 @@ func TestTutorReservationCountsInFlightCallsAndFinalizeReplacesIt(t *testing.T) 
 	if _, err := st.FinalizeTutorCall(call, first); err != nil {
 		t.Fatalf("FinalizeTutorCall: %v", err)
 	}
-	if count, err := st.TutorCallCountSince(day); err != nil || count != 1 {
+	if count, err := st.TutorCallCountSince("", day); err != nil || count != 1 {
 		t.Fatalf("recorded calls = %d, %v; want 1", count, err)
 	}
 	// The recorded call replaces its reservation rather than adding to it.
-	if refused, used, err := st.ReserveTutorCall(day, at, 2); err != nil || refused != 0 || used != 2 {
+	if refused, used, err := st.ReserveTutorCall("", day, at, 2); err != nil || refused != 0 || used != 2 {
 		t.Fatalf("finalize left the budget inconsistent: %d, %d, %v", refused, used, err)
 	}
 	if err := st.ReleaseTutorCallReservation(second); err != nil {
 		t.Fatalf("ReleaseTutorCallReservation: %v", err)
 	}
-	third, used, err := st.ReserveTutorCall(day, at, 2)
+	third, used, err := st.ReserveTutorCall("", day, at, 2)
 	if err != nil || third == 0 || used != 2 {
 		t.Fatalf("released slot was not reusable: %d, %d, %v", third, used, err)
 	}
@@ -356,7 +356,7 @@ func TestTutorReservationsAreAtomicAcrossHandles(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			ids[i], _, errs[i] = st.ReserveTutorCall(day, at, 1)
+			ids[i], _, errs[i] = st.ReserveTutorCall("", day, at, 1)
 		}()
 	}
 	close(start)
@@ -382,14 +382,14 @@ func TestTutorReservationsAreAtomicAcrossHandles(t *testing.T) {
 	if _, err := stores[holder].FinalizeTutorCall(call, ids[holder]); err != nil {
 		t.Fatalf("FinalizeTutorCall: %v", err)
 	}
-	if count, err := stores[0].TutorCallCountSince(day); err != nil || count != 1 {
+	if count, err := stores[0].TutorCallCountSince("", day); err != nil || count != 1 {
 		t.Fatalf("recorded calls = %d, %v; want 1", count, err)
 	}
 }
 
 func TestFinalizeTutorCallRejectsMalformedRecords(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "invalid.sqlite"))
-	reservation, _, err := st.ReserveTutorCall(
+	reservation, _, err := st.ReserveTutorCall("",
 		time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC), sampleTutorCall().CreatedAt, 200)
 	if err != nil {
 		t.Fatalf("ReserveTutorCall: %v", err)

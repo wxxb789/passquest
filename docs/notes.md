@@ -231,8 +231,9 @@ font, stylesheet, script, image or URL. `note model` prints the whole template a
 - Pass Quest never contacts AnkiWeb or a phone. Synchronization is the learner's own manual action in
   Anki, and no output claims otherwise.
 - No Anki clone, own scheduling, `.apkg`, images, audio, AnkiWeb API calls or mobile apps.
-- `--refine` sends one provider request through the goal-0005 endpoint and shared daily budget. The
-  deterministic draft never needs a provider. Refined text is labelled advisory; the learner accepts
+- `--refine` sends one provider request through the configured/selected provider and its per-provider
+  daily budget. The deterministic draft never needs a provider. Refined text is labelled advisory;
+  the learner accepts
   it explicitly. A refinement that would reproduce an unanswered question's key is rejected and the
   deterministic draft stays available.
 - `export` is a fallback, not a revision channel; re-importing an edited export may duplicate cards.

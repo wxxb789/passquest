@@ -10,6 +10,7 @@ import (
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/note"
+	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/tutor"
@@ -85,7 +86,11 @@ func noteDraftFor(st *store.Store, id int64) (store.NoteDraft, error) {
 // consentGranted reports whether the latest recorded consent for a source is a
 // grant. A lookup error is treated as no consent.
 func consentGranted(st *store.Store, sourceID string) bool {
-	event, ok, err := st.TutorConsent(sourceID)
+	providerID := ""
+	if cfg, configured, err := st.TutorConfig(); err == nil && configured {
+		providerID = cfg.Provider
+	}
+	event, ok, err := st.TutorConsent(sourceID, providerID)
 	return err == nil && ok && event.Granted
 }
 
@@ -652,13 +657,13 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 		return draft, nil, usageError(opt, jsonMode, "not_configured",
 			"no tutor provider is configured; run passquest tutor config --endpoint URL --model NAME, or omit --refine")
 	}
-	key := strings.TrimSpace(opt.Getenv(tutor.CredentialEnv))
-	if key == "" {
-		return draft, nil, usageError(opt, jsonMode, "missing_credential",
-			fmt.Sprintf("%s is not set; export it in this environment (it is never stored)", tutor.CredentialEnv))
+	env, key, present := provider.CredentialValue(opt.Getenv, cfg.Provider)
+	if !present {
+		return draft, nil, usageError(opt, jsonMode, "no_credential",
+			fmt.Sprintf("%s is not set; export it in this environment (it is never stored)", env))
 	}
 	now := opt.Now()
-	reservation, used, err := st.ReserveNoteRefinement(tutorDayStart(now), now, cfg.DailyCalls)
+	reservation, used, err := st.ReserveNoteRefinement(cfg.Provider, tutorDayStart(now), now, cfg.DailyCalls)
 	if err != nil {
 		return draft, nil, internalError(opt, jsonMode, err)
 	}
@@ -692,10 +697,12 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 	if err != nil {
 		return draft, nil, usageError(opt, jsonMode, "invalid_config", err.Error())
 	}
+	request.CredentialEnv = env
 	sha, bytes := note.RequestIdentity(request.Body)
 	record := store.NoteRefinement{
 		DraftID:       draft.ID,
 		CreatedAt:     now,
+		Provider:      cfg.Provider,
 		ProviderHost:  cfg.ProviderHost(),
 		Model:         cfg.Model,
 		PromptVersion: note.PromptVersion,

@@ -74,6 +74,7 @@ func (m Mode) Valid() bool {
 // Config is the non-secret provider configuration stored in the local
 // database. It never contains a credential.
 type Config struct {
+	Provider        string `json:"provider,omitempty"`
 	Endpoint        string `json:"endpoint"`
 	Model           string `json:"model"`
 	TimeoutMS       int64  `json:"timeout_ms"`
@@ -194,6 +195,10 @@ type HostRequest struct {
 	MaxResponseChars int    `json:"max_response_chars"`
 	Chat             Chat   `json:"chat"`
 	Body             string `json:"body"`
+	// CredentialEnv selects the environment variable the transport copies into
+	// the host's documented credential slot. It is transport metadata, never
+	// part of the provider request document.
+	CredentialEnv string `json:"-"`
 }
 
 // Usage is provider-reported token accounting. It is optional because a
@@ -546,6 +551,46 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 			PromptVersion:               PromptVersion,
 		},
 	}, nil
+}
+
+// ProbeRequest builds one minimal non-streaming chat request for a capability
+// check. It is the same host document tutor ask uses, with the smallest
+// authored prompt and output bound the host accepts.
+func ProbeRequest(endpoint, model string, timeoutMS int64) (HostRequest, string, int, error) {
+	cfg := Config{
+		Endpoint:        endpoint,
+		Model:           model,
+		TimeoutMS:       timeoutMS,
+		MaxOutputTokens: MinMaxTokens,
+		DailyCalls:      1,
+	}
+	if err := cfg.Validate(); err != nil {
+		return HostRequest{}, "", 0, err
+	}
+	chat := Chat{
+		Model: strings.TrimSpace(model),
+		Messages: []Message{
+			{Role: "system", Content: "You are a model capability probe. Reply with the two letters OK and nothing else."},
+			{Role: "user", Content: "Capability check: text.chat. Reply OK."},
+		},
+		MaxTokens:   MinMaxTokens,
+		Temperature: 0,
+		Stream:      false,
+	}
+	encoded, err := json.Marshal(chat)
+	if err != nil {
+		return HostRequest{}, "", 0, fmt.Errorf("tutor: encode probe: %w", err)
+	}
+	sum := sha256.Sum256(encoded)
+	request := HostRequest{
+		ProtocolVersion:  ProtocolVersion,
+		Endpoint:         strings.TrimSpace(endpoint),
+		TimeoutMS:        cfg.TimeoutMS,
+		MaxResponseChars: MaxResponseChars,
+		Chat:             chat,
+		Body:             string(encoded),
+	}
+	return request, hex.EncodeToString(sum[:]), len(encoded), nil
 }
 
 func attemptLine(target Target) string {

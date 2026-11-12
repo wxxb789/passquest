@@ -198,7 +198,7 @@ func TestNoteRefinementSharesTheDailyBudget(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	now := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
 	day := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
-	reservation, used, err := st.ReserveNoteRefinement(day, now, 2)
+	reservation, used, err := st.ReserveNoteRefinement("", day, now, 2)
 	if err != nil || reservation == 0 || used != 1 {
 		t.Fatalf("first reserve = %d, %d, %v", reservation, used, err)
 	}
@@ -211,17 +211,17 @@ func TestNoteRefinementSharesTheDailyBudget(t *testing.T) {
 	if err != nil || saved.ID == 0 {
 		t.Fatalf("finalize = %+v, %v", saved, err)
 	}
-	if count, err := st.TutorCallCountSince(day); err != nil || count != 1 {
+	if count, err := st.TutorCallCountSince("", day); err != nil || count != 1 {
 		t.Fatalf("shared daily count = %d, %v", count, err)
 	}
-	reservation, used, err = st.ReserveNoteRefinement(day, now, 2)
+	reservation, used, err = st.ReserveNoteRefinement("", day, now, 2)
 	if err != nil || reservation == 0 || used != 2 {
 		t.Fatalf("second reserve = %d, %d, %v", reservation, used, err)
 	}
 	if err := st.ReleaseTutorCallReservation(reservation); err != nil {
 		t.Fatal(err)
 	}
-	if _, used, err := st.ReserveNoteRefinement(day, now, 1); err != nil || used != 1 {
+	if _, used, err := st.ReserveNoteRefinement("", day, now, 1); err != nil || used != 1 {
 		t.Fatalf("limit-1 reserve after finalize = %d, %v", used, err)
 	}
 	if rows, err := st.NoteRefinements(); err != nil || len(rows) != 1 {
@@ -236,7 +236,7 @@ func TestTutorReservationCountsFinalizedRefinements(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "shared-budget.sqlite"))
 	now := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
 	day := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
-	reservation, _, err := st.ReserveNoteRefinement(day, now, 2)
+	reservation, _, err := st.ReserveNoteRefinement("", day, now, 2)
 	if err != nil {
 		t.Fatalf("reserve refinement: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestTutorReservationCountsFinalizedRefinements(t *testing.T) {
 	if _, err := st.FinalizeNoteRefinement(refinement, reservation); err != nil {
 		t.Fatalf("finalize refinement: %v", err)
 	}
-	if refused, used, err := st.ReserveTutorCall(day, now, 1); err != nil || refused != 0 || used != 1 {
+	if refused, used, err := st.ReserveTutorCall("", day, now, 1); err != nil || refused != 0 || used != 1 {
 		t.Fatalf("tutor reservation after a refinement = %d, %d, %v; want a refusal at 1", refused, used, err)
 	}
 }

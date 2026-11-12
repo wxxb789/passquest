@@ -5,13 +5,15 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 ## Design and development
 
 - [Core Design](docs/core-design.md) — product purpose, safety, quality and architecture principles.
-- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0009
-  are done; 0010 is active.
+- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0010
+  are done; 0011 is provisional.
 - [Harness](docs/harness.md) — the single `bun run gate` entry point and what each gate reads.
 - [Cross-platform rules](docs/cross-platform.md) — Windows, macOS and Linux: paths, processes, mode
   bits, goldens, and the path literals the `portable-paths` gate refuses.
 - [BYOK text tutor](docs/tutor.md) — one user-supplied text endpoint, advisory coaching, private
   source consent and credential handling.
+- [Provider and model choice](docs/providers.md) — a versioned registry, four separate axes,
+  capability verification, per-provider budgets and bounded consent-equal failover.
 - [Durable agent work](docs/agent.md) — a bounded multi-step study brief on the Pi Durable runtime,
   with pause/resume, cancellation, idempotent steps and an independent durable history.
 - [Anki notes](docs/notes.md) — a deterministic note from a stored attempt or a learner mark,
@@ -122,6 +124,28 @@ and records `tutor consent SOURCE --reviewer NAME`; first-party exercises need n
 `revoke` appends a withholding event. Credentials are read only from `PASSQUEST_TUTOR_API_KEY` and
 are redacted from output and stored call records. Details: [`docs/tutor.md`](docs/tutor.md).
 Measured evidence: [`docs/evidence/0005-bring-your-own-text-tutor.md`](docs/evidence/0005-bring-your-own-text-tutor.md).
+
+## Choose a provider and model
+
+Goal 0010 replaces one hand-typed endpoint with a versioned registry of OpenAI, Qwen, Doubao,
+DeepSeek, Gemini and a custom OpenAI-compatible endpoint. Provider, model, capability and
+authorization are separate columns; a missing key prints `no_credential`, never "unsupported".
+
+```bash
+passquest model list
+passquest model use deepseek/deepseek-chat
+passquest model test deepseek/deepseek-chat
+passquest model budget
+```
+
+`model test` makes one minimal call and records `verified` or `failed:<type>` with a timestamp.
+`tutor ask` and `agent start` require a verified `text.chat` for a registry-selected model. The daily
+budget is counted per provider, so the printed sum is the real ceiling (`providers × limit`).
+`tutor ask` may retry once on another provider only when that target is verified, has budget and has
+an exactly equal consent scope; the line `failover: <from> → <to> (reason: <type>)` is printed and
+recorded. Private source text never moves to a provider with a wider consent scope. Details:
+[`docs/providers.md`](docs/providers.md). Measured evidence:
+[`docs/evidence/0010-provider-choice-and-optional-capabilities.md`](docs/evidence/0010-provider-choice-and-optional-capabilities.md).
 
 ## Resume agent work after interruption
 

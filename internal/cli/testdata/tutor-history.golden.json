@@ -8,7 +8,61 @@
     "prompt_tokens": 120,
     "completion_tokens": 30,
     "daily_calls": 2,
-    "daily_limit": 20
+    "daily_limit": 20,
+    "providers": [
+      {
+        "provider": "",
+        "label": "unattributed (legacy)",
+        "calls": 2,
+        "limit": 20,
+        "active": true
+      },
+      {
+        "provider": "openai",
+        "label": "OpenAI",
+        "calls": 0,
+        "limit": 20,
+        "active": false
+      },
+      {
+        "provider": "qwen",
+        "label": "Qwen (DashScope)",
+        "calls": 0,
+        "limit": 20,
+        "active": false
+      },
+      {
+        "provider": "doubao",
+        "label": "Doubao (Volcengine Ark)",
+        "calls": 0,
+        "limit": 20,
+        "active": false
+      },
+      {
+        "provider": "deepseek",
+        "label": "DeepSeek",
+        "calls": 0,
+        "limit": 20,
+        "active": false
+      },
+      {
+        "provider": "gemini",
+        "label": "Gemini (OpenAI compatibility)",
+        "calls": 0,
+        "limit": 20,
+        "active": false
+      },
+      {
+        "provider": "legacy",
+        "label": "Manual tutor configuration",
+        "calls": 0,
+        "limit": 20,
+        "active": false
+      }
+    ],
+    "total_calls": 2,
+    "total_limit": 120,
+    "ceiling": "6 providers × 20 = 120"
   },
   "calls": [
     {

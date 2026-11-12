@@ -23,6 +23,7 @@ import { importSmoke } from "./import-smoke.ts";
 import { localOnly } from "./local-only.ts";
 import { noteSmoke } from "./note-smoke.ts";
 import { portablePaths } from "./portable-paths.ts";
+import { providerSmoke } from "./provider-smoke.ts";
 import { secrets } from "./secrets.ts";
 import { tacticSmoke } from "./tactic-smoke.ts";
 import { tutorSmoke } from "./tutor-smoke.ts";
@@ -491,6 +492,14 @@ function brokenCases(): BrokenCase[] {
     {
       gate: assessSmoke,
       label: "CLI whose assess output is not the protocol",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
+      },
+    },
+    {
+      gate: providerSmoke,
+      label: "CLI whose model output is not the protocol",
       files: {
         "go.mod": GO_MOD,
         "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
