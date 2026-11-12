@@ -124,6 +124,7 @@ type assessSkillView struct {
 }
 
 type assessAnnotationView struct {
+	Withheld        bool                `json:"withheld,omitempty"`
 	Available       bool                `json:"available"`
 	Evidence        string              `json:"evidence,omitempty"`
 	Reasoning       string              `json:"reasoning,omitempty"`
@@ -364,6 +365,7 @@ func reportItemViewOf(item assess.ItemReport) assessReportItemView {
 		Scored:      item.Scored,
 		Reasons:     append([]string(nil), item.Reasons...),
 		Annotations: assessAnnotationView{
+			Withheld:        item.Annotations.Withheld,
 			Available:       item.Annotations.Evidence != "" || item.Annotations.Reasoning != "" || len(item.Annotations.Glossary) > 0 || len(item.Annotations.OptionReasoning) > 0,
 			Evidence:        item.Annotations.Evidence,
 			Reasoning:       item.Annotations.Reasoning,
@@ -483,6 +485,9 @@ func writeAssessmentSummary(w io.Writer, doc assessmentRunResultDoc, dbPath stri
 func writeAssessmentReport(w io.Writer, doc assessReportDoc, dbPath string) {
 	fmt.Fprintf(w, "Pass Quest — unseen assessment report (run %d)\n", doc.Run.ID)
 	fmt.Fprintf(w, "Status: %s\n", doc.Run.Status)
+	if doc.Run.Status == assess.StatusActive {
+		fmt.Fprintf(w, "Annotations: withheld until the run is finished (run %d is active)\n", doc.Run.ID)
+	}
 	fmt.Fprintf(w, "Window: %d minute(s); per-item timeout: %d ms; annotations: %s\n",
 		doc.Run.WindowMinutes, doc.Run.PerItemTimeoutMS, doc.Run.Annotations)
 	fmt.Fprintf(w, "Selected: %d; presented: %d; finalized: %d; scored: %d; contaminated: %d; pending: %d; unavailable: %d\n",
@@ -539,6 +544,14 @@ func writeAssessmentReport(w io.Writer, doc assessReportDoc, dbPath string) {
 		}
 		fmt.Fprintf(w, "  #%d %s/%s  %s  %d ms%s\n",
 			item.Position+1, item.ContentID, item.QuestionID, displayItemState(item), item.ElapsedMS, suffix)
+		if item.Annotations.Withheld {
+			if doc.Run.Status == assess.StatusActive {
+				fmt.Fprintln(w, "    Annotations: withheld (run is still active)")
+			} else {
+				fmt.Fprintln(w, "    Annotations: withheld (item was never finalized)")
+			}
+			continue
+		}
 		if !item.Annotations.Available {
 			fmt.Fprintln(w, "    Annotations: unavailable (content changed or is no longer practiceable)")
 			continue

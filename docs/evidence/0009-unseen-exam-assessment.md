@@ -1,8 +1,9 @@
 # 0009 — Show defensible independent exam readiness: evidence
 
 - Tree: working tree on top of `fda985eccd1ea521c5de9061efea09be9c37c513` (`docs(0009,0010):
-  activate both contracts with the owner's decisions`). The operator owns the commit; this run did
-  not commit, push or open a pull request.
+  activate both contracts with the owner's decisions`), then PR #18 head `0821bd2` plus the
+  review-round fixes for `findings-review-1.md`. The operator owns the commit; this run did not
+  commit, push or open a pull request.
 - Date: 2026-11-12. Host: Linux 7.0.0-1017-azure x64.
 - Toolchain: Go 1.27.3; Node v22.23.2; Bun 1.4.4.
 - Contract: [`../goals/archive/0009-unseen-exam-assessment.md`](../goals/archive/0009-unseen-exam-assessment.md).
@@ -22,7 +23,7 @@ added to the repository. The demonstration databases and JSON documents stayed u
 | `internal/cli` | `assess pool/start/resume/abandon/report/compare`, the interactive and blind-batch run loop, the coaching guard, source/next presentation recording, and the human/JSON documents. |
 | `internal/attempt` | `AssistanceNone`, `AssessmentRunID`, `WithAssessment` and `IndependentEvidence`; assessment answers remain ordinary append-only attempts. |
 | `internal/exam`, `internal/source` | The optional bounded glossary and its validation, storage and carry-through into practice content. |
-| `harness/gates/assess-smoke.ts` | Real CLI, generated reviewed source, 259 assertions over the nine acceptance rows. |
+| `harness/gates/assess-smoke.ts` | Real CLI, generated reviewed source, 275 assertions over the nine acceptance rows, including active-run annotation withholding and a page shown before any question was authored. |
 
 ## Acceptance
 
@@ -31,7 +32,7 @@ added to the repository. The demonstration databases and JSON documents stayed u
 | 1 | Only unseen content units enter a pool | `assess pool` on a 40-page source reported 43 items / 40 units; one practice on page 1 reported 39 items / 39 units, page 1 `spent by attempt,practice` with 4 questions, page 2 still unseen. `assess-smoke` asserts the same drop and the fresh unit. |
 | 2 | A run cannot consult coaching | an interrupted run left active; `tutor history`, `skill show` and `find` each exited **2** with `{"error":{"code":"assessment_active",...}}`; `assess-smoke` asserts all three. |
 | 3 | Timing is measured, not asserted | every run item carries a stored `elapsed_ms`; a real `(sleep 3.2; yes B \| head -20)` run with `--size 20 --minutes 1` recorded 1 timed-out item at exactly `3000 ms` and `timed out 1`. |
-| 4 | Annotations are withheld and later visible | the human run transcript shows the passage, stem and options but no reasoning, option reasoning or glossary; `assess report` prints `Evidence`, `Reasoning`, both option explanations and `Glossary: closes — shuts`. |
+| 4 | Annotations are withheld and later visible | the human run transcript shows the passage, stem and options but no reasoning, option reasoning or glossary; a completed run's `assess report` prints `Evidence`, `Reasoning`, both option explanations and `Glossary: closes — shuts`. While the run is still `active`, the report prints `Annotations: withheld until the run is finished (run 1 is active)` and each item says `Annotations: withheld (run is still active)`; JSON carries `"withheld": true` and no annotation key. Abandoning a run withholds every unfinalized item. `assess-smoke` asserts the active-run withholding. |
 | 5 | Contamination is visible, not averaged away | a `show SOURCE --page 15` during a run produced `scored: 19; contaminated: 1`, `prior_exposure: 1`, and item `#18 …p015/p15-q1 … reasons prior_exposure`; the headline was 19/19, not 20/20. |
 | 6 | Comparison refuses unlike runs | `assess compare 1 2` exited **2** with `window_minutes differs (60 vs 30)`; `assess compare 1 1` exited 0 with state `compared`. |
 | 7 | Unknowns are stated | every report prints `pass threshold: unknown`, `real item count: unknown`, `real time limit: unknown`, `readiness probability: not computed`; no pass/fail verdict or probability appears. |
@@ -60,6 +61,11 @@ Pool floor: 20 items (met)
 
 and the unit table shows `src-…-p001 page 1 questions 4 spent by attempt,practice`, while
 `src-…-p002` remains `unseen`. The drop is four items, not one.
+
+Showing a page before any question was authored also spends its unit. On a two-page source whose
+page 1 had no questions, `show SOURCE --page 1` printed 0 questions. Adding and reviewing `p01-q1`
+on that page then left `assess pool` at 2 practiceable units, 1 qualifying unit and 1 spent unit,
+with `p001` listed `spent by show` and `question_count: 1`; the new question did not enter the pool.
 
 The 4-item floor refusal, exit 2:
 
@@ -109,6 +115,44 @@ The human run transcript for the same item set contains the passage, stem and op
 `No coaching, glossary, reasoning, evidence or correctness feedback is shown during the run.` It
 contains no `Reasoning:`, `Option A:` explanation or `Glossary:` line. The passage text necessarily
 contains the evidence sentence; the withheld annotation is the separate `Evidence` field.
+
+## Withholding while the run is active
+
+`assess start --size 20 --minutes 60` was answered once and then interrupted (exit **4**); run 1
+stayed `active`. `assess report 1`:
+
+```text
+Status: active
+Annotations: withheld until the run is finished (run 1 is active)
+Selected: 20; presented: 2; finalized: 1; scored: 1; contaminated: 0; pending: 19; unavailable: 0
+...
+Items and withheld annotations
+  #1 …-p001/p01-q1  correct  17 ms
+    Annotations: withheld (run is still active)
+  #2 …-p002/p02-q1  presented  0 ms [excluded]
+    Annotations: withheld (run is still active)
+```
+
+The JSON item annotation is `{"withheld": true, "available": false}`; `evidence`, `reasoning`,
+`option_reasoning` and `glossary` are absent rather than empty. After resuming with the remaining 19
+answers, the same report prints all four annotations for every item and no withholding line.
+
+Abandoning an interrupted run with 3 answers recorded (3 answered, 1 presented, 16 still pending;
+the printed `pending: 17` also counts the presented item) keeps the answered items readable and
+withholds every unfinalized item:
+
+```text
+Status: abandoned
+Selected: 20; presented: 4; finalized: 3; scored: 3; contaminated: 0; pending: 17; unavailable: 0
+...
+  #4 …-p004/p04-q1  presented  0 ms [excluded]
+    Annotations: withheld (item was never finalized)
+  #5 …-p005/p05-q1  pending  0 ms [excluded]
+    Annotations: withheld (item was never finalized)
+```
+
+The chosen policy for `assess abandon` is to **withhold**, not to record an extra exposure spend:
+unpresented units remain eligible for the next run, and they reveal no annotation.
 
 ## Forced per-item timeout
 
@@ -227,7 +271,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (17 packages, 702 tests, 0 skipped)
+PASS  go test (17 packages, 705 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -236,7 +280,7 @@ PASS  go mod tidy
 PASS  docs links (148 checked, 0 broken)
 
 == secrets/sources
-PASS  secrets/sources (409 files, 0 findings)
+PASS  secrets/sources (410 files, 0 findings)
 
 == local-only CLI
 PASS  local-only CLI (16 first-party packages, 0 network imports, 0 confidential markers)
@@ -266,7 +310,7 @@ PASS  note smoke (806 assertions)
 PASS  find smoke (113 assertions)
 
 == assess smoke
-PASS  assess smoke (259 assertions)
+PASS  assess smoke (275 assertions)
 
 == portable paths
 PASS  portable paths (88 Go files, no platform-bound path literal)

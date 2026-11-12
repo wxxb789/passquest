@@ -63,45 +63,53 @@ func seedAssessmentSource(t *testing.T, db string, pages int, firstPageQuestions
 			t.Fatal(err)
 		}
 		for index := 1; index <= count; index++ {
-			questionID := fmt.Sprintf("p%02d-q%d", pageNumber, index)
-			tag := "vocabulary-in-context"
-			if index == 1 {
-				tag = "not-except-polarity"
-			}
-			q := source.Question{
-				SourceID: src.ID,
-				ID:       questionID,
-				Page:     pageNumber,
-				Stem:     fmt.Sprintf("Page %d question %d: When does the library close on Saturdays?", pageNumber, index),
-				Options: []exam.Option{
-					{Label: "A", Text: "At 9 a.m."},
-					{Label: "B", Text: "At 4 p.m."},
-				},
-				Evidence:        "closes at 4 p.m. on Saturdays",
-				Reasoning:       fmt.Sprintf("Reasoning for page %d question %d.", pageNumber, index),
-				OptionReasoning: map[string]string{"A": "Nine is the weekday opening time.", "B": "The passage states 4 p.m. on Saturdays."},
-				Tactics:         []string{tag},
-				Glossary: []exam.GlossaryEntry{
-					{Term: "closes", Meaning: "shuts"},
-				},
-				AnswerStatus: source.AnswerUnmapped,
-				Review:       source.Unreviewed,
-				CreatedAt:    goldenBase,
-				UpdatedAt:    goldenBase,
-			}
-			if err := st.AddQuestion(q); err != nil {
-				t.Fatalf("add question %s: %v", questionID, err)
-			}
-			reviewed, err := q.ReviewAnswer(page, "B", "fixture-reviewer", goldenBase)
-			if err != nil {
-				t.Fatalf("review answer %s: %v", questionID, err)
-			}
-			if err := st.SaveQuestion(reviewed, store.EventQuestionReviewed); err != nil {
-				t.Fatalf("save question %s: %v", questionID, err)
-			}
+			addReviewedFixtureQuestion(t, st, page, src.ID, pageNumber, index)
 		}
 	}
 	return src.ID
+}
+
+// addReviewedFixtureQuestion authors and review-approves one fixture question
+// on an already reviewed page. It is used by the seed helper and by tests that
+// add a question to a page the learner already viewed.
+func addReviewedFixtureQuestion(t *testing.T, st *store.Store, page source.Page, sourceID string, pageNumber, index int) {
+	t.Helper()
+	questionID := fmt.Sprintf("p%02d-q%d", pageNumber, index)
+	tag := "vocabulary-in-context"
+	if index == 1 {
+		tag = "not-except-polarity"
+	}
+	q := source.Question{
+		SourceID: sourceID,
+		ID:       questionID,
+		Page:     pageNumber,
+		Stem:     fmt.Sprintf("Page %d question %d: When does the library close on Saturdays?", pageNumber, index),
+		Options: []exam.Option{
+			{Label: "A", Text: "At 9 a.m."},
+			{Label: "B", Text: "At 4 p.m."},
+		},
+		Evidence:        "closes at 4 p.m. on Saturdays",
+		Reasoning:       fmt.Sprintf("Reasoning for page %d question %d.", pageNumber, index),
+		OptionReasoning: map[string]string{"A": "Nine is the weekday opening time.", "B": "The passage states 4 p.m. on Saturdays."},
+		Tactics:         []string{tag},
+		Glossary: []exam.GlossaryEntry{
+			{Term: "closes", Meaning: "shuts"},
+		},
+		AnswerStatus: source.AnswerUnmapped,
+		Review:       source.Unreviewed,
+		CreatedAt:    goldenBase,
+		UpdatedAt:    goldenBase,
+	}
+	if err := st.AddQuestion(q); err != nil {
+		t.Fatalf("add question %s: %v", questionID, err)
+	}
+	reviewed, err := q.ReviewAnswer(page, "B", "fixture-reviewer", goldenBase)
+	if err != nil {
+		t.Fatalf("review answer %s: %v", questionID, err)
+	}
+	if err := st.SaveQuestion(reviewed, store.EventQuestionReviewed); err != nil {
+		t.Fatalf("save question %s: %v", questionID, err)
+	}
 }
 
 func decodePool(t *testing.T, raw string) poolDoc {
@@ -288,6 +296,161 @@ func TestAssessRunHidesAnnotationsAndReportsThem(t *testing.T) {
 	}
 	if strings.Contains(human, "Result: PASS") || strings.Contains(human, "Result: FAIL") {
 		t.Fatalf("human report printed a verdict:\n%s", human)
+	}
+}
+
+func TestAssessReportWithholdsAnnotationsUntilRunFinishes(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	seedAssessmentSource(t, db, 20, 1)
+	code, _, errOut := runCLI(t, db, clock, "B\n", "assess", "start", "--size", "20", "--minutes", "60", "--json")
+	if code != 4 {
+		t.Fatalf("interrupted start = %d, %s", code, errOut)
+	}
+	runID := activeAssessmentID(t, db)
+	raw := mustRun(t, db, clock, "", "assess", "report", fmt.Sprintf("%d", runID), "--json")
+	report := decodeAssessReport(t, raw)
+	if report.Run.Status != assess.StatusActive || len(report.Items) != 20 {
+		t.Fatalf("active report = %+v items=%d", report.Run, len(report.Items))
+	}
+	for _, item := range report.Items {
+		if !item.Annotations.Withheld {
+			t.Fatalf("active run exposed annotations for %s: %+v", item.QuestionID, item.Annotations)
+		}
+		if item.Annotations.Available || item.Annotations.Evidence != "" || item.Annotations.Reasoning != "" ||
+			len(item.Annotations.OptionReasoning) != 0 || len(item.Annotations.Glossary) != 0 {
+			t.Fatalf("active run item %s carries annotation content: %+v", item.QuestionID, item.Annotations)
+		}
+	}
+	for _, key := range []string{"Reasoning for", "shuts", `"evidence"`, `"reasoning"`, `"option_reasoning"`, `"glossary"`} {
+		if strings.Contains(raw, key) {
+			t.Fatalf("active report leaked %q:\n%s", key, raw)
+		}
+	}
+	human := mustRun(t, db, clock, "", "assess", "report", fmt.Sprintf("%d", runID))
+	if !strings.Contains(human, fmt.Sprintf("Annotations: withheld until the run is finished (run %d is active)", runID)) {
+		t.Fatalf("active human report does not state the withholding:\n%s", human)
+	}
+	for _, leaked := range []string{"Evidence:", "Reasoning:", "Option A:", "Glossary:"} {
+		if strings.Contains(human, leaked) {
+			t.Fatalf("active human report leaked %q:\n%s", leaked, human)
+		}
+	}
+
+	mustRun(t, db, clock, strings.Repeat("B\n", 19), "assess", "resume", fmt.Sprintf("%d", runID), "--json")
+	finished := decodeAssessReport(t, mustRun(t, db, clock, "", "assess", "report", fmt.Sprintf("%d", runID), "--json"))
+	if finished.Run.Status != assess.StatusCompleted || len(finished.Items) != 20 {
+		t.Fatalf("finished report = %+v items=%d", finished.Run, len(finished.Items))
+	}
+	for _, item := range finished.Items {
+		if item.Annotations.Withheld || !item.Annotations.Available || !strings.Contains(item.Annotations.Reasoning, "Reasoning for") {
+			t.Fatalf("finished run item %s did not expose its annotations: %+v", item.QuestionID, item.Annotations)
+		}
+	}
+	human = mustRun(t, db, clock, "", "assess", "report", fmt.Sprintf("%d", runID))
+	if strings.Contains(human, "withheld until the run is finished") || !strings.Contains(human, "Reasoning: Reasoning for page 1 question 1.") {
+		t.Fatalf("finished human report did not expose annotations:\n%s", human)
+	}
+}
+
+func TestAssessAbandonedRunWithholdsUnfinalizedAnnotations(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	seedAssessmentSource(t, db, 20, 1)
+	code, _, errOut := runCLI(t, db, clock, "B\nB\nB\n", "assess", "start", "--size", "20", "--minutes", "60", "--json")
+	if code != 4 {
+		t.Fatalf("interrupted start = %d, %s", code, errOut)
+	}
+	runID := activeAssessmentID(t, db)
+	mustRun(t, db, clock, "", "assess", "abandon", fmt.Sprintf("%d", runID), "--json")
+	report := decodeAssessReport(t, mustRun(t, db, clock, "", "assess", "report", fmt.Sprintf("%d", runID), "--json"))
+	if report.Run.Status != assess.StatusAbandoned {
+		t.Fatalf("run status = %q", report.Run.Status)
+	}
+	pending, presented, answered := 0, 0, 0
+	for _, item := range report.Items {
+		switch item.State {
+		case assess.StatePending:
+			pending++
+		case assess.StatePresented:
+			presented++
+		case assess.StateAnswered:
+			answered++
+		}
+		if item.State == assess.StateAnswered {
+			if item.Annotations.Withheld || !item.Annotations.Available {
+				t.Fatalf("answered item %s = %+v", item.QuestionID, item.Annotations)
+			}
+			continue
+		}
+		if !item.Annotations.Withheld || item.Annotations.Available || item.Annotations.Reasoning != "" ||
+			item.Annotations.Evidence != "" || len(item.Annotations.Glossary) != 0 || len(item.Annotations.OptionReasoning) != 0 {
+			t.Fatalf("unfinalized item %s (%s) = %+v", item.QuestionID, item.State, item.Annotations)
+		}
+	}
+	if pending != 16 || presented != 1 || answered != 3 {
+		t.Fatalf("item states = pending %d, presented %d, answered %d", pending, presented, answered)
+	}
+	human := mustRun(t, db, clock, "", "assess", "report", fmt.Sprintf("%d", runID))
+	if !strings.Contains(human, "Annotations: withheld (item was never finalized)") || strings.Contains(human, "withheld until the run is finished") {
+		t.Fatalf("abandoned human report = \n%s", human)
+	}
+}
+
+func TestShowPageWithoutQuestionsSpendsItsUnit(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	sourceID := seedAssessmentSource(t, db, 20, 0)
+	pool := decodePool(t, mustRun(t, db, clock, "", "assess", "pool", "--json"))
+	if pool.QualifyingUnits != 19 || pool.PracticeableUnits != 19 {
+		t.Fatalf("pool with an empty page = %+v", pool)
+	}
+	shown := mustRun(t, db, clock, "", "show", sourceID, "--page", "1", "--json")
+	if strings.Contains(shown, "p01-q1") {
+		t.Fatalf("page 1 unexpectedly lists a question:\n%s", shown)
+	}
+
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spends, err := st.Spends()
+	if err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	var pageRows []assess.Spend
+	for _, spend := range spends {
+		if spend.ContentID == sourceID+"-p001" && spend.Surface == assess.SurfaceShow {
+			pageRows = append(pageRows, spend)
+		}
+	}
+	if len(pageRows) != 1 || pageRows[0].QuestionID != "" {
+		st.Close()
+		t.Fatalf("page presentation rows = %+v", pageRows)
+	}
+	page, err := st.Page(sourceID, 1)
+	if err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	addReviewedFixtureQuestion(t, st, page, sourceID, 1, 1)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	pool = decodePool(t, mustRun(t, db, clock, "", "assess", "pool", "--json"))
+	if pool.PracticeableUnits != 20 || pool.QualifyingUnits != 19 || pool.QualifyingItems != 19 {
+		t.Fatalf("pool after authoring on the shown page = %+v", pool)
+	}
+	var unit *poolUnitView
+	for index := range pool.ContentUnits {
+		if pool.ContentUnits[index].ContentID == sourceID+"-p001" {
+			unit = &pool.ContentUnits[index]
+		}
+	}
+	if unit == nil || !unit.Spent || unit.QuestionCount != 1 || !containsExact(unit.SpentBy, assess.SurfaceShow) {
+		t.Fatalf("shown page unit = %+v", unit)
 	}
 }
 

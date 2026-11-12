@@ -25,6 +25,31 @@ function fixturePageText(page: number): string {
   return `Page ${page}. The library closes at 4 p.m. on Saturdays. It opens at 9 a.m. on weekdays.\n`;
 }
 
+function writeFixtureQuestion(dir: string, page: number, index: number): string {
+  const id = `p${String(page).padStart(2, "0")}-q${index}`;
+  writeFileSync(
+    path.join(dir, "questions", `${id}.json`),
+    JSON.stringify({
+      id,
+      stem: `Page ${page} question ${index}: When does the library close on Saturdays?`,
+      options: [
+        { label: "A", text: "At 9 a.m." },
+        { label: "B", text: "At 4 p.m." },
+      ],
+      answer: "B",
+      evidence: "closes at 4 p.m. on Saturdays",
+      reasoning: `Reasoning for page ${page} question ${index}.`,
+      option_reasoning: {
+        A: "Nine is the weekday opening time.",
+        B: "The passage states 4 p.m. on Saturdays.",
+      },
+      tactics: [index === 1 ? "not-except-polarity" : "vocabulary-in-context"],
+      glossary: [{ term: "closes", meaning: "shuts" }],
+    }),
+  );
+  return id;
+}
+
 function writeFixtureTree(dir: string, pages: number, firstPageQuestions: number): Array<{ page: number; id: string }> {
   const pagesDir = path.join(dir, "pages");
   const questionsDir = path.join(dir, "questions");
@@ -35,28 +60,7 @@ function writeFixtureTree(dir: string, pages: number, firstPageQuestions: number
     writeFileSync(path.join(pagesDir, `page-${String(page).padStart(3, "0")}.txt`), fixturePageText(page));
     const count = page === 1 ? firstPageQuestions : 1;
     for (let index = 1; index <= count; index++) {
-      const id = `p${String(page).padStart(2, "0")}-q${index}`;
-      written.push({ page, id });
-      writeFileSync(
-        path.join(questionsDir, `${id}.json`),
-        JSON.stringify({
-          id,
-          stem: `Page ${page} question ${index}: When does the library close on Saturdays?`,
-          options: [
-            { label: "A", text: "At 9 a.m." },
-            { label: "B", text: "At 4 p.m." },
-          ],
-          answer: "B",
-          evidence: "closes at 4 p.m. on Saturdays",
-          reasoning: `Reasoning for page ${page} question ${index}.`,
-          option_reasoning: {
-            A: "Nine is the weekday opening time.",
-            B: "The passage states 4 p.m. on Saturdays.",
-          },
-          tactics: [index === 1 ? "not-except-polarity" : "vocabulary-in-context"],
-          glossary: [{ term: "closes", meaning: "shuts" }],
-        }),
-      );
+      written.push({ page, id: writeFixtureQuestion(dir, page, index) });
     }
   }
   return written;
@@ -159,6 +163,26 @@ export const assessSmoke: Gate = {
       check(asRecord(spentUnit).spent === true && numberField(spentUnit, "question_count") === 4, "page 1 is not shown spent with four questions");
       check(asRecord(freshUnit).spent === false, "the fresh page no longer counts");
 
+      // 1b. A page shown before any question was authored still spends its
+      // unit: a question reviewed onto that page later must not enter the pool.
+      const earlyDir = path.join(temp, "early-source");
+      const earlyDB = path.join(temp, "early.sqlite");
+      const earlySource = await seedSource(earlyDB, earlyDir, 2, 0);
+      if (!earlySource) return fail(checks);
+      const shownEmpty = await callJSON(earlyDB, ["show", earlySource, "--page", "1"]);
+      check(shownEmpty.code === 0, `show empty page exit = ${shownEmpty.code}: ${shownEmpty.stderr}`);
+      const earlyQuestion = writeFixtureQuestion(earlyDir, 1, 1);
+      const earlyAdded = await callJSON(earlyDB, ["question", "add", earlySource, "1", "--file", path.join(earlyDir, "questions", `${earlyQuestion}.json`)]);
+      check(earlyAdded.code === 0, `question add on shown page exit = ${earlyAdded.code}: ${earlyAdded.stderr}`);
+      const earlyReviewed = await callJSON(earlyDB, ["question", "review", earlySource, earlyQuestion, "--answer", "B", "--reviewer", "smoke"]);
+      check(earlyReviewed.code === 0, `question review on shown page exit = ${earlyReviewed.code}: ${earlyReviewed.stderr}`);
+      const earlyPool = await callJSON(earlyDB, ["assess", "pool"]);
+      if (!check(earlyPool.code === 0, `early pool exit = ${earlyPool.code}: ${earlyPool.stderr}`)) return fail(checks);
+      check(numberField(earlyPool.doc, "practiceable_units") === 2, "the authored page is not practiceable");
+      check(numberField(earlyPool.doc, "qualifying_units") === 1, "a question authored on a shown page entered the pool");
+      const earlyUnit = arrayField(earlyPool.doc, "content_units").find((unit) => stringField(unit, "content_id") === `${earlySource}-p001`);
+      check(asRecord(earlyUnit).spent === true && arrayField(earlyUnit, "spent_by").includes("show"), "the page shown before authoring is not spent by show");
+
       // 9. Pool floor: a four-item source refuses with the shortfall in items
       // and the unit count behind it.
       const smallDir = path.join(temp, "small-source");
@@ -211,6 +235,12 @@ export const assessSmoke: Gate = {
       await collect(coachingRun);
       const active = await callJSON(coachingDB, ["assess", "pool"]);
       check(active.code === 0, "pool while active");
+      const activeReport = await callJSON(coachingDB, ["assess", "report", "1"]);
+      if (!check(activeReport.code === 0, `active report exit = ${activeReport.code}: ${activeReport.stderr}`)) return fail(checks);
+      const activeItems = arrayField(activeReport.doc, "items");
+      check(activeItems.length === 20, `active report items = ${activeItems.length}`);
+      check(activeItems.every((item) => asRecord(field(item, "annotations")).withheld === true), "active report did not mark annotations withheld");
+      check(!activeReport.stdout.includes("Reasoning for") && !activeReport.stdout.includes("shuts"), "active report leaked annotations");
       const tutor = await callJSON(coachingDB, ["tutor", "history"]);
       const skill = await callJSON(coachingDB, ["skill", "show", "vocabulary-in-context"]);
       const find = await callJSON(coachingDB, ["find"]);

@@ -50,9 +50,14 @@ one exposed question therefore reports one spent unit and four fewer qualifying 
 still counts. The unit count, not the item count, is the binding constraint on how many independent
 assessments the imported material supports.
 
-`show SOURCE` without `--page` prints every question stem it lists, so it spends every unit whose
-stem is shown. `show SOURCE --page N` spends the units whose questions on that page are shown.
-`questions SOURCE` prints the same stems and therefore spends the same units.
+`show SOURCE --page N` records one page-level presentation row (empty `question_id`) for the
+displayed page, independently of the questions currently authored on it, plus one row per stem it
+prints. A page displayed before any question was authored therefore still spends its unit, and a
+reviewed question added to it later never enters the pool. The row lives in the same append-only
+`content_presentations` table, so the pool still counts one spend per content unit. `show SOURCE`
+without `--page` prints every question stem it lists, so it spends every unit whose stem is shown.
+`questions SOURCE` prints the same stems and therefore spends the same units; `questions SOURCE
+--page N` records only the stems it prints, so a page with no questions records nothing.
 `next` prints only a command, not a stem, but the contract lists it as a presentation surface, so it
 spends the unit its recommendation names. `skill show` and `tactic show` are lessons, not question
 presentations, and spend nothing.
@@ -88,12 +93,29 @@ first-attempt evidence; repeat and timeout rules still apply.
 
 ## Annotations
 
-An authored question file may add a `glossary` array of `{term, meaning}` entries. Ordinary
-practice, `show`, `questions`, `report` and the pre-answer JSON show it. A run omits the glossary,
-question reasoning, option reasoning and evidence sentence. `assess report` prints all four per item
-under `Items and withheld annotations`, so the learner can still learn from them after the fact. A
-question without a glossary prints `glossary: none`. See
-[`source-import.md`](source-import.md#annotations).
+An authored question file may add a `glossary` array of `{term, meaning}` entries (see
+[`source-import.md`](source-import.md#annotations)). Ordinary
+practice, `show`, `questions` and the pre-answer JSON show it. A run omits the glossary, question
+reasoning, option reasoning and evidence sentence.
+
+`assess report` prints all four per item under `Items and withheld annotations`, but only for an
+item the run finalized (`answered`, `timed_out` or `skipped`):
+
+- while the run is `active`, every item withholds its annotations because the run can still be
+  resumed. The report header says
+  `Annotations: withheld until the run is finished (run N is active)` and each item says
+  `Annotations: withheld (run is still active)`.
+- a `pending` item, and an item presented but not finalized, never carries annotations in any run
+  status. An abandoned run therefore reveals nothing for the units it selected but never presented;
+  those units also stay eligible for the next run, because an unpresented assessment item is not a
+  spend. The choice here is **withhold**, not record an extra exposure spend.
+- `--json` follows the same rule: a withheld item prints
+  `"annotations": {"withheld": true, "available": false}` and omits `evidence`, `reasoning`,
+  `option_reasoning` and `glossary` entirely rather than printing empty strings. Once the item is
+  finalized in a finished run, the keys carry their values and `withheld` is absent.
+
+A question without a glossary prints `glossary: none` once its annotations are shown. Annotations
+that cannot be attached because the content changed print as unavailable, not as an empty value.
 
 ## Report
 
@@ -110,7 +132,8 @@ question without a glossary prints `glossary: none`. See
   70–84%, `strong` at or above 85%; `comfortable` below 50% of the per-item clock, `steady` 50–74%,
   `pressed` at or above 75%;
 - a contamination section, never averaged away;
-- the withheld annotations;
+- the annotations of finalized items, with withheld and unavailable annotations labelled rather than
+  silently omitted;
 - explicit unknowns: `pass threshold: unknown`, `real item count: unknown`, `real time limit:
   unknown`, `readiness probability: not computed`, `exam blueprint: not available`. No pass or fail
   verdict is printed.

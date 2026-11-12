@@ -67,6 +67,15 @@ func BuildReport(run Run, items []Item, attempts []attempt.Attempt, events []Eve
 			State:       item.State,
 			Annotations: annotations[attempt.QuestionKey{ContentID: item.ContentID, QuestionID: item.QuestionID}],
 		}
+		// An active run can still be resumed, so no item may reveal its key
+		// annotations. An item that was selected but never finalized (pending,
+		// or presented before an abandon) must not reveal them either: its unit
+		// can stay eligible for the next run, and abandoning must not hand the
+		// learner the answers first. An unavailable item has no annotation
+		// content to leak, so it keeps the "unavailable" label.
+		if run.Status == StatusActive || (!item.Finalized() && item.State != StateUnavailable) {
+			entry.Annotations = Annotations{Withheld: true}
+		}
 		if !item.PresentedAt.IsZero() {
 			counts.Presented++
 		}

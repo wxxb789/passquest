@@ -284,7 +284,13 @@ func (i Item) Finalized() bool {
 }
 
 // Annotations is the withheld study material printed in the report after a run.
+// Withheld marks material the report refuses to print. An active run withholds
+// every item because it can still be resumed; any other run withholds the items
+// with no recorded outcome (pending, or presented before an abandon), so a
+// resumable or abandoned run never hands the learner the key. An unavailable
+// item has no annotation content and keeps its separate unavailable label.
 type Annotations struct {
+	Withheld        bool
 	Evidence        string
 	Reasoning       string
 	OptionReasoning map[string]string

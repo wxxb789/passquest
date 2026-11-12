@@ -84,9 +84,10 @@ reasoning or status.
 
 A question file may add an optional `"glossary": [{"term": "...", "meaning": "..."}]`. It is a
 small reading aid, not a second answer key: at most 20 entries, 80 characters per term and 300 per
-meaning, with unique terms. Ordinary practice, `show`, `questions` and the post-run assessment report
-show it; a timed assessment run withholds it together with the question reasoning, option reasoning
-and evidence sentence. See [`assess.md`](assess.md#annotations).
+meaning, with unique terms. Ordinary practice, `show`, `questions` and the assessment report after the
+run is finished and the item is finalized show it; a timed assessment run withholds it together with
+the question reasoning, option reasoning and evidence sentence. See
+[`assess.md`](assess.md#annotations).
 
 A question file may add `"tactics": ["not-except-polarity"]` or `"tactics":
 ["vocabulary-in-context"]` to make the question available to `passquest tactic practice --source
