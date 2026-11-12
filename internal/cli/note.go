@@ -10,6 +10,7 @@ import (
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/note"
+	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/tutor"
@@ -82,10 +83,12 @@ func noteDraftFor(st *store.Store, id int64) (store.NoteDraft, error) {
 	return draft, nil
 }
 
-// consentGranted reports whether the latest recorded consent for a source is a
-// grant. A lookup error is treated as no consent.
+// consentGranted reports whether the latest recorded global consent for a
+// source is a grant. Note text and its Anki export are a different destination
+// from provider inference, so a provider-scoped tutor grant never authorizes
+// them; only the global decision does. A lookup error is treated as no consent.
 func consentGranted(st *store.Store, sourceID string) bool {
-	event, ok, err := st.TutorConsent(sourceID)
+	event, ok, err := st.TutorConsent(sourceID, "")
 	return err == nil && ok && event.Granted
 }
 
@@ -357,6 +360,19 @@ func noteConsentMessage(draft store.NoteDraft) string {
 	return fmt.Sprintf(
 		"source %s is private and its text is withheld; inspect the preview, then authorize with:\n  passquest tutor consent %s --reviewer NAME",
 		draft.SourceID, draft.SourceID)
+}
+
+// noteRefineConsentMessage names the provider that the inference grant has to
+// cover, so a provider-scoped denial is actionable rather than looking like a
+// missing global grant.
+func noteRefineConsentMessage(sourceID, providerID string) string {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return noteConsentMessage(store.NoteDraft{SourceID: sourceID})
+	}
+	return fmt.Sprintf(
+		"source %s is private and its consent does not cover provider %s; authorize with:\n  passquest tutor consent %s --provider %s --reviewer NAME",
+		sourceID, providerID, sourceID, providerID)
 }
 
 func runNotePreview(args []string, opt Options) int {
@@ -652,13 +668,40 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 		return draft, nil, usageError(opt, jsonMode, "not_configured",
 			"no tutor provider is configured; run passquest tutor config --endpoint URL --model NAME, or omit --refine")
 	}
-	key := strings.TrimSpace(opt.Getenv(tutor.CredentialEnv))
-	if key == "" {
-		return draft, nil, usageError(opt, jsonMode, "missing_credential",
-			fmt.Sprintf("%s is not set; export it in this environment (it is never stored)", tutor.CredentialEnv))
+	// Refinement is an inference destination, so it resolves the active pair
+	// exactly like tutor ask: the registry endpoint replaces a stale saved one,
+	// the pair must declare text.chat, and its evidence must be verified before
+	// any text leaves the machine.
+	cfg, registry, hasProvider, code := resolveActive(cfg, opt, jsonMode)
+	if code != 0 {
+		return draft, nil, code
+	}
+	if hasProvider {
+		if code := requireVerifiedTextChat(st, registry, opt, cfg.Provider, cfg.Model, jsonMode); code != 0 {
+			return draft, nil, code
+		}
+	}
+	// The draft's note text and its Anki export stay on the global consent
+	// decision, which is a different destination (see consentGranted). Sending
+	// this source to a provider needs the consent that covers that provider: a
+	// provider-scoped denial after a global grant overrides it.
+	if input.Target.Restricted && input.Target.SourceID != "" {
+		event, ok, err := st.TutorConsent(input.Target.SourceID, strings.TrimSpace(cfg.Provider))
+		if err != nil {
+			return draft, nil, internalError(opt, jsonMode, err)
+		}
+		if !ok || !event.Granted {
+			return draft, nil, usageError(opt, jsonMode, "consent_required",
+				noteRefineConsentMessage(input.Target.SourceID, cfg.Provider))
+		}
+	}
+	env, key, present := provider.CredentialValue(opt.Getenv, cfg.Provider)
+	if !present {
+		return draft, nil, usageError(opt, jsonMode, "no_credential",
+			fmt.Sprintf("%s is not set; export it in this environment (it is never stored)", env))
 	}
 	now := opt.Now()
-	reservation, used, err := st.ReserveNoteRefinement(tutorDayStart(now), now, cfg.DailyCalls)
+	reservation, used, err := st.ReserveNoteRefinement(cfg.Provider, tutorDayStart(now), now, cfg.DailyCalls)
 	if err != nil {
 		return draft, nil, internalError(opt, jsonMode, err)
 	}
@@ -692,10 +735,12 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 	if err != nil {
 		return draft, nil, usageError(opt, jsonMode, "invalid_config", err.Error())
 	}
+	request.CredentialEnv = env
 	sha, bytes := note.RequestIdentity(request.Body)
 	record := store.NoteRefinement{
 		DraftID:       draft.ID,
 		CreatedAt:     now,
+		Provider:      cfg.Provider,
 		ProviderHost:  cfg.ProviderHost(),
 		Model:         cfg.Model,
 		PromptVersion: note.PromptVersion,

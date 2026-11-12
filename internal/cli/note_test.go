@@ -16,6 +16,7 @@ import (
 
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/note"
+	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
@@ -887,7 +888,7 @@ func TestNoteRefineUsesProviderAndRecordsIt(t *testing.T) {
 	if err != nil || len(refinements) != 1 || refinements[0].Status != "ok" || refinements[0].PromptTokens == nil || *refinements[0].PromptTokens != 10 {
 		t.Fatalf("refinements = %+v, %v", refinements, err)
 	}
-	count, err := st.TutorCallCountSince(tutorDayStart(clock.Now()))
+	count, err := st.TutorCallCountSince("", tutorDayStart(clock.Now()))
 	if err != nil || count != 1 {
 		t.Fatalf("daily count = %d, %v", count, err)
 	}
@@ -936,6 +937,151 @@ func TestNoteRefineRefusesRestrictedSourceWithoutConsent(t *testing.T) {
 	defer st.Close()
 	if refinements, err := st.NoteRefinements(); err != nil || len(refinements) != 0 {
 		t.Fatalf("refinements without consent = %+v, %v", refinements, err)
+	}
+}
+
+func TestNoteRefineRequiresVerifiedTextChat(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	readyNoteSource(t, db, clock)
+	registry := modelRegistryFile(t, modelProvider("alpha", "https://alpha.example.com/v1/chat/completions"))
+	env := map[string]string{provider.RegistryEnv: registry, "PASSQUEST_ALPHA_API_KEY": fakeTutorKey}
+	if code, _, errOut := modelRun(t, db, clock, nil, env, "model", "use", "alpha/alpha-text", "--json"); code != 0 {
+		t.Fatalf("model use exit = %d: %s", code, errOut)
+	}
+
+	transport := &fakeTutorTransport{response: fixedTutorResponse(`{"front":"refined","back":"refined meaning"}`)}
+	code, _, errOut := modelRun(t, db, clock, transport, env, "note", "propose", "--attempt", "1", "--refine", "--json")
+	if code != 2 || !strings.Contains(errOut, "capability_unverified") {
+		t.Fatalf("unverified refine = %d, %s", code, errOut)
+	}
+	if len(transport.requests) != 0 {
+		t.Fatalf("unverified refine contacted the provider: %+v", transport.requests)
+	}
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refinements, err := st.NoteRefinements()
+	if err != nil || len(refinements) != 0 {
+		st.Close()
+		t.Fatalf("unverified refinements = %+v, %v", refinements, err)
+	}
+	st.Close()
+
+	if code, _, errOut := modelRun(t, db, clock, transport, env, "model", "test", "alpha/alpha-text", "--json"); code != 0 {
+		t.Fatalf("model test exit = %d: %s", code, errOut)
+	}
+	beforeRefine := len(transport.requests)
+	code, refineRaw, errOut := modelRun(t, db, clock, transport, env, "note", "propose", "--attempt", "1", "--refine", "--json")
+	if code != 0 {
+		t.Fatalf("verified refine = %d, %s", code, errOut)
+	}
+	doc := noteDraftDoc{}
+	if err := json.Unmarshal([]byte(refineRaw), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Draft.Origin != "refined" || doc.Refinement == nil || doc.Refinement.Model != "alpha-text" {
+		t.Fatalf("verified refine = %+v", doc)
+	}
+	if got := len(transport.requests) - beforeRefine; got != 1 {
+		t.Fatalf("verified refine requests = %d, want 1", got)
+	}
+}
+
+// noteRefineProviderEnv writes a one-provider registry at endpoint, selects
+// alpha/alpha-text, verifies its text.chat evidence and returns the environment
+// plus the registry path so a test can change the endpoint later.
+func noteRefineProviderEnv(t *testing.T, db string, clock *stepClock, transport *fakeTutorTransport, endpoint string) (map[string]string, string) {
+	t.Helper()
+	registry := modelRegistryFile(t, modelProvider("alpha", endpoint))
+	env := map[string]string{provider.RegistryEnv: registry, "PASSQUEST_ALPHA_API_KEY": fakeTutorKey}
+	if code, _, errOut := modelRun(t, db, clock, transport, env, "model", "use", "alpha/alpha-text", "--json"); code != 0 {
+		t.Fatalf("model use exit = %d: %s", code, errOut)
+	}
+	if code, _, errOut := modelRun(t, db, clock, transport, env, "model", "test", "alpha/alpha-text", "--json"); code != 0 {
+		t.Fatalf("model test exit = %d: %s", code, errOut)
+	}
+	return env, registry
+}
+
+func TestNoteRefineRefusesAProviderScopedRevoke(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	sourceID := readyNoteSource(t, db, clock)
+	transport := &fakeTutorTransport{response: fixedTutorResponse(`{"front":"refined","back":"refined meaning"}`)}
+	env, _ := noteRefineProviderEnv(t, db, clock, transport, "https://alpha.example.com/v1/chat/completions")
+	if code, _, errOut := modelRun(t, db, clock, nil, env, "tutor", "revoke", sourceID,
+		"--provider", "alpha", "--reviewer", "note-reviewer", "--json"); code != 0 {
+		t.Fatalf("provider revoke exit = %d: %s", code, errOut)
+	}
+
+	before := len(transport.requests)
+	code, _, errOut := modelRun(t, db, clock, transport, env, "note", "propose", "--attempt", "1", "--refine", "--json")
+	if code != 2 || !strings.Contains(errOut, "consent_required") || !strings.Contains(errOut, "--provider alpha") {
+		t.Fatalf("provider-revoked refine = %d, %s", code, errOut)
+	}
+	if len(transport.requests) != before {
+		t.Fatalf("provider-revoked refine contacted the provider: %+v", transport.requests)
+	}
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if refinements, err := st.NoteRefinements(); err != nil || len(refinements) != 0 {
+		t.Fatalf("provider-revoked refinements = %+v, %v", refinements, err)
+	}
+}
+
+func TestNoteRefineUsesTheCurrentRegistryEndpoint(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	readyNoteSource(t, db, clock)
+	const current = "https://current.example.com/v1/chat/completions"
+	transport := &fakeTutorTransport{response: fixedTutorResponse(`{"front":"refined","back":"refined meaning"}`)}
+	env, registry := noteRefineProviderEnv(t, db, clock, transport, "https://retired.example.com/v1/chat/completions")
+	writeModelRegistry(t, registry, modelProvider("alpha", current))
+
+	before := len(transport.requests)
+	code, out, errOut := modelRun(t, db, clock, transport, env, "note", "propose", "--attempt", "1", "--refine", "--json")
+	if code != 0 {
+		t.Fatalf("refine after endpoint change = %d, %s", code, errOut)
+	}
+	doc := noteDraftDoc{}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Draft.Origin != "refined" || doc.Refinement == nil {
+		t.Fatalf("refine after endpoint change = %+v", doc)
+	}
+	if len(transport.requests) != before+1 {
+		t.Fatalf("refine requests = %d, want 1", len(transport.requests)-before)
+	}
+	if got := transport.requests[before].Endpoint; got != current {
+		t.Fatalf("refine endpoint = %q, want %q", got, current)
+	}
+}
+
+func TestNoteRefineRefusesAGrantForADifferentProvider(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	sourceID := noteSourceFixture(t, db, clock)
+	if code, _, errOut := modelRun(t, db, clock, nil, nil, "tutor", "consent", sourceID,
+		"--provider", "beta", "--reviewer", "note-reviewer", "--json"); code != 0 {
+		t.Fatalf("beta consent exit = %d: %s", code, errOut)
+	}
+	transport := &fakeTutorTransport{response: fixedTutorResponse(`{"front":"refined","back":"refined meaning"}`)}
+	env, _ := noteRefineProviderEnv(t, db, clock, transport, "https://alpha.example.com/v1/chat/completions")
+
+	before := len(transport.requests)
+	code, _, errOut := modelRun(t, db, clock, transport, env, "note", "propose",
+		"--content", sourceID+"-p001", "--question", "q2", "--mark", "Sunday", "--refine", "--json")
+	if code != 2 || !strings.Contains(errOut, "consent_required") {
+		t.Fatalf("grant for another provider = %d, %s", code, errOut)
+	}
+	if len(transport.requests) != before {
+		t.Fatalf("grant for another provider contacted the provider: %+v", transport.requests)
 	}
 }
 
@@ -1441,6 +1587,72 @@ func TestNoteExportRechecksConsent(t *testing.T) {
 	}
 	if _, err := os.Stat(out); err != nil {
 		t.Fatalf("re-consented export did not write: %v", err)
+	}
+}
+
+func TestNoteExportNeedsGlobalConsentNotProviderScope(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	sourceID := readyNoteSource(t, db, clock)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
+
+	// Replace the global grant with a provider-scoped one: alpha may see the
+	// source for inference, but no destination-wide export consent remains.
+	mustRun(t, db, clock, "", "tutor", "revoke", sourceID, "--reviewer", "note-reviewer", "--json")
+	mustRun(t, db, clock, "", "tutor", "consent", sourceID, "--reviewer", "note-reviewer", "--provider", "alpha", "--json")
+
+	out := filepath.Join(t.TempDir(), "provider-scoped.tsv")
+	code, _, errOut := runNoteCLI(t, db, clock, nil, nil, "", "note", "export", "--out", out, "--json")
+	if code != 2 || !strings.Contains(errOut, "consent_required") {
+		t.Fatalf("provider-scoped export = %d, %s", code, errOut)
+	}
+	if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("provider-scoped export wrote a file: %v", err)
+	}
+	ankiTransport := newFakeAnki()
+	code, _, errOut = runNoteCLI(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")
+	if code != 2 || !strings.Contains(errOut, "consent_required") || len(ankiTransport.requests) != 0 {
+		t.Fatalf("provider-scoped push = %d, %s, requests %d", code, errOut, len(ankiTransport.requests))
+	}
+
+	// The same alpha grant still authorizes inference for that provider.
+	registry := modelRegistryFile(t, modelProvider("alpha", "https://alpha.example.com/v1/chat/completions"))
+	env := map[string]string{provider.RegistryEnv: registry, "PASSQUEST_ALPHA_API_KEY": fakeTutorKey}
+	transport := &fakeTutorTransport{response: fixedTutorResponse("The answer follows from the Saturday sentence.")}
+	if code, _, errOut := modelRun(t, db, clock, nil, env, "model", "use", "alpha/alpha-text", "--json"); code != 0 {
+		t.Fatalf("model use exit = %d: %s", code, errOut)
+	}
+	if code, _, errOut := modelRun(t, db, clock, transport, env, "model", "test", "alpha/alpha-text", "--json"); code != 0 {
+		t.Fatalf("model test exit = %d: %s", code, errOut)
+	}
+	code, askRaw, errOut := modelRun(t, db, clock, transport, env, "tutor", "ask", "--attempt", "1", "--json")
+	if code != 0 {
+		t.Fatalf("provider-scoped tutor ask = %d, %s", code, errOut)
+	}
+	ask := decodeTutorAdvisory(t, askRaw)
+	if ask.Call.Provider != "alpha" || !ask.Context.ConsentGranted || !ask.Call.SourceTextShared {
+		t.Fatalf("provider-scoped ask context = %+v, call = %+v", ask.Context, ask.Call)
+	}
+
+	// A global grant is what authorizes the note destinations.
+	noteConsent(t, db, clock, sourceID, "note-reviewer")
+	exported := noteExportDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "export", "--out", out, "--json")), &exported); err != nil {
+		t.Fatal(err)
+	}
+	if exported.Notes != 1 {
+		t.Fatalf("globally consented export = %+v", exported)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("globally consented export did not write: %v", err)
+	}
+	pushed := notePushDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")), &pushed); err != nil {
+		t.Fatal(err)
+	}
+	if pushed.State != "pushed" || pushed.Counts.Pushed != 1 {
+		t.Fatalf("globally consented push = %+v", pushed)
 	}
 }
 

@@ -597,8 +597,9 @@ func classifyWriteResult(item *notePushWork, result anki.ActionResult, action st
 	return false
 }
 
-// noteConsentRefusal names restricted sources without current consent. Export
-// and push share this policy; verb states what was refused.
+// noteConsentRefusal names restricted sources without a global grant. Export
+// and push share this policy; verb states what was refused. A provider-scoped
+// tutor grant authorizes inference, not this export destination.
 func noteConsentRefusal(st *store.Store, notes []store.Note, verb string) (string, bool) {
 	var denied []string
 	for _, n := range notes {

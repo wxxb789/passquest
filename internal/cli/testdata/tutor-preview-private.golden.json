@@ -23,6 +23,7 @@
     "timeout_ms": 30000,
     "max_output_tokens": 350,
     "daily_calls": 20,
+    "auth": "present",
     "credential_env": "PASSQUEST_TUTOR_API_KEY",
     "credential_present": true
   },
@@ -77,6 +78,6 @@
     "Raw prompt text is not stored: a call records the SHA-256 and byte size of the exact serialized request body plus scope flags. Run `passquest tutor preview` to inspect the exact text before sending.",
     "Private imported source text is withheld until a recorded `tutor consent` event for that source; first-party material needs no consent.",
     "A failed or malformed provider response is recorded as a failure and cannot append an attempt, change a grade or edit an answer key.",
-    "The daily call budget counts failed calls and resets at 00:00 UTC. No retry is attempted automatically."
+    "The daily call budget counts failed calls and resets at 00:00 UTC. `tutor ask` retries at most once, only on another verified provider with the same recorded consent scope and remaining budget."
   ]
 }

@@ -88,6 +88,7 @@ var schemaV8 = []string{
 type TutorConsentEvent struct {
 	ID       int64
 	SourceID string
+	Provider string
 	Granted  bool
 	Reviewer string
 	At       time.Time
@@ -107,7 +108,9 @@ type TutorCall struct {
 	Status           string
 	ErrorCode        string
 	ErrorMessage     string
+	Provider         string
 	ProviderHost     string
+	FailoverFrom     string
 	Model            string
 	PromptVersion    string
 	SourceID         string
@@ -128,9 +131,9 @@ type TutorCall struct {
 // when the learner has not saved one. A saved credential is never part of it.
 func (s *Store) TutorConfig() (tutor.Config, bool, error) {
 	var cfg tutor.Config
-	err := s.db.QueryRow(`SELECT endpoint, model, timeout_ms, max_output_tokens, daily_calls
+	err := s.db.QueryRow(`SELECT provider, endpoint, model, timeout_ms, max_output_tokens, daily_calls
 		FROM tutor_config WHERE id = 1`).
-		Scan(&cfg.Endpoint, &cfg.Model, &cfg.TimeoutMS, &cfg.MaxOutputTokens, &cfg.DailyCalls)
+		Scan(&cfg.Provider, &cfg.Endpoint, &cfg.Model, &cfg.TimeoutMS, &cfg.MaxOutputTokens, &cfg.DailyCalls)
 	if errors.Is(err, sql.ErrNoRows) {
 		return tutor.Config{}, false, nil
 	}
@@ -150,17 +153,18 @@ func (s *Store) SaveTutorConfig(cfg tutor.Config, at time.Time) error {
 		return errors.New("store: tutor config timestamp is required")
 	}
 	_, err := s.db.Exec(`INSERT INTO tutor_config (
-			id, endpoint, model, timeout_ms, max_output_tokens, daily_calls, updated_at
-		) VALUES (1, ?, ?, ?, ?, ?, ?)
+			id, provider, endpoint, model, timeout_ms, max_output_tokens, daily_calls, updated_at
+		) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
+			provider = excluded.provider,
 			endpoint = excluded.endpoint,
 			model = excluded.model,
 			timeout_ms = excluded.timeout_ms,
 			max_output_tokens = excluded.max_output_tokens,
 			daily_calls = excluded.daily_calls,
 			updated_at = excluded.updated_at`,
-		strings.TrimSpace(cfg.Endpoint), strings.TrimSpace(cfg.Model), cfg.TimeoutMS,
-		cfg.MaxOutputTokens, cfg.DailyCalls, at.UTC().Format(time.RFC3339Nano))
+		strings.TrimSpace(cfg.Provider), strings.TrimSpace(cfg.Endpoint), strings.TrimSpace(cfg.Model),
+		cfg.TimeoutMS, cfg.MaxOutputTokens, cfg.DailyCalls, at.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("store: save tutor config: %w", err)
 	}
@@ -171,6 +175,7 @@ func (s *Store) SaveTutorConfig(cfg tutor.Config, at time.Time) error {
 // the source exists; this method validates the event shape.
 func (s *Store) AppendTutorConsent(event TutorConsentEvent) (TutorConsentEvent, error) {
 	event.SourceID = strings.TrimSpace(event.SourceID)
+	event.Provider = strings.TrimSpace(event.Provider)
 	event.Reviewer = strings.TrimSpace(event.Reviewer)
 	if event.SourceID == "" {
 		return TutorConsentEvent{}, errors.New("store: tutor consent source id is required")
@@ -181,9 +186,10 @@ func (s *Store) AppendTutorConsent(event TutorConsentEvent) (TutorConsentEvent, 
 	if event.At.IsZero() {
 		return TutorConsentEvent{}, errors.New("store: tutor consent timestamp is required")
 	}
-	res, err := s.db.Exec(`INSERT INTO tutor_consent_events (source_id, granted, reviewer, at)
-		VALUES (?, ?, ?, ?)`,
-		event.SourceID, boolInt(event.Granted), event.Reviewer, event.At.UTC().Format(time.RFC3339Nano))
+	res, err := s.db.Exec(`INSERT INTO tutor_consent_events (source_id, provider, granted, reviewer, at)
+		VALUES (?, ?, ?, ?, ?)`,
+		event.SourceID, event.Provider, boolInt(event.Granted), event.Reviewer,
+		event.At.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return TutorConsentEvent{}, fmt.Errorf("store: append tutor consent: %w", err)
 	}
@@ -196,10 +202,16 @@ func (s *Store) AppendTutorConsent(event TutorConsentEvent) (TutorConsentEvent, 
 	return event, nil
 }
 
-// TutorConsent returns the latest consent event for one source.
-func (s *Store) TutorConsent(sourceID string) (TutorConsentEvent, bool, error) {
-	row := s.db.QueryRow(`SELECT id, source_id, granted, reviewer, at
-		FROM tutor_consent_events WHERE source_id = ? ORDER BY id DESC LIMIT 1`, sourceID)
+// TutorConsent returns the effective consent for one source and provider. A
+// provider-specific event overrides a global one for that provider; without
+// one, the latest global event applies. The legacy empty provider reads only
+// global events. A source with no event means private text is withheld.
+func (s *Store) TutorConsent(sourceID, providerID string) (TutorConsentEvent, bool, error) {
+	providerID = strings.TrimSpace(providerID)
+	row := s.db.QueryRow(`SELECT id, source_id, provider, granted, reviewer, at
+		FROM tutor_consent_events
+		WHERE source_id = ? AND (provider = ? OR provider = '')
+		ORDER BY (provider = ?) DESC, id DESC LIMIT 1`, sourceID, providerID, providerID)
 	event, err := scanTutorConsent(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TutorConsentEvent{}, false, nil
@@ -210,13 +222,17 @@ func (s *Store) TutorConsent(sourceID string) (TutorConsentEvent, bool, error) {
 	return event, true, nil
 }
 
-// TutorConsents returns the latest event for every source that has one. A
-// source with no event is absent, which means private text is withheld.
+// TutorConsents returns the latest event for every (source, provider) pair
+// that has one. A source with no event is absent, which means private text is
+// withheld.
 func (s *Store) TutorConsents() ([]TutorConsentEvent, error) {
-	rows, err := s.db.Query(`SELECT e.id, e.source_id, e.granted, e.reviewer, e.at
+	rows, err := s.db.Query(`SELECT e.id, e.source_id, e.provider, e.granted, e.reviewer, e.at
 		FROM tutor_consent_events e
-		WHERE e.id = (SELECT MAX(latest.id) FROM tutor_consent_events latest WHERE latest.source_id = e.source_id)
-		ORDER BY e.source_id`)
+		WHERE e.id = (
+			SELECT MAX(latest.id) FROM tutor_consent_events latest
+			WHERE latest.source_id = e.source_id AND latest.provider = e.provider
+		)
+		ORDER BY e.source_id, e.provider`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list tutor consents: %w", err)
 	}
@@ -241,7 +257,7 @@ func scanTutorConsent(row rowScanner) (TutorConsentEvent, error) {
 		granted int
 		at      string
 	)
-	if err := row.Scan(&event.ID, &event.SourceID, &granted, &event.Reviewer, &at); err != nil {
+	if err := row.Scan(&event.ID, &event.SourceID, &event.Provider, &granted, &event.Reviewer, &at); err != nil {
 		return TutorConsentEvent{}, err
 	}
 	event.Granted = granted == 1
@@ -260,10 +276,11 @@ func scanTutorConsent(row rowScanner) (TutorConsentEvent, error) {
 // number of slots already consumed. A reservation that is never finalized keeps
 // its slot for the rest of the UTC day: the provider may already have been
 // contacted, so under-spending is the safe accounting error.
-func (s *Store) ReserveTutorCall(since, at time.Time, limit int) (int64, int, error) {
+func (s *Store) ReserveTutorCall(providerID string, since, at time.Time, limit int) (int64, int, error) {
 	if limit <= 0 {
 		return 0, 0, errors.New("store: tutor daily call limit must be positive")
 	}
+	providerID = strings.TrimSpace(providerID)
 	boundary := since.UTC().Format(time.RFC3339Nano)
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -271,19 +288,15 @@ func (s *Store) ReserveTutorCall(since, at time.Time, limit int) (int64, int, er
 	}
 	defer tx.Rollback()
 	var used int
-	err = tx.QueryRow(`SELECT
-			(SELECT COUNT(*) FROM tutor_calls WHERE julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM tutor_call_reservations WHERE julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM note_refinements WHERE julianday(created_at) >= julianday(?))`,
-		boundary, boundary, boundary).Scan(&used)
+	err = tx.QueryRow(providerCallCountSQL(true), providerCallCountArgs(providerID, boundary, true)...).Scan(&used)
 	if err != nil {
 		return 0, 0, fmt.Errorf("store: count tutor budget: %w", err)
 	}
 	if used >= limit {
 		return 0, used, nil
 	}
-	res, err := tx.Exec(`INSERT INTO tutor_call_reservations (created_at) VALUES (?)`,
-		at.UTC().Format(time.RFC3339Nano))
+	res, err := tx.Exec(`INSERT INTO tutor_call_reservations (provider, created_at) VALUES (?, ?)`,
+		providerID, at.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return 0, 0, fmt.Errorf("store: reserve tutor call: %w", err)
 	}
@@ -339,12 +352,13 @@ func (s *Store) FinalizeTutorCall(call TutorCall, reservationID int64) (TutorCal
 	}
 	res, err := tx.Exec(`INSERT INTO tutor_calls (
 			created_at, attempt_id, mode, status, error_code, error_message,
-			provider_host, model, prompt_version, source_id, content_id, question_id,
+			provider, provider_host, failover_from, model, prompt_version, source_id, content_id, question_id,
 			source_text_shared, request_sha256, request_bytes, output_text, output_chars,
 			prompt_tokens, completion_tokens, http_status, latency_ms
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		call.CreatedAt.UTC().Format(time.RFC3339Nano), call.AttemptID, call.Mode, call.Status,
-		call.ErrorCode, call.ErrorMessage, call.ProviderHost, call.Model, call.PromptVersion,
+		call.ErrorCode, call.ErrorMessage, call.Provider, call.ProviderHost, call.FailoverFrom,
+		call.Model, call.PromptVersion,
 		call.SourceID, call.ContentID, call.QuestionID, boolInt(call.SourceTextShared),
 		call.RequestSHA256, call.RequestBytes, call.OutputText, call.OutputChars,
 		nullableInt(call.PromptTokens), nullableInt(call.CompletionTokens), call.HTTPStatus, call.LatencyMS)
@@ -365,7 +379,7 @@ func (s *Store) FinalizeTutorCall(call TutorCall, reservationID int64) (TutorCal
 
 // tutorCallColumns is the one column order both call queries scan.
 const tutorCallColumns = `id, created_at, attempt_id, mode, status, error_code, error_message,
-			provider_host, model, prompt_version, source_id, content_id, question_id,
+			provider, provider_host, failover_from, model, prompt_version, source_id, content_id, question_id,
 			source_text_shared, request_sha256, request_bytes, output_text, output_chars,
 			prompt_tokens, completion_tokens, http_status, latency_ms`
 
@@ -412,15 +426,15 @@ func (s *Store) TutorCall(id int64) (TutorCall, error) {
 	return call, nil
 }
 
-// TutorCallCountSince counts provider calls at or after at, including failures
-// and note refinements, because both share the daily budget. SQLite parses the
-// stored RFC3339 timestamps. The tutor call list remains coaching-only.
-func (s *Store) TutorCallCountSince(at time.Time) (int, error) {
+// TutorCallCountSince counts provider calls at or after at, including failures,
+// note refinements and model probes that actually reached a provider, because
+// all three consume the same daily budget. SQLite parses the stored RFC3339
+// timestamps. The tutor call list remains coaching-only.
+func (s *Store) TutorCallCountSince(providerID string, at time.Time) (int, error) {
+	providerID = strings.TrimSpace(providerID)
 	var count int
-	err := s.db.QueryRow(`SELECT
-			(SELECT COUNT(*) FROM tutor_calls WHERE julianday(created_at) >= julianday(?)) +
-			(SELECT COUNT(*) FROM note_refinements WHERE julianday(created_at) >= julianday(?))`,
-		at.UTC().Format(time.RFC3339Nano), at.UTC().Format(time.RFC3339Nano)).Scan(&count)
+	args := providerCallCountArgs(providerID, at.UTC().Format(time.RFC3339Nano), false)
+	err := s.db.QueryRow(providerCallCountSQL(false), args...).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("store: count tutor calls: %w", err)
 	}
@@ -437,7 +451,8 @@ func scanTutorCall(row rowScanner) (TutorCall, error) {
 	)
 	if err := row.Scan(
 		&call.ID, &created, &call.AttemptID, &call.Mode, &call.Status, &call.ErrorCode, &call.ErrorMessage,
-		&call.ProviderHost, &call.Model, &call.PromptVersion, &call.SourceID, &call.ContentID, &call.QuestionID,
+		&call.Provider, &call.ProviderHost, &call.FailoverFrom, &call.Model, &call.PromptVersion,
+		&call.SourceID, &call.ContentID, &call.QuestionID,
 		&sourceTextShared, &call.RequestSHA256, &call.RequestBytes, &call.OutputText, &call.OutputChars,
 		&promptTokens, &completionTokens, &call.HTTPStatus, &call.LatencyMS,
 	); err != nil {
@@ -506,6 +521,15 @@ func validateTutorCall(call TutorCall) error {
 	}
 	if strings.TrimSpace(call.ProviderHost) == "" {
 		add("provider_host is required")
+	}
+	if len(call.Provider) > 32 {
+		add("provider is longer than 32 characters")
+	}
+	if len(call.FailoverFrom) > 32 {
+		add("failover_from is longer than 32 characters")
+	}
+	if call.FailoverFrom != "" && call.FailoverFrom == call.Provider {
+		add("failover_from equals the call provider")
 	}
 	if strings.TrimSpace(call.Model) == "" {
 		add("model is required")

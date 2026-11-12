@@ -176,6 +176,7 @@ type AgentRun struct {
 	RunID         string
 	TaskKind      string
 	PromptVersion string
+	Provider      string
 	Model         string
 	StorePath     string
 	MaxSteps      int
@@ -250,10 +251,10 @@ func (s *Store) CreateAgentRun(run AgentRun, detail any, at time.Time) error {
 		return ErrAgentRunUnfinished
 	}
 	if _, err := tx.Exec(`INSERT INTO agent_runs (
-			run_id, task_kind, prompt_version, model, store_path, max_steps, max_turns, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.RunID, run.TaskKind, run.PromptVersion, run.Model, run.StorePath, run.MaxSteps, run.MaxTurns,
-		run.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+			run_id, task_kind, prompt_version, provider, model, store_path, max_steps, max_turns, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.RunID, run.TaskKind, run.PromptVersion, run.Provider, run.Model, run.StorePath,
+		run.MaxSteps, run.MaxTurns, run.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("store: insert agent run: %w", err)
 	}
 	if _, err := tx.Exec(`INSERT INTO agent_run_events (run_id, kind, detail_json, at) VALUES (?, ?, ?, ?)`,
@@ -410,9 +411,9 @@ func (s *Store) AgentRun(runID string) (AgentRun, bool, error) {
 		run       AgentRun
 		createdAt string
 	)
-	err := s.db.QueryRow(`SELECT run_id, task_kind, prompt_version, model, store_path, max_steps, max_turns, created_at
+	err := s.db.QueryRow(`SELECT run_id, task_kind, prompt_version, provider, model, store_path, max_steps, max_turns, created_at
 		FROM agent_runs WHERE run_id = ?`, runID).
-		Scan(&run.RunID, &run.TaskKind, &run.PromptVersion, &run.Model, &run.StorePath, &run.MaxSteps, &run.MaxTurns, &createdAt)
+		Scan(&run.RunID, &run.TaskKind, &run.PromptVersion, &run.Provider, &run.Model, &run.StorePath, &run.MaxSteps, &run.MaxTurns, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentRun{}, false, nil
 	}
@@ -429,7 +430,7 @@ func (s *Store) AgentRun(runID string) (AgentRun, bool, error) {
 // LatestAgentRun returns the newest run, optionally restricted to runs whose
 // latest event is not completed or cancelled.
 func (s *Store) LatestAgentRun(unfinishedOnly bool) (AgentRun, bool, error) {
-	query := `SELECT r.run_id, r.task_kind, r.prompt_version, r.model, r.store_path, r.max_steps, r.max_turns, r.created_at
+	query := `SELECT r.run_id, r.task_kind, r.prompt_version, r.provider, r.model, r.store_path, r.max_steps, r.max_turns, r.created_at
 		FROM agent_runs r
 		WHERE (? = 0 OR COALESCE((` + agentLatestEventQuery("r.run_id") + `), 'started')
 			NOT IN ('completed', 'cancelled'))
@@ -439,7 +440,7 @@ func (s *Store) LatestAgentRun(unfinishedOnly bool) (AgentRun, bool, error) {
 		createdAt string
 	)
 	err := s.db.QueryRow(query, boolInt(unfinishedOnly)).
-		Scan(&run.RunID, &run.TaskKind, &run.PromptVersion, &run.Model, &run.StorePath, &run.MaxSteps, &run.MaxTurns, &createdAt)
+		Scan(&run.RunID, &run.TaskKind, &run.PromptVersion, &run.Provider, &run.Model, &run.StorePath, &run.MaxSteps, &run.MaxTurns, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentRun{}, false, nil
 	}
@@ -456,7 +457,7 @@ func (s *Store) LatestAgentRun(unfinishedOnly bool) (AgentRun, bool, error) {
 // AgentRuns lists every run newest first with its latest event, step count and
 // effect invocation count.
 func (s *Store) AgentRuns() ([]AgentRunSummary, error) {
-	rows, err := s.db.Query(`SELECT r.run_id, r.task_kind, r.prompt_version, r.model, r.store_path, r.max_steps, r.max_turns,
+	rows, err := s.db.Query(`SELECT r.run_id, r.task_kind, r.prompt_version, r.provider, r.model, r.store_path, r.max_steps, r.max_turns,
 			r.created_at,
 			COALESCE((` + agentLatestEventQuery("r.run_id") + `), ''),
 			(SELECT COUNT(*) FROM agent_steps s WHERE s.run_id = r.run_id),
@@ -472,9 +473,9 @@ func (s *Store) AgentRuns() ([]AgentRunSummary, error) {
 			summary   AgentRunSummary
 			createdAt string
 		)
-		if err := rows.Scan(&summary.RunID, &summary.TaskKind, &summary.PromptVersion, &summary.Model,
-			&summary.StorePath, &summary.MaxSteps, &summary.MaxTurns, &createdAt, &summary.LatestEvent,
-			&summary.Steps, &summary.Attempts); err != nil {
+		if err := rows.Scan(&summary.RunID, &summary.TaskKind, &summary.PromptVersion, &summary.Provider,
+			&summary.Model, &summary.StorePath, &summary.MaxSteps, &summary.MaxTurns, &createdAt,
+			&summary.LatestEvent, &summary.Steps, &summary.Attempts); err != nil {
 			return nil, fmt.Errorf("store: scan agent run: %w", err)
 		}
 		summary.CreatedAt, err = parseTime(createdAt)

@@ -89,9 +89,12 @@ passquest tutor consent SOURCE --reviewer NAME
 passquest tutor revoke SOURCE --reviewer NAME
 ```
 
-Consent is the existing append-only per-source ledger. `revoke` withholds the source on the next
-preview and blocks a new export or push; it does not delete a note the learner already accepted.
-First-party sample and skill content needs no consent.
+Consent is the existing append-only per-source ledger. The note body and its Anki export are a
+destination separate from provider payloads, so these paths require the global decision: a
+`--provider`-scoped grant authorizes that provider's inference payload only and never satisfies a
+note export or push. `revoke` withholds the source on the next preview and blocks a new export or
+push; it does not delete a note the learner already accepted. First-party sample and skill content
+needs no consent.
 
 ## Identity and revisions
 
@@ -231,8 +234,9 @@ font, stylesheet, script, image or URL. `note model` prints the whole template a
 - Pass Quest never contacts AnkiWeb or a phone. Synchronization is the learner's own manual action in
   Anki, and no output claims otherwise.
 - No Anki clone, own scheduling, `.apkg`, images, audio, AnkiWeb API calls or mobile apps.
-- `--refine` sends one provider request through the goal-0005 endpoint and shared daily budget. The
-  deterministic draft never needs a provider. Refined text is labelled advisory; the learner accepts
+- `--refine` sends one provider request through the configured/selected provider and its per-provider
+  daily budget. The deterministic draft never needs a provider. Refined text is labelled advisory;
+  the learner accepts
   it explicitly. A refinement that would reproduce an unanswered question's key is rejected and the
   deterministic draft stays available.
 - `export` is a fallback, not a revision channel; re-importing an edited export may duplicate cards.

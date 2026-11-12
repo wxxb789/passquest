@@ -15,6 +15,7 @@ import { importSmoke } from "./import-smoke.ts";
 import { localOnly } from "./local-only.ts";
 import { noteSmoke } from "./note-smoke.ts";
 import { portablePaths } from "./portable-paths.ts";
+import { providerSmoke } from "./provider-smoke.ts";
 import { secrets } from "./secrets.ts";
 import { selfTest } from "./self-test.ts";
 import { tacticSmoke } from "./tactic-smoke.ts";
@@ -41,5 +42,6 @@ export const gates: Gate[] = [
   findSmoke,
   assessSmoke,
   portablePaths,
+  providerSmoke,
   selfTest,
 ];

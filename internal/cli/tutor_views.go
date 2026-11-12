@@ -1,10 +1,10 @@
 package cli
 
 import (
-	"strings"
 	"time"
 
 	"github.com/wxxb789/passquest/internal/attempt"
+	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
@@ -45,20 +45,23 @@ func tutorAttemptViewOf(record attempt.Attempt) tutorAttemptView {
 
 type tutorProviderView struct {
 	tutorConfigView
+	Provider          string `json:"provider,omitempty"`
+	Auth              string `json:"auth"`
 	CredentialEnv     string `json:"credential_env"`
 	CredentialPresent bool   `json:"credential_present"`
+	TextChatState     string `json:"text_chat_state,omitempty"`
+	TextChatAction    string `json:"text_chat_action,omitempty"`
 }
 
 func tutorProviderViewOf(cfg tutor.Config, opt Options) tutorProviderView {
+	env, _, present := provider.CredentialValue(opt.Getenv, cfg.Provider)
 	return tutorProviderView{
 		tutorConfigView:   tutorConfigViewOf(cfg),
-		CredentialEnv:     tutor.CredentialEnv,
-		CredentialPresent: credentialPresent(opt),
+		Provider:          cfg.Provider,
+		Auth:              authState(present),
+		CredentialEnv:     env,
+		CredentialPresent: present,
 	}
-}
-
-func credentialPresent(opt Options) bool {
-	return strings.TrimSpace(opt.Getenv(tutor.CredentialEnv)) != ""
 }
 
 type tutorContextView struct {
@@ -100,6 +103,7 @@ func tutorContextViewOf(context tutor.Context) tutorContextView {
 }
 
 type tutorConfigView struct {
+	Provider        string `json:"provider,omitempty"`
 	Endpoint        string `json:"endpoint"`
 	Model           string `json:"model"`
 	TimeoutMS       int64  `json:"timeout_ms"`
@@ -123,6 +127,7 @@ type tutorConfigDoc struct {
 
 func tutorConfigViewOf(cfg tutor.Config) tutorConfigView {
 	return tutorConfigView{
+		Provider:        cfg.Provider,
 		Endpoint:        cfg.Endpoint,
 		Model:           cfg.Model,
 		TimeoutMS:       cfg.TimeoutMS,
@@ -161,7 +166,9 @@ type tutorCallView struct {
 	Status           string `json:"status"`
 	ErrorCode        string `json:"error_code,omitempty"`
 	ErrorMessage     string `json:"error_message,omitempty"`
+	Provider         string `json:"provider,omitempty"`
 	ProviderHost     string `json:"provider_host"`
+	FailoverFrom     string `json:"failover_from,omitempty"`
 	Model            string `json:"model"`
 	PromptVersion    string `json:"prompt_version"`
 	SourceTextShared bool   `json:"source_text_shared"`
@@ -187,7 +194,9 @@ func tutorCallViewOf(call store.TutorCall, includeText bool) tutorCallView {
 		Status:           call.Status,
 		ErrorCode:        call.ErrorCode,
 		ErrorMessage:     call.ErrorMessage,
+		Provider:         call.Provider,
 		ProviderHost:     call.ProviderHost,
+		FailoverFrom:     call.FailoverFrom,
 		Model:            call.Model,
 		PromptVersion:    call.PromptVersion,
 		SourceTextShared: call.SourceTextShared,
@@ -205,21 +214,35 @@ func tutorCallViewOf(call store.TutorCall, includeText bool) tutorCallView {
 	return view
 }
 
+type tutorFailoverView struct {
+	FromProvider string `json:"from_provider"`
+	FromModel    string `json:"from_model"`
+	ToProvider   string `json:"to_provider,omitempty"`
+	ToModel      string `json:"to_model,omitempty"`
+	Reason       string `json:"reason"`
+	Applied      bool   `json:"applied"`
+	Refusal      string `json:"refusal,omitempty"`
+	Detail       string `json:"detail,omitempty"`
+}
+
 type tutorAdvisoryDoc struct {
 	SchemaVersion int                 `json:"schema_version"`
 	State         string              `json:"state"`
 	Call          tutorCallView       `json:"call"`
 	Suggestion    tutorSuggestionView `json:"suggestion"`
 	Context       tutorContextView    `json:"context"`
+	Failover      *tutorFailoverView  `json:"failover,omitempty"`
 	Limits        []string            `json:"limits"`
 }
 
 type tutorFailureDoc struct {
-	SchemaVersion int           `json:"schema_version"`
-	State         string        `json:"state"`
-	Error         errorBody     `json:"error"`
-	Call          tutorCallView `json:"call"`
-	Limits        []string      `json:"limits"`
+	SchemaVersion int                `json:"schema_version"`
+	State         string             `json:"state"`
+	Error         errorBody          `json:"error"`
+	Action        string             `json:"action,omitempty"`
+	Call          tutorCallView      `json:"call"`
+	Failover      *tutorFailoverView `json:"failover,omitempty"`
+	Limits        []string           `json:"limits"`
 }
 
 type tutorShowDoc struct {
@@ -231,13 +254,17 @@ type tutorShowDoc struct {
 }
 
 type tutorHistorySummaryView struct {
-	Calls            int  `json:"calls"`
-	OK               int  `json:"ok"`
-	Failed           int  `json:"failed"`
-	PromptTokens     int  `json:"prompt_tokens"`
-	CompletionTokens int  `json:"completion_tokens"`
-	DailyCalls       int  `json:"daily_calls"`
-	DailyLimit       *int `json:"daily_limit,omitempty"`
+	Calls            int                       `json:"calls"`
+	OK               int                       `json:"ok"`
+	Failed           int                       `json:"failed"`
+	PromptTokens     int                       `json:"prompt_tokens"`
+	CompletionTokens int                       `json:"completion_tokens"`
+	DailyCalls       int                       `json:"daily_calls"`
+	DailyLimit       *int                      `json:"daily_limit,omitempty"`
+	Providers        []modelBudgetProviderView `json:"providers"`
+	TotalCalls       int                       `json:"total_calls"`
+	TotalLimit       int                       `json:"total_limit"`
+	Ceiling          string                    `json:"ceiling"`
 }
 
 type tutorHistoryDoc struct {
@@ -252,6 +279,7 @@ type tutorConsentDoc struct {
 	SchemaVersion int      `json:"schema_version"`
 	State         string   `json:"state"`
 	SourceID      string   `json:"source_id"`
+	Provider      string   `json:"provider,omitempty"`
 	Granted       bool     `json:"granted"`
 	RecordedAt    string   `json:"recorded_at"`
 	Reviewer      string   `json:"reviewer"`
@@ -260,6 +288,7 @@ type tutorConsentDoc struct {
 
 type tutorConsentSourceView struct {
 	SourceID   string `json:"source_id"`
+	Provider   string `json:"provider,omitempty"`
 	Title      string `json:"title"`
 	Granted    bool   `json:"granted"`
 	RecordedAt string `json:"recorded_at,omitempty"`
@@ -279,5 +308,5 @@ var tutorLimits = []string{
 	"Raw prompt text is not stored: a call records the SHA-256 and byte size of the exact serialized request body plus scope flags. Run `passquest tutor preview` to inspect the exact text before sending.",
 	"Private imported source text is withheld until a recorded `tutor consent` event for that source; first-party material needs no consent.",
 	"A failed or malformed provider response is recorded as a failure and cannot append an attempt, change a grade or edit an answer key.",
-	"The daily call budget counts failed calls and resets at 00:00 UTC. No retry is attempted automatically.",
+	"The daily call budget counts failed calls and resets at 00:00 UTC. `tutor ask` retries at most once, only on another verified provider with the same recorded consent scope and remaining budget.",
 }

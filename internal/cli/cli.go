@@ -138,6 +138,8 @@ func Run(args []string, options Options) int {
 		return runNext(args[1:], opt)
 	case "tutor":
 		return runTutor(args[1:], opt)
+	case "model":
+		return runModel(args[1:], opt)
 	case "agent":
 		return runAgent(args[1:], opt)
 	case "note":
@@ -189,6 +191,10 @@ Usage:
   passquest tutor consent SOURCE --reviewer NAME [--db PATH] [--json]
   passquest tutor revoke  SOURCE --reviewer NAME [--db PATH] [--json]
   passquest tutor consents [--db PATH] [--json]
+  passquest model list   [--db PATH] [--json]
+  passquest model use    PROVIDER/MODEL [--endpoint URL] [--db PATH] [--json]
+  passquest model test   PROVIDER/MODEL [--endpoint URL] [--db PATH] [--json]
+  passquest model budget [--db PATH] [--json]
   passquest agent start  [--task study-brief] [--max-steps N] [--timeout-seconds N]
                      [--db PATH] [--agent-store PATH] [--json]
   passquest agent status [RUN] [--db PATH] [--agent-store PATH] [--json]

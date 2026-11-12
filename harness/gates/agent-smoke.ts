@@ -5,6 +5,7 @@ import path from "node:path";
 import { runGo } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
+import { sseText, sseTool } from "../lib/sse.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
@@ -24,34 +25,6 @@ function parse(raw: string): unknown {
   } catch {
     return {};
   }
-}
-
-function sseText(text: string): Response {
-  const base = { id: "chatcmpl-smoke", object: "chat.completion.chunk", created: 1, model: MODEL };
-  const body = [
-    { ...base, choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }] },
-    { ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
-  ]
-    .map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`)
-    .join("");
-  return new Response(`${body}data: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
-}
-
-function sseTool(index: number, kind: string, title: string, body: string): Response {
-  const base = { id: "chatcmpl-smoke", object: "chat.completion.chunk", created: 1, model: MODEL };
-  const call = {
-    index: 0,
-    id: `call_${index}`,
-    type: "function",
-    function: { name: "record_study_step", arguments: JSON.stringify({ index, kind, title, body }) },
-  };
-  const chunks = [
-    { ...base, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [call] }, finish_reason: null }] },
-    { ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
-  ];
-  return new Response(`${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`, {
-    headers: { "content-type": "text/event-stream" },
-  });
 }
 
 export const agentSmoke: Gate = {
@@ -101,10 +74,10 @@ export const agentSmoke: Gate = {
         }
         if (mode === "delay") {
           await Bun.sleep(15000);
-          return sseText("late stub answer");
+          return sseText("late stub answer", MODEL);
         }
         if (mode === "text") {
-          return sseText("plain stub answer");
+          return sseText("plain stub answer", MODEL);
         }
         const messages = Array.isArray((body as { messages?: unknown }).messages)
           ? ((body as { messages: { role?: string; content?: unknown }[] }).messages)
@@ -118,12 +91,12 @@ export const agentSmoke: Gate = {
           .map((message) => String(message.content ?? ""))
           .join("\n");
         if (!/step 1/i.test(toolText)) {
-          return sseTool(1, "diagnosis", `Step 1 diagnosis ${label}`, "The recorded outcome suggests marking the negation before comparing options.");
+          return sseTool(1, "diagnosis", `Step 1 diagnosis ${label}`, "The recorded outcome suggests marking the negation before comparing options.", MODEL);
         }
         if (!/step 2/i.test(toolText)) {
-          return sseTool(2, "tactic", `Step 2 tactic ${label}`, "Mark NOT or EXCEPT first; a word match alone is not evidence.");
+          return sseTool(2, "tactic", `Step 2 tactic ${label}`, "Mark NOT or EXCEPT first; a word match alone is not evidence.", MODEL);
         }
-        return sseText("Two advisory steps recorded; practise the focused tactic next.");
+        return sseText("Two advisory steps recorded; practise the focused tactic next.", MODEL);
       },
     });
 

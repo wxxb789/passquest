@@ -74,6 +74,7 @@ func (m Mode) Valid() bool {
 // Config is the non-secret provider configuration stored in the local
 // database. It never contains a credential.
 type Config struct {
+	Provider        string `json:"provider,omitempty"`
 	Endpoint        string `json:"endpoint"`
 	Model           string `json:"model"`
 	TimeoutMS       int64  `json:"timeout_ms"`
@@ -194,6 +195,10 @@ type HostRequest struct {
 	MaxResponseChars int    `json:"max_response_chars"`
 	Chat             Chat   `json:"chat"`
 	Body             string `json:"body"`
+	// CredentialEnv selects the environment variable the transport copies into
+	// the host's documented credential slot. It is transport metadata, never
+	// part of the provider request document.
+	CredentialEnv string `json:"-"`
 }
 
 // Usage is provider-reported token accounting. It is optional because a
@@ -511,23 +516,14 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 		Temperature: 0,
 		Stream:      false,
 	}
-	encoded, err := json.Marshal(chat)
+	request, requestSHA, requestBytes, err := hostRequestFor(cfg.Endpoint, cfg.TimeoutMS, chat)
 	if err != nil {
-		return Preview{}, fmt.Errorf("tutor: encode chat: %w", err)
-	}
-	sum := sha256.Sum256(encoded)
-	request := HostRequest{
-		ProtocolVersion:  ProtocolVersion,
-		Endpoint:         strings.TrimSpace(cfg.Endpoint),
-		TimeoutMS:        cfg.TimeoutMS,
-		MaxResponseChars: MaxResponseChars,
-		Chat:             chat,
-		Body:             string(encoded),
+		return Preview{}, err
 	}
 	return Preview{
 		Request:      request,
-		RequestSHA:   hex.EncodeToString(sum[:]),
-		RequestBytes: len(encoded),
+		RequestSHA:   requestSHA,
+		RequestBytes: requestBytes,
 		Context: Context{
 			PrivateSource:               target.PrivateSource,
 			SourceID:                    target.SourceID,
@@ -546,6 +542,52 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 			PromptVersion:               PromptVersion,
 		},
 	}, nil
+}
+
+// hostRequestFor serializes one chat document once and derives the host
+// request and its identity from those same bytes.
+func hostRequestFor(endpoint string, timeoutMS int64, chat Chat) (HostRequest, string, int, error) {
+	encoded, err := json.Marshal(chat)
+	if err != nil {
+		return HostRequest{}, "", 0, fmt.Errorf("tutor: encode chat: %w", err)
+	}
+	sum := sha256.Sum256(encoded)
+	request := HostRequest{
+		ProtocolVersion:  ProtocolVersion,
+		Endpoint:         strings.TrimSpace(endpoint),
+		TimeoutMS:        timeoutMS,
+		MaxResponseChars: MaxResponseChars,
+		Chat:             chat,
+		Body:             string(encoded),
+	}
+	return request, hex.EncodeToString(sum[:]), len(encoded), nil
+}
+
+// ProbeRequest builds one minimal non-streaming chat request for a capability
+// check. It is the same host document tutor ask uses, with the smallest
+// authored prompt and output bound the host accepts.
+func ProbeRequest(endpoint, model string, timeoutMS int64) (HostRequest, string, int, error) {
+	cfg := Config{
+		Endpoint:        endpoint,
+		Model:           model,
+		TimeoutMS:       timeoutMS,
+		MaxOutputTokens: MinMaxTokens,
+		DailyCalls:      1,
+	}
+	if err := cfg.Validate(); err != nil {
+		return HostRequest{}, "", 0, err
+	}
+	chat := Chat{
+		Model: strings.TrimSpace(model),
+		Messages: []Message{
+			{Role: "system", Content: "You are a model capability probe. Reply with the two letters OK and nothing else."},
+			{Role: "user", Content: "Capability check: text.chat. Reply OK."},
+		},
+		MaxTokens:   MinMaxTokens,
+		Temperature: 0,
+		Stream:      false,
+	}
+	return hostRequestFor(endpoint, cfg.TimeoutMS, chat)
 }
 
 func attemptLine(target Target) string {

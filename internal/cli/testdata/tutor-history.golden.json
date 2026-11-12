@@ -8,7 +8,54 @@
     "prompt_tokens": 120,
     "completion_tokens": 30,
     "daily_calls": 2,
-    "daily_limit": 20
+    "daily_limit": 20,
+    "providers": [
+      {
+        "provider": "",
+        "label": "unattributed (legacy)",
+        "calls": 2,
+        "limit": 20,
+        "active": true
+      },
+      {
+        "provider": "openai",
+        "label": "OpenAI",
+        "calls": 0,
+        "limit": 20,
+        "active": false
+      },
+      {
+        "provider": "qwen",
+        "label": "Qwen (DashScope)",
+        "calls": 0,
+        "limit": 20,
+        "active": false
+      },
+      {
+        "provider": "doubao",
+        "label": "Doubao (Volcengine Ark)",
+        "calls": 0,
+        "limit": 20,
+        "active": false
+      },
+      {
+        "provider": "deepseek",
+        "label": "DeepSeek",
+        "calls": 0,
+        "limit": 20,
+        "active": false
+      },
+      {
+        "provider": "gemini",
+        "label": "Gemini (OpenAI compatibility)",
+        "calls": 0,
+        "limit": 20,
+        "active": false
+      }
+    ],
+    "total_calls": 2,
+    "total_limit": 120,
+    "ceiling": "6 providers × 20 = 120"
   },
   "calls": [
     {
@@ -58,6 +105,6 @@
     "Raw prompt text is not stored: a call records the SHA-256 and byte size of the exact serialized request body plus scope flags. Run `passquest tutor preview` to inspect the exact text before sending.",
     "Private imported source text is withheld until a recorded `tutor consent` event for that source; first-party material needs no consent.",
     "A failed or malformed provider response is recorded as a failure and cannot append an attempt, change a grade or edit an answer key.",
-    "The daily call budget counts failed calls and resets at 00:00 UTC. No retry is attempted automatically."
+    "The daily call budget counts failed calls and resets at 00:00 UTC. `tutor ask` retries at most once, only on another verified provider with the same recorded consent scope and remaining budget."
   ]
 }

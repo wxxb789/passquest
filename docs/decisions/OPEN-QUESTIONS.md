@@ -913,3 +913,95 @@ Entry format:
   `assess compare`; the per-item clock uses the actual count. Reverse by changing `Pool.Select`.
 - Revisit when: the owner wants an exact item count more than whole-unit holdout semantics.
 
+### Q-0010-07 — Which capabilities does `model test` actually probe?
+- Status: decided(default taken)
+- Context: clause 4 requires a minimal call and a verified/failed record; clause 7 makes search,
+  speech and images discoverable. The goal-0005 host validates an exact five-key chat body and has no
+  tool/image path, so probing `tool.calls` or `vision` would widen the host protocol without an
+  acceptance row.
+- Options considered: (A) probe only `text.chat` and leave the optional capabilities
+  `declared,unverified`; (B) add tool and image probes to the host; (C) declare no optional
+  capabilities at all.
+- Default taken: (A). `model test` verifies `text.chat`; every other declared capability stays
+  discoverable and unverified, so no feature offers it. Reverse by adding a probe and one integration
+  test per capability; existing verification rows keep their capability name.
+- Revisit when: the desktop workspace actually executes an image or speech feature, or a provider's
+  tool-call behavior must be verified for a feature that ships.
+
+### Q-0010-08 — Does bounded failover apply to durable agent runs?
+- Status: decided(default taken)
+- Context: clause 8 says "when a call fails"; agent hosts make several provider calls inside one
+  durable run, and goal 0006 records the model at start.
+- Options considered: (A) fail over only in the single-call `tutor ask` path; (B) fail over inside the
+  Pi host at every model call; (C) fail over only on the first agent call.
+- Default taken: (A). Agent runs keep the recorded provider and model; `resume` is their retry
+  mechanism. Reverse by adding an explicit model/provider hand-off event and a host-side retry; that
+  needs a new recorded-model decision first.
+- Revisit when: a durable run repeatedly fails on a transient provider error and the owner wants an
+  automatic one-step hand-off.
+
+### Q-0010-09 — Does a failover target need its credential present?
+- Status: decided(default taken)
+- Context: clause 8 lists verification, consent scope, budget and a different provider. A target
+  whose credential variable is absent cannot complete the retry.
+- Options considered: (A) require the target credential and refuse with `no_credential`; (B) try
+  anyway and record the host's failure; (C) skip the condition because verification implies a past
+  key.
+- Default taken: (A). A verified model can outlive the key that verified it. The refusal names
+  `no_credential` and makes no target call. Reverse by removing the presence check before
+  `ReserveTutorCall`.
+- Revisit when: the OS secret store makes credential presence a durable, provider-owned fact.
+
+### Q-0010-10 — Is `speech.synthesis` a fifth registry capability?
+- Status: decided(default taken)
+- Context: clause 1 names four capabilities; clause 7 also requires speech to be discoverable.
+- Options considered: (A) add `speech.synthesis` to the capability vocabulary; (B) treat speech as a
+  provider-level feature outside the model matrix; (C) omit speech from this increment.
+- Default taken: (A). It is always `declared` or `unsupported` for the shipped text models and has no
+  execution path. Reverse by removing it from the data file and the vocabulary; verification rows
+  keep the name.
+- Revisit when: a speech feature ships and needs its own probe.
+
+### Q-0010-11 — Does `model test` spend the provider budget?
+- Status: decided(default taken)
+- Context: clause 6 counts provider calls per day; a model test is a real provider call. Exempting it
+  would let repeated tests exceed the printed ceiling.
+- Options considered: (A) spend one slot per test after the host is invoked; (B) exempt probes; (C)
+  count probes in a separate budget.
+- Default taken: (A). A missing key, unknown model, invalid endpoint or exhausted budget refuses
+  before a call and spends nothing. A verification event with `call_made = 1` consumes the slot; a
+  crash between the reservation and that event leaves the reservation spent for the UTC day, so
+  accounting can under-spend. Reverse by excluding `call_made` events from the counter.
+- Revisit when: an owner wants a separate diagnostic budget for setup.
+
+### Q-0010-12 — Is a hand-configured tutor endpoint verified like a registry model?
+- Status: decided(default taken)
+- Context: goal 0005 documented `tutor config --endpoint --model` as the only path. Requiring a
+  registry id would break the 0005 surface and every 0005 test.
+- Options considered: (A) keep the legacy path permissive and mark it `legacy,unverified` in
+  `model list`; (B) require `model test` for every configured endpoint; (C) delete the legacy path.
+- Default taken: (A). `model use` sets the provider field and is strict; a manual
+  `tutor config --endpoint --model` clears the provider field and remains the documented exception.
+  `model list` labels it `legacy`. Reverse by requiring verification whenever an endpoint is
+  configured.
+- Revisit when: goal 0011 can migrate every stored legacy configuration into the registry.
+
+### Q-0010-13 — Does a legacy agent run bind its endpoint at start?
+- Status: open
+- Context: `agentProviderConfig` (`internal/cli/agent.go`) refreshes `cfg.Endpoint` from the current
+  active registry provider, but `runAgentResume` skips the recorded-provider block when the run has no
+  provider (a goal-0005 legacy run). After `model use beta/...`, resuming a legacy run therefore sends
+  beta's endpoint with the run's legacy model id and `PASSQUEST_TUTOR_API_KEY`.
+- Repro: configure a hand-edited endpoint, start an agent run that pauses, run
+  `model use beta/<model>`, then `agent resume RUN`: the resume document keeps `run.model` (the legacy
+  id), while the host request targets beta's endpoint.
+- Options considered: (A) bind the endpoint at start for legacy runs and keep it on resume; (B) keep
+  the current endpoint as Q-0006-05 deliberately says; (C) refuse resume when the endpoint no longer
+  matches the run's recorded provider.
+- Default taken: (B), unchanged in goal 0010 — this record names the behaviour so it is not mistaken
+  for a verified provider/model pairing. Reverse by storing the endpoint on a legacy run or refusing
+  the mismatch.
+- Revisit when: the owner decides whether Q-0006-05's "endpoint is current" rule extends to a run that
+  predates registry providers.
+
+

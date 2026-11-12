@@ -15,6 +15,7 @@ import (
 
 	"github.com/wxxb789/passquest/internal/adaptive"
 	"github.com/wxxb789/passquest/internal/agent"
+	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/skill"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
@@ -111,8 +112,11 @@ func runAgentStart(args []string, opt Options) int {
 	}
 	defer st.Close()
 
-	cfg, code := agentProviderConfig(st, opt, *flags.json)
+	cfg, registry, code := agentProviderConfig(st, opt, *flags.json)
 	if code != 0 {
+		return code
+	}
+	if code := requireVerifiedTextChat(st, registry, opt, cfg.Provider, cfg.Model, *flags.json); code != 0 {
 		return code
 	}
 	if existing, ok, err := st.LatestAgentRun(true); err != nil {
@@ -146,6 +150,7 @@ func runAgentStart(args []string, opt Options) int {
 		RunID:         runID,
 		TaskKind:      agent.TaskStudyBrief,
 		PromptVersion: agent.PromptVersion,
+		Provider:      cfg.Provider,
 		Model:         cfg.Model,
 		StorePath:     storePath,
 		MaxSteps:      *stepsFlag,
@@ -163,18 +168,14 @@ func runAgentStart(args []string, opt Options) int {
 		return internalError(opt, *flags.json, err)
 	}
 
-	if strings.TrimSpace(opt.Getenv(agent.CredentialEnv)) == "" {
-		failure := agent.FailureForCode(agent.CodeMissingCredential)
-		detail := agentFailureDetail(failure, agent.StateNeedsAction, "")
-		if _, err := st.AppendAgentRunEvent(runID, store.AgentEventNeedsAction, detail, opt.Now()); err != nil {
-			return internalError(opt, *flags.json, err)
-		}
-		return writeAgentFailure(opt, *flags.json, run, agent.StateNeedsAction, failure, nil)
+	env, _, present := provider.CredentialValue(opt.Getenv, run.Provider)
+	if !present {
+		return agentMissingCredential(opt, *flags.json, st, run, env)
 	}
 
 	// start binds the model recorded with the run; a model rename needs
 	// cancel + start, while endpoint, timeout and credential stay current.
-	request, err := agentHostRequest(st, run, agent.ModeStart, cfg.Model, prompt, token, cfg, *timeoutFlag)
+	request, err := agentHostRequest(st, run, agent.ModeStart, cfg.Model, prompt, token, cfg, *timeoutFlag, env)
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
@@ -243,9 +244,41 @@ func runAgentResume(args []string, opt Options) int {
 			return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s answered without steps; start a new run", run.RunID))
 		}
 	}
-	cfg, code := agentProviderConfig(st, opt, *flags.json)
+	cfg, registry, code := agentProviderConfig(st, opt, *flags.json)
 	if code != 0 {
 		return code
+	}
+	env := provider.CredentialEnvFor(run.Provider)
+	if strings.TrimSpace(run.Provider) != "" {
+		if len(registry.Providers) == 0 {
+			loaded, _, err := provider.Load(opt.Getenv)
+			if err != nil {
+				return usageError(opt, *flags.json, "invalid_registry", err.Error())
+			}
+			registry = loaded
+		}
+		recorded, _, ok := registry.Find(run.Provider, run.Model)
+		if !ok {
+			return usageError(opt, *flags.json, "unknown_model",
+				fmt.Sprintf("run %s recorded model %s/%s, which is no longer in the registry", run.RunID, run.Provider, run.Model))
+		}
+		if recorded.Custom {
+			if cfg.Provider != run.Provider {
+				return usageError(opt, *flags.json, "provider_changed",
+					fmt.Sprintf("run %s uses the custom provider; run passquest model use custom/%s --endpoint URL before resuming",
+						run.RunID, run.Model))
+			}
+		} else {
+			cfg.Endpoint = recorded.Endpoint
+		}
+		if code := requireVerifiedTextChat(st, registry, opt, run.Provider, run.Model, *flags.json); code != 0 {
+			return code
+		}
+		var present bool
+		env, _, present = provider.CredentialValue(opt.Getenv, run.Provider)
+		if !present {
+			return agentMissingCredential(opt, *flags.json, st, run, env)
+		}
 	}
 	if err := agent.PrepareStorePath(run.StorePath); err != nil {
 		return internalError(opt, *flags.json, err)
@@ -274,9 +307,7 @@ func runAgentResume(args []string, opt Options) int {
 			return internalError(opt, *flags.json, err)
 		}
 	}
-	// resume keeps the run's recorded model with the current endpoint, timeout
-	// and credential (Q-0006-05).
-	request, err := agentHostRequest(st, run, agent.ModeResume, run.Model, prompt, token, cfg, *timeoutFlag)
+	request, err := agentHostRequest(st, run, agent.ModeResume, run.Model, prompt, token, cfg, *timeoutFlag, env)
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
@@ -284,26 +315,52 @@ func runAgentResume(args []string, opt Options) int {
 }
 
 // agentProviderConfig applies the provider preconditions start and resume
-// share: a configured endpoint and the agent's endpoint rule.
-func agentProviderConfig(st *store.Store, opt Options, jsonMode bool) (tutor.Config, int) {
+// share: a configured endpoint, the active registry endpoint and the agent's
+// endpoint rule. The loaded registry is returned so a run resolves it once.
+func agentProviderConfig(st *store.Store, opt Options, jsonMode bool) (tutor.Config, provider.Registry, int) {
 	cfg, configured, err := st.TutorConfig()
 	if err != nil {
-		return tutor.Config{}, internalError(opt, jsonMode, err)
+		return tutor.Config{}, provider.Registry{}, internalError(opt, jsonMode, err)
 	}
 	if !configured {
-		return tutor.Config{}, usageError(opt, jsonMode, "not_configured",
+		return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "not_configured",
 			"no provider is configured; run passquest tutor config --endpoint URL --model NAME")
 	}
-	if err := agent.ValidateEndpoint(cfg.Endpoint); err != nil {
-		return tutor.Config{}, usageError(opt, jsonMode, "invalid_config", err.Error())
+	var registry provider.Registry
+	if strings.TrimSpace(cfg.Provider) != "" {
+		var err error
+		registry, _, err = provider.Load(opt.Getenv)
+		if err != nil {
+			return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "invalid_registry", err.Error())
+		}
+		_, _, refreshed, _, err := activeProvider(cfg, registry)
+		if err != nil {
+			return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "unknown_model", err.Error())
+		}
+		cfg = refreshed
 	}
-	return cfg, 0
+	if err := agent.ValidateEndpoint(cfg.Endpoint); err != nil {
+		return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "invalid_config", err.Error())
+	}
+	return cfg, registry, 0
+}
+
+// agentMissingCredential records the one needs_action event every missing-key
+// path shares.
+func agentMissingCredential(opt Options, jsonMode bool, st *store.Store, run store.AgentRun, env string) int {
+	failure := agent.FailureForCode(agent.CodeMissingCredential)
+	failure.Message = fmt.Sprintf("%s is not set", env)
+	detail := agentFailureDetail(failure, agent.StateNeedsAction, "")
+	if _, err := st.AppendAgentRunEvent(run.RunID, store.AgentEventNeedsAction, detail, opt.Now()); err != nil {
+		return internalError(opt, jsonMode, err)
+	}
+	return writeAgentFailure(opt, jsonMode, run, agent.StateNeedsAction, failure, nil)
 }
 
 // agentHostRequest builds the one host request shape start and resume share.
 // model is explicit because resume binds the run's recorded model while start
 // binds the current configuration (Q-0006-05).
-func agentHostRequest(st *store.Store, run store.AgentRun, mode, model, prompt, token string, cfg tutor.Config, timeoutSeconds int) (agent.HostRequest, error) {
+func agentHostRequest(st *store.Store, run store.AgentRun, mode, model, prompt, token string, cfg tutor.Config, timeoutSeconds int, credentialEnv string) (agent.HostRequest, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return agent.HostRequest{}, err
@@ -319,7 +376,7 @@ func agentHostRequest(st *store.Store, run store.AgentRun, mode, model, prompt, 
 		HostToken:       token,
 		BinaryPath:      executable,
 		DBPath:          st.Path(),
-		CredentialEnv:   agent.CredentialEnv,
+		CredentialEnv:   credentialEnv,
 		Model: &agent.ModelConfig{
 			Endpoint:        cfg.Endpoint,
 			Model:           model,

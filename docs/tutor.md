@@ -27,6 +27,8 @@ passquest tutor ask --mode micro_lesson --json
 passquest tutor history
 passquest tutor show 3
 passquest tutor consents
+passquest tutor consent SOURCE --reviewer NAME [--provider ID]
+passquest tutor revoke SOURCE --reviewer NAME [--provider ID]
 ```
 
 `--attempt` defaults to the latest recorded attempt. `report` shows attempt ids. Every command accepts
@@ -42,14 +44,16 @@ passquest tutor consents
   `preview` shows it. The host checks the serialized body against that content and posts the bytes
   unchanged, so the recorded SHA-256 and size identify what was sent. The host adds
   `Authorization: Bearer <key>` and refuses redirects.
-- No provider-specific capability, model or account claim is made. Multiple providers, login flows,
-  capability discovery, search, speech and images belong to goal 0010.
+- No provider-specific capability, model or account claim is made by this legacy path. Goal 0010 adds
+  a registry of providers, models and declared capabilities; see [providers.md](providers.md). A
+  registry-selected model, its credential variable and its verification state are separate facts.
 
 ## Credential
 
-The only credential input is the environment variable `PASSQUEST_TUTOR_API_KEY`, read by the agent
-host. Pass Quest never writes it to SQLite, argv, output, a call record, a generated command or the
-repository. `tutor config` reports `present` or `missing`, never the value.
+The legacy path reads `PASSQUEST_TUTOR_API_KEY`. A registry provider reads its own variable
+(`PASSQUEST_OPENAI_API_KEY`, `PASSQUEST_QWEN_API_KEY`, …; see [providers.md](providers.md)). The
+credential is read by the agent host, never written to SQLite, argv, output, a call record, a
+generated command or the repository. `tutor config` reports `present` or `missing`, never the value.
 
 Until the desktop workspace provides an OS secret store (goal 0011), the learner exports the variable
 in the session that runs `tutor ask`:
@@ -74,8 +78,11 @@ tactic exercise and the skill passages) are authored for this repository and nee
 | Content changed or unavailable | Attempt facts, stored selected/correct option texts when allowed, lessons; current passage/evidence are not sent | same, with private stored text allowed by the grant |
 
 `tutor preview` prints the exact chat content and lists `withheld` and `truncated_fields`. Consent is an
-append-only event trail per source; `revoke` appends a new event and withholds the source again. The
-reviewer label is attribution, not authentication, matching the review model in
+append-only event trail per source; `revoke` appends a new event and withholds the source again. An
+optional `--provider ID` scopes a decision to one registry provider; a provider-specific event
+overrides the global event for that provider, and a global event applies to every provider. Failover
+compares those scopes exactly and never widens them. The reviewer label is attribution, not
+authentication, matching the review model in
 [source-import.md](source-import.md).
 
 The provider payload never includes the database path, source title or path, endpoint path, API key,
@@ -111,11 +118,13 @@ budget is reached. `preview` names every clipped or omitted field.
 ## What is stored
 
 Schema version 8 added four tutor tables (the current schema is later; goal 0007 adds
-`note_refinements` to the same provider budget):
+`note_refinements` to the same provider budget, and goal 0010 adds `provider` columns plus the
+verification and failover ledgers):
 
-- `tutor_config` — endpoint, model, timeout, output bound and daily budget. Mutable settings, no
-  credential.
-- `tutor_consent_events` — append-only grant/revoke events with reviewer and time.
+- `tutor_config` — optional registry provider id, endpoint, model, timeout, output bound and daily
+  budget. Mutable settings, no credential.
+- `tutor_consent_events` — append-only grant/revoke events with reviewer, optional provider scope and
+  time.
 - `tutor_calls` — append-only advisory records: attempt/content/question ids, mode, status, error
   code/message, provider host, model, prompt version, whether private text was shared, request
   SHA-256/bytes, output text/characters, token usage, HTTP status and latency.
@@ -130,15 +139,22 @@ stored advisory text. A call records `source_text_shared` only when the host act
 that carried private source text; a failure before the request was sent records `false`. `report`,
 `next`, `practice` and any export path do not read these tables.
 
-The call budget counts failed calls and note refinements (`note propose --refine`), and resets at
-00:00 UTC. `tutor history` reports the shared daily count but lists coaching calls only. `ask` claims
-a slot with an immediate
-database transaction before it spawns the host, so two concurrent invocations cannot both pass the
-same check with, say, `--daily-calls 1`; the recorded call replaces its claim atomically. A path that
-fails before the host is invoked releases its claim. A crash or a storage failure after that cannot,
-so the slot stays spent until the next UTC day: the accounting can under-spend, never over-spend.
-There is no automatic retry: a retry can double provider spend and hide a failure. Run `tutor ask`
-again after fixing the cause.
+The call budget counts failed calls and note refinements (`note propose --refine`), resets at
+00:00 UTC and is counted **per provider** (goal 0010). `tutor history`, `model list` and
+`model budget` print each provider counter and the sum; the ceiling is the sum, not one global cap.
+`tutor history` reports the active provider's shared daily count but lists coaching calls only.
+`ask` claims a slot with an immediate database transaction before it spawns the host, so two
+concurrent invocations cannot both pass the same check with, say, `--daily-calls 1`; the recorded
+call replaces its claim atomically. A path that fails before the host is invoked releases its claim.
+A crash or a storage failure after that cannot, so the slot stays spent until the next UTC day: the
+accounting can under-spend, never over-spend. `model test` also spends one slot because it makes a
+real provider call.
+
+`tutor ask` may make one bounded retry on another provider after a retryable transport or quota
+failure. It requires the target's `text.chat` verification, an exactly equal consent scope, remaining
+budget and a different provider, and prints `failover: <from> → <to> (reason: <type>)`. A consent
+difference refuses the retry and prints why. Agent runs do not fail over; they keep the model and
+provider recorded at start. Details: [providers.md](providers.md#bounded-failover).
 
 ## Runtime boundary
 
@@ -156,8 +172,8 @@ multi-step study briefs; `tutor ask` stays a single-shot call. See [agent.md](ag
 | Exit | Meaning |
 |---|---|
 | 0 | Success, including a stored failure shown by `tutor show`. |
-| 2 | Invalid input, no configuration, no attempt/unknown attempt, unknown call/source, missing credential or exhausted daily budget. No provider call is made. |
-| 3 | Agent host, network or provider failure after a call record. Codes: `agent_unavailable`, `missing_credential` (host-side), `auth_failed`, `rate_limited`, `provider_error`, `timeout`, `network_error`, `invalid_response`, `host_error`, `config_error`. |
+| 2 | Invalid input, no configuration, no attempt/unknown attempt, unknown call/source, missing credential, an unverified registry model (`capability_unverified`) or exhausted daily budget. No provider call is made. |
+| 3 | Agent host, network or provider failure after a call record. Codes include `agent_unavailable`, `no_credential`/`missing_credential`, `unauthorized`/`auth_failed`, `rate_limited`, `model_missing`, `endpoint_unreachable`, `invalid_response`, `provider_error`, `timeout`, `host_error`, `config_error`. |
 | 1 | Local storage or internal failure. |
 
 A failed provider call stores an error row with no model text; the attempt report is byte-identical
@@ -165,9 +181,11 @@ before and after the failure. `practice` still records and grades locally.
 
 ## Limits
 
-- One endpoint shape, one attempt and no streaming. Broad provider choice and capabilities are goal
-  0010; durable multi-step work lives in the separate `agent` commands ([agent.md](agent.md)), not in
-  `tutor ask`.
+- One endpoint shape, one attempt and no streaming. Broad provider choice and capabilities are
+  [providers.md](providers.md); durable multi-step work lives in the separate `agent` commands
+  ([agent.md](agent.md)), not in `tutor ask`.
+- The registry path requires `model test` verification of `text.chat`; the legacy hand-configured path
+  does not. Only `text.chat` is probed in this increment.
 - The credential lives in the environment until goal 0011's OS secret store. A learner must export it
   in each session or shell profile they control.
 - The model output is stored locally so the learner can reread it. It is not an answer key, a grade,

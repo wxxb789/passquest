@@ -11,10 +11,18 @@ import (
 	"github.com/wxxb789/passquest/internal/store"
 )
 
+func providerLabelOrManual(providerID string) string {
+	if strings.TrimSpace(providerID) == "" {
+		return "manual"
+	}
+	return providerID
+}
+
 type agentRunView struct {
 	RunID         string `json:"run_id"`
 	Task          string `json:"task"`
 	PromptVersion string `json:"prompt_version"`
+	Provider      string `json:"provider,omitempty"`
 	Model         string `json:"model"`
 	Store         string `json:"store,omitempty"`
 	MaxSteps      int    `json:"max_steps"`
@@ -110,6 +118,7 @@ type agentCancelDoc struct {
 type agentRunSummaryView struct {
 	RunID       string `json:"run_id"`
 	Task        string `json:"task"`
+	Provider    string `json:"provider,omitempty"`
 	Model       string `json:"model"`
 	MaxSteps    int    `json:"max_steps"`
 	CreatedAt   string `json:"created_at"`
@@ -187,6 +196,7 @@ func agentRunViewOf(run store.AgentRun) agentRunView {
 		RunID:         run.RunID,
 		Task:          run.TaskKind,
 		PromptVersion: run.PromptVersion,
+		Provider:      run.Provider,
 		Model:         run.Model,
 		Store:         run.StorePath,
 		MaxSteps:      run.MaxSteps,
@@ -272,7 +282,8 @@ func agentRunSummaryViews(summaries []store.AgentRunSummary) []agentRunSummaryVi
 	for _, summary := range summaries {
 		state := string(agentAppState(summary.LatestEvent))
 		out = append(out, agentRunSummaryView{
-			RunID: summary.RunID, Task: summary.TaskKind, Model: summary.Model, MaxSteps: summary.MaxSteps,
+			RunID: summary.RunID, Task: summary.TaskKind, Provider: summary.Provider,
+			Model: summary.Model, MaxSteps: summary.MaxSteps,
 			CreatedAt: source.FormatTime(summary.CreatedAt), State: state, LatestEvent: summary.LatestEvent,
 			Steps: summary.Steps, Attempts: summary.Attempts,
 		})
@@ -336,7 +347,8 @@ func agentCancelDocOf(run store.AgentRun, state agent.State, heartbeatPID int) a
 func writeAgentRun(w io.Writer, doc agentRunDoc) {
 	fmt.Fprintf(w, "Pass Quest — durable study brief %s\n", doc.Run.RunID)
 	fmt.Fprintf(w, "State: %s\n", doc.State)
-	fmt.Fprintf(w, "Model: %s | max steps: %d | max turns: %d\n", doc.Run.Model, doc.Run.MaxSteps, doc.Run.MaxTurns)
+	fmt.Fprintf(w, "Provider: %s | model: %s | max steps: %d | max turns: %d\n",
+		providerLabelOrManual(doc.Run.Provider), doc.Run.Model, doc.Run.MaxSteps, doc.Run.MaxTurns)
 	if doc.Durable.Available {
 		fmt.Fprintf(w, "Durable runtime: conversation %d in the Pi store\n", doc.Durable.ConversationID)
 	}
@@ -377,8 +389,9 @@ func writeAgentStatus(w io.Writer, doc agentStatusDoc) {
 	if doc.Status.Action != "" {
 		fmt.Fprintf(w, "Action: %s\n", doc.Status.Action)
 	}
-	fmt.Fprintf(w, "Model: %s | steps: %d | effect attempts: %d (%d duplicate)\n",
-		doc.Run.Model, doc.Counts.Steps, doc.Counts.Attempts, doc.Counts.Duplicates)
+	fmt.Fprintf(w, "Provider: %s | model: %s | steps: %d | effect attempts: %d (%d duplicate)\n",
+		providerLabelOrManual(doc.Run.Provider), doc.Run.Model,
+		doc.Counts.Steps, doc.Counts.Attempts, doc.Counts.Duplicates)
 	if doc.Durable.HeartbeatFresh {
 		fmt.Fprintf(w, "Host: running as pid %d\n", doc.Durable.HeartbeatPID)
 	} else {
@@ -453,7 +466,8 @@ func writeAgentRuns(w io.Writer, doc agentRunsDoc) {
 func writeAgentShow(w io.Writer, doc agentShowDoc) {
 	fmt.Fprintf(w, "Pass Quest — agent run %s\n", doc.Run.RunID)
 	fmt.Fprintf(w, "Trail state: %s | latest event: %s\n", doc.TrailState, doc.LatestEvent)
-	fmt.Fprintf(w, "Model: %s | created %s\n", doc.Run.Model, doc.Run.CreatedAt)
+	fmt.Fprintf(w, "Provider: %s | model: %s | created %s\n",
+		providerLabelOrManual(doc.Run.Provider), doc.Run.Model, doc.Run.CreatedAt)
 	fmt.Fprintf(w, "Effects: %d steps, %d attempts, %d committed, %d duplicate, %d reconciliation event(s)\n",
 		doc.Effects.Steps, doc.Effects.Attempts, doc.Effects.Committed, doc.Effects.Duplicates, doc.Effects.Reconciled)
 	if len(doc.Steps) > 0 {
