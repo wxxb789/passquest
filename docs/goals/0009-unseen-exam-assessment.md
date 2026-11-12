@@ -21,14 +21,18 @@ timed run, and a like-for-like comparison.
 
 **In scope**
 
-1. **Holdout pool.** `passquest assess pool` reports how many items qualify as unseen: imported items with an
-   answer-verified status and **zero prior exposure**. Exposure is recorded when an item is *presented*
-   (`practice`, `next`, `show`, or a derived note), not when it is answered — so a question whose key was
-   shown is spent even if the learner never typed an answer.
-2. **Assessment run.** `passquest assess start --size N --minutes M` presents one item at a time, refuses
-   `tutor`, `skill` and `find` during the run, records per-item `elapsed_ms`, a per-item timeout and
-   `assistance='none'`. An interrupted run resumes under the goal-0006 rules; a run left past its window is
-   recorded `abandoned`, never silently dropped.
+1. **Holdout pool.** `passquest assess pool` reports how many items qualify as unseen, counted **per
+   content unit (a passage or source cluster), not per sibling question**: a unit is spent the moment any
+   of its questions is presented (`practice`, `next`, `show`, or a derived note), and a spent unit removes
+   every question on it from the pool. This follows the assessment rule in
+   [Core Design](../core-design.md) — holdout by entire passage or source cluster rather than splitting
+   sibling questions — because a learner who has read a passage can no longer answer its other questions
+   independently. The command prints both the qualifying item count and the qualifying unit count, since
+   40 items may be eight passages rather than forty independent exposures.
+2. **Assessment run.** `passquest assess start --size N --minutes M` presents one unit's questions at a
+   time, in the order the source presents them, refuses `tutor`, `skill` and `find` during the run,
+   records per-item `elapsed_ms`, a per-item timeout and `assistance='none'`. An interrupted run resumes
+   under the goal-0006 rules; a run left past its window is recorded `abandoned`, never silently dropped.
 3. **Annotations withheld.** During a run the question renders without glossary or reasoning
    (`--annotations none` is the only accepted value in this goal); the withheld annotations are printed in the
    report instead, so the learner can still learn from them after the fact.
@@ -57,14 +61,15 @@ Q-0009-03); any claim that this assessment replaces the real exam.
 - Pass threshold: none. The report shows accuracy and speed bands and prints `pass threshold: unknown`
   (Q-0009-02).
 - Minimum holdout: 20 qualifying items (Q-0009-03).
-- Exposure: any presentation of the item, not only a wrong answer (Q-0009-04).
+- Exposure: any presentation of any question on a content unit spends that whole unit, so its sibling
+  questions leave the pool with it (Q-0009-04).
 - Annotations: hidden during a run, shown in the report (Q-0009-05).
 
 ## Acceptance and evidence
 
 | # | Acceptance | Evidence |
 |---|---|---|
-| 1 | Only unseen items enter a pool | `assess pool` over a database with exposed items prints the exposure events; a control run exposes one item and the pool count drops by one |
+| 1 | Only unseen content units enter a pool | `assess pool` over a database with one exposed question prints that unit as spent and drops the pool by every question on it, not by one; a fresh unit still counts |
 | 2 | A run cannot consult coaching | real transcript where `tutor` and `skill` are refused with a typed error and a nonzero exit code |
 | 3 | Timing is measured, not asserted | stored `elapsed_ms` per item, plus a run with a forced per-item timeout |
 | 4 | Annotations are withheld and later visible | run transcript showing no glossary/reasoning, then the same annotations in `assess report` |
@@ -72,14 +77,17 @@ Q-0009-03); any claim that this assessment replaces the real exam.
 | 6 | Comparison refuses unlike runs | `assess compare` on two runs differing in size or minutes → refusal naming the dimension and an exit code |
 | 7 | Unknowns are stated | report over this database prints `pass threshold: unknown` and no pass/fail verdict |
 | 8 | Interruption does not lose a run | kill the process mid-run, resume, and the report shows the resumed portion and marks it |
-| 9 | The pool floor is enforced | a database below 20 unseen items refuses with the shortfall, exit code shown |
+| 9 | The pool floor is enforced | a database below 20 unseen items refuses with the shortfall in items (and the unit count behind it), exit code shown |
 
 ## Known limits
 
 No real exam standard is available, so the report cannot say "you would pass". Holdout items are drawn from
 the imported 165-page source, so the pool only covers what was reviewed and imported. Item difficulty is not
 calibrated, so a cross-run comparison is only valid inside the same pool family. The 40/60 defaults are a
-disclosed approximation, not the real examination.
+disclosed approximation, not the real examination. Because holdout is per content unit, a page carrying
+several questions is spent as fast as a page carrying one, so the pool is reported in both items and units
+and the unit count is the binding constraint on how many independent assessments the imported material
+supports.
 
 ## Execution boundary
 

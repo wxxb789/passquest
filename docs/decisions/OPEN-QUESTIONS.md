@@ -769,7 +769,10 @@ Entry format:
 ### Q-0009-04 — What counts as prior exposure to an item?
 - Status: resolved
 - Resolution: (owner, 2026-11-12) option (A) confirmed: any presentation — `practice`, `next`, `show` or a
-  derived note — spends the item for assessment purposes, whether or not it was answered.
+  derived note — spends the item for assessment purposes, whether or not it was answered. The **unit** of
+  spending is the content unit, not the question: presenting one question spends its whole passage or
+  source cluster, because a learner who has read the passage can no longer answer its sibling questions
+  independently (Core Design, Assessment).
 - Context: counting only wrong answers keeps the pool alive but admits items whose key the learner already
   saw, which inflates the independent score.
 - Options considered: (A) any presentation; (B) only an incorrect or assisted attempt; (C) two pools, a strict
