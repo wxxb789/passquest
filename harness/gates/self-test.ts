@@ -19,6 +19,7 @@ import { goTest } from "./go-test.ts";
 import { goTidy } from "./go-tidy.ts";
 import { goVet } from "./go-vet.ts";
 import { gofmt } from "./gofmt.ts";
+import { goldenContract } from "./golden-contract.ts";
 import { importSmoke } from "./import-smoke.ts";
 import { localOnly } from "./local-only.ts";
 import { noteSmoke } from "./note-smoke.ts";
@@ -36,7 +37,19 @@ interface BrokenCase {
   label: string;
   files: Record<string, string>;
   tracked?: string[];
+  /** Runs after the fixture files exist and before the gate (usually git state). */
+  prepare?: (root: string) => Promise<string | null>;
   postFail?: (failures: string[]) => string | null;
+}
+
+/** A fixture the gate must accept; proves a check is not unconditionally red. */
+interface PassCase {
+  gate: Gate;
+  label: string;
+  files: Record<string, string>;
+  tracked?: string[];
+  prepare?: (root: string) => Promise<string | null>;
+  postPass?: (detail: string) => string | null;
 }
 
 interface BaselineFixtureOptions {
@@ -90,6 +103,62 @@ async function workingTreeDiscoveryProblem(): Promise<string | null> {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+async function gitAt(root: string, args: string[]): Promise<string | null> {
+  const result = await run(executable("git"), args, { cwd: root });
+  return result.code === 0 ? null : `git ${args.join(" ")} failed: ${result.stderr || result.stdout}`;
+}
+
+async function commitAll(root: string, message: string): Promise<string | null> {
+  const add = await gitAt(root, ["add", "-A"]);
+  if (add) return add;
+  return gitAt(root, [
+    "-c",
+    "user.name=selftest",
+    "-c",
+    "user.email=selftest@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "-m",
+    message,
+  ]);
+}
+
+/** A committed golden the fixtures then change or replace. */
+const baseGoldenJson = '{\n  "schema_version": 1\n}\n';
+
+/**
+ * A repository with a `main` base commit and a `feature` branch, so the golden
+ * gate's merge-base path is the one exercised. The fixture's first commit holds
+ * the pre-change files; `change` then edits the working tree on `feature`.
+ */
+async function withFeatureBranch(root: string, change: (root: string) => Promise<string | null>): Promise<string | null> {
+  const init = await gitAt(root, ["init", "-q", "-b", "main"]);
+  if (init) return init;
+  const base = await commitAll(root, "base");
+  if (base) return base;
+  const branch = await gitAt(root, ["checkout", "-q", "-b", "feature"]);
+  if (branch) return branch;
+  return change(root);
+}
+
+async function goldenOnlyChange(root: string): Promise<string | null> {
+  writeFileSync(resolve(root, "internal/cli/testdata/next-empty.golden.json"), '{\n  "schema_version": 2\n}\n');
+  return commitAll(root, "rewrite a golden without evidence");
+}
+
+async function newGoldenWithEvidence(root: string): Promise<string | null> {
+  writeFileSync(resolve(root, "internal/cli/testdata/brand-new.golden.json"), "{}\n");
+  const commit = await commitAll(root, "add a golden");
+  if (commit) return commit;
+  // The evidence row stays untracked: the gate must read the working tree, not
+  // only committed history.
+  mkdirSync(resolve(root, "docs/evidence"), { recursive: true });
+  writeFileSync(resolve(root, "docs/evidence/0001-golden-contract.md"), "# Evidence\n\nNew golden declared.\n");
+  return null;
 }
 
 function brokenCases(): BrokenCase[] {
@@ -505,17 +574,77 @@ function brokenCases(): BrokenCase[] {
         "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("{}") }\n',
       },
     },
+    {
+      gate: goldenContract,
+      label: "golden rewritten on a branch without a contract document",
+      files: { "internal/cli/testdata/next-empty.golden.json": baseGoldenJson },
+      prepare: (root) => withFeatureBranch(root, goldenOnlyChange),
+      postFail: (failures) => {
+        if (failures.length !== 1) {
+          return `golden-contract: expected one failure, saw ${failures.length}: ${failures.join("; ")}`;
+        }
+        if (!failures[0].includes("internal/cli/testdata/next-empty.golden.json")) {
+          return "golden-contract: did not name the golden that changed";
+        }
+        if (!failures[0].includes("docs/evidence/") || !failures[0].includes("OPEN-QUESTIONS.md")) {
+          return "golden-contract: did not name the contract document that is missing";
+        }
+        return null;
+      },
+    },
   ];
+}
+
+/** Fixtures the gates must accept; a check that always fails is also a defect. */
+function passCases(): PassCase[] {
+  return [
+    {
+      gate: goldenContract,
+      label: "new golden declared by an untracked evidence record",
+      files: { "internal/cli/testdata/next-empty.golden.json": baseGoldenJson },
+      prepare: (root) => withFeatureBranch(root, newGoldenWithEvidence),
+      postPass: (detail) =>
+        detail.includes("1 golden(s) declared by 1 contract document(s)")
+          ? null
+          : `golden-contract: accepted detail ${JSON.stringify(detail)} does not name the declaring evidence row`,
+    },
+  ];
+}
+
+async function prepareFixture(
+  root: string,
+  testCase: { files: Record<string, string>; prepare?: (root: string) => Promise<string | null> },
+): Promise<string | null> {
+  for (const [file, content] of Object.entries(testCase.files)) {
+    const absolute = resolve(root, file);
+    mkdirSync(path.dirname(absolute), { recursive: true });
+    writeFileSync(absolute, content);
+  }
+  return testCase.prepare ? testCase.prepare(root) : null;
+}
+
+async function runPassCase(testCase: PassCase): Promise<string | null> {
+  const root = mkdtempSync(path.join(tmpdir(), "passquest-selftest-"));
+  try {
+    const preparation = await prepareFixture(root, testCase);
+    if (preparation) return `${testCase.gate.id}: fixture on ${testCase.label}: ${preparation}`;
+    const result = await testCase.gate.run(context(root, testCase.tracked));
+    if (result.status !== "pass") {
+      return `${testCase.gate.id}: status ${result.status} on ${testCase.label}, want pass: ${(result.failures ?? []).join("; ")}`;
+    }
+    return testCase.postPass?.(result.detail ?? "") ?? null;
+  } catch (error) {
+    return `${testCase.gate.id}: threw on ${testCase.label}: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 async function runCase(testCase: BrokenCase): Promise<string | null> {
   const root = mkdtempSync(path.join(tmpdir(), "passquest-selftest-"));
   try {
-    for (const [file, content] of Object.entries(testCase.files)) {
-      const absolute = resolve(root, file);
-      mkdirSync(path.dirname(absolute), { recursive: true });
-      writeFileSync(absolute, content);
-    }
+    const preparation = await prepareFixture(root, testCase);
+    if (preparation) return `${testCase.gate.id}: fixture on ${testCase.label}: ${preparation}`;
     const ctx: GateContext = context(root, testCase.tracked);
     const result = await testCase.gate.run(ctx);
     if (result.status === "fail") {
@@ -540,6 +669,7 @@ export const selfTest: Gate = {
     // this module is the entry point. The list is only needed here, at run time.
     const { gates } = await import("./index.ts");
     const cases = brokenCases();
+    const accepted = passCases();
     const problems: string[] = [];
     const discovery = await workingTreeDiscoveryProblem();
     if (discovery) problems.push(discovery);
@@ -547,12 +677,16 @@ export const selfTest: Gate = {
       const problem = await runCase(testCase);
       if (problem) problems.push(problem);
     }
-    const covered = new Set(cases.map((testCase) => testCase.gate.id));
+    for (const testCase of accepted) {
+      const problem = await runPassCase(testCase);
+      if (problem) problems.push(problem);
+    }
+    const covered = new Set([...cases, ...accepted].map((testCase) => testCase.gate.id));
     const expected = gates.filter((gate) => gate.id !== selfTest.id);
     for (const gate of expected) {
       if (!covered.has(gate.id)) problems.push(`${gate.id}: no self-test case`);
     }
     if (problems.length > 0) return fail(problems);
-    return pass(`${cases.length} cases, ${covered.size}/${expected.length} gates`);
+    return pass(`${cases.length + accepted.length} cases (${accepted.length} must pass), ${covered.size}/${expected.length} gates`);
   },
 };

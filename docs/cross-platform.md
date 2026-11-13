@@ -105,5 +105,5 @@ turns red.
 
 ## Gates
 
-`bun run gate` → 21 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
+`bun run gate` → 22 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
 gates run on all three OS in CI.

@@ -75,6 +75,32 @@ Entry format:
   resumed safely under (A).
 - Revisit when: the owner answers, or a second concurrent commit appears while the conductor runs.
 
+### Q-0000-05 — Are the CLI goldens contract evidence or test fixtures?
+- Status: resolved
+- Resolution: (owner, 2026-11-13) option (A) confirmed: the protocol and history goldens under
+  `internal/cli/testdata/` (`*.golden.json`, `*golden.txt`) **are** contract evidence. A golden change
+  is a contract change, so the gate refuses a diff that touches a `*golden*` file there without also
+  touching a contract-bearing document — an evidence record under `docs/evidence/`, a goal contract
+  under `docs/goals/`, or a decisions record under `docs/decisions/` (including this file) — and names
+  every golden it saw plus the document that is missing. The rules live in
+  [`../harness.md`](../harness.md) (gate 21) and the check is `harness/gates/golden-contract.ts`,
+  proven both ways by `harness/gates/self-test.ts` (a golden-only change fails; a new golden plus its
+  evidence row passes).
+- Context: the goldens pin the CLI's JSON protocol and its human history output, but nothing stopped
+  `-update-golden` from rewriting one to make a red test green, which silently changes the protocol a
+  learner's scripts and the agent bridge depend on. The 2026-11-13 quoting change moved three `next`
+  goldens for a documented reason, which is exactly the case the record must distinguish from a silent
+  rewrite.
+- Options considered: (A) treat a golden as contract evidence and fail a golden change that no
+  contract document declares; (B) keep goldens as ordinary fixtures and rely on review; (C) require an
+  owner approval marker on every golden change.
+- Default taken: (A). The check is diff-based against the branch's merge base (falling back to
+  `HEAD^1` in CI's shallow pull-request checkout, or `PASSQUEST_GOLDEN_BASE`), and an unresolvable base
+  fails instead of passing silently. Reverse by deleting the gate from `harness/gates/index.ts` and
+  this entry's rule from `docs/harness.md`.
+- Revisit when: a golden change is genuinely mechanical across many files at once, or a second golden
+  directory appears outside `internal/cli/testdata/`.
+
 ### Q-0001-01 — May a learner repeat a question after seeing the key, and how is it counted?
 - Status: decided(default taken)
 - Context: goal 0001 requires correct, incorrect, skipped and repeated attempts to be represented

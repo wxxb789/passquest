@@ -21,7 +21,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
+      # Depth 2 keeps the clone shallow while leaving the pull request's base
+      # commit reachable as HEAD^1, which the golden-contract gate diffs against.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - uses: actions/setup-go@v5
         if: ${{ hashFiles('go.mod') != '' }}
