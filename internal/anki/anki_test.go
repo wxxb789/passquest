@@ -210,3 +210,48 @@ func TestResolveHost(t *testing.T) {
 		t.Fatal("ResolveHost accepted a missing override")
 	}
 }
+
+func TestCardsInfoParamsAndDecoder(t *testing.T) {
+	params := CardsInfoParams([]int64{7, 8})
+	cards, ok := params["cards"].([]int64)
+	if !ok || len(cards) != 2 || cards[0] != 7 {
+		t.Fatalf("CardsInfoParams = %#v", params)
+	}
+	rows, err := DecodeCardsInfo(json.RawMessage(`[
+		{"cardId": 7, "note": 101, "deckName": "Default", "fields": {"Front": {"value": "x"}}},
+		{"cardId": 8, "note": 102, "deckName": "Pass Quest"}
+	]`))
+	if err != nil {
+		t.Fatalf("DecodeCardsInfo: %v", err)
+	}
+	if len(rows) != 2 || rows[0] != (CardInfo{CardID: 7, NoteID: 101, DeckName: "Default"}) ||
+		rows[1] != (CardInfo{CardID: 8, NoteID: 102, DeckName: "Pass Quest"}) {
+		t.Fatalf("DecodeCardsInfo rows = %+v", rows)
+	}
+	for _, raw := range []string{"", "null"} {
+		rows, err := DecodeCardsInfo(json.RawMessage(raw))
+		if err != nil || rows != nil {
+			t.Fatalf("DecodeCardsInfo(%q) = %+v, %v", raw, rows, err)
+		}
+	}
+	if _, err := DecodeCardsInfo(json.RawMessage(`{"note": 1}`)); err == nil {
+		t.Fatal("DecodeCardsInfo accepted a non-list result")
+	}
+}
+
+func TestNotesInfoCarriesTheCards(t *testing.T) {
+	rows, err := DecodeNotesInfo(json.RawMessage(`[{"noteId": 101, "modelName": "PassQuest Note",
+		"fields": {"Front": {"value": "x"}}, "cards": [7, 8]}]`))
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("DecodeNotesInfo = %+v, %v", rows, err)
+	}
+	if len(rows[0].Cards) != 2 || rows[0].Cards[1] != 8 || rows[0].FieldValue("Front") != "x" {
+		t.Fatalf("decoded note = %+v", rows[0])
+	}
+	if err := ValidateRequest(HostRequest{
+		ProtocolVersion: ProtocolVersion, Endpoint: DefaultEndpoint, TimeoutMS: 1000,
+		Actions: []Action{{Action: "cardsInfo", Params: CardsInfoParams([]int64{7})}},
+	}); err != nil {
+		t.Fatalf("cardsInfo is not allowed: %v", err)
+	}
+}

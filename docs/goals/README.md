@@ -17,7 +17,7 @@ Work through these **one at a time**, in numeric order, accepting an earlier out
 | [0011 — Study comfortably in the MyGo desktop application](./0011-desktop-study-workspace.md) | Provisional | 0007 — Anki notes and 0009 — unseen assessment, with 0005 — AI coaching | Move the proven headless exam experience into a genuinely usable MyGo desktop reading and practice workspace without changing the domain model or evidence semantics. |
 | [0012 — A distinctive, restrained and memorable study experience](./0012-opus-grade-visual-experience.md) | Provisional | 0011 — usable desktop study workspace | Reserve the high-fidelity interface, interaction design and Anki card look-and-feel for a later Opus-led pass. |
 | [0013 — Install and recover Pass Quest as a personal desktop app](./0013-reliable-personal-desktop-distribution.md) | Provisional | 0011 — functional desktop workspace, 0012 — visual refinement | Make the product viable for a nondeveloper studying alone, respecting the fact that Go/MyGo and the Node/Pi agent host both need a lifecycle. |
-| [0014 — A pushed note lands in the deck the CLI claims](./0014-note-lands-in-the-declared-deck.md) | Active | 0007 — Anki notes | Turn the deck claim `note push` already prints into a checked claim: either the card is in the named deck or the push says which deck it reached, keeps the note id and exits non-zero. |
+| [0014 — A pushed note lands in the deck the CLI claims](./archive/0014-note-lands-in-the-declared-deck.md) | Done | 0007 — Anki notes | Turn the deck claim `note push` already prints into a checked claim: either the card is in the named deck or the push says which deck it reached, keeps the note id and exits non-zero. |
 
 ## Constraints
 

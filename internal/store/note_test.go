@@ -465,3 +465,158 @@ func TestNoteDraftStatusRejectsUnknownState(t *testing.T) {
 		t.Fatalf("unknown draft error = %v", err)
 	}
 }
+
+func TestMigrationFromVersionFifteenRecordsTheDeckReadBack(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v15.sqlite")
+	db := openSQLite(t, path)
+	for _, migration := range migrations {
+		if migration.version > 15 {
+			break
+		}
+		for _, statement := range migration.statements {
+			if _, err := db.Exec(statement); err != nil {
+				t.Fatalf("create v15 schema at %d: %v", migration.version, err)
+			}
+		}
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 15`); err != nil {
+		t.Fatalf("set v15 version: %v", err)
+	}
+	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	stamp := at.Format(time.RFC3339Nano)
+	if _, err := db.Exec(`INSERT INTO notes (
+			note_id, target_key, attempt_id, content_id, content_version, question_id, source_id,
+			page_number, restricted, revision, front, back, tactic, source_label, content_hash, origin, model,
+			mark, anki_note_id, anki_pushed_revision, anki_state, created_at, updated_at
+		) VALUES ('note-legacy', 'legacy' || char(31) || 'q1' || char(31) || 'mark', 0, 'c', 'v1', 'q1', '',
+			1, 1, 1, 'f', 'b', 't', 's', ?, 'deterministic', '', 'mark', 77, 1, 'pushed', ?, ?)`,
+		strings.Repeat("a", 64), stamp, stamp); err != nil {
+		t.Fatalf("insert v15 note: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO anki_push_attempts (note_id, revision, action, outcome, detail, at)
+		VALUES ('note-legacy', 1, 'add', 'ok', '', ?)`, stamp); err != nil {
+		t.Fatalf("insert v15 attempt: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close v15 fixture: %v", err)
+	}
+
+	st := mustOpen(t, path)
+	var version int
+	if err := st.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", version, SchemaVersion)
+	}
+	stored, err := st.Note("note-legacy")
+	if err != nil {
+		t.Fatalf("note after v16 migration: %v", err)
+	}
+	if stored.AnkiNoteID != 77 || stored.AnkiState != AnkiStatePushed || stored.AnkiPushedRevision != 1 {
+		t.Fatalf("migrated note = %+v", stored)
+	}
+	if stored.AnkiDeck != "" {
+		t.Fatalf("migrated note claims deck %q; only a completed read records one", stored.AnkiDeck)
+	}
+	// The whole point of the rebuild: the new state and outcome are accepted...
+	if err := st.RecordAnkiAttempt(AnkiAttempt{
+		NoteID: "note-legacy", Revision: 1, Action: "check", Outcome: "deck_mismatch",
+		Detail: `card landed in "Default", not "Pass Quest"`, At: at,
+		AnkiDeck: "Default", AnkiState: AnkiStateDeckMismatch, Keep: true,
+	}); err != nil {
+		t.Fatalf("record deck verdict after migration: %v", err)
+	}
+	updated, err := st.Note("note-legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AnkiState != AnkiStateDeckMismatch || updated.AnkiDeck != "Default" ||
+		updated.AnkiNoteID != 77 || updated.AnkiPushedRevision != 1 {
+		t.Fatalf("note after the deck verdict = %+v", updated)
+	}
+	// ...and the old rows, the checks and the append-only rules are intact.
+	var ledger []string
+	rows, err := st.db.Query(`SELECT action || '/' || outcome FROM anki_push_attempts WHERE note_id = 'note-legacy' ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			t.Fatal(err)
+		}
+		ledger = append(ledger, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(ledger, ","); got != "add/ok,check/deck_mismatch" {
+		t.Fatalf("ledger after migration = %s", got)
+	}
+	if _, err := st.db.Exec(`UPDATE anki_push_attempts SET outcome = 'failed'`); err == nil {
+		t.Fatal("the ledger lost its append-only trigger in the v16 rebuild")
+	}
+	if _, err := st.db.Exec(`UPDATE notes SET anki_state = 'elsewhere'`); err == nil {
+		t.Fatal("the note state check was lost in the v16 rebuild")
+	}
+	if _, err := st.db.Exec(`UPDATE notes SET anki_deck = ? WHERE note_id = 'note-legacy'`,
+		strings.Repeat("d", 201)); err == nil {
+		t.Fatal("anki_deck accepted a name over the recorded bound")
+	}
+}
+
+func TestDeckVerdictKeepsTheQueueAsTheWriteLeftIt(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
+	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	target := noteTargetFixture()
+	if _, err := st.AcceptNote(target, noteContentFixture("one"), at); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if pending, err := st.PendingNoteOutbox(); err != nil || len(pending) != 1 {
+		t.Fatalf("pending after accept = %+v, %v", pending, err)
+	}
+	if err := st.RecordAnkiAttempt(AnkiAttempt{
+		NoteID: target.NoteID, Revision: 1, Action: "add", Outcome: "ok", At: at,
+		AnkiNoteID: 77, AnkiState: AnkiStatePushed, PushedRevision: 1, Drain: true,
+	}); err != nil {
+		t.Fatalf("record write: %v", err)
+	}
+	if pending, err := st.PendingNoteOutbox(); err != nil || len(pending) != 0 {
+		t.Fatalf("pending after the write = %+v, %v", pending, err)
+	}
+	if err := st.RecordAnkiAttempt(AnkiAttempt{
+		NoteID: target.NoteID, Revision: 1, Action: "check", Outcome: "deck_mismatch",
+		Detail: `card landed in "Default", not "Pass Quest"`, At: at,
+		AnkiDeck: "Default", AnkiState: AnkiStateDeckMismatch, Keep: true,
+	}); err != nil {
+		t.Fatalf("record deck verdict: %v", err)
+	}
+	pending, err := st.PendingNoteOutbox()
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("a kept verdict re-pended the queue: %+v, %v", pending, err)
+	}
+	outbox, err := st.NoteOutbox()
+	if err != nil || len(outbox) != 1 || outbox[0].Status != "drained" || outbox[0].AnkiNoteID != 77 {
+		t.Fatalf("queue after the verdict = %+v, %v", outbox, err)
+	}
+	stored, err := st.Note(target.NoteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AnkiState != AnkiStateDeckMismatch || stored.AnkiDeck != "Default" ||
+		stored.AnkiNoteID != 77 || stored.AnkiPushedRevision != 1 {
+		t.Fatalf("note after the verdict = %+v", stored)
+	}
+	// A verdict that is not a read (a retryable failure) still re-pends the note.
+	if err := st.RecordAnkiAttempt(AnkiAttempt{
+		NoteID: target.NoteID, Revision: 1, Action: "check", Outcome: "unreachable",
+		Detail: "connection refused", At: at, AnkiState: AnkiStateQueued,
+	}); err != nil {
+		t.Fatalf("record retryable verdict: %v", err)
+	}
+	if pending, err := st.PendingNoteOutbox(); err != nil || len(pending) != 1 {
+		t.Fatalf("retryable verdict did not re-pend the queue: %+v, %v", pending, err)
+	}
+}

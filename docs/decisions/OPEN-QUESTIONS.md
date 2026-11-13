@@ -1060,3 +1060,49 @@ Entry format:
   (B) once a compatible add-on version is known.
 - Revisit when: a released AnkiConnect is confirmed to honour `deckName` on the supported Anki version, or
   the owner wants the card moved automatically.
+
+### Q-0014-02 — What happens when the endpoint will not report a card's deck?
+- Status: decided(default taken)
+- Context: goal 0014 needs the deck a card reached. `notesInfo` gives a note's cards and `cardsInfo`
+  is the only documented read that names a card's deck, but an endpoint can omit either (an older
+  build, or a stub that answers something else). Two ways to treat that: trust the requested deck, or
+  refuse to claim it.
+- Options considered: (A) treat an unread deck as `deck_mismatch` with a detail naming what was not
+  read; (B) treat it as success because the write was acknowledged; (C) add a third state such as
+  `deck_unknown`.
+- Default taken: (A). Refusing the claim keeps the contract's promise ("either the card is in the
+  deck it names or the push says it is not"), it needs no extra state in the vocabulary, and the exit
+  code and the learner's action are the same as for a card found elsewhere. Reverse by mapping the
+  unread case to (B) or (C) once a supported AnkiConnect version is confirmed to always answer both
+  reads (the documented v6 API does; see `docs/notes.md`).
+- Revisit when: a released AnkiConnect on a supported Anki version is confirmed to omit `cards` or
+  `deckName`, or an endpoint in the field answers `cardsInfo` without a deck.
+
+### Q-0014-03 — Does a later push re-read the deck of a note that is already drained?
+- Status: decided(default taken)
+- Context: after a mismatch the learner moves the card by hand. Nothing is pending, so the next push
+  is `idle` and contacts nothing, which keeps the idle path byte-identical and never adds a card. The
+  recorded deck therefore stays the deck reported at the last write until a new revision pushes.
+- Options considered: (A) leave it — the recorded fact is what Anki said at the last write; (B) an
+  idle push re-reads the decks of notes whose recorded state is `deck_mismatch` (or whose deck is
+  empty) and refreshes them, exiting 3 only while a card is still elsewhere; (C) add a
+  `passquest note verify` command.
+- Default taken: (A). (B) and (C) are useful but they are new surfaces, not the contract's clause: it
+  asks that a repeat push contact no write and add no second card, which holds, and the fix for the
+  learner is one manual move plus the next revision push. Reverse by adopting (B) or (C) if the
+  learner reports the stale recorded deck as misleading.
+- Revisit when: an owner's real-machine run shows the stale `deck` value causing a wrong decision, or
+  goal 0011 gives the workspace a place to show a live deck.
+
+### Q-0014-04 — Is the deck check charged to the same push or a new write action?
+- Status: decided(default taken)
+- Context: the verdict could be folded into the write's ledger row (`add/deck_mismatch`) or recorded
+  as its own read row. Folding it would also have to interleave the read between a write batch and its
+  persistence, which the harness pins as "each acknowledged batch is written before the next call".
+- Options considered: (A) a separate `check/ok` or `check/deck_mismatch` row after the writes are
+  recorded; (B) one `add/deck_mismatch` row; (C) no ledger row, only the note's state.
+- Default taken: (A). The write's own outcome stays visible, the read is evidence in the append-only
+  ledger, and the queue keeps the drain the write decided. Reverse by folding the verdict into the
+  write row if a later review shows the extra row per write is noise.
+- Revisit when: a learner's ledger grows large enough that the extra row per push costs anything
+  measurable, or a view wants a per-push summary instead of per-note history.

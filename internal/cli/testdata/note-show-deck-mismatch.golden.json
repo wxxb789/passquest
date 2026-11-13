@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "state": "show",
+  "notes": [
+    {
+      "note": {
+        "note_id": "note-e7f54e2c40bf7326",
+        "revision": 1,
+        "target": {
+          "content_id": "src-bb4d9a5479518365-p001",
+          "question_id": "q2",
+          "source_id": "src-bb4d9a5479518365",
+          "page": 1,
+          "attempt_id": 1
+        },
+        "front": "The library opens at 8 a.m. on Sundays.",
+        "back": "No Sunday opening time appears in the notice.\n\nExample: The Westbridge Community Library closes at 4 p.m. on Saturdays.",
+        "tactic": "NOT/EXCEPT polarity",
+        "source": "src-bb4d9a5479518365 · p001 · q2",
+        "fields": {
+          "Front": "The library opens at 8 a.m. on Sundays.",
+          "Back": "\u003cdiv class=\"pq-meaning\"\u003eNo Sunday opening time appears in the notice.\u003c/div\u003e\u003cdiv class=\"pq-example\"\u003eExample: The Westbridge Community Library closes at 4 p.m. on Saturdays.\u003c/div\u003e",
+          "Tactic": "NOT/EXCEPT polarity",
+          "Source": "src-bb4d9a5479518365 · p001 · q2"
+        },
+        "restricted": true,
+        "origin": "deterministic",
+        "anki": {
+          "state": "deck_mismatch",
+          "note_id": 101,
+          "pushed_revision": 1,
+          "deck": "Default",
+          "deck_expected": "Pass Quest"
+        },
+        "created_at": "2026-11-10T09:00:09Z",
+        "updated_at": "2026-11-10T09:00:11Z"
+      },
+      "revisions": [
+        {
+          "revision": 1,
+          "front": "The library opens at 8 a.m. on Sundays.",
+          "back": "No Sunday opening time appears in the notice.\n\nExample: The Westbridge Community Library closes at 4 p.m. on Saturdays.",
+          "tactic": "NOT/EXCEPT polarity",
+          "source": "src-bb4d9a5479518365 · p001 · q2",
+          "content_hash": "1b7a235ffb38f028e1514db69c1710cb082d97f336153ef877cd0a47ee7d8fae",
+          "origin": "deterministic",
+          "restricted": true,
+          "accepted_at": "2026-11-10T09:00:09Z"
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "A note is a study aid derived from recorded evidence, not a verified answer key or grade.",
+    "Anki owns the card and its review scheduling after import or push.",
+    "AnkiWeb and mobile synchronization are your own manual actions in Anki; Pass Quest never contacts AnkiWeb or a phone.",
+    "A real Anki Desktop write is unverified on this machine; the adapter is proven against a loopback AnkiConnect stub."
+  ]
+}

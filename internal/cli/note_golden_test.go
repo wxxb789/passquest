@@ -53,12 +53,45 @@ func TestGoldenNotePushJSON(t *testing.T) {
 	checkGolden(t, filepath.Join("testdata", "note-push.golden.json"), []byte(out))
 }
 
+// TestGoldenNotePushDeckMismatchJSON pins the mismatch document: the endpoint
+// accepts the write and files the card in another deck, which is what the
+// owner's real Anki 26.x run produced.
+func TestGoldenNotePushDeckMismatchJSON(t *testing.T) {
+	db, clock, _ := goldenNoteDB(t)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
+	transport := newFakeAnki()
+	transport.deckOverride = "Default"
+	code, _, errOut := runNoteCLI(t, db, clock, transport, nil, "", "note", "push", "--json")
+	if code != 3 {
+		t.Fatalf("mismatch push exit = %d, stderr = %s", code, errOut)
+	}
+	checkGolden(t, filepath.Join("testdata", "note-push-deck-mismatch.golden.json"), []byte(errOut))
+}
+
+// TestGoldenNoteShowDeckMismatchJSON pins what the learner can inspect after a
+// mismatch: the note keeps its Anki id, records the deck it reached and names
+// the deck the push asked for.
+func TestGoldenNoteShowDeckMismatchJSON(t *testing.T) {
+	db, clock, _ := goldenNoteDB(t)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
+	transport := newFakeAnki()
+	transport.deckOverride = "Default"
+	if code, _, errOut := runNoteCLI(t, db, clock, transport, nil, "", "note", "push", "--json"); code != 3 {
+		t.Fatalf("mismatch push exit = %d, stderr = %s", code, errOut)
+	}
+	out := mustNoteRun(t, db, clock, nil, nil, "", "note", "show", "--json")
+	checkGolden(t, filepath.Join("testdata", "note-show-deck-mismatch.golden.json"), []byte(out))
+}
+
 // TestNodeGoldenDocumentsAreValidJSON keeps a broken golden from being read as
 // a protocol change.
 func TestNoteGoldenDocumentsAreValidJSON(t *testing.T) {
 	for _, name := range []string{
 		"note-draft.golden.json", "note-preview.golden.json", "note-accept.golden.json",
 		"note-show.golden.json", "note-push.golden.json",
+		"note-show-deck-mismatch.golden.json", "note-push-deck-mismatch.golden.json",
 	} {
 		raw, err := os.ReadFile(filepath.Join("testdata", name))
 		if err != nil {

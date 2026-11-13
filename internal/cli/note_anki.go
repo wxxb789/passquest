@@ -76,9 +76,14 @@ type notePushWork struct {
 	Code       string
 	Detail     string
 	AnkiNoteID int64
-	State      string
-	Drain      bool
-	Persisted  bool
+	// CardIDs are the cards of this note, learned from the read-back or from
+	// the deck verify pass. Deck is the deck Anki reported when it is not the
+	// deck this push named; it stays empty when the card is where it should be.
+	CardIDs   []int64
+	Deck      string
+	State     string
+	Drain     bool
+	Persisted bool
 }
 
 func runNotePush(args []string, opt Options) int {
@@ -214,7 +219,7 @@ func runNotePush(args []string, opt Options) int {
 			view := notePushItemView{
 				NoteID: item.Entry.NoteID, Revision: item.Entry.Revision,
 				AnkiNoteID: item.AnkiNoteID, State: item.State, Outcome: item.Outcome,
-				Code: item.Code, Detail: item.Detail,
+				Code: item.Code, Detail: item.Detail, Deck: item.Deck,
 			}
 			if view.AnkiNoteID == 0 && item.Note.AnkiNoteID != 0 {
 				view.AnkiNoteID = item.Note.AnkiNoteID
@@ -227,6 +232,7 @@ func runNotePush(args []string, opt Options) int {
 		doc.Counts.Conflicts = counts.Conflicts
 		doc.Counts.Failed = counts.Failed
 		doc.Counts.Queued = counts.Queued
+		doc.Counts.DeckMismatch = counts.DeckMismatch
 		remaining, err := st.PendingNoteOutbox()
 		if err != nil {
 			return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
@@ -235,6 +241,8 @@ func runNotePush(args []string, opt Options) int {
 		switch {
 		case counts.Conflicts > 0:
 			doc.State = "conflict"
+		case counts.DeckMismatch > 0:
+			doc.State = "deck_mismatch"
 		case counts.Failed > 0:
 			doc.State = "failed"
 		case counts.Queued > 0 && counts.Pushed == 0 && counts.AlreadyPresent == 0:
@@ -252,7 +260,7 @@ func runNotePush(args []string, opt Options) int {
 			doc.Error = failure
 			exit = 3
 		}
-		if exit == 0 && (doc.State == "conflict" || doc.State == "failed") {
+		if exit == 0 && (doc.State == "conflict" || doc.State == "failed" || doc.State == "deck_mismatch") {
 			exit = 3
 		}
 		if exit != 0 && doc.Error == nil {
@@ -260,6 +268,9 @@ func runNotePush(args []string, opt Options) int {
 			case "conflict":
 				doc.Error = &errorBody{Code: "anki_conflict", Message: fmt.Sprintf(
 					"%d note(s) remain queued in conflict; nothing was overwritten", counts.Conflicts)}
+			case "deck_mismatch":
+				doc.Error = &errorBody{Code: "anki_deck_mismatch", Message: fmt.Sprintf(
+					"%d note(s) landed in a deck other than %q; their Anki note ids are kept", counts.DeckMismatch, note.Deck)}
 			default:
 				doc.Error = &errorBody{Code: "anki_failed", Message: fmt.Sprintf(
 					"%d note(s) failed and remain queued", counts.Failed)}
@@ -391,6 +402,7 @@ func runNotePush(args []string, opt Options) int {
 					item.Action = "readd"
 					continue
 				}
+				item.CardIDs = info.Cards
 				if info.ModelName != "" && info.ModelName != note.ModelName {
 					item.State = store.AnkiStateConflict
 					item.Outcome = "conflict"
@@ -523,12 +535,172 @@ func runNotePush(args []string, opt Options) int {
 		}
 	}
 
+	// Deck verification. The claim this command prints is which deck the card
+	// reached, and AnkiConnect's addNote is known to ignore deckName on some
+	// builds, so every note this push wrote is read back: notesInfo for the
+	// cards of notes whose cards are not known yet, then cardsInfo, the only
+	// documented read that names a card's deck. The verdict is its own check
+	// row, so the write's own outcome stays visible in the ledger, and it keeps
+	// the queue row exactly as the write left it.
+	deckFailed := func(code, detail string) int {
+		if err := persist(); err != nil {
+			return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+		}
+		return report(3, &errorBody{Code: code, Message: fmt.Sprintf(
+			"the deck read-back failed after the write was acknowledged: %s; no note records a deck", detail)})
+	}
+	var verified []int
+	var askCards []int64
+	for i := range work {
+		item := &work[i]
+		if item.State == store.AnkiStatePushed && item.Outcome == "ok" && item.AnkiNoteID > 0 {
+			verified = append(verified, i)
+			if len(item.CardIDs) == 0 {
+				askCards = append(askCards, item.AnkiNoteID)
+			}
+		}
+	}
+	if len(verified) > 0 {
+		if len(askCards) > 0 {
+			cards := make(map[int64][]int64, len(askCards))
+			for start := 0; start < len(askCards); start += anki.MaxActionsPerCall {
+				end := min(start+anki.MaxActionsPerCall, len(askCards))
+				read, err := call([]anki.Action{{Action: "notesInfo", Params: anki.NotesInfoParams(askCards[start:end])}})
+				if err != nil {
+					return deckFailed("anki_unavailable", err.Error())
+				}
+				if anki.IsUnreachable(read) {
+					return deckFailed("anki_unavailable", "the endpoint did not answer")
+				}
+				if err := noteResultOK(read, 0, "notesInfo"); err != nil {
+					return deckFailed("anki_error", err.Error())
+				}
+				infos, err := anki.DecodeNotesInfo(read.Results[0].Result)
+				if err != nil {
+					return deckFailed("anki_error", err.Error())
+				}
+				for _, info := range infos {
+					cards[info.NoteID] = info.Cards
+				}
+			}
+			for _, index := range verified {
+				if len(work[index].CardIDs) == 0 {
+					work[index].CardIDs = cards[work[index].AnkiNoteID]
+				}
+			}
+		}
+		// The card rows are attributed by the card id this push asked about, so
+		// a row about anything else cannot become this note's deck claim.
+		owner := make(map[int64]int, len(verified))
+		var cardIDs []int64
+		for _, index := range verified {
+			for _, id := range work[index].CardIDs {
+				if _, seen := owner[id]; !seen {
+					owner[id] = index
+					cardIDs = append(cardIDs, id)
+				}
+			}
+		}
+		rows := make(map[int][]anki.CardInfo, len(verified))
+		for start := 0; start < len(cardIDs); start += anki.MaxActionsPerCall {
+			end := min(start+anki.MaxActionsPerCall, len(cardIDs))
+			read, err := call([]anki.Action{{Action: "cardsInfo", Params: anki.CardsInfoParams(cardIDs[start:end])}})
+			if err != nil {
+				return deckFailed("anki_unavailable", err.Error())
+			}
+			if anki.IsUnreachable(read) {
+				return deckFailed("anki_unavailable", "the endpoint did not answer")
+			}
+			if err := noteResultOK(read, 0, "cardsInfo"); err != nil {
+				return deckFailed("anki_error", err.Error())
+			}
+			cards, err := anki.DecodeCardsInfo(read.Results[0].Result)
+			if err != nil {
+				return deckFailed("anki_error", err.Error())
+			}
+			for _, card := range cards {
+				if index, ok := owner[card.CardID]; ok {
+					rows[index] = append(rows[index], card)
+				}
+			}
+		}
+		for _, index := range verified {
+			item := &work[index]
+			verdict := readNoteDecks(rows[index], item.CardIDs, note.Deck)
+			attempt := store.AnkiAttempt{
+				NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: "check",
+				Outcome: "ok", At: opt.Now(), AnkiDeck: note.Deck, AnkiState: store.AnkiStatePushed,
+				Detail: fmt.Sprintf("card is in %q", note.Deck), Keep: true,
+			}
+			if !verdict.Matched {
+				item.State = store.AnkiStateDeckMismatch
+				item.Outcome = "deck_mismatch"
+				item.Deck = verdict.Deck
+				item.Detail = verdict.Detail
+				attempt.Outcome = "deck_mismatch"
+				attempt.AnkiDeck = verdict.Deck
+				attempt.AnkiState = store.AnkiStateDeckMismatch
+				attempt.Detail = verdict.Detail
+			}
+			if err := st.RecordAnkiAttempt(attempt); err != nil {
+				return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+			}
+		}
+	}
+
 	// A storage failure leaves the outbox pending, so the next push retries
 	// safely.
 	if err := persist(); err != nil {
 		return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
 	}
 	return report(0, nil)
+}
+
+// noteDeckRead is the deck verdict for one written note: Matched is true only
+// when the endpoint reported every card of the note and named them all in the
+// expected deck. Anything else leaves the claim unconfirmed, and Detail says
+// what could not be read or which deck the card reached instead.
+type noteDeckRead struct {
+	Deck    string
+	Detail  string
+	Matched bool
+}
+
+// readNoteDecks decides one note's deck claim from its cardsInfo rows. asked
+// lists the cards this push knows belong to the note; a row about another card
+// is not part of this verdict.
+func readNoteDecks(cards []anki.CardInfo, asked []int64, expected string) noteDeckRead {
+	answered := make(map[int64]bool, len(cards))
+	var unexpected []string
+	for _, card := range cards {
+		answered[card.CardID] = true
+		deck := strings.TrimSpace(card.DeckName)
+		if !usableDeckName(deck) {
+			return noteDeckRead{Detail: fmt.Sprintf("Anki reported no usable deck for card %d", card.CardID)}
+		}
+		if deck != expected && !containsString(unexpected, deck) {
+			unexpected = append(unexpected, deck)
+		}
+	}
+	for _, id := range asked {
+		if !answered[id] {
+			return noteDeckRead{Detail: fmt.Sprintf("Anki reported no card %d for this note", id)}
+		}
+	}
+	if len(asked) == 0 {
+		return noteDeckRead{Detail: "Anki reported no card for this note"}
+	}
+	if len(unexpected) == 0 {
+		return noteDeckRead{Matched: true}
+	}
+	quoted := make([]string, 0, len(unexpected))
+	for _, deck := range unexpected {
+		quoted = append(quoted, fmt.Sprintf("%q", deck))
+	}
+	return noteDeckRead{
+		Deck:   strings.Join(unexpected, ", "),
+		Detail: fmt.Sprintf("card landed in %s, not %q", strings.Join(quoted, ", "), expected),
+	}
 }
 
 // classifyWriteResult applies one Anki write result to its work item. It
@@ -708,4 +880,19 @@ func appendUnique(values []string, value string) []string {
 		values = append(values, value)
 	}
 	return values
+}
+
+// usableDeckName reports whether a deck name from the endpoint can be the deck
+// part of the claim: non-empty, bounded and printable, so a name the learner
+// cannot read in Anki is never reported as where the card went.
+func usableDeckName(deck string) bool {
+	if deck == "" || len(deck) > anki.MaxDeckNameChars {
+		return false
+	}
+	for _, char := range deck {
+		if char < 0x20 || char == 0x7f {
+			return false
+		}
+	}
+	return true
 }

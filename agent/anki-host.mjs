@@ -19,6 +19,7 @@ const ALLOWED_ACTIONS = new Set([
   "addNote",
   "updateNoteFields",
   "notesInfo",
+  "cardsInfo",
 ]);
 
 function failure(message) {

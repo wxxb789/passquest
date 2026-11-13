@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "state": "deck_mismatch",
+  "endpoint": "http://127.0.0.1:8765",
+  "deck": "Pass Quest",
+  "model": "PassQuest Note",
+  "model_created": true,
+  "counts": {
+    "pending": 0,
+    "pushed": 0,
+    "already_present": 0,
+    "conflicts": 0,
+    "failed": 0,
+    "queued": 0,
+    "deck_mismatch": 1
+  },
+  "notes": [
+    {
+      "note_id": "note-e7f54e2c40bf7326",
+      "revision": 1,
+      "anki_note_id": 101,
+      "state": "deck_mismatch",
+      "outcome": "deck_mismatch",
+      "detail": "card landed in \"Default\", not \"Pass Quest\"",
+      "deck": "Default"
+    }
+  ],
+  "error": {
+    "code": "anki_deck_mismatch",
+    "message": "1 note(s) landed in a deck other than \"Pass Quest\"; their Anki note ids are kept"
+  },
+  "limits": [
+    "A note is a study aid derived from recorded evidence, not a verified answer key or grade.",
+    "Anki owns the card and its review scheduling after import or push.",
+    "AnkiWeb and mobile synchronization are your own manual actions in Anki; Pass Quest never contacts AnkiWeb or a phone.",
+    "A real Anki Desktop write is unverified on this machine; the adapter is proven against a loopback AnkiConnect stub."
+  ]
+}

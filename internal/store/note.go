@@ -152,6 +152,77 @@ var schemaV12 = []string{
 	`ALTER TABLE note_drafts ADD COLUMN accepted_model TEXT NOT NULL DEFAULT ''`,
 }
 
+// schemaV16 records, on the note row, the deck Anki reported for the note's
+// card at the last push, and widens two vocabularies: a note can be
+// deck_mismatch (written, but not into the deck the push named) and one ledger
+// row can report that verdict. SQLite cannot widen a CHECK in place, so notes
+// and anki_push_attempts are rebuilt with an explicit copy; every row keeps its
+// id and values and the append-only triggers are recreated. A write never sets
+// anki_deck: only a completed deck read does, so an unread deck records nothing.
+var schemaV16 = []string{
+	`DROP TRIGGER IF EXISTS anki_push_attempts_append_only_update`,
+	`DROP TRIGGER IF EXISTS anki_push_attempts_append_only_delete`,
+	`DROP INDEX IF EXISTS anki_push_attempts_note`,
+	`ALTER TABLE notes RENAME TO notes_v15`,
+	`CREATE TABLE notes (
+		note_id TEXT PRIMARY KEY CHECK (length(note_id) BETWEEN 1 AND 80),
+		target_key TEXT NOT NULL UNIQUE,
+		attempt_id INTEGER NOT NULL DEFAULT 0,
+		content_id TEXT NOT NULL,
+		content_version TEXT NOT NULL,
+		question_id TEXT NOT NULL,
+		source_id TEXT NOT NULL DEFAULT '',
+		page_number INTEGER NOT NULL DEFAULT 0,
+		restricted INTEGER NOT NULL CHECK (restricted IN (0, 1)),
+		revision INTEGER NOT NULL CHECK (revision >= 1),
+		front TEXT NOT NULL,
+		back TEXT NOT NULL,
+		tactic TEXT NOT NULL,
+		source_label TEXT NOT NULL,
+		content_hash TEXT NOT NULL CHECK (length(content_hash) = 64),
+		origin TEXT NOT NULL CHECK (origin IN ('deterministic', 'refined', 'edited')),
+		model TEXT NOT NULL DEFAULT '',
+		mark TEXT NOT NULL DEFAULT '',
+		anki_note_id INTEGER NOT NULL DEFAULT 0 CHECK (anki_note_id >= 0),
+		anki_pushed_revision INTEGER NOT NULL DEFAULT 0 CHECK (anki_pushed_revision >= 0),
+		anki_deck TEXT NOT NULL DEFAULT '' CHECK (length(anki_deck) <= 200),
+		anki_state TEXT NOT NULL CHECK (anki_state IN
+			('local', 'queued', 'pushed', 'already_present', 'conflict', 'failed', 'deck_mismatch')),
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
+	`INSERT INTO notes (
+		note_id, target_key, attempt_id, content_id, content_version, question_id, source_id,
+		page_number, restricted, revision, front, back, tactic, source_label, content_hash, origin, model,
+		mark, anki_note_id, anki_pushed_revision, anki_deck, anki_state, created_at, updated_at
+		)
+		SELECT
+		note_id, target_key, attempt_id, content_id, content_version, question_id, source_id,
+		page_number, restricted, revision, front, back, tactic, source_label, content_hash, origin, model,
+		mark, anki_note_id, anki_pushed_revision, '', anki_state, created_at, updated_at
+		FROM notes_v15`,
+	`DROP TABLE notes_v15`,
+	`ALTER TABLE anki_push_attempts RENAME TO anki_push_attempts_v15`,
+	`CREATE TABLE anki_push_attempts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		note_id TEXT NOT NULL,
+		revision INTEGER NOT NULL CHECK (revision >= 1),
+		action TEXT NOT NULL CHECK (action IN ('add', 'update', 'readd', 'check')),
+		outcome TEXT NOT NULL CHECK (outcome IN
+			('ok', 'duplicate', 'not_found', 'conflict', 'failed', 'unreachable', 'deck_mismatch')),
+		detail TEXT NOT NULL DEFAULT '',
+		at TEXT NOT NULL
+	)`,
+	`INSERT INTO anki_push_attempts (id, note_id, revision, action, outcome, detail, at)
+		SELECT id, note_id, revision, action, outcome, detail, at FROM anki_push_attempts_v15`,
+	`DROP TABLE anki_push_attempts_v15`,
+	`CREATE INDEX IF NOT EXISTS anki_push_attempts_note ON anki_push_attempts(note_id, id)`,
+	`CREATE TRIGGER IF NOT EXISTS anki_push_attempts_append_only_update BEFORE UPDATE ON anki_push_attempts
+		BEGIN SELECT RAISE(ABORT, 'anki push attempts are append-only'); END`,
+	`CREATE TRIGGER IF NOT EXISTS anki_push_attempts_append_only_delete BEFORE DELETE ON anki_push_attempts
+		BEGIN SELECT RAISE(ABORT, 'anki push attempts are append-only'); END`,
+}
+
 // Note draft states. A draft is a proposal, not evidence; only notes/revisions
 // are canonical local content.
 const (
@@ -168,6 +239,10 @@ const (
 	AnkiStateAlreadyExists = "already_present"
 	AnkiStateConflict      = "conflict"
 	AnkiStateFailed        = "failed"
+	// AnkiStateDeckMismatch means Anki accepted the write and the card is not in
+	// the deck the push named. The note id and pushed revision are kept, so a
+	// later revision updates the same card instead of adding a second one.
+	AnkiStateDeckMismatch = "deck_mismatch"
 )
 
 // NoteDraft is one open proposal. RefinedFront/RefinedBack are advisory text
@@ -221,9 +296,12 @@ type Note struct {
 	Model              string
 	AnkiNoteID         int64
 	AnkiPushedRevision int
-	AnkiState          string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// AnkiDeck is the deck Anki reported for the note's card at the last
+	// completed deck read. It stays empty until such a read happens.
+	AnkiDeck  string
+	AnkiState string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // NoteRevision is one immutable accepted revision.
@@ -289,6 +367,8 @@ type NoteOutboxEntry struct {
 
 // AnkiAttempt is one external action outcome. The store appends the ledger row,
 // updates the note's Anki state and advances the outbox in one transaction.
+// Keep marks a read-only verdict: the row and the note state are written, and
+// the outbox row is left exactly as the last write left it.
 type AnkiAttempt struct {
 	NoteID         string
 	Revision       int
@@ -297,9 +377,11 @@ type AnkiAttempt struct {
 	Detail         string
 	At             time.Time
 	AnkiNoteID     int64
+	AnkiDeck       string
 	AnkiState      string
 	PushedRevision int
 	Drain          bool
+	Keep           bool
 }
 
 // NoteRefinement is one recorded provider refinement.
@@ -523,7 +605,7 @@ func (s *Store) acceptNote(target NoteTarget, content NoteContent, draftID int64
 			return AcceptResult{}, fmt.Errorf("store: insert note revision: %w", err)
 		}
 		if _, err := tx.Exec(`UPDATE notes SET revision = ?, front = ?, back = ?, tactic = ?, source_label = ?,
-				content_hash = ?, origin = ?, model = ?, anki_state = 'local', updated_at = ?
+				content_hash = ?, origin = ?, model = ?, anki_state = 'local', anki_deck = '', updated_at = ?
 			WHERE note_id = ?`,
 			revision, content.Front, content.Back, content.Tactic, content.SourceLabel,
 			content.ContentHash, content.Origin, content.Model, stamp, existing.NoteID); err != nil {
@@ -620,7 +702,7 @@ func upsertNoteOutbox(tx *sql.Tx, noteID string, revision int, stamp string) err
 
 const noteColumns = `note_id, target_key, attempt_id, content_id, content_version, question_id, source_id,
 	page_number, mark, restricted, revision, front, back, tactic, source_label, content_hash, origin, model,
-	anki_note_id, anki_pushed_revision, anki_state, created_at, updated_at`
+	anki_note_id, anki_pushed_revision, anki_deck, anki_state, created_at, updated_at`
 
 func scanNote(row rowScanner) (Note, bool, error) {
 	var (
@@ -631,7 +713,7 @@ func scanNote(row rowScanner) (Note, bool, error) {
 	)
 	err := row.Scan(&n.NoteID, &n.TargetKey, &n.AttemptID, &n.ContentID, &n.ContentVersion, &n.QuestionID,
 		&n.SourceID, &n.Page, &n.Mark, &restricted, &n.Revision, &n.Front, &n.Back, &n.Tactic, &n.SourceLabel,
-		&n.ContentHash, &n.Origin, &n.Model, &n.AnkiNoteID, &n.AnkiPushedRevision, &n.AnkiState,
+		&n.ContentHash, &n.Origin, &n.Model, &n.AnkiNoteID, &n.AnkiPushedRevision, &n.AnkiDeck, &n.AnkiState,
 		&created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Note{}, false, nil
@@ -804,7 +886,7 @@ func (s *Store) RecordAnkiAttempt(a AnkiAttempt) error {
 		return fmt.Errorf("store: anki action %q is invalid", a.Action)
 	}
 	switch a.Outcome {
-	case "ok", "duplicate", "not_found", "conflict", "failed", "unreachable":
+	case "ok", "duplicate", "not_found", "conflict", "failed", "unreachable", "deck_mismatch":
 	default:
 		return fmt.Errorf("store: anki outcome %q is invalid", a.Outcome)
 	}
@@ -828,20 +910,27 @@ func (s *Store) RecordAnkiAttempt(a AnkiAttempt) error {
 	pushed := a.PushedRevision
 	if _, err := tx.Exec(`UPDATE notes SET
 			anki_note_id = CASE WHEN ? > 0 THEN ? ELSE anki_note_id END,
+			anki_deck = CASE WHEN ? <> '' THEN ? ELSE anki_deck END,
 			anki_state = ?,
 			anki_pushed_revision = CASE WHEN ? > 0 THEN ? ELSE anki_pushed_revision END,
 			updated_at = ?
-		WHERE note_id = ?`, a.AnkiNoteID, a.AnkiNoteID, state, pushed, pushed, stamp, a.NoteID); err != nil {
+		WHERE note_id = ?`,
+		a.AnkiNoteID, a.AnkiNoteID, a.AnkiDeck, a.AnkiDeck, state, pushed, pushed, stamp, a.NoteID); err != nil {
 		return fmt.Errorf("store: update note anki state: %w", err)
 	}
-	if a.Drain {
+	switch {
+	case a.Keep:
+		// A read-only verdict: the ledger row and the note state above are the
+		// whole effect. The queue row stays exactly as the write left it, so a
+		// verified note is not re-sent and a mismatch is not retried blindly.
+	case a.Drain:
 		if _, err := tx.Exec(`UPDATE note_outbox SET status = 'drained', drained_at = ?, last_error = '',
 				anki_note_id = CASE WHEN ? > 0 THEN ? ELSE anki_note_id END
 			WHERE note_id = ? AND revision = ? AND status = 'pending'`,
 			stamp, a.AnkiNoteID, a.AnkiNoteID, a.NoteID, a.Revision); err != nil {
 			return fmt.Errorf("store: drain note outbox: %w", err)
 		}
-	} else {
+	default:
 		if _, err := tx.Exec(`UPDATE note_outbox SET status = 'pending', attempts = attempts + 1, last_error = ?,
 				anki_note_id = CASE WHEN ? > 0 THEN ? ELSE anki_note_id END
 			WHERE note_id = ?`, a.Detail, a.AnkiNoteID, a.AnkiNoteID, a.NoteID); err != nil {
