@@ -1041,4 +1041,22 @@ Entry format:
 - Revisit when: the owner decides whether Q-0006-05's "endpoint is current" rule extends to a run that
   predates registry providers.
 
-
+### Q-0014-01 — Can Pass Quest tell that AnkiConnect ignored the requested deck?
+- Status: open
+- Context: the owner's real-machine verification (2026-11-13, Anki Desktop 26.9.4 with AnkiConnect built
+  from source) found `note push` printing `Deck: Pass Quest` and `pushed/ok` while the card was in Anki's
+  default deck; the `Pass Quest` deck existed and was empty. A direct AnkiConnect `addNote` with
+  `deckName: "Pass Quest"` landed in the default deck too, and the add-on sets the requested deck on the
+  note type (`ankiNote.model()['did']`) before `collection.addNote(ankiNote)` without a deck id — so the
+  payload is correct and the add-on/Anki pair is what drops it. Pass Quest's read-back compares the model
+  and the fields, never the deck, so neither the CLI nor the stub-based `note smoke` gate can see it.
+- Repro: point `note push` at a real Anki Desktop on Anki 26.x with the current AnkiConnect, push one
+  note, then ask the same endpoint `getDecks`/`cardsInfo` for the card's deck.
+- Options considered: (A) read the landed deck back and report a typed mismatch, keeping the note id;
+  (B) additionally move the card with `changeDeck` so the claim becomes true; (C) document the add-on
+  version sensitivity and change nothing.
+- Default taken: (A), as active goal 0014: reporting what happened is a smaller, more honest change than
+  writing to the learner's collection, and (C) leaves a printed false claim in place. Reverse by adopting
+  (B) once a compatible add-on version is known.
+- Revisit when: a released AnkiConnect is confirmed to honour `deckName` on the supported Anki version, or
+  the owner wants the card moved automatically.
