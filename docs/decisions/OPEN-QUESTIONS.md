@@ -506,19 +506,30 @@ Entry format:
 - Revisit when: goal 0010 exposes provider/model choice or a run needs planned model hand-off.
 
 ### Q-0006-06 — Is a copied `next` command POSIX shell text or per-platform shell text?
-- Status: open
-- Context: `quoteCommandArgument` (`internal/cli/next.go:344`) emits a POSIX form: double quotes with
-  `\$`, `` \` `` and `\"` escaping, and treats `\`, `/`, `:` and `@` as safe characters. That is correct
-  for `sh`/`zsh`/`bash` and wrong for `cmd.exe` and PowerShell, where `$HOME` is not escaped the same
-  way and a path with a space needs different quoting. The product targets Windows, macOS and Linux, so
-  the learner on Windows currently copies a command that may not run.
+- Status: resolved
+- Resolution: (owner, 2026-11-13) option (B) confirmed: `next` renders each copyable command for the
+  detected shell family — `sh`-family, `cmd.exe` or PowerShell — and every family is pinned by table
+  tests over hostile paths (spaces, `$`, backticks, `"`, `'`, `%`, `!`, non-ASCII, a trailing Windows
+  separator). The POSIX form is additionally round-tripped through a real `sh -c`. Detection order,
+  its visible disclosure and the residual limits are recorded in
+  [cross-platform.md](../cross-platform.md); `next --json` carries
+  `shell.{family,detected_from,detail,override}`. `cmd.exe` has no way to suppress `%NAME%` expansion
+  outside a batch file, so a rendered command containing `%` is printed with a warning and the limit
+  is disclosed instead of being claimed fixed. The Windows and PowerShell forms are pinned as text
+  and were not executed on the Linux host of this change; the 3-OS CI run is the remaining evidence.
+- Context: `quoteCommandArgument` (`internal/cli/next.go`) emitted a POSIX form: double quotes with
+  `\$`, `` \` `` and `\"` escaping, and treated `\`, `/`, `:` and `@` as safe characters. That was
+  correct for `sh`/`zsh`/`bash` and wrong for `cmd.exe` and PowerShell, where `$HOME` expands
+  differently and a path with a space needs different quoting. The product targets Windows, macOS and
+  Linux, so the learner on Windows copied a command that might not run.
 - Options considered: (A) emit the POSIX form and say so in the command's surrounding text; (B) render
   the command for the detected shell (`sh`-family vs `cmd.exe` vs PowerShell) and pin each form with
   table tests; (C) print a shell-neutral form only (no quoting, refuse paths with spaces).
-- Default taken: (A), but this is a **known gap**, not a decision — it is recorded here so it is not
-  mistaken for cross-platform correctness. [cross-platform.md](../cross-platform.md) states the same.
-- Revisit when: a learner copies a command on Windows, or goal 0007/0012 introduces a copyable command
-  whose paths leave the ASCII-safe set.
+- Default taken: (A) from 2026-11-10 until this resolution; it was recorded as a **known gap**, not a
+  decision. The gap closed by replacing the single POSIX renderer with `internal/cli/shell.go`; no
+  stored attempt, database column or command name changed.
+- Revisit when: a learner reports a copied command that still fails in their shell, or goal 0007/0012
+  introduces a copyable command whose paths leave the ASCII-safe set.
 
 ### Q-0007-01 — Can the AnkiConnect path be proven without Anki Desktop on this machine?
 - Status: decided(default taken)

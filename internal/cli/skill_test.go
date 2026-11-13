@@ -313,7 +313,7 @@ func TestNextSendsUnGuidedScoringToTacticWalkthrough(t *testing.T) {
 	if scoring.Inference.State != "insufficient" || scoring.Inference.Action != "explain" {
 		t.Fatalf("scoring inference = %+v", scoring.Inference)
 	}
-	wantCommand := "passquest tactic practice not-except-polarity --stage guided --db " + quoteCommandArgument(db)
+	wantCommand := "passquest tactic practice not-except-polarity --stage guided --db " + testQuoter.quote(db)
 	if doc.Recommendation == nil || doc.Recommendation.Command != wantCommand {
 		t.Fatalf("recommendation = %+v, want command %q", doc.Recommendation, wantCommand)
 	}
@@ -553,7 +553,7 @@ func TestNextPassageExposureAndHints(t *testing.T) {
 	if scoring.Inference.State != "familiarity_only" || scoring.Inference.Action != "practice_new" {
 		t.Fatalf("scoring inference = %+v", scoring.Inference)
 	}
-	wantCommand := "passquest skill practice not-except-polarity --db " + quoteCommandArgument(db)
+	wantCommand := "passquest skill practice not-except-polarity --db " + testQuoter.quote(db)
 	if doc.Recommendation == nil || doc.Recommendation.Skill.ID != "not-except-polarity" || doc.Recommendation.Command != wantCommand {
 		t.Fatalf("recommendation = %+v, want command %q", doc.Recommendation, wantCommand)
 	}
@@ -609,7 +609,7 @@ func TestNextExhaustedScoringYieldsToLanguage(t *testing.T) {
 	if doc.Recommendation == nil || doc.Recommendation.Skill.ID != "vocabulary-in-context" || doc.Recommendation.Action != "practice_new" {
 		t.Fatalf("recommendation = %+v, want fresh vocabulary practice", doc.Recommendation)
 	}
-	if !strings.Contains(doc.Recommendation.Command, "--db "+quoteCommandArgument(db)) {
+	if !strings.Contains(doc.Recommendation.Command, "--db "+testQuoter.quote(db)) {
 		t.Fatalf("vocabulary command does not preserve the database: %q", doc.Recommendation.Command)
 	}
 }
@@ -641,7 +641,7 @@ func TestNextExhaustedWeakYieldsToFreshMaterial(t *testing.T) {
 		if doc.Recommendation == nil || doc.Recommendation.Skill.ID != "vocabulary-in-context" || doc.Recommendation.Action != "practice_new" {
 			t.Fatalf("recommendation = %+v, want fresh vocabulary practice", doc.Recommendation)
 		}
-		if !strings.Contains(doc.Recommendation.Command, "--db "+quoteCommandArgument(db)) {
+		if !strings.Contains(doc.Recommendation.Command, "--db "+testQuoter.quote(db)) {
 			t.Fatalf("vocabulary command does not preserve the database: %q", doc.Recommendation.Command)
 		}
 
@@ -658,7 +658,7 @@ func TestNextExhaustedWeakYieldsToFreshMaterial(t *testing.T) {
 			t.Fatalf("exhausted explanation command = %q", doc.Recommendation.Command)
 		}
 		if !strings.Contains(doc.Recommendation.FollowUpCommand, "--question s2") ||
-			!strings.Contains(doc.Recommendation.FollowUpCommand, "--db "+quoteCommandArgument(db)) {
+			!strings.Contains(doc.Recommendation.FollowUpCommand, "--db "+testQuoter.quote(db)) {
 			t.Fatalf("exhausted explanation follow-up = %q", doc.Recommendation.FollowUpCommand)
 		}
 	})
@@ -706,7 +706,7 @@ func TestNextReviewCommandWhenEverySkillIsExhausted(t *testing.T) {
 	if !strings.Contains(doc.Recommendation.Command, "--question x1") {
 		t.Fatalf("review command does not name a seen question: %q", doc.Recommendation.Command)
 	}
-	if !strings.Contains(doc.Recommendation.Command, "--db "+quoteCommandArgument(db)) {
+	if !strings.Contains(doc.Recommendation.Command, "--db "+testQuoter.quote(db)) {
 		t.Fatalf("review command does not preserve the database: %q", doc.Recommendation.Command)
 	}
 }
@@ -721,7 +721,7 @@ func TestNextCommandPreservesSelectedDatabase(t *testing.T) {
 	if doc.Recommendation == nil {
 		t.Fatal("no recommendation")
 	}
-	want := "--db " + quoteCommandArgument(db)
+	want := "--db " + testQuoter.quote(db)
 	for name, command := range map[string]string{
 		"command":   doc.Recommendation.Command,
 		"follow-up": doc.Recommendation.FollowUpCommand,
@@ -746,27 +746,6 @@ func TestNextCommandOmitsDefaultDatabase(t *testing.T) {
 		if strings.Contains(command, "--db") {
 			t.Fatalf("%s repeats the default database: %q", name, command)
 		}
-	}
-}
-
-func TestQuoteCommandArgument(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"plain", "attempts.sqlite", "attempts.sqlite"},
-		{"path with space", "/tmp/learner data/attempts.sqlite", `"/tmp/learner data/attempts.sqlite"`},     // portable-paths: allow the POSIX quoting form is the assertion; the Windows form is Q-0006-06
-		{"windows path with space", `C:\Users\A Name\attempts.sqlite`, `"C:\Users\A Name\attempts.sqlite"`}, // portable-paths: allow the POSIX quoting form is the assertion; the Windows form is Q-0006-06
-		{"dollar", "$HOME/attempts.sqlite", `"\$HOME/attempts.sqlite"`},
-		{"double quote", `a"b.sqlite`, `"a\"b.sqlite"`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := quoteCommandArgument(tt.in); got != tt.want {
-				t.Fatalf("quoteCommandArgument(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
 	}
 }
 

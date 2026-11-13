@@ -68,10 +68,30 @@ turns red.
 
 ## Shell output
 
-- A command the learner copies is shell text. `quoteCommandArgument` (`internal/cli/next.go`) currently
-  emits a POSIX form: double quotes with `\$` escaping. That is correct for `sh`/`zsh`/`bash` and wrong
-  for `cmd.exe`/PowerShell. This is a known gap, not a decision: see
-  [decisions/OPEN-QUESTIONS.md](decisions/OPEN-QUESTIONS.md).
+- A command the learner copies is shell text, and the shell is detected rather than assumed. `next`
+  classifies the environment into one of three families — `sh` (`sh`, `bash`, `zsh`, `dash`, `ksh`,
+  `mksh`, `ash`), `cmd.exe`, PowerShell — in this order: `PASSQUEST_SHELL=sh|cmd|powershell`
+  (explicit; an unknown value is an exit-2 `invalid_input` error, never a silent fallback), `SHELL`
+  naming a POSIX shell, `PSModulePath`, `ComSpec` on Windows, then POSIX as a recorded default.
+- No environment variable is authoritative: cmd.exe keeps an inherited `SHELL`, Windows defines
+  `PSModulePath` machine-wide, and a PowerShell process inherits the login shell's `SHELL`. The guess
+  is therefore printed beside the command with its source and the override hint, and `next --json`
+  records it in `shell.{family,detected_from,detail,override}`. A wrong guess is visible before the
+  paste, not after it.
+- Quoting per family (`internal/cli/shell.go`):
+  - `sh`: single quotes, with `'\''` for an embedded quote. Nothing inside expands, so `$`,
+    backticks, `"`, `%`, `!`, spaces and non-ASCII text arrive unchanged. Proven by a round trip
+    through a real `sh -c` wherever `sh` is on `PATH`; where it is absent the table test still pins
+    the text. No test is marked `skip`, which the gate forbids.
+  - PowerShell: single quotes, with `''` for an embedded quote. Same literal guarantee.
+  - `cmd.exe`: double quotes, with `""` for an embedded quote and a doubled backslash before the
+    closing quote (C-runtime argument parsing). cmd.exe has **no** escape for `%` outside a batch
+    file, so a value containing a `%NAME%` variable reference still expands after a paste; `next`
+    prints a warning when the command it rendered contains `%` and the family is `cmd`. Delayed
+    expansion (`!`) is off by default and is not defended against.
+- The Windows forms are pinned by table tests over spaces, `$`, backticks, `"`, `'`, `%`, `!` and
+  non-ASCII text; they are not executed on this Linux host. The 3-OS CI run is what proves the
+  shells, as for every other platform claim here.
 
 ## Tests
 
