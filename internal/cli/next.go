@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/adaptive"
@@ -37,11 +38,15 @@ func runNext(args []string, opt Options) int {
 		return internalError(opt, *jsonFlag, err)
 	}
 
+	shell, err := detectShell(opt.Getenv, runtime.GOOS)
+	if err != nil {
+		return usageError(opt, *jsonFlag, "invalid_input", err.Error())
+	}
 	result := adaptive.Recommend(input)
 	if err := recordNextPresentation(st, result.Recommendation, opt.PresentationNow()); err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	doc := nextDocOf(result, unclassified, *sourceFlag, catalog.sourceTaggedQuestions, nextDatabaseArgument(*dbFlag, opt))
+	doc := nextDocOf(result, unclassified, *sourceFlag, catalog.sourceTaggedQuestions, nextDatabaseArgument(*dbFlag, opt), commandQuoter{shell: shell})
 	if *jsonFlag {
 		return writeJSON(opt, doc)
 	}
@@ -247,10 +252,11 @@ func nextRecord(record attempt.Attempt, tagsByKey map[attempt.QuestionKey][]stri
 	return adapted, "content or question is unavailable in the current material"
 }
 
-func nextDocOf(result adaptive.Result, unclassified []unclassifiedAttemptView, sourceScope string, sourceTagged int, dbArg string) nextDoc {
+func nextDocOf(result adaptive.Result, unclassified []unclassifiedAttemptView, sourceScope string, sourceTagged int, dbArg string, quoter commandQuoter) nextDoc {
 	doc := nextDoc{
 		SchemaVersion:         ProtocolVersion,
 		State:                 "recommendation",
+		Shell:                 shellViewOf(quoter.shell),
 		Skills:                make([]nextSkillView, 0, len(result.Skills)),
 		UnclassifiedAttempts:  unclassified,
 		Limitations:           nextLimitations(len(unclassified)),
@@ -268,7 +274,7 @@ func nextDocOf(result adaptive.Result, unclassified []unclassifiedAttemptView, s
 		})
 	}
 	if result.Recommendation != nil {
-		command, followUp := nextCommands(result.Recommendation, dbArg)
+		command, followUp := nextCommands(result.Recommendation, dbArg, quoter)
 		doc.Recommendation = &nextRecommendationView{
 			Action:             string(result.Recommendation.Action),
 			Skill:              skillRefOf(result.Recommendation.Skill),
@@ -282,27 +288,27 @@ func nextDocOf(result adaptive.Result, unclassified []unclassifiedAttemptView, s
 	return doc
 }
 
-func nextCommands(rec *adaptive.Recommendation, dbArg string) (string, string) {
+func nextCommands(rec *adaptive.Recommendation, dbArg string, quoter commandQuoter) (string, string) {
 	switch rec.Action {
 	case adaptive.ActionExplain:
 		followUp := ""
 		if rec.FreshMaterial != nil {
-			followUp = skillPracticeCommand(rec.Skill.ID, rec.FreshMaterial, false, dbArg)
+			followUp = skillPracticeCommand(rec.Skill.ID, rec.FreshMaterial, false, dbArg, quoter)
 		} else if rec.ReviewMaterial != nil {
-			followUp = skillPracticeCommand(rec.Skill.ID, rec.ReviewMaterial, true, dbArg)
+			followUp = skillPracticeCommand(rec.Skill.ID, rec.ReviewMaterial, true, dbArg, quoter)
 		}
 		if rec.Skill.Kind == adaptive.KindScoring {
-			return tacticPracticeCommand(rec.Skill.ID, dbArg), followUp
+			return tacticPracticeCommand(rec.Skill.ID, dbArg, quoter), followUp
 		}
 		return fmt.Sprintf("passquest skill show %s", rec.Skill.ID), followUp
 	case adaptive.ActionPracticeNew:
 		if rec.FreshMaterial != nil {
-			return skillPracticeCommand(rec.Skill.ID, rec.FreshMaterial, false, dbArg), ""
+			return skillPracticeCommand(rec.Skill.ID, rec.FreshMaterial, false, dbArg, quoter), ""
 		}
-		return withDatabaseArgument(fmt.Sprintf("passquest skill practice %s", rec.Skill.ID), dbArg), ""
+		return withDatabaseArgument(fmt.Sprintf("passquest skill practice %s", rec.Skill.ID), dbArg, quoter), ""
 	case adaptive.ActionReview:
 		if rec.ReviewMaterial != nil {
-			return skillPracticeCommand(rec.Skill.ID, rec.ReviewMaterial, true, dbArg), ""
+			return skillPracticeCommand(rec.Skill.ID, rec.ReviewMaterial, true, dbArg, quoter), ""
 		}
 		return fmt.Sprintf("passquest skill show %s", rec.Skill.ID), ""
 	default:
@@ -310,22 +316,22 @@ func nextCommands(rec *adaptive.Recommendation, dbArg string) (string, string) {
 	}
 }
 
-func tacticPracticeCommand(skillID, dbArg string) string {
+func tacticPracticeCommand(skillID, dbArg string, quoter commandQuoter) string {
 	command := fmt.Sprintf("passquest tactic practice %s --stage guided", skillID)
-	return withDatabaseArgument(command, dbArg)
+	return withDatabaseArgument(command, dbArg, quoter)
 }
 
 // withDatabaseArgument appends the selected database to a command that opens
 // learner history. Callers do not use it for read-only lesson commands such as
 // `skill show`, which never open the store.
-func withDatabaseArgument(command, dbArg string) string {
+func withDatabaseArgument(command, dbArg string, quoter commandQuoter) string {
 	if dbArg == "" {
 		return command
 	}
-	return command + " --db " + quoteCommandArgument(dbArg)
+	return command + " --db " + quoter.quote(dbArg)
 }
 
-func skillPracticeCommand(skillID string, material *adaptive.Material, includeQuestion bool, dbArg string) string {
+func skillPracticeCommand(skillID string, material *adaptive.Material, includeQuestion bool, dbArg string, quoter commandQuoter) string {
 	parts := []string{"passquest", "skill", "practice", skillID}
 	if material != nil && material.SourceID != "" {
 		parts = append(parts, "--source", material.SourceID)
@@ -334,34 +340,9 @@ func skillPracticeCommand(skillID string, material *adaptive.Material, includeQu
 		parts = append(parts, "--question", material.QuestionID)
 	}
 	if dbArg != "" {
-		parts = append(parts, "--db", quoteCommandArgument(dbArg))
+		parts = append(parts, "--db", quoter.quote(dbArg))
 	}
 	return strings.Join(parts, " ")
-}
-
-// quoteCommandArgument quotes one generated shell argument when it contains a
-// character a shell would split or expand. Double quotes are used because both
-// POSIX shells and cmd.exe accept them around a path with spaces; backslashes
-// stay intact so a Windows path remains readable. The command is a convenience
-// for a local copy, not a protocol that Pass Quest executes itself.
-func quoteCommandArgument(value string) string {
-	if commandArgumentIsSafe(value) {
-		return value
-	}
-	replacer := strings.NewReplacer(`"`, `\"`, `$`, `\$`, "`", "\\`")
-	return `"` + replacer.Replace(value) + `"`
-}
-
-func commandArgumentIsSafe(value string) bool {
-	for _, r := range value {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case r == '_', r == '-', r == '.', r == '/', r == '\\', r == ':', r == '@', r == '+', r == '=', r == ',':
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 func skillRefOf(candidate adaptive.Skill) skillRefView {
@@ -434,6 +415,7 @@ func writeNext(w io.Writer, doc nextDoc, dbPath string) {
 		if rec.FollowUpCommand != "" {
 			fmt.Fprintf(w, "Then: %s\n", rec.FollowUpCommand)
 		}
+		writeShellDisclosure(w, doc)
 	}
 	fmt.Fprintln(w, "\nEvidence (recorded attempts)")
 	for _, candidate := range doc.Skills {
@@ -478,6 +460,35 @@ func selectedSkillID(doc nextDoc) string {
 		return ""
 	}
 	return doc.Recommendation.Skill.ID
+}
+
+// writeShellDisclosure states which shell the copied commands were quoted for
+// and what decided that family. A guess must be visible: the same path quoted
+// for the wrong shell fails only after the learner pastes it.
+func writeShellDisclosure(w io.Writer, doc nextDoc) {
+	if doc.Shell == nil {
+		return
+	}
+	from := "no shell detected, defaulted"
+	switch doc.Shell.DetectedFrom {
+	case shellOverrideEnv:
+		from = "from " + shellOverrideEnv
+	case "PSModulePath":
+		from = "from PSModulePath"
+	case "SHELL", "ComSpec":
+		from = fmt.Sprintf("from %s=%s", doc.Shell.DetectedFrom, doc.Shell.Detail)
+	}
+	fmt.Fprintf(w, "Quoted for %s (%s); override with %s.\n", doc.Shell.Family, from, doc.Shell.Override)
+	if doc.Shell.Family == string(shellFamilyCmd) && recommendationExpandsPercent(doc) {
+		fmt.Fprintln(w, "Warning: cmd.exe expands %NAME% even inside double quotes, so this command is not copy-safe with that path; set PASSQUEST_SHELL=powershell or pass the path another way.")
+	}
+}
+
+func recommendationExpandsPercent(doc nextDoc) bool {
+	if doc.Recommendation == nil {
+		return false
+	}
+	return strings.Contains(doc.Recommendation.Command, "%") || strings.Contains(doc.Recommendation.FollowUpCommand, "%")
 }
 
 // JSON documents. Field names are protocol: tests and golden files pin them.
@@ -547,10 +558,21 @@ type unclassifiedAttemptView struct {
 type nextDoc struct {
 	SchemaVersion         int                       `json:"schema_version"`
 	State                 string                    `json:"state"`
+	Shell                 *shellView                `json:"shell"`
 	SourceScope           string                    `json:"source_scope,omitempty"`
 	SourceTaggedQuestions int                       `json:"source_tagged_questions"`
 	Recommendation        *nextRecommendationView   `json:"recommendation,omitempty"`
 	Skills                []nextSkillView           `json:"skills"`
 	UnclassifiedAttempts  []unclassifiedAttemptView `json:"unclassified_attempts"`
 	Limitations           []string                  `json:"limitations"`
+}
+
+// shellView is the quoting dialect of `command` and `follow_up_command`, and
+// what decided it. A consumer that prints or re-quotes those commands needs the
+// family; the human output prints the same fact beside them.
+type shellView struct {
+	Family       string `json:"family"`
+	DetectedFrom string `json:"detected_from"`
+	Detail       string `json:"detail,omitempty"`
+	Override     string `json:"override"`
 }

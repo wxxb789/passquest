@@ -11,6 +11,7 @@ import { goTest } from "./go-test.ts";
 import { goTidy } from "./go-tidy.ts";
 import { goVet } from "./go-vet.ts";
 import { gofmt } from "./gofmt.ts";
+import { goldenContract } from "./golden-contract.ts";
 import { importSmoke } from "./import-smoke.ts";
 import { localOnly } from "./local-only.ts";
 import { noteSmoke } from "./note-smoke.ts";
@@ -43,5 +44,6 @@ export const gates: Gate[] = [
   assessSmoke,
   portablePaths,
   providerSmoke,
+  goldenContract,
   selfTest,
 ];

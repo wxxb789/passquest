@@ -151,6 +151,13 @@ history repeats the database selected with `--db` or `PASSQUEST_DB` as a quoted 
 so copying it reads and records in the same store. The app-owned default path is omitted because the
 command resolves it the same way; `skill show` never opens the store and never carries `--db`.
 
+The argument is quoted for the shell the learner is in — `sh`-family, `cmd.exe` or PowerShell — and
+the document records that family in `shell.{family,detected_from,detail,override}`. The human output
+prints `Quoted for <family> (<source>); override with PASSQUEST_SHELL=sh|cmd|powershell` next to the
+command, because no environment variable identifies the current shell reliably and a wrong guess must
+be visible before the paste. Detection order and the per-family escaping rules, including the
+`cmd.exe` `%NAME%` limit, live in [`cross-platform.md`](cross-platform.md).
+
 ## Question tags
 
 A local question file's `tactics` field keeps its goal-0003 name but accepts any registered skill id,

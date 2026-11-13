@@ -1,6 +1,11 @@
 {
   "schema_version": 1,
   "state": "recommendation",
+  "shell": {
+    "family": "sh",
+    "detected_from": "default",
+    "override": "PASSQUEST_SHELL=sh|cmd|powershell"
+  },
   "source_tagged_questions": 0,
   "recommendation": {
     "action": "practice_new",

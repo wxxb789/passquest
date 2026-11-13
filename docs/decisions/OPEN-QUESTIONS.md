@@ -75,6 +75,32 @@ Entry format:
   resumed safely under (A).
 - Revisit when: the owner answers, or a second concurrent commit appears while the conductor runs.
 
+### Q-0000-05 — Are the CLI goldens contract evidence or test fixtures?
+- Status: resolved
+- Resolution: (owner, 2026-11-13) option (A) confirmed: the protocol and history goldens under
+  `internal/cli/testdata/` (`*.golden.json`, `*golden.txt`) **are** contract evidence. A golden change
+  is a contract change, so the gate refuses a diff that touches a `*golden*` file there without also
+  touching a contract-bearing document — an evidence record under `docs/evidence/`, a goal contract
+  under `docs/goals/`, or a decisions record under `docs/decisions/` (including this file) — and names
+  every golden it saw plus the document that is missing. The rules live in
+  [`../harness.md`](../harness.md) (gate 21) and the check is `harness/gates/golden-contract.ts`,
+  proven both ways by `harness/gates/self-test.ts` (a golden-only change fails; a new golden plus its
+  evidence row passes).
+- Context: the goldens pin the CLI's JSON protocol and its human history output, but nothing stopped
+  `-update-golden` from rewriting one to make a red test green, which silently changes the protocol a
+  learner's scripts and the agent bridge depend on. The 2026-11-13 quoting change moved three `next`
+  goldens for a documented reason, which is exactly the case the record must distinguish from a silent
+  rewrite.
+- Options considered: (A) treat a golden as contract evidence and fail a golden change that no
+  contract document declares; (B) keep goldens as ordinary fixtures and rely on review; (C) require an
+  owner approval marker on every golden change.
+- Default taken: (A). The check is diff-based against the branch's merge base (falling back to
+  `HEAD^1` in CI's shallow pull-request checkout, or `PASSQUEST_GOLDEN_BASE`), and an unresolvable base
+  fails instead of passing silently. Reverse by deleting the gate from `harness/gates/index.ts` and
+  this entry's rule from `docs/harness.md`.
+- Revisit when: a golden change is genuinely mechanical across many files at once, or a second golden
+  directory appears outside `internal/cli/testdata/`.
+
 ### Q-0001-01 — May a learner repeat a question after seeing the key, and how is it counted?
 - Status: decided(default taken)
 - Context: goal 0001 requires correct, incorrect, skipped and repeated attempts to be represented
@@ -506,19 +532,30 @@ Entry format:
 - Revisit when: goal 0010 exposes provider/model choice or a run needs planned model hand-off.
 
 ### Q-0006-06 — Is a copied `next` command POSIX shell text or per-platform shell text?
-- Status: open
-- Context: `quoteCommandArgument` (`internal/cli/next.go:344`) emits a POSIX form: double quotes with
-  `\$`, `` \` `` and `\"` escaping, and treats `\`, `/`, `:` and `@` as safe characters. That is correct
-  for `sh`/`zsh`/`bash` and wrong for `cmd.exe` and PowerShell, where `$HOME` is not escaped the same
-  way and a path with a space needs different quoting. The product targets Windows, macOS and Linux, so
-  the learner on Windows currently copies a command that may not run.
+- Status: resolved
+- Resolution: (owner, 2026-11-13) option (B) confirmed: `next` renders each copyable command for the
+  detected shell family — `sh`-family, `cmd.exe` or PowerShell — and every family is pinned by table
+  tests over hostile paths (spaces, `$`, backticks, `"`, `'`, `%`, `!`, non-ASCII, a trailing Windows
+  separator). The POSIX form is additionally round-tripped through a real `sh -c`. Detection order,
+  its visible disclosure and the residual limits are recorded in
+  [cross-platform.md](../cross-platform.md); `next --json` carries
+  `shell.{family,detected_from,detail,override}`. `cmd.exe` has no way to suppress `%NAME%` expansion
+  outside a batch file, so a rendered command containing `%` is printed with a warning and the limit
+  is disclosed instead of being claimed fixed. The Windows and PowerShell forms are pinned as text
+  and were not executed on the Linux host of this change; the 3-OS CI run is the remaining evidence.
+- Context: `quoteCommandArgument` (`internal/cli/next.go`) emitted a POSIX form: double quotes with
+  `\$`, `` \` `` and `\"` escaping, and treated `\`, `/`, `:` and `@` as safe characters. That was
+  correct for `sh`/`zsh`/`bash` and wrong for `cmd.exe` and PowerShell, where `$HOME` expands
+  differently and a path with a space needs different quoting. The product targets Windows, macOS and
+  Linux, so the learner on Windows copied a command that might not run.
 - Options considered: (A) emit the POSIX form and say so in the command's surrounding text; (B) render
   the command for the detected shell (`sh`-family vs `cmd.exe` vs PowerShell) and pin each form with
   table tests; (C) print a shell-neutral form only (no quoting, refuse paths with spaces).
-- Default taken: (A), but this is a **known gap**, not a decision — it is recorded here so it is not
-  mistaken for cross-platform correctness. [cross-platform.md](../cross-platform.md) states the same.
-- Revisit when: a learner copies a command on Windows, or goal 0007/0012 introduces a copyable command
-  whose paths leave the ASCII-safe set.
+- Default taken: (A) from 2026-11-10 until this resolution; it was recorded as a **known gap**, not a
+  decision. The gap closed by replacing the single POSIX renderer with `internal/cli/shell.go`; no
+  stored attempt, database column or command name changed.
+- Revisit when: a learner reports a copied command that still fails in their shell, or goal 0007/0012
+  introduces a copyable command whose paths leave the ASCII-safe set.
 
 ### Q-0007-01 — Can the AnkiConnect path be proven without Anki Desktop on this machine?
 - Status: decided(default taken)
