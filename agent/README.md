@@ -61,7 +61,8 @@ vocabulary.
 while AnkiConnect is an HTTP endpoint. It is a bounded transport, not an Anki client.
 
 - One JSON request on stdin with an endpoint, a timeout and 1–50 allow-listed actions: `version`,
-  `createDeck`, `modelNames`, `createModel`, `addNote`, `updateNoteFields`, `notesInfo`.
+  `createDeck`, `modelNames`, `createModel`, `addNote`, `updateNoteFields`, `notesInfo`, `cardsInfo`
+  (the deck read-back that makes a push's deck claim checkable).
 - The endpoint is validated again in the host: `http`/`https`, no userinfo/query/fragment, and a
   loopback host (`localhost`, `127.0.0.0/8`, `[::1]`). A remote endpoint is a failed document.
 - Each action is posted as `{action, version: 6, params}`. The host returns Anki's raw result and

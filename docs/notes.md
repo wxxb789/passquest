@@ -164,17 +164,42 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
   `[::ffff:127.0.0.1]`). A remote endpoint is refused with exit 2: a note can contain private source
   text and AnkiConnect is a local bridge.
 - The host accepts one versioned document with at most 50 allow-listed actions: `version`,
-  `createDeck`, `modelNames`, `createModel`, `addNote`, `updateNoteFields`, `notesInfo`. It refuses
-  redirects and has no database or filesystem access. A push with more than 50 pending notes splits
-  its writes into consecutive documents of at most 50 actions, preserving queue order; a chunk whose
-  endpoint does not answer stays queued. Each completed chunk is recorded before the next call, so a
-  later failure cannot discard an acknowledged note id.
+  `createDeck`, `modelNames`, `createModel`, `addNote`, `updateNoteFields`, `notesInfo`,
+  `cardsInfo`. It refuses redirects and has no database or filesystem access. A push with more than
+  50 pending notes splits its writes into consecutive documents of at most 50 actions, preserving
+  queue order; a chunk whose endpoint does not answer stays queued. Each completed chunk is recorded
+  before the next call, so a later failure cannot discard an acknowledged note id.
 - The read-back is bounded the same way: more than 50 previously pushed notes are queried in
   consecutive `notesInfo` documents of at most 50 ids, and the results are combined before conflict
   classification. The host caps one HTTP response at 1 MiB, so one unbounded request would make every
   push of a larger collection fail before any update.
 - `version` must be at least 6. The deck `Pass Quest` is created when missing; the model
   `PassQuest Note` is created when `modelNames` does not contain it.
+- **The deck is read back, not assumed.** After the writes of one push are recorded, every note that
+  write touched is verified: `notesInfo` for the cards of notes whose cards are not already known,
+  then `cardsInfo` for those cards (chunked at 50 like every other action). `addNote` carrying
+  `deckName: "Pass Quest"` is a request, and the AnkiConnect build on the owner's machine is known to
+  file the card elsewhere anyway, so the push reports where the card reached:
+  - every card in `Pass Quest` → the note records that deck, the item stays `pushed`/`ok`, exit 0; a
+    conforming push prints and prints exactly what it printed before this check existed;
+  - any card in another deck → the item's state and outcome are `deck_mismatch`, the document's
+    `counts.deck_mismatch` is 1, the named deck is the one the card reached, `push` exits 3 with the
+    envelope `anki_deck_mismatch`, and the human summary states one action: move the card into
+    `Pass Quest` in Anki (the learner's manual move; Pass Quest never moves it for them);
+  - a card the endpoint does not answer about, or whose `deckName` is missing, empty, unprintable or
+    longer than 200 characters, or a note whose several decks together exceed those 200 characters →
+    the same `deck_mismatch` outcome, with the detail saying what could not be read. An unread claim
+    is never printed as achieved;
+  - a read that fails after the write → exit 3 with `anki_unavailable`/`anki_error`; the notes keep
+    their recorded ids and revisions and record no deck.
+  The verification does not re-send anything: the write already drained the queue, the recorded
+  Anki note id and pushed revision stay, a repeat push therefore contacts nothing and adds no second
+  card, and a later revision updates the same card. `--force` is verified like any other write.
+  The ledger records the check as its own `check/ok` or `check/deck_mismatch` row, so the write's own
+  outcome stays visible beside it.
+- A push that exits 3 states its failure in human mode as one `passquest: <code>: <message>` line —
+  the same code and message the `--json` document carries in `error`. The post-write deck-failure path
+  has no other human explanation, so that line is the one place it is stated.
 - `addNote` uses `allowDuplicate: false`. A duplicate of a note's first revision, with nothing pushed
   before, is reported as `already_present` (exit 0) and that revision is marked delivered; a later
   revision of that duplicate-only note is a **conflict**, because AnkiConnect reports no note id for
@@ -201,11 +226,17 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
   `propose --refine` needs Node, and `push` needs it only when there is pending work.
 
 The local outbox is one desired revision per note with `pending`/`drained` state. Every acknowledged
-add/update/readd is appended to a per-note attempt ledger, so duplicate suppression and retries are
+add/update/readd is appended to a per-note attempt ledger, and so is the deck check of each write
+(`check/ok`, `check/deck_mismatch`), so duplicate suppression, retries and the deck claim are
 countable. In a push document, `counts.pending` is the number of outbox rows still pending after that
-push: `queued`, `conflict` and `failed` rows all stay pending until a later push resolves them. A
-conflict or failed push on stderr carries the usual `error` object (`anki_conflict` or `anki_failed`)
-beside the counts and note list.
+push: `queued`, `conflict` and `failed` rows all stay pending until a later push resolves them, while a
+`deck_mismatch` row is drained and keeps its note id. A conflict, failed or mismatched push on stderr
+carries the usual `error` object (`anki_conflict`, `anki_failed` or `anki_deck_mismatch`) beside the
+counts and note list. `note show` prints the recorded deck for a note whose deck was read
+(`anki=deck_mismatch deck=Default (expected Pass Quest)`, and `anki.deck` / `anki.deck_expected` in
+`--json`); a new accepted revision clears it until the next push reads it again, and a read that
+cannot name a deck records none — a `deck_mismatch` from an unreadable card is shown as
+`anki=deck_mismatch` with no `deck=` clause rather than with the name an earlier read left behind.
 
 ## Model and template
 
@@ -223,7 +254,7 @@ font, stylesheet, script, image or URL. `note model` prints the whole template a
 |---|---|
 | 0 | Success, including a queued push because no endpoint answered and an `already_present` duplicate. |
 | 2 | Invalid input, no open draft, low-value target, missing consent, no configured provider, not-practiceable question, remote endpoint, exhausted provider budget. |
-| 3 | Provider or Anki failure after an external attempt; Anki host unavailable; a conflict found by read-back. The local queue is retained. |
+| 3 | Provider or Anki failure after an external attempt; Anki host unavailable; a conflict found by read-back; a card that reached another deck. The local queue is retained, and a mismatch keeps its recorded note id instead of staying queued. |
 | 1 | Local storage or export I/O failure. |
 
 ## Limits
@@ -243,6 +274,13 @@ font, stylesheet, script, image or URL. `note model` prints the whole template a
 - A conflict is never overwritten silently. A read-back field difference can be overwritten with
   `--force`; a duplicate conflict whose Anki note id is unknown cannot be, and needs the card removed
   in Anki or the local content aligned before a later push.
+- The recorded deck is what Anki reported at the last push that wrote to that note. A card the learner
+  moves by hand is not re-read until the next write, and a push with nothing pending contacts no
+  endpoint at all; `note show` therefore reports the last known placement, not a live one.
+- The deck claim needs an endpoint that reports a note's cards (`notesInfo.cards`) and a card's deck
+  (`cardsInfo.deckName`). An endpoint that omits either is reported as `deck_mismatch` with the detail
+  saying what could not be read, rather than being trusted.
 
-Measured evidence: [`evidence/0007-anki-from-learning.md`](evidence/0007-anki-from-learning.md).
-Decisions: [`decisions/OPEN-QUESTIONS.md`](decisions/OPEN-QUESTIONS.md) (Q-0007-01..10).
+Measured evidence: [`evidence/0007-anki-from-learning.md`](evidence/0007-anki-from-learning.md) and
+[`evidence/0014-note-lands-in-the-declared-deck.md`](evidence/0014-note-lands-in-the-declared-deck.md).
+Decisions: [`decisions/OPEN-QUESTIONS.md`](decisions/OPEN-QUESTIONS.md) (Q-0007-01..10, Q-0014-01..04).

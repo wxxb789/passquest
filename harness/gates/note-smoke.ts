@@ -58,10 +58,14 @@ export const noteSmoke: Gate = {
     };
 
     const notes = new Map<number, Record<string, string>>();
+    const noteDecks = new Map<number, string>();
+    const noteCards = new Map<number, number[]>();
     const models: string[] = [];
     const actions: StubAction[] = [];
     let nextID = 101;
+    let nextCard = 501;
     let duplicate = false;
+    let misassigned: string | null = null;
     const stub = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -97,6 +101,8 @@ export const noteSmoke: Gate = {
             for (const [name, value] of Object.entries(fields)) stored[name] = String(value);
             const id = nextID++;
             notes.set(id, stored);
+            noteDecks.set(id, misassigned ?? stringField(note, "deckName") ?? "");
+            noteCards.set(id, [nextCard++]);
             result = id;
             break;
           }
@@ -122,7 +128,19 @@ export const noteSmoke: Gate = {
                 fields: Object.fromEntries(
                   Object.entries(notes.get(id)!).map(([name, value]) => [name, { value, order: 0 }]),
                 ),
+                cards: noteCards.get(id) ?? [],
               }));
+            break;
+          }
+          case "cardsInfo": {
+            const asked = Array.isArray(params.cards) ? params.cards.map(Number) : [];
+            result = asked.flatMap((cardID) => {
+              for (const [noteID, ids] of noteCards) {
+                if (!ids.includes(cardID)) continue;
+                return [{ cardId: cardID, note: noteID, modelName: "PassQuest Note", deckName: noteDecks.get(noteID) ?? "" }];
+              }
+              return [];
+            });
             break;
           }
           default:
@@ -312,7 +330,7 @@ export const noteSmoke: Gate = {
       );
       check(numberField(arrayField(push.doc, "notes")[0], "anki_note_id") === 101, "first push note id");
       check(
-        actionNames(beforePush).join(",") === "version,createDeck,modelNames,createModel,addNote",
+        actionNames(beforePush).join(",") === "version,createDeck,modelNames,createModel,addNote,notesInfo,cardsInfo",
         `first push actions = ${actionNames(beforePush).join(",")}`,
       );
       const createModel = actions.slice(beforePush).find((item) => item.action === "createModel");
@@ -356,10 +374,15 @@ export const noteSmoke: Gate = {
       const update = await callJSON(["note", "push", "--endpoint", endpoint]);
       check(update.code === 0, `update push exit = ${update.code}: ${update.stderr}`);
       check(
-        actionNames(beforeUpdate).join(",") === "version,createDeck,modelNames,notesInfo,updateNoteFields",
+        actionNames(beforeUpdate).join(",") === "version,createDeck,modelNames,notesInfo,updateNoteFields,cardsInfo",
         `update push actions = ${actionNames(beforeUpdate).join(",")}`,
       );
       check((notes.get(101)?.Front ?? "") === "closes on Sunday", "update did not reach the same Anki note");
+      check(field(arrayField(update.doc, "notes")[0], "deck") === undefined, "a matching card carries a deck field");
+      check(
+        numberField(field(update.doc, "counts"), "deck_mismatch") === undefined,
+        "a matching push reports a deck mismatch count",
+      );
 
       // A learner edit in Anki is a conflict; --force is the explicit overwrite.
       notes.get(101)!.Back = "learner edit";
@@ -394,6 +417,139 @@ export const noteSmoke: Gate = {
       );
       const afterDrain = await callJSON(["note", "push", "--endpoint", endpoint]);
       check(field(afterDrain.doc, "state") === "idle", "a drained note was sent twice");
+
+      // An endpoint that accepts the write and files the card in another deck.
+      const reportBeforeMismatch = (await callJSON(["report", "--json"])).stdout;
+      const nextBeforeMismatch = (await callJSON(["next", "--json"])).stdout;
+      const questionsBeforeMismatch = (await callJSON(["questions", sourceID!, "--json"])).stdout;
+      misassigned = "Default";
+      const mislocatedProposal = await callJSON([
+        "note",
+        "propose",
+        "--content",
+        `${sourceID}-p001`,
+        "--question",
+        "q2",
+        "--mark",
+        "mislocated wording",
+      ]);
+      const mislocatedDraft = numberField(field(mislocatedProposal.doc, "draft"), "id");
+      if (!check(mislocatedDraft !== undefined, "the mismatch proposal returned no draft id")) return fail(checks);
+      const mislocatedAccept = await callJSON(["note", "accept", "--draft", String(mislocatedDraft)]);
+      if (!check(mislocatedAccept.code === 0, `mismatch accept exit = ${mislocatedAccept.code}: ${mislocatedAccept.stderr}`)) {
+        return fail(checks);
+      }
+      const beforeMismatch = actions.length;
+      const mismatch = await callJSON(["note", "push", "--endpoint", endpoint]);
+      check(mismatch.code === 3, `mismatch push exit = ${mismatch.code}`);
+      check(field(mismatch.failure, "state") === "deck_mismatch", "mismatch push state");
+      check(
+        stringField(field(mismatch.failure, "error"), "code") === "anki_deck_mismatch",
+        "mismatch push has no error envelope",
+      );
+      check(numberField(field(mismatch.failure, "counts"), "deck_mismatch") === 1, "mismatch count");
+      check(numberField(field(mismatch.failure, "counts"), "pushed") === 0, "mismatch push counts as pushed");
+      check(numberField(field(mismatch.failure, "counts"), "pending") === 0, "mismatch left the note queued");
+      const mismatchItem = arrayField(mismatch.failure, "notes")[0];
+      const mismatchNoteID = stringField(mismatchItem, "note_id");
+      const mismatchAnkiID = numberField(mismatchItem, "anki_note_id");
+      check(field(mismatchItem, "state") === "deck_mismatch", `mismatch item state = ${String(field(mismatchItem, "state"))}`);
+      check(field(mismatchItem, "outcome") === "deck_mismatch", "mismatch item outcome");
+      check(stringField(mismatchItem, "deck") === "Default", "mismatch item does not name the landed deck");
+      check(
+        (stringField(mismatchItem, "detail") ?? "").includes('"Default"') &&
+          (stringField(mismatchItem, "detail") ?? "").includes('"Pass Quest"'),
+        `mismatch detail = ${String(stringField(mismatchItem, "detail"))}`,
+      );
+      // The deck can only come from the read: the write asked for Pass Quest and
+      // the stub filed it elsewhere.
+      const mismatchActions = actionNames(beforeMismatch);
+      check(mismatchActions.includes("cardsInfo"), "the mismatch push never read the deck back");
+      const mismatchAdd = actions.slice(beforeMismatch).find((item) => item.action === "addNote");
+      check(
+        stringField(asRecord(mismatchAdd?.params.note), "deckName") === "Pass Quest",
+        `the mismatch push asked for deck ${String(stringField(asRecord(mismatchAdd?.params.note), "deckName"))}`,
+      );
+      check(mismatchAnkiID !== undefined && noteDecks.get(mismatchAnkiID) === "Default", "the stub did not mis-assign the card");
+      if (!check(typeof mismatchNoteID === "string", "the mismatch item has no note id")) return fail(checks);
+
+      // The note id survives, and note show reports the deck it reached.
+      const mismatchShow = await callJSON(["note", "show", mismatchNoteID!]);
+      if (!check(arrayField(mismatchShow.doc, "notes").length === 1, "note show lost the mismatched note")) {
+        return fail(checks);
+      }
+      const shownNote = field(arrayField(mismatchShow.doc, "notes")[0], "note");
+      const shownAnki = field(shownNote, "anki");
+      check(stringField(shownAnki, "state") === "deck_mismatch", "note show does not report the mismatch");
+      check(stringField(shownAnki, "deck") === "Default", "note show does not report the landed deck");
+      check(stringField(shownAnki, "deck_expected") === "Pass Quest", "note show does not report the expected deck");
+      check(numberField(shownAnki, "note_id") === mismatchAnkiID, "note show lost the Anki note id");
+
+      // The stated action is in the human summary, and the count line still does
+      // not claim a push.
+      await callJSON(["note", "accept", "--draft", String(mislocatedDraft), "--front", "mislocated one"]);
+      const humanMismatch = await call(["note", "push", "--endpoint", endpoint]);
+      check(humanMismatch.code === 3, `human mismatch exit = ${humanMismatch.code}`);
+      for (const want of [
+        'Deck mismatch: 1 note(s) are not in "Pass Quest"',
+        'landed in "Default"',
+        "anki_deck_mismatch",
+        'Move the card into "Pass Quest" in Anki',
+      ]) {
+        check(humanMismatch.stderr.includes(want), `human mismatch output is missing ${want}`);
+      }
+      check(!humanMismatch.stderr.includes("pushed 1"), "human mismatch output claims a push");
+      check(humanMismatch.stdout === "", `human mismatch wrote ${humanMismatch.stdout.length} bytes to stdout`);
+
+      const countsBeforeRepeat = notes.size;
+      const beforeRepeat = actions.length;
+      const repeatMismatch = await callJSON(["note", "push", "--endpoint", endpoint]);
+      check(repeatMismatch.code === 0, `repeat mismatch exit = ${repeatMismatch.code}`);
+      check(field(repeatMismatch.doc, "state") === "idle", "a repeat push over a mismatched note is not idle");
+      check(actions.length === beforeRepeat, "a repeat push over a mismatched note contacted the endpoint");
+      check(notes.size === countsBeforeRepeat, "a repeat push added a second card");
+
+      // The next revision updates the same card, still reporting where it is.
+      await callJSON(["note", "accept", "--draft", String(mislocatedDraft), "--front", "mislocated two"]);
+      const beforeRevision = actions.length;
+      const mismatchedRevision = await callJSON(["note", "push", "--endpoint", endpoint]);
+      check(mismatchedRevision.code === 3, `mismatched revision exit = ${mismatchedRevision.code}`);
+      const revisionActions = actionNames(beforeRevision);
+      check(
+        revisionActions.filter((name) => name === "updateNoteFields").length === 1,
+        `mismatched revision updated ${revisionActions.filter((name) => name === "updateNoteFields").length} times`,
+      );
+      check(!revisionActions.includes("addNote"), "mismatched revision added a second card");
+      check(
+        numberField(arrayField(mismatchedRevision.failure, "notes")[0], "anki_note_id") === mismatchAnkiID,
+        "the mismatched revision did not keep the Anki note id",
+      );
+      check((notes.get(mismatchAnkiID!)?.Front ?? "") === "mislocated two", "the revision did not reach the same card");
+
+      // The learner moves the card by hand; the next revision confirms the deck
+      // instead of assuming it.
+      noteDecks.set(mismatchAnkiID!, "Pass Quest");
+      await callJSON(["note", "accept", "--draft", String(mislocatedDraft), "--front", "mislocated three"]);
+      const moved = await callJSON(["note", "push", "--endpoint", endpoint]);
+      check(moved.code === 0, `moved push exit = ${moved.code}: ${moved.stderr}`);
+      check(field(moved.doc, "state") === "pushed", "a moved card was not confirmed");
+      check(
+        numberField(field(moved.doc, "counts"), "deck_mismatch") === undefined,
+        "a matching deck was counted as a mismatch",
+      );
+      check(field(arrayField(moved.doc, "notes")[0], "deck") === undefined, "a matching card carries a deck field");
+      misassigned = null;
+      await callJSON(["note", "skip", "--draft", String(mislocatedDraft)]);
+
+      check(
+        (await callJSON(["report", "--json"])).stdout === reportBeforeMismatch,
+        "a mismatched push changed the attempt report",
+      );
+      check((await callJSON(["next", "--json"])).stdout === nextBeforeMismatch, "a mismatched push changed next");
+      check(
+        (await callJSON(["questions", sourceID!, "--json"])).stdout === questionsBeforeMismatch,
+        "a mismatched push changed the stored answer key",
+      );
 
       // An unanswered reviewed question: preview must not include its key.
       for (const args of [

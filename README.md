@@ -191,10 +191,14 @@ passquest note model                      # deck, model, CSS, template, rendered
 The note model is `PassQuest Note` in deck `Pass Quest` with fields `Front`, `Back`, `Tactic`,
 `Source`. Duplicates are reported as already-present, revisions update the same Anki note id, a
 learner edit is a visible conflict rather than a silent overwrite, and an unreachable endpoint leaves
-the note queued for exactly one later drain. A skipped attempt and an unanswered mark never include
-the correct option or its explanation. AnkiWeb and mobile synchronization remain the learner's own
-manual action; Pass Quest never contacts AnkiWeb or a phone. Details: [`docs/notes.md`](docs/notes.md).
-Measured evidence: [`docs/evidence/0007-anki-from-learning.md`](docs/evidence/0007-anki-from-learning.md).
+the note queued for exactly one later drain. The deck a pushed card reached is read back from
+AnkiConnect: a card that lands elsewhere is reported as `deck_mismatch` with the deck it reached, exit
+3 and one action, while the note id and pushed revision are kept so no repeat push adds a second card.
+A skipped attempt and an unanswered mark never include the correct option or its explanation. AnkiWeb
+and mobile synchronization remain the learner's own manual action; Pass Quest never contacts AnkiWeb
+or a phone. Details: [`docs/notes.md`](docs/notes.md). Measured evidence:
+[`docs/evidence/0007-anki-from-learning.md`](docs/evidence/0007-anki-from-learning.md) and
+[`docs/evidence/0014-note-lands-in-the-declared-deck.md`](docs/evidence/0014-note-lands-in-the-declared-deck.md).
 
 ## Find practice when evidence needs it
 

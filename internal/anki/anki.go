@@ -27,6 +27,11 @@ const MinAPIVersion = 6
 // MaxActionsPerCall bounds one host document; the CLI chunks a larger queue.
 const MaxActionsPerCall = 50
 
+// MaxDeckNameChars bounds a deck name this build reports as a card's location.
+// The answer comes from a local AnkiConnect process: a longer or unprintable
+// name is not a deck the learner can verify in Anki.
+const MaxDeckNameChars = 200
+
 // EndpointEnv and TimeoutEnv configure the default connection.
 const (
 	EndpointEnv = "PASSQUEST_ANKI_ENDPOINT"
@@ -79,6 +84,7 @@ var allowedActions = map[string]bool{
 	"addNote":          true,
 	"updateNoteFields": true,
 	"notesInfo":        true,
+	"cardsInfo":        true,
 }
 
 var allowedResultStates = map[string]bool{"ok": true, "error": true, "unreachable": true}
@@ -269,11 +275,18 @@ func NotesInfoParams(ids []int64) map[string]any {
 	return map[string]any{"notes": ids}
 }
 
+// CardsInfoParams builds a cardsInfo action, the only documented read that
+// reports which deck a card reached.
+func CardsInfoParams(ids []int64) map[string]any {
+	return map[string]any{"cards": ids}
+}
+
 // NoteInfo is the subset of notesInfo this build reads.
 type NoteInfo struct {
 	NoteID    int64                      `json:"noteId"`
 	ModelName string                     `json:"modelName"`
 	Fields    map[string]json.RawMessage `json:"fields"`
+	Cards     []int64                    `json:"cards"`
 }
 
 // FieldValue returns one field's value.
@@ -300,6 +313,26 @@ func DecodeNotesInfo(raw json.RawMessage) ([]NoteInfo, error) {
 	var rows []NoteInfo
 	if err := json.Unmarshal(raw, &rows); err != nil {
 		return nil, fmt.Errorf("anki: decode notesInfo: %w", err)
+	}
+	return rows, nil
+}
+
+// CardInfo is the subset of cardsInfo this build reads.
+type CardInfo struct {
+	CardID   int64  `json:"cardId"`
+	NoteID   int64  `json:"note"`
+	DeckName string `json:"deckName"`
+}
+
+// DecodeCardsInfo decodes a cardsInfo result. Anki returns null for no rows.
+func DecodeCardsInfo(raw json.RawMessage) ([]CardInfo, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil, nil
+	}
+	var rows []CardInfo
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("anki: decode cardsInfo: %w", err)
 	}
 	return rows, nil
 }

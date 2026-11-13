@@ -94,6 +94,10 @@ type noteAnkiView struct {
 	State          string `json:"state"`
 	NoteID         int64  `json:"note_id"`
 	PushedRevision int    `json:"pushed_revision"`
+	// Deck is what Anki reported for the note's card at the last completed deck
+	// read; DeckExpected is set only when that is not the deck this build names.
+	Deck         string `json:"deck,omitempty"`
+	DeckExpected string `json:"deck_expected,omitempty"`
 }
 
 type noteView struct {
@@ -194,6 +198,9 @@ type notePushCounts struct {
 	Conflicts      int `json:"conflicts"`
 	Failed         int `json:"failed"`
 	Queued         int `json:"queued"`
+	// DeckMismatch counts notes Anki accepted into a deck other than the one
+	// this push named.
+	DeckMismatch int `json:"deck_mismatch,omitempty"`
 }
 
 type notePushItemView struct {
@@ -204,6 +211,9 @@ type notePushItemView struct {
 	Outcome    string `json:"outcome"`
 	Code       string `json:"code,omitempty"`
 	Detail     string `json:"detail,omitempty"`
+	// Deck names where Anki put the card when that is not the deck this push
+	// named.
+	Deck string `json:"deck,omitempty"`
 }
 
 type notePushDoc struct {
@@ -252,6 +262,15 @@ func notePlainViewOf(e noteEffective) notePlainView {
 
 func noteViewOf(n store.Note) noteView {
 	fields := note.HTML(n.Front, n.Back, n.Tactic, n.SourceLabel)
+	anki := noteAnkiView{
+		State:          n.AnkiState,
+		NoteID:         n.AnkiNoteID,
+		PushedRevision: n.AnkiPushedRevision,
+		Deck:           n.AnkiDeck,
+	}
+	if n.AnkiDeck != "" && n.AnkiDeck != note.Deck {
+		anki.DeckExpected = note.Deck
+	}
 	return noteView{
 		NoteID:     n.NoteID,
 		Revision:   n.Revision,
@@ -264,13 +283,9 @@ func noteViewOf(n store.Note) noteView {
 		Restricted: n.Restricted,
 		Origin:     n.Origin,
 		Model:      n.Model,
-		Anki: noteAnkiView{
-			State:          n.AnkiState,
-			NoteID:         n.AnkiNoteID,
-			PushedRevision: n.AnkiPushedRevision,
-		},
-		CreatedAt: source.FormatTime(n.CreatedAt),
-		UpdatedAt: source.FormatTime(n.UpdatedAt),
+		Anki:       anki,
+		CreatedAt:  source.FormatTime(n.CreatedAt),
+		UpdatedAt:  source.FormatTime(n.UpdatedAt),
 	}
 }
 
@@ -408,8 +423,15 @@ func writeNoteShow(w io.Writer, doc noteShowDoc) {
 	}
 	for _, item := range doc.Notes {
 		n := item.Note
-		fmt.Fprintf(w, "\n%s  revision %d  %s  restricted=%t  origin=%s  anki=%s\n",
-			n.NoteID, n.Revision, n.Target.ContentID+"/"+n.Target.QuestionID, n.Restricted, n.Origin, n.Anki.State)
+		deck := ""
+		if n.Anki.Deck != "" {
+			deck = fmt.Sprintf(" deck=%s", n.Anki.Deck)
+			if n.Anki.DeckExpected != "" {
+				deck = fmt.Sprintf(" deck=%s (expected %s)", n.Anki.Deck, n.Anki.DeckExpected)
+			}
+		}
+		fmt.Fprintf(w, "\n%s  revision %d  %s  restricted=%t  origin=%s  anki=%s%s\n",
+			n.NoteID, n.Revision, n.Target.ContentID+"/"+n.Target.QuestionID, n.Restricted, n.Origin, n.Anki.State, deck)
 		fmt.Fprintf(w, "  front: %s\n", n.Front)
 		fmt.Fprintf(w, "  back: %s\n", indentNoteText(n.Back))
 		fmt.Fprintf(w, "  tactic: %s · source: %s\n", n.Tactic, n.Source)
@@ -462,6 +484,20 @@ func writeNotePush(w io.Writer, doc notePushDoc) {
 	if doc.State == "queued" {
 		fmt.Fprintln(w, "No endpoint answered; every note stays queued and the next reachable push drains it once.")
 	}
+	if doc.Counts.DeckMismatch > 0 {
+		fmt.Fprintf(w, "Deck mismatch: %d note(s) are not in %q.\n", doc.Counts.DeckMismatch, doc.Deck)
+		for _, item := range doc.Notes {
+			if item.State != store.AnkiStateDeckMismatch {
+				continue
+			}
+			if item.Deck == "" {
+				fmt.Fprintf(w, "  %s rev %d reached no reported deck (anki note %d)\n", item.NoteID, item.Revision, item.AnkiNoteID)
+				continue
+			}
+			fmt.Fprintf(w, "  %s rev %d landed in %q (anki note %d)\n", item.NoteID, item.Revision, item.Deck, item.AnkiNoteID)
+		}
+		fmt.Fprintf(w, "Move the card into %q in Anki — the note id is kept, so a later revision updates the same card.\n", doc.Deck)
+	}
 	if doc.Counts.Conflicts > 0 {
 		fmt.Fprintln(w, "Conflicts were not overwritten. Inspect or edit the card in Anki, then push again.")
 		forceable, idUnknown := false, false
@@ -479,6 +515,9 @@ func writeNotePush(w io.Writer, doc notePushDoc) {
 		if idUnknown {
 			fmt.Fprintln(w, "  A duplicate conflict has no Anki note id; remove that card in Anki or align the local content. --force cannot update it.")
 		}
+	}
+	if doc.Error != nil {
+		fmt.Fprintf(w, "passquest: %s: %s\n", doc.Error.Code, doc.Error.Message)
 	}
 	fmt.Fprintf(w, "%s\n", noteSyncStatement)
 }
@@ -509,6 +548,8 @@ func noteCountsOf(items []notePushItemView) notePushCounts {
 			counts.Failed++
 		case store.AnkiStateQueued:
 			counts.Queued++
+		case store.AnkiStateDeckMismatch:
+			counts.DeckMismatch++
 		}
 	}
 	return counts
