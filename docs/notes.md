@@ -187,8 +187,9 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
     envelope `anki_deck_mismatch`, and the human summary states one action: move the card into
     `Pass Quest` in Anki (the learner's manual move; Pass Quest never moves it for them);
   - a card the endpoint does not answer about, or whose `deckName` is missing, empty, unprintable or
-    longer than 200 characters → the same `deck_mismatch` outcome, with the detail saying what could
-    not be read. An unread claim is never printed as achieved;
+    longer than 200 characters, or a note whose several decks together exceed those 200 characters →
+    the same `deck_mismatch` outcome, with the detail saying what could not be read. An unread claim
+    is never printed as achieved;
   - a read that fails after the write → exit 3 with `anki_unavailable`/`anki_error`; the notes keep
     their recorded ids and revisions and record no deck.
   The verification does not re-send anything: the write already drained the queue, the recorded
@@ -196,6 +197,9 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
   card, and a later revision updates the same card. `--force` is verified like any other write.
   The ledger records the check as its own `check/ok` or `check/deck_mismatch` row, so the write's own
   outcome stays visible beside it.
+- A push that exits 3 states its failure in human mode as one `passquest: <code>: <message>` line —
+  the same code and message the `--json` document carries in `error`. The post-write deck-failure path
+  has no other human explanation, so that line is the one place it is stated.
 - `addNote` uses `allowDuplicate: false`. A duplicate of a note's first revision, with nothing pushed
   before, is reported as `already_present` (exit 0) and that revision is marked delivered; a later
   revision of that duplicate-only note is a **conflict**, because AnkiConnect reports no note id for

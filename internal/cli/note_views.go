@@ -199,8 +199,7 @@ type notePushCounts struct {
 	Failed         int `json:"failed"`
 	Queued         int `json:"queued"`
 	// DeckMismatch counts notes Anki accepted into a deck other than the one
-	// this push named. It is omitted when zero so a conforming push is
-	// unchanged.
+	// this push named.
 	DeckMismatch int `json:"deck_mismatch,omitempty"`
 }
 
@@ -213,8 +212,7 @@ type notePushItemView struct {
 	Code       string `json:"code,omitempty"`
 	Detail     string `json:"detail,omitempty"`
 	// Deck names where Anki put the card when that is not the deck this push
-	// named. A matching card carries no deck field, so a conforming push
-	// document is unchanged.
+	// named.
 	Deck string `json:"deck,omitempty"`
 }
 
@@ -519,7 +517,7 @@ func writeNotePush(w io.Writer, doc notePushDoc) {
 		}
 	}
 	if doc.Error != nil {
-		fmt.Fprintf(w, "%s: %s\n", doc.Error.Code, doc.Error.Message)
+		fmt.Fprintf(w, "passquest: %s: %s\n", doc.Error.Code, doc.Error.Message)
 	}
 	fmt.Fprintf(w, "%s\n", noteSyncStatement)
 }

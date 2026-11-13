@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/attempt"
 )
 
@@ -562,7 +563,11 @@ func TestMigrationFromVersionFifteenRecordsTheDeckReadBack(t *testing.T) {
 		t.Fatal("the note state check was lost in the v16 rebuild")
 	}
 	if _, err := st.db.Exec(`UPDATE notes SET anki_deck = ? WHERE note_id = 'note-legacy'`,
-		strings.Repeat("d", 201)); err == nil {
+		strings.Repeat("d", anki.MaxDeckNameChars)); err != nil {
+		t.Fatalf("anki_deck rejected a %d-character deck name: %v", anki.MaxDeckNameChars, err)
+	}
+	if _, err := st.db.Exec(`UPDATE notes SET anki_deck = ? WHERE note_id = 'note-legacy'`,
+		strings.Repeat("d", anki.MaxDeckNameChars+1)); err == nil {
 		t.Fatal("anki_deck accepted a name over the recorded bound")
 	}
 }

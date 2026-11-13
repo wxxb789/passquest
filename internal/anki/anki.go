@@ -281,8 +281,7 @@ func CardsInfoParams(ids []int64) map[string]any {
 	return map[string]any{"cards": ids}
 }
 
-// NoteInfo is the subset of notesInfo this build reads. Cards carries the card
-// ids Anki reports for the note, which the deck read-back needs.
+// NoteInfo is the subset of notesInfo this build reads.
 type NoteInfo struct {
 	NoteID    int64                      `json:"noteId"`
 	ModelName string                     `json:"modelName"`
@@ -318,8 +317,7 @@ func DecodeNotesInfo(raw json.RawMessage) ([]NoteInfo, error) {
 	return rows, nil
 }
 
-// CardInfo is the subset of cardsInfo this build reads. DeckName is what makes
-// the deck claim of a push checkable.
+// CardInfo is the subset of cardsInfo this build reads.
 type CardInfo struct {
 	CardID   int64  `json:"cardId"`
 	NoteID   int64  `json:"note"`

@@ -34,6 +34,13 @@ type fakeAnkiTransport struct {
 	deckOverride string
 	duplicate    bool
 	unreachable  bool
+	// deleteAfterNotesInfo deletes the notes the next notesInfo answer reported,
+	// once, right after it is sent: a card the learner removes between the
+	// read-back and the write.
+	deleteAfterNotesInfo bool
+	// strayCards are rows a cardsInfo answer returns for cards this push never
+	// asked about.
+	strayCards   []map[string]any
 	failAddAfter int
 	adds         int
 	calls        int
@@ -49,7 +56,7 @@ func newFakeAnki() *fakeAnkiTransport {
 	}
 }
 
-// moveCard simulates the learner moving a card inside Anki.
+// moveCard records the learner's manual move of a card.
 func (f *fakeAnkiTransport) moveCard(id int64, deck string) {
 	if _, ok := f.notes[id]; ok {
 		f.decks[id] = deck
@@ -105,8 +112,6 @@ func (f *fakeAnkiTransport) Call(_ context.Context, req anki.HostRequest) (anki.
 			id := f.next
 			f.next++
 			f.notes[id] = copyFields(fields)
-			// A real AnkiConnect build has been seen to ignore deckName on some
-			// Anki versions: the card is added, in another deck.
 			f.decks[id] = payload["deckName"].(string)
 			if f.deckOverride != "" {
 				f.decks[id] = f.deckOverride
@@ -144,6 +149,14 @@ func (f *fakeAnkiTransport) Call(_ context.Context, req anki.HostRequest) (anki.
 					"noteId": id, "modelName": note.ModelName, "fields": encoded, "cards": f.cards[id],
 				})
 			}
+			if f.deleteAfterNotesInfo {
+				f.deleteAfterNotesInfo = false
+				for _, id := range ids {
+					delete(f.notes, id)
+					delete(f.cards, id)
+					delete(f.decks, id)
+				}
+			}
 			raw, _ := json.Marshal(rows)
 			result.Result = raw
 		case "cardsInfo":
@@ -160,6 +173,7 @@ func (f *fakeAnkiTransport) Call(_ context.Context, req anki.HostRequest) (anki.
 					})
 				}
 			}
+			rows = append(rows, f.strayCards...)
 			raw, _ := json.Marshal(rows)
 			result.Result = raw
 		default:
@@ -506,8 +520,6 @@ func TestNotePushCreatesUpdatesConflictsAndQueues(t *testing.T) {
 			t.Fatalf("%s count = %d, want 1", action, ankiTransport.count(action))
 		}
 	}
-	// The first push reads the new card's deck back (the claim it prints) and
-	// never consults the note for a conflict, because nothing was pushed before.
 	if ankiTransport.count("notesInfo") != 1 || ankiTransport.count("cardsInfo") != 1 {
 		t.Fatalf("first push read-back = notesInfo %d, cardsInfo %d, want 1 each",
 			ankiTransport.count("notesInfo"), ankiTransport.count("cardsInfo"))
@@ -1608,6 +1620,82 @@ func TestNotePushReaddsANoteDeletedFromAnki(t *testing.T) {
 	}
 }
 
+// A card deleted between the pre-write read-back and the update: the readd
+// writes a new note with a new id and a new card, and the deck claim is read
+// from that card — never from the deleted note's, which would report a mismatch
+// for a card that is exactly where the push put it.
+func TestNotePushReaddsANoteDeletedAfterTheReadBack(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	readyNoteSource(t, db, clock)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+	accepted := noteAcceptDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")), &accepted); err != nil {
+		t.Fatal(err)
+	}
+
+	ankiTransport := newFakeAnki()
+	initial := notePushDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")), &initial); err != nil {
+		t.Fatal(err)
+	}
+	if initial.State != "pushed" || initial.Notes[0].AnkiNoteID != 101 || initial.Notes[0].Deck != "" {
+		t.Fatalf("first push = %+v", initial)
+	}
+
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sundays", "--json")
+	ankiTransport.resetActions()
+	ankiTransport.deleteAfterNotesInfo = true
+	code, out, errOut := runNoteCLI(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")
+	if code != 0 {
+		t.Fatalf("readd after a late delete exit = %d, stdout = %s, stderr = %s", code, out, errOut)
+	}
+	readded := notePushDoc{}
+	if err := json.Unmarshal([]byte(out), &readded); err != nil {
+		t.Fatal(err)
+	}
+	if readded.State != "pushed" || readded.Counts.Pushed != 1 || readded.Counts.DeckMismatch != 0 {
+		t.Fatalf("readd after a late delete = %+v", readded)
+	}
+	item := readded.Notes[0]
+	if item.AnkiNoteID != 102 || item.State != store.AnkiStatePushed || item.Outcome != "ok" || item.Deck != "" {
+		t.Fatalf("readd item = %+v", item)
+	}
+	if got := strings.Join(ankiTransport.actions, ","); got != "version,createDeck,modelNames,notesInfo,updateNoteFields,addNote,notesInfo,cardsInfo" {
+		t.Fatalf("readd actions = %s", got)
+	}
+	// The read is about the new note and its own card: the deleted note's id and
+	// card are never asked about again.
+	var askedNotes, askedCards []int64
+	for _, request := range ankiTransport.requests {
+		for _, action := range request.Actions {
+			switch action.Action {
+			case "notesInfo":
+				askedNotes = append(askedNotes, action.Params["notes"].([]int64)...)
+			case "cardsInfo":
+				askedCards = append(askedCards, action.Params["cards"].([]int64)...)
+			}
+		}
+	}
+	if !slices.Contains(askedNotes, int64(102)) || !slices.Equal(askedCards, ankiTransport.cards[102]) {
+		t.Fatalf("read-back asked notes %v, cards %v; the new note's card is %v", askedNotes, askedCards, ankiTransport.cards[102])
+	}
+
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	stored, err := st.Note(accepted.Note.NoteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AnkiNoteID != 102 || stored.AnkiState != store.AnkiStatePushed ||
+		stored.AnkiDeck != note.Deck || stored.AnkiPushedRevision != 2 {
+		t.Fatalf("note after the late delete = %+v", stored)
+	}
+}
+
 func TestNoteExportRechecksConsent(t *testing.T) {
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
@@ -1797,6 +1885,9 @@ func TestNotePushReportsShortResultBatches(t *testing.T) {
 }
 
 func TestReadNoteDecks(t *testing.T) {
+	// 200 three-byte characters: over the bound in bytes, exactly at it in
+	// characters, which is the unit the schema and the docs state.
+	multibyteDeck := strings.Repeat("日", anki.MaxDeckNameChars)
 	cases := []struct {
 		name    string
 		cards   []anki.CardInfo
@@ -1850,6 +1941,22 @@ func TestReadNoteDecks(t *testing.T) {
 			detail: "Anki reported no usable deck for card 5",
 		},
 		{
+			name:   "the endpoint names a multibyte deck at the character bound",
+			cards:  []anki.CardInfo{{CardID: 5, NoteID: 101, DeckName: multibyteDeck}},
+			asked:  []int64{5},
+			deck:   multibyteDeck,
+			detail: fmt.Sprintf("card landed in %q, not %q", multibyteDeck, "Pass Quest"),
+		},
+		{
+			name: "the reported decks together exceed one recordable name",
+			cards: []anki.CardInfo{
+				{CardID: 5, NoteID: 101, DeckName: strings.Repeat("a", 120)},
+				{CardID: 6, NoteID: 101, DeckName: strings.Repeat("b", 120)},
+			},
+			asked:  []int64{5, 6},
+			detail: fmt.Sprintf("Anki reported 2 decks for this note; the combined name exceeds %d characters", anki.MaxDeckNameChars),
+		},
+		{
 			name:   "a card of the note is missing from the answer",
 			cards:  []anki.CardInfo{{CardID: 9, NoteID: 101, DeckName: "Pass Quest"}},
 			asked:  []int64{5},
@@ -1882,10 +1989,12 @@ func TestNotePushReportsADeckMismatchAndKeepsTheNoteID(t *testing.T) {
 	reportBefore := mustRun(t, db, &stepClock{base: goldenBase}, "", "report", "--json")
 	nextBefore := mustRun(t, db, &stepClock{base: goldenBase}, "", "next", "--json")
 
-	// The endpoint accepts the write and files the card in another deck: the
-	// real Anki 26.x behaviour goal 0014 exists for.
+	// The endpoint accepts the write and files the card in another deck.
 	ankiTransport := newFakeAnki()
 	ankiTransport.deckOverride = "Default"
+	// A row about a card this push never asked about cannot become this note's
+	// deck claim.
+	ankiTransport.strayCards = []map[string]any{{"cardId": 9001, "note": 101, "deckName": "Foreign"}}
 	code, out, errOut := runNoteCLI(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")
 	if code != 3 {
 		t.Fatalf("mismatch push exit = %d, stdout = %s, stderr = %s", code, out, errOut)
@@ -1905,6 +2014,9 @@ func TestNotePushReportsADeckMismatchAndKeepsTheNoteID(t *testing.T) {
 	if item.State != store.AnkiStateDeckMismatch || item.Outcome != "deck_mismatch" || item.Deck != "Default" ||
 		item.AnkiNoteID != 101 || !strings.Contains(item.Detail, `"Default"`) {
 		t.Fatalf("mismatch item = %+v", item)
+	}
+	if strings.Contains(item.Detail, "Foreign") {
+		t.Fatalf("a card row this push never asked about became the note's deck claim: %+v", item)
 	}
 	if ankiTransport.count("addNote") != 1 || ankiTransport.count("cardsInfo") != 1 {
 		t.Fatalf("mismatch actions = %v", ankiTransport.actions)

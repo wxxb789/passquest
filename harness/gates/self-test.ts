@@ -601,8 +601,6 @@ function brokenCases(): BrokenCase[] {
       },
     },
     {
-      // The real tree with one line removed: the push reads the deck back and
-      // then ignores what it read. The gate must not accept that.
       gate: noteSmoke,
       label: "note push that reads the deck back and never compares it",
       files: {},

@@ -65,8 +65,6 @@ export const noteSmoke: Gate = {
     let nextID = 101;
     let nextCard = 501;
     let duplicate = false;
-    // The deck this stub files added cards in, whatever deckName was asked for:
-    // the real Anki 26.x + AnkiConnect behaviour goal 0014 reports.
     let misassigned: string | null = null;
     const stub = Bun.serve({
       hostname: "127.0.0.1",
@@ -421,8 +419,6 @@ export const noteSmoke: Gate = {
       check(field(afterDrain.doc, "state") === "idle", "a drained note was sent twice");
 
       // An endpoint that accepts the write and files the card in another deck.
-      // This is what the real Anki 26.x run produced; the push must say where
-      // the card went instead of presenting the deck it named as achieved.
       const reportBeforeMismatch = (await callJSON(["report", "--json"])).stdout;
       const nextBeforeMismatch = (await callJSON(["next", "--json"])).stdout;
       const questionsBeforeMismatch = (await callJSON(["questions", sourceID!, "--json"])).stdout;
@@ -505,7 +501,6 @@ export const noteSmoke: Gate = {
       check(!humanMismatch.stderr.includes("pushed 1"), "human mismatch output claims a push");
       check(humanMismatch.stdout === "", `human mismatch wrote ${humanMismatch.stdout.length} bytes to stdout`);
 
-      // A repeat push over a mismatched note writes nothing and adds no card.
       const countsBeforeRepeat = notes.size;
       const beforeRepeat = actions.length;
       const repeatMismatch = await callJSON(["note", "push", "--endpoint", endpoint]);
@@ -546,7 +541,6 @@ export const noteSmoke: Gate = {
       misassigned = null;
       await callJSON(["note", "skip", "--draft", String(mislocatedDraft)]);
 
-      // Nothing else moved.
       check(
         (await callJSON(["report", "--json"])).stdout === reportBeforeMismatch,
         "a mismatched push changed the attempt report",

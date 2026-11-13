@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/note"
@@ -76,14 +77,11 @@ type notePushWork struct {
 	Code       string
 	Detail     string
 	AnkiNoteID int64
-	// CardIDs are the cards of this note, learned from the read-back or from
-	// the deck verify pass. Deck is the deck Anki reported when it is not the
-	// deck this push named; it stays empty when the card is where it should be.
-	CardIDs   []int64
-	Deck      string
-	State     string
-	Drain     bool
-	Persisted bool
+	CardIDs    []int64
+	Deck       string
+	State      string
+	Drain      bool
+	Persisted  bool
 }
 
 func runNotePush(args []string, opt Options) int {
@@ -494,6 +492,7 @@ func runNotePush(args []string, opt Options) int {
 					}); err != nil {
 						return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
 					}
+					item.CardIDs = nil
 					readdIndexes = append(readdIndexes, ref.index)
 				}
 			}
@@ -535,13 +534,8 @@ func runNotePush(args []string, opt Options) int {
 		}
 	}
 
-	// Deck verification. The claim this command prints is which deck the card
-	// reached, and AnkiConnect's addNote is known to ignore deckName on some
-	// builds, so every note this push wrote is read back: notesInfo for the
-	// cards of notes whose cards are not known yet, then cardsInfo, the only
-	// documented read that names a card's deck. The verdict is its own check
-	// row, so the write's own outcome stays visible in the ledger, and it keeps
-	// the queue row exactly as the write left it.
+	// Deck verification. AnkiConnect's addNote is known to ignore deckName on
+	// some builds, so every note this push wrote is read back.
 	deckFailed := func(code, detail string) int {
 		if err := persist(); err != nil {
 			return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
@@ -550,22 +544,22 @@ func runNotePush(args []string, opt Options) int {
 			"the deck read-back failed after the write was acknowledged: %s; no note records a deck", detail)})
 	}
 	var verified []int
-	var askCards []int64
+	var askNotes []int64
 	for i := range work {
 		item := &work[i]
 		if item.State == store.AnkiStatePushed && item.Outcome == "ok" && item.AnkiNoteID > 0 {
 			verified = append(verified, i)
 			if len(item.CardIDs) == 0 {
-				askCards = append(askCards, item.AnkiNoteID)
+				askNotes = append(askNotes, item.AnkiNoteID)
 			}
 		}
 	}
 	if len(verified) > 0 {
-		if len(askCards) > 0 {
-			cards := make(map[int64][]int64, len(askCards))
-			for start := 0; start < len(askCards); start += anki.MaxActionsPerCall {
-				end := min(start+anki.MaxActionsPerCall, len(askCards))
-				read, err := call([]anki.Action{{Action: "notesInfo", Params: anki.NotesInfoParams(askCards[start:end])}})
+		if len(askNotes) > 0 {
+			cards := make(map[int64][]int64, len(askNotes))
+			for start := 0; start < len(askNotes); start += anki.MaxActionsPerCall {
+				end := min(start+anki.MaxActionsPerCall, len(askNotes))
+				read, err := call([]anki.Action{{Action: "notesInfo", Params: anki.NotesInfoParams(askNotes[start:end])}})
 				if err != nil {
 					return deckFailed("anki_unavailable", err.Error())
 				}
@@ -693,12 +687,18 @@ func readNoteDecks(cards []anki.CardInfo, asked []int64, expected string) noteDe
 	if len(unexpected) == 0 {
 		return noteDeckRead{Matched: true}
 	}
+	claim := strings.Join(unexpected, ", ")
+	if !usableDeckName(claim) {
+		return noteDeckRead{Detail: fmt.Sprintf(
+			"Anki reported %d decks for this note; the combined name exceeds %d characters",
+			len(unexpected), anki.MaxDeckNameChars)}
+	}
 	quoted := make([]string, 0, len(unexpected))
 	for _, deck := range unexpected {
 		quoted = append(quoted, fmt.Sprintf("%q", deck))
 	}
 	return noteDeckRead{
-		Deck:   strings.Join(unexpected, ", "),
+		Deck:   claim,
 		Detail: fmt.Sprintf("card landed in %s, not %q", strings.Join(quoted, ", "), expected),
 	}
 }
@@ -886,7 +886,7 @@ func appendUnique(values []string, value string) []string {
 // part of the claim: non-empty, bounded and printable, so a name the learner
 // cannot read in Anki is never reported as where the card went.
 func usableDeckName(deck string) bool {
-	if deck == "" || len(deck) > anki.MaxDeckNameChars {
+	if deck == "" || utf8.RuneCountInString(deck) > anki.MaxDeckNameChars {
 		return false
 	}
 	for _, char := range deck {

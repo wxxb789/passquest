@@ -155,10 +155,9 @@ var schemaV12 = []string{
 // schemaV16 records, on the note row, the deck Anki reported for the note's
 // card at the last push, and widens two vocabularies: a note can be
 // deck_mismatch (written, but not into the deck the push named) and one ledger
-// row can report that verdict. SQLite cannot widen a CHECK in place, so notes
-// and anki_push_attempts are rebuilt with an explicit copy; every row keeps its
-// id and values and the append-only triggers are recreated. A write never sets
-// anki_deck: only a completed deck read does, so an unread deck records nothing.
+// row can report that verdict. SQLite cannot widen a CHECK in place, so both
+// tables are rebuilt. A write never sets anki_deck: only a completed deck read
+// does, so an unread deck records nothing.
 var schemaV16 = []string{
 	`DROP TRIGGER IF EXISTS anki_push_attempts_append_only_update`,
 	`DROP TRIGGER IF EXISTS anki_push_attempts_append_only_delete`,
@@ -239,10 +238,7 @@ const (
 	AnkiStateAlreadyExists = "already_present"
 	AnkiStateConflict      = "conflict"
 	AnkiStateFailed        = "failed"
-	// AnkiStateDeckMismatch means Anki accepted the write and the card is not in
-	// the deck the push named. The note id and pushed revision are kept, so a
-	// later revision updates the same card instead of adding a second one.
-	AnkiStateDeckMismatch = "deck_mismatch"
+	AnkiStateDeckMismatch  = "deck_mismatch"
 )
 
 // NoteDraft is one open proposal. RefinedFront/RefinedBack are advisory text
@@ -297,7 +293,7 @@ type Note struct {
 	AnkiNoteID         int64
 	AnkiPushedRevision int
 	// AnkiDeck is the deck Anki reported for the note's card at the last
-	// completed deck read. It stays empty until such a read happens.
+	// completed deck read.
 	AnkiDeck  string
 	AnkiState string
 	CreatedAt time.Time
@@ -920,9 +916,6 @@ func (s *Store) RecordAnkiAttempt(a AnkiAttempt) error {
 	}
 	switch {
 	case a.Keep:
-		// A read-only verdict: the ledger row and the note state above are the
-		// whole effect. The queue row stays exactly as the write left it, so a
-		// verified note is not re-sent and a mismatch is not retried blindly.
 	case a.Drain:
 		if _, err := tx.Exec(`UPDATE note_outbox SET status = 'drained', drained_at = ?, last_error = '',
 				anki_note_id = CASE WHEN ? > 0 THEN ? ELSE anki_note_id END

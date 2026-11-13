@@ -54,8 +54,7 @@ func TestGoldenNotePushJSON(t *testing.T) {
 }
 
 // TestGoldenNotePushDeckMismatchJSON pins the mismatch document: the endpoint
-// accepts the write and files the card in another deck, which is what the
-// owner's real Anki 26.x run produced.
+// accepts the write and files the card in another deck.
 func TestGoldenNotePushDeckMismatchJSON(t *testing.T) {
 	db, clock, _ := goldenNoteDB(t)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")

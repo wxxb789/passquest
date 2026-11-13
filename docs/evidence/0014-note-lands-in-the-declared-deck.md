@@ -27,11 +27,13 @@ involved. The owner's real-machine observation (Anki Desktop 26.9.4 with a sourc
 | `harness/gates/self-test.ts` | A 35th case: the product sources are copied into the fixture root and the deck comparison is removed from `internal/cli/note_anki.go`; note smoke must fail. |
 
 Go-side coverage: `internal/anki/anki_test.go` (payload, decoder, null result, allowlist),
-`internal/store/note_test.go` (v15→v16 migration with the widened vocabulary and intact triggers;
-`Keep` leaves the queue drained while a non-`Keep` verdict still re-pends it),
-`internal/cli/note_test.go` (fake transport with decks and cards, `readNoteDecks` table, the full
-mismatch/revise/move scenario), `internal/cli/note_golden_test.go` plus
-`note-push-deck-mismatch.golden.json` and `note-show-deck-mismatch.golden.json`.
+`internal/store/note_test.go` (v15→v16 migration with the widened vocabulary and intact triggers, and
+the `anki_deck` bound asserted against `anki.MaxDeckNameChars`; `Keep` leaves the queue drained while a
+non-`Keep` verdict still re-pends it), `internal/cli/note_test.go` (fake transport with decks and
+cards, the `readNoteDecks` table with a foreign `cardsInfo` row, the full mismatch/revise/move
+scenario, and the readd after a card is deleted between the read-back and the update),
+`internal/cli/note_golden_test.go` plus `note-push-deck-mismatch.golden.json` and
+`note-show-deck-mismatch.golden.json`.
 
 ## Acceptance 1 — a conforming endpoint is unaffected
 
@@ -118,7 +120,8 @@ note keeps `anki_note_id: 101`, `pushed_revision: 2` and a drained outbox row (a
 - A conforming note is never flagged: the update push in the gate asserts the item carries no `deck`
   field and `counts.deck_mismatch` is absent; `readNoteDecks` is additionally a table test over
   matching decks, one and two foreign decks, a missing card row, a missing deck name, an unprintable
-  deck name, a 201-character deck name and a note with no cards.
+  deck name, a 201-character deck name, a 200-character multibyte deck name, a deck list that exceeds
+  one recorded name, and a note with no cards.
 
 ## Acceptance 6 — nothing else moves
 
@@ -131,9 +134,13 @@ attempt, revision, export, model, conflict, duplicate, queue and consent scenari
 
 Command: `bun run gate` (the single gate definition; `bash scripts/gate.sh` execs it). The run below is
 the local run on the tree that carries every code, gate, golden, doc and archive change of this
-increment. The evidence record's own text (this section included) and one plan checklist tick are the
-only later changes; the two gates that read markdown were re-run on that final tree afterwards and
-exited `0` each (`docs links (177 checked, 0 broken)`, `secrets/sources (434 files, 0 findings)`).
+increment, plus the accepted simplify pass applied on the same day (the rune-count deck bound, the
+bounded multi-deck aggregate, the card-id clear at a scheduled readd with its regression case, the
+`askNotes` rename and the comment trims). Exactly one recorded number moved: `go test` gained
+`TestNotePushReaddsANoteDeletedAfterTheReadBack` (783 → 784 tests). The evidence record's own text
+(this section included) and one plan checklist tick are the only later changes; the two gates that read
+markdown were re-run on that final tree afterwards and exited `0` each
+(`docs links (177 checked, 0 broken)`, `secrets/sources (434 files, 0 findings)`).
 
 ```text
 $ bun run gate
@@ -150,7 +157,7 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (18 packages, 783 tests, 0 skipped)
+PASS  go test (18 packages, 784 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
@@ -224,7 +231,9 @@ above are from the run on the final tree, which is the one reported.
 - The recorded deck is the last one Anki reported at a write; a manual move is not re-read until the
   next revision push, and an idle push still contacts nothing (Q-0014-03).
 - An endpoint that omits `notesInfo.cards` or `cardsInfo.deckName` is reported as `deck_mismatch`
-  (unconfirmed) rather than trusted (Q-0014-02). The documented AnkiConnect v6 API answers both.
+  (unconfirmed) rather than trusted (Q-0014-02). The documented AnkiConnect v6 API answers both. The
+  same unconfirmed outcome covers a single deck name over 200 characters and a note whose several
+  reported decks together exceed that: the mismatch is typed, and the row records no deck.
 - A deck read that fails after an acknowledged write exits 3 with the write recorded and no deck
   claim; the next push does not re-check that note until it writes to it again.
 - The gate's stub models one card per note (the PassQuest note type has one template). Several cards in
