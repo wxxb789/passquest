@@ -12,7 +12,9 @@
 
 Every measurement below is a loopback AnkiConnect stub in this repository's harness or in a
 throwaway comparison script under `/tmp`; no Anki Desktop, no real deck and no external network were
-involved. The owner's real-machine observation (Anki Desktop 26.9.4 with a source-built AnkiConnect,
+involved. Byte counts are those of the recorded run; a document carrying a `created_at`/`updated_at`
+stamp can differ by one byte between runs, because RFC 3339 nanosecond fields vary in length. The
+owner's real-machine observation (Anki Desktop 26.9.4 with a source-built AnkiConnect,
 2026-11-13) is what the stub reproduces and stays owner-supplied evidence for the live path.
 
 ## What was built
@@ -21,7 +23,7 @@ involved. The owner's real-machine observation (Anki Desktop 26.9.4 with a sourc
 |---|---|
 | `internal/anki` | `cardsInfo` added to the action allowlist plus `CardsInfoParams`, `CardInfo`, `DecodeCardsInfo`; `NoteInfo.Cards` (the card ids `notesInfo` reports); `MaxDeckNameChars` (200). |
 | `agent/anki-host.mjs` | `cardsInfo` allow-listed; still one versioned document, at most 50 actions, loopback only, redirects refused. |
-| `internal/store` | Schema v16: `notes.anki_deck` (bounded at 200 characters) and `deck_mismatch` in both `notes.anki_state` and `anki_push_attempts.outcome`; `AnkiAttempt.Keep` (a read-only verdict that leaves the queue as the write left it) and `AnkiAttempt.AnkiDeck`. Both affected tables are rebuilt with an explicit copy and their append-only triggers recreated. |
+| `internal/store` | Schema v16: `notes.anki_deck` (bounded at 200 characters) and `deck_mismatch` in both `notes.anki_state` and `anki_push_attempts.outcome`; `AnkiAttempt.Keep` (a read-only verdict that leaves the queue as the write left it), `AnkiAttempt.AnkiDeck` and `AnkiAttempt.SetDeck` (a completed deck read writes the whole claim, so a read that names no deck clears the name an earlier read recorded; no other attempt touches it). Both affected tables are rebuilt with an explicit copy and their append-only triggers recreated. |
 | `internal/cli` | The deck verify pass after the write and read-back phases, `readNoteDecks`/`usableDeckName`, the `deck_mismatch` item state, `counts.deck_mismatch`, doc state `deck_mismatch`, envelope `anki_deck_mismatch`, exit 3, the human mismatch block with one stated action, and `note show`'s recorded and expected deck. |
 | `harness/gates/note-smoke.ts` | The stub files a card in another deck on demand and answers `cardsInfo`; the gate asserts the read happened, the mismatch is named, the id survives, a repeat push writes nothing, the learner's move is confirmed, and `report`/`next`/`questions` stay byte-identical. 1140 assertions (806 before this increment). |
 | `harness/gates/self-test.ts` | A 35th case: the product sources are copied into the fixture root and the deck comparison is removed from `internal/cli/note_anki.go`; note smoke must fail. |
@@ -29,11 +31,18 @@ involved. The owner's real-machine observation (Anki Desktop 26.9.4 with a sourc
 Go-side coverage: `internal/anki/anki_test.go` (payload, decoder, null result, allowlist),
 `internal/store/note_test.go` (v15→v16 migration with the widened vocabulary and intact triggers, and
 the `anki_deck` bound asserted against `anki.MaxDeckNameChars`; `Keep` leaves the queue drained while a
-non-`Keep` verdict still re-pends it), `internal/cli/note_test.go` (fake transport with decks and
+non-`Keep` verdict still re-pends it; an unconfirmed check clears a recorded deck while a write and a
+miss leave it alone), `internal/cli/note_test.go` (fake transport with decks and
 cards, the `readNoteDecks` table with a foreign `cardsInfo` row, the full mismatch/revise/move
-scenario, and the readd after a card is deleted between the read-back and the update),
+scenario, the unconfirmed read against a card the endpoint cannot name, and the readd after a card is
+deleted between the read-back and the update),
 `internal/cli/note_golden_test.go` plus `note-push-deck-mismatch.golden.json` and
 `note-show-deck-mismatch.golden.json`.
+
+Falsifiability of those two cases: with `SetDeck` removed from the check attempt, the store case fails
+on the note row (`AnkiDeck: Default` beside `anki_state: deck_mismatch`) and the CLI case fails on
+`note show` printing `anki=deck_mismatch deck=Default (expected Pass Quest)` for a card the endpoint
+never named; with it restored both pass.
 
 ## Acceptance 1 — a conforming endpoint is unaffected
 
@@ -78,16 +87,27 @@ The old binary's transcript asserted `pushed/ok`; the new one:
              "message": "1 note(s) landed in a deck other than \"Pass Quest\"; their Anki note ids are kept" } }
 ```
 
-Human summary of the next (revision) push, exit 0 → 3 and 414 → 801 bytes:
+Human summary of the next (revision) push: exit 0 → 3, the summary itself moving from stdout to stderr
+(373 → 771 bytes written; 414 → 812 in the compare script's per-command count, which adds one
+`name: exit N` line). Re-captured for this record against a stub on the fixed loopback port 47831,
+human mode without `--json`, so the transcript and its length repeat exactly:
 
 ```text
+Pass Quest — Anki push
+Endpoint: http://127.0.0.1:47831
+Deck: Pass Quest · model: PassQuest Note (created: false)
 Pending 0 · pushed 0 · already present 0 · conflicts 0 · failed 0 · queued 0
   note-e7f54e2c40bf7326 rev 2  deck_mismatch/deck_mismatch  anki note 101  card landed in "Default", not "Pass Quest"
 Deck mismatch: 1 note(s) are not in "Pass Quest".
   note-e7f54e2c40bf7326 rev 2 landed in "Default" (anki note 101)
 Move the card into "Pass Quest" in Anki — the note id is kept, so a later revision updates the same card.
-anki_deck_mismatch: 1 note(s) landed in a deck other than "Pass Quest"; their Anki note ids are kept
+passquest: anki_deck_mismatch: 1 note(s) landed in a deck other than "Pass Quest"; their Anki note ids are kept
+AnkiWeb and mobile synchronization are your own manual actions in Anki. Pass Quest never contacts AnkiWeb or a phone.
 ```
+
+The last-but-one line is the house `passquest: <code>: <message>` failure line
+[`../notes.md`](../notes.md) states, the sync statement follows it, and 771 bytes is this whole stderr.
+The old binary's success summary for the same push was 373 bytes on stdout, with no error line.
 
 `note show --json` for the same note: `"state": "pushed"` → `"deck_mismatch"`, plus
 `"deck": "Default"` and `"deck_expected": "Pass Quest"` (2957 → 3034 bytes). The count line no longer
@@ -134,13 +154,17 @@ attempt, revision, export, model, conflict, duplicate, queue and consent scenari
 
 Command: `bun run gate` (the single gate definition; `bash scripts/gate.sh` execs it). The run below is
 the local run on the tree that carries every code, gate, golden, doc and archive change of this
-increment, plus the accepted simplify pass applied on the same day (the rune-count deck bound, the
-bounded multi-deck aggregate, the card-id clear at a scheduled readd with its regression case, the
-`askNotes` rename and the comment trims). Exactly one recorded number moved: `go test` gained
-`TestNotePushReaddsANoteDeletedAfterTheReadBack` (783 → 784 tests). The evidence record's own text
-(this section included) and one plan checklist tick are the only later changes; the two gates that read
-markdown were re-run on that final tree afterwards and exited `0` each
-(`docs links (177 checked, 0 broken)`, `secrets/sources (434 files, 0 findings)`).
+increment: the accepted simplify pass applied on the same day (the rune-count deck bound, the bounded
+multi-deck aggregate, the card-id clear at a scheduled readd with its regression case, the `askNotes`
+rename and the comment trims) plus the fix-stage response to the review findings F-01 and F-02
+(`AnkiAttempt.SetDeck` with the store and CLI cases that pin both directions, and the re-captured human
+mismatch transcript above). Two counted numbers moved: `go test` gained
+`TestNotePushReaddsANoteDeletedAfterTheReadBack` in the simplify pass (783 → 784) and
+`TestDeckReadWithoutADeckNameClearsTheRecordedDeck` plus `TestNotePushRecordsNoDeckWhenTheReadCannotNameIt`
+here (784 → 786), and `docs links` went 177 → 178 checked because the re-captured transcript's
+paragraph links `../notes.md`. No other counted number moved: `note smoke` is still 1140 assertions and
+the two markdown-reading gates exit `0` (`docs links (178 checked, 0 broken)`,
+`secrets/sources (434 files, 0 findings)`).
 
 ```text
 $ bun run gate
@@ -157,13 +181,13 @@ PASS  go vet
 PASS  go build
 
 == go test
-PASS  go test (18 packages, 784 tests, 0 skipped)
+PASS  go test (18 packages, 786 tests, 0 skipped)
 
 == go mod tidy
 PASS  go mod tidy
 
 == docs links
-PASS  docs links (177 checked, 0 broken)
+PASS  docs links (178 checked, 0 broken)
 
 == secrets/sources
 PASS  secrets/sources (434 files, 0 findings)
@@ -233,7 +257,8 @@ above are from the run on the final tree, which is the one reported.
 - An endpoint that omits `notesInfo.cards` or `cardsInfo.deckName` is reported as `deck_mismatch`
   (unconfirmed) rather than trusted (Q-0014-02). The documented AnkiConnect v6 API answers both. The
   same unconfirmed outcome covers a single deck name over 200 characters and a note whose several
-  reported decks together exceed that: the mismatch is typed, and the row records no deck.
+  reported decks together exceed that: the mismatch is typed, and the row records no deck — a name an
+  earlier read recorded is cleared, so no stale deck is shown beside the state that contradicts it.
 - A deck read that fails after an acknowledged write exits 3 with the write recorded and no deck
   claim; the next push does not re-check that note until it writes to it again.
 - The gate's stub models one card per note (the PassQuest note type has one template). Several cards in

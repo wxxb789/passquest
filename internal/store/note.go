@@ -156,8 +156,8 @@ var schemaV12 = []string{
 // card at the last push, and widens two vocabularies: a note can be
 // deck_mismatch (written, but not into the deck the push named) and one ledger
 // row can report that verdict. SQLite cannot widen a CHECK in place, so both
-// tables are rebuilt. A write never sets anki_deck: only a completed deck read
-// does, so an unread deck records nothing.
+// tables are rebuilt. Only a completed deck read writes anki_deck, and the read
+// sets it whole: an unconfirmed read records no deck.
 var schemaV16 = []string{
 	`DROP TRIGGER IF EXISTS anki_push_attempts_append_only_update`,
 	`DROP TRIGGER IF EXISTS anki_push_attempts_append_only_delete`,
@@ -293,7 +293,7 @@ type Note struct {
 	AnkiNoteID         int64
 	AnkiPushedRevision int
 	// AnkiDeck is the deck Anki reported for the note's card at the last
-	// completed deck read.
+	// completed deck read. A read that names no deck leaves it empty.
 	AnkiDeck  string
 	AnkiState string
 	CreatedAt time.Time
@@ -364,7 +364,10 @@ type NoteOutboxEntry struct {
 // AnkiAttempt is one external action outcome. The store appends the ledger row,
 // updates the note's Anki state and advances the outbox in one transaction.
 // Keep marks a read-only verdict: the row and the note state are written, and
-// the outbox row is left exactly as the last write left it.
+// the outbox row is left exactly as the last write left it. SetDeck marks the
+// attempt as a completed deck read, so AnkiDeck is the note's whole deck claim:
+// an empty one clears the name an earlier read recorded. An attempt that is not
+// a deck read leaves the stored name untouched.
 type AnkiAttempt struct {
 	NoteID         string
 	Revision       int
@@ -374,6 +377,7 @@ type AnkiAttempt struct {
 	At             time.Time
 	AnkiNoteID     int64
 	AnkiDeck       string
+	SetDeck        bool
 	AnkiState      string
 	PushedRevision int
 	Drain          bool
@@ -906,12 +910,12 @@ func (s *Store) RecordAnkiAttempt(a AnkiAttempt) error {
 	pushed := a.PushedRevision
 	if _, err := tx.Exec(`UPDATE notes SET
 			anki_note_id = CASE WHEN ? > 0 THEN ? ELSE anki_note_id END,
-			anki_deck = CASE WHEN ? <> '' THEN ? ELSE anki_deck END,
+			anki_deck = CASE WHEN ? = 1 THEN ? ELSE anki_deck END,
 			anki_state = ?,
 			anki_pushed_revision = CASE WHEN ? > 0 THEN ? ELSE anki_pushed_revision END,
 			updated_at = ?
 		WHERE note_id = ?`,
-		a.AnkiNoteID, a.AnkiNoteID, a.AnkiDeck, a.AnkiDeck, state, pushed, pushed, stamp, a.NoteID); err != nil {
+		a.AnkiNoteID, a.AnkiNoteID, boolInt(a.SetDeck), a.AnkiDeck, state, pushed, pushed, stamp, a.NoteID); err != nil {
 		return fmt.Errorf("store: update note anki state: %w", err)
 	}
 	switch {

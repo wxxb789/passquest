@@ -524,7 +524,7 @@ func TestMigrationFromVersionFifteenRecordsTheDeckReadBack(t *testing.T) {
 	if err := st.RecordAnkiAttempt(AnkiAttempt{
 		NoteID: "note-legacy", Revision: 1, Action: "check", Outcome: "deck_mismatch",
 		Detail: `card landed in "Default", not "Pass Quest"`, At: at,
-		AnkiDeck: "Default", AnkiState: AnkiStateDeckMismatch, Keep: true,
+		AnkiDeck: "Default", SetDeck: true, AnkiState: AnkiStateDeckMismatch, Keep: true,
 	}); err != nil {
 		t.Fatalf("record deck verdict after migration: %v", err)
 	}
@@ -572,6 +572,99 @@ func TestMigrationFromVersionFifteenRecordsTheDeckReadBack(t *testing.T) {
 	}
 }
 
+// The deck column is the whole claim of the last completed read: a read that
+// cannot name a deck records none, and an attempt that is not a deck read never
+// touches the name an earlier read recorded.
+func TestDeckReadWithoutADeckNameClearsTheRecordedDeck(t *testing.T) {
+	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
+	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
+	target := noteTargetFixture()
+	if _, err := st.AcceptNote(target, noteContentFixture("one"), at); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if err := st.RecordAnkiAttempt(AnkiAttempt{
+		NoteID: target.NoteID, Revision: 1, Action: "add", Outcome: "ok", At: at,
+		AnkiNoteID: 77, AnkiState: AnkiStatePushed, PushedRevision: 1, Drain: true,
+	}); err != nil {
+		t.Fatalf("record write: %v", err)
+	}
+	if err := st.RecordAnkiAttempt(AnkiAttempt{
+		NoteID: target.NoteID, Revision: 1, Action: "check", Outcome: "deck_mismatch",
+		Detail: `card landed in "Default", not "Pass Quest"`, At: at,
+		AnkiDeck: "Default", SetDeck: true, AnkiState: AnkiStateDeckMismatch, Keep: true,
+	}); err != nil {
+		t.Fatalf("record deck verdict: %v", err)
+	}
+	stored, err := st.Note(target.NoteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AnkiState != AnkiStateDeckMismatch || stored.AnkiDeck != "Default" {
+		t.Fatalf("note after the deck verdict = %+v", stored)
+	}
+
+	// A write and a miss are not deck reads: neither may drop the recorded name.
+	if err := st.RecordAnkiAttempt(AnkiAttempt{
+		NoteID: target.NoteID, Revision: 1, Action: "update", Outcome: "ok", At: at,
+		AnkiNoteID: 77, AnkiState: AnkiStatePushed, PushedRevision: 1, Drain: true,
+	}); err != nil {
+		t.Fatalf("record write without a deck: %v", err)
+	}
+	if err := st.RecordAnkiAttempt(AnkiAttempt{
+		NoteID: target.NoteID, Revision: 1, Action: "check", Outcome: "not_found",
+		Detail: "note was missing in Anki", At: at,
+		AnkiNoteID: 77, AnkiState: AnkiStateQueued,
+	}); err != nil {
+		t.Fatalf("record miss: %v", err)
+	}
+	stored, err = st.Note(target.NoteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AnkiDeck != "Default" {
+		t.Fatalf("an attempt that is not a deck read dropped the recorded deck: %+v", stored)
+	}
+
+	// The next completed read cannot name a deck: the claim is cleared instead
+	// of contradicting the deck_mismatch state.
+	if err := st.RecordAnkiAttempt(AnkiAttempt{
+		NoteID: target.NoteID, Revision: 1, Action: "check", Outcome: "deck_mismatch",
+		Detail: "Anki reported no card 501 for this note", At: at,
+		SetDeck: true, AnkiState: AnkiStateDeckMismatch, Keep: true,
+	}); err != nil {
+		t.Fatalf("record unconfirmed deck verdict: %v", err)
+	}
+	stored, err = st.Note(target.NoteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AnkiState != AnkiStateDeckMismatch || stored.AnkiDeck != "" ||
+		stored.AnkiNoteID != 77 || stored.AnkiPushedRevision != 1 {
+		t.Fatalf("note after the unconfirmed read = %+v", stored)
+	}
+	// Both reads stay in the ledger, so the clearing is countable.
+	var ledger []string
+	rows, err := st.db.Query(`SELECT action || '/' || outcome FROM anki_push_attempts
+		WHERE note_id = ? ORDER BY id`, target.NoteID)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			t.Fatal(err)
+		}
+		ledger = append(ledger, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(ledger, ","); got != "add/ok,check/deck_mismatch,update/ok,check/not_found,check/deck_mismatch" {
+		t.Fatalf("ledger = %s", got)
+	}
+}
+
 func TestDeckVerdictKeepsTheQueueAsTheWriteLeftIt(t *testing.T) {
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
@@ -594,7 +687,7 @@ func TestDeckVerdictKeepsTheQueueAsTheWriteLeftIt(t *testing.T) {
 	if err := st.RecordAnkiAttempt(AnkiAttempt{
 		NoteID: target.NoteID, Revision: 1, Action: "check", Outcome: "deck_mismatch",
 		Detail: `card landed in "Default", not "Pass Quest"`, At: at,
-		AnkiDeck: "Default", AnkiState: AnkiStateDeckMismatch, Keep: true,
+		AnkiDeck: "Default", SetDeck: true, AnkiState: AnkiStateDeckMismatch, Keep: true,
 	}); err != nil {
 		t.Fatalf("record deck verdict: %v", err)
 	}

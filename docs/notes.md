@@ -234,7 +234,9 @@ push: `queued`, `conflict` and `failed` rows all stay pending until a later push
 carries the usual `error` object (`anki_conflict`, `anki_failed` or `anki_deck_mismatch`) beside the
 counts and note list. `note show` prints the recorded deck for a note whose deck was read
 (`anki=deck_mismatch deck=Default (expected Pass Quest)`, and `anki.deck` / `anki.deck_expected` in
-`--json`); a new accepted revision clears it until the next push reads it again.
+`--json`); a new accepted revision clears it until the next push reads it again, and a read that
+cannot name a deck records none — a `deck_mismatch` from an unreadable card is shown as
+`anki=deck_mismatch` with no `deck=` clause rather than with the name an earlier read left behind.
 
 ## Model and template
 

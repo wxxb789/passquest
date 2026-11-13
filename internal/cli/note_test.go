@@ -2140,3 +2140,96 @@ func TestNotePushReportsADeckMismatchAndKeepsTheNoteID(t *testing.T) {
 		t.Fatalf("the mismatched push changed next:\n--- before ---\n%s\n--- after ---\n%s", nextBefore, again)
 	}
 }
+
+// A deck read that cannot name a deck leaves the note claiming none, so
+// `note show` cannot contradict the deck_mismatch state with a stale name.
+//
+// The state the check has to correct is written through the store, because the
+// CLI cannot produce it: a completed read drains the outbox, only a new accepted
+// revision re-pends the note, and accepting clears the recorded deck. The CLI
+// half here is the read-back path and what the two `note show` surfaces print.
+func TestNotePushRecordsNoDeckWhenTheReadCannotNameIt(t *testing.T) {
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	readyNoteSource(t, db, clock)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+	accepted := noteAcceptDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")), &accepted); err != nil {
+		t.Fatal(err)
+	}
+
+	ankiTransport := newFakeAnki()
+	first := notePushDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.State != "pushed" || first.Notes[0].Deck != "" {
+		t.Fatalf("first push = %+v", first)
+	}
+
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sundays", "--json")
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.RecordAnkiAttempt(store.AnkiAttempt{
+		NoteID: accepted.Note.NoteID, Revision: 2, Action: "check", Outcome: "deck_mismatch",
+		Detail: `card landed in "Default", not "Pass Quest"`, At: clock.Now(),
+		AnkiDeck: "Default", SetDeck: true, AnkiState: store.AnkiStateDeckMismatch, Keep: true,
+	}); err != nil {
+		t.Fatalf("record the name an earlier read left behind: %v", err)
+	}
+
+	// The endpoint answers cardsInfo for the card but names no deck.
+	delete(ankiTransport.decks, 101)
+	ankiTransport.resetActions()
+	code, out, errOut := runNoteCLI(t, db, clock, ankiTransport, nil, "", "note", "push")
+	if code != 3 {
+		t.Fatalf("unconfirmed push exit = %d, stdout = %s, stderr = %s", code, out, errOut)
+	}
+	for _, want := range []string{
+		"Deck mismatch: 1 note(s) are not in \"Pass Quest\".",
+		"reached no reported deck (anki note 101)",
+		`passquest: anki_deck_mismatch: 1 note(s) landed in a deck other than "Pass Quest"`,
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Fatalf("human unconfirmed output is missing %q:\n%s", want, errOut)
+		}
+	}
+	if strings.Contains(errOut, `"Default"`) {
+		t.Fatalf("human unconfirmed output claims the stale deck:\n%s", errOut)
+	}
+	if ankiTransport.count("cardsInfo") != 1 || ankiTransport.count("updateNoteFields") != 1 {
+		t.Fatalf("unconfirmed actions = %v", ankiTransport.actions)
+	}
+
+	// `note show` records the state without a deck and without an expectation.
+	shown := mustNoteRun(t, db, clock, nil, nil, "", "note", "show", accepted.Note.NoteID)
+	if !strings.Contains(shown, "anki=deck_mismatch") {
+		t.Fatalf("note show lost the state:\n%s", shown)
+	}
+	if strings.Contains(shown, "deck=") || strings.Contains(shown, "expected") {
+		t.Fatalf("note show claims a deck after an unconfirmed read:\n%s", shown)
+	}
+	doc := noteShowDoc{}
+	if err := json.Unmarshal([]byte(mustNoteRun(t, db, clock, nil, nil, "", "note", "show", accepted.Note.NoteID, "--json")), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Notes) != 1 {
+		t.Fatalf("note show found %d notes", len(doc.Notes))
+	}
+	anki := doc.Notes[0].Note.Anki
+	if anki.State != store.AnkiStateDeckMismatch || anki.Deck != "" || anki.DeckExpected != "" ||
+		anki.NoteID != 101 || anki.PushedRevision != 2 {
+		t.Fatalf("note show anki = %+v", anki)
+	}
+	stored, err := st.Note(accepted.Note.NoteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AnkiState != store.AnkiStateDeckMismatch || stored.AnkiDeck != "" ||
+		stored.AnkiNoteID != 101 || stored.AnkiPushedRevision != 2 {
+		t.Fatalf("note after the unconfirmed read = %+v", stored)
+	}
+}

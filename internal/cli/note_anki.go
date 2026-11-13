@@ -621,9 +621,12 @@ func runNotePush(args []string, opt Options) int {
 		for _, index := range verified {
 			item := &work[index]
 			verdict := readNoteDecks(rows[index], item.CardIDs, note.Deck)
+			// SetDeck: this is the note's whole deck claim, so an unconfirmed
+			// verdict must clear a name an earlier read recorded instead of
+			// leaving it to contradict the deck_mismatch state.
 			attempt := store.AnkiAttempt{
 				NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: "check",
-				Outcome: "ok", At: opt.Now(), AnkiDeck: note.Deck, AnkiState: store.AnkiStatePushed,
+				Outcome: "ok", At: opt.Now(), AnkiDeck: note.Deck, SetDeck: true, AnkiState: store.AnkiStatePushed,
 				Detail: fmt.Sprintf("card is in %q", note.Deck), Keep: true,
 			}
 			if !verdict.Matched {
