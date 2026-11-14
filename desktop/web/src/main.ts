@@ -1,9 +1,10 @@
 // Pass Quest desktop window — entry point. Installs the error bar, wires the delegated events, the
 // router, the keyboard and the display clock, then renders the current route.
 //
-// The study service is bound with `bindApi()` (src/api/client.ts) by the generated MyGo wrapper.
-// Until it is bound, every screen shows its "service not connected" state; nothing is invented.
+// Inside a MyGo window the study service is bound at boot (`connectStudy()`, src/api/client.ts).
+// Elsewhere every screen shows its "service not connected" state; nothing is invented.
 import '../styles/index.css';
+import { bindApi, connectStudy } from './api/client';
 import { ACT, doMark, keyActions, onDeadline, onFieldInput, onRoute, setEv } from './actions';
 import { checkSelection, hideMarkPop, onMark } from './components/passage';
 import { startClock } from './core/clock';
@@ -81,7 +82,33 @@ function delegate(): void {
   onMark(() => void doMark());
 }
 
+declare global {
+  interface Window {
+    /** Boot state read by the desktop smoke: ready once the first real Today has rendered. */
+    __pq?: { ready: boolean };
+  }
+}
+
+/** Binds the Go service; `__pq.ready` turns true after the first Today that loaded has rendered. */
+function bindStudy(): void {
+  const study = connectStudy();
+  if (!study) return;
+  window.__pq = { ready: false };
+  bindApi({
+    ...study,
+    async today() {
+      const value = await study.today();
+      // The loader renders right after this promise settles; mark ready after that render.
+      setTimeout(() => {
+        if (window.__pq && document.querySelector('#stage')?.children.length) window.__pq.ready = true;
+      }, 0);
+      return value;
+    },
+  });
+}
+
 function boot(): void {
+  bindStudy();
   setScreens(screens);
   delegate();
   installKeyboard({ ...keyActions, hideMarkPop });
