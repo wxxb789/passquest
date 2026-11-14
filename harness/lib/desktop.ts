@@ -74,6 +74,8 @@ export interface DesktopRun {
   wrapped: boolean;
   /** Resolves the app's own pid (the wrapper's descendant when wrapped). */
   appPid: () => Promise<number | null>;
+  /** The watchdog's kill: ends the whole process tree now; `result` then resolves. */
+  kill: () => Promise<void>;
   result: Promise<LaunchResult>;
 }
 
@@ -99,21 +101,24 @@ function failedLaunch(error: string): DesktopRun {
     pid: -1,
     wrapped: false,
     appPid: async () => null,
+    kill: async () => {},
     result: Promise.resolve({ code: -1, stdout: "", stderr: "", timedOut: false, error }),
   };
 }
 
 /**
  * Starts the app under a watchdog. On Windows each launch gets a fresh
- * WEBVIEW2_USER_DATA_FOLDER; on Linux without a display the launch is wrapped
- * in `xvfb-run -a`. Output goes to files, not pipes, so a webview child that
+ * WEBVIEW2_USER_DATA_FOLDER unless `env` names one: WebView2 helpers can still
+ * write to the profile shortly after the host exits, so a caller that waits for
+ * them passes a folder it removes itself. On Linux without a display the launch
+ * is wrapped in `xvfb-run -a`. Output goes to files, not pipes, so a webview child that
  * inherits the handles cannot keep the result pending after the app exits.
  */
 export function startDesktop(options: LaunchOptions): DesktopRun {
   const scratch = mkdtempSync(path.join(tmpdir(), "passquest-desktop-launch-"));
   const env: Record<string, string | undefined> = { ...options.env };
   if (process.platform === "win32") {
-    env.WEBVIEW2_USER_DATA_FOLDER = path.join(scratch, "webview2");
+    env.WEBVIEW2_USER_DATA_FOLDER ??= path.join(scratch, "webview2");
   }
   let cmd = [options.binary, ...(options.args ?? [])];
   let wrapped = false;
@@ -152,11 +157,15 @@ export function startDesktop(options: LaunchOptions): DesktopRun {
     const app = descendants(table.items, pid).find((entry) => path.basename(entry.command.split(" ")[0]) === name);
     return app ? app.pid : null;
   };
+  const kill = async (): Promise<void> => {
+    await killTree(pid);
+    proc.kill("SIGKILL");
+  };
   const result = (async (): Promise<LaunchResult> => {
     let timedOut = false;
     const watchdog = setTimeout(() => {
       timedOut = true;
-      void killTree(pid).finally(() => proc.kill("SIGKILL"));
+      void kill();
     }, options.timeoutMs);
     const code = await proc.exited;
     clearTimeout(watchdog);
@@ -172,7 +181,7 @@ export function startDesktop(options: LaunchOptions): DesktopRun {
     await removeTree(scratch);
     return { code, stdout, stderr, timedOut };
   })();
-  return { pid, wrapped, appPid, result };
+  return { pid, wrapped, appPid, kill, result };
 }
 
 export function launchDesktop(options: LaunchOptions): Promise<LaunchResult> {
@@ -288,11 +297,15 @@ export async function stillRunning(snapshot: ProcessInfo[]): Promise<Probe<Proce
 export async function listeningSockets(pids: number[]): Promise<Probe<ListeningSocket>> {
   if (pids.length === 0) return { items: [] };
   if (process.platform === "win32") {
+    // The cmdlet reports "no matching connection" as an ObjectNotFound error
+    // (exit 1); that is the empty list. Any other error is a failed probe.
     const script = [
-      "if (-not (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue)) { exit 3 }",
-      `Get-NetTCPConnection -State Listen -OwningProcess ${pids.join(",")} -ErrorAction SilentlyContinue |`,
-      "Select-Object OwningProcess,LocalAddress,LocalPort | ConvertTo-Json -Compress",
-    ].join(" ");
+      "if (-not (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue)) { [Console]::Error.WriteLine('Get-NetTCPConnection is not available'); exit 3 }",
+      "$rows = @()",
+      `try { $rows = @(Get-NetTCPConnection -State Listen -OwningProcess ${pids.join(",")} -ErrorAction Stop) } ` +
+        "catch { if ($_.CategoryInfo.Category -ne 'ObjectNotFound') { [Console]::Error.WriteLine($_.Exception.Message); exit 4 } }",
+      "$rows | Select-Object OwningProcess,LocalAddress,LocalPort | ConvertTo-Json -Compress",
+    ].join("; ");
     const result = await powershell(script);
     if (result.code !== 0) return { error: `Get-NetTCPConnection exit ${result.code}: ${result.stderr.trim()}` };
     try {

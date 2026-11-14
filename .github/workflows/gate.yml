@@ -43,12 +43,24 @@ jobs:
 
       # The desktop smoke launches a hidden MyGo window: WebKitGTK 4.1 (which pulls
       # in GTK 3) is loaded at window creation, and the runner has no display.
+      # Its settings scenario stores a key through libsecret, which needs a
+      # Secret Service on a D-Bus session bus: gnome-keyring provides one.
       - name: Install desktop webview prerequisites
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb gnome-keyring libsecret-1-0 dbus-daemon
 
       - name: Install harness dependencies
         run: bun install --frozen-lockfile
 
+      # macOS and Windows use the login keychain and the Credential Manager.
       - name: Gate
+        if: runner.os != 'Linux'
         run: bun run gate
+
+      # A private session bus with a keyring unlocked by a throwaway password, so
+      # libsecret never prompts and nothing outlives the job.
+      - name: Gate (D-Bus session with an unlocked keyring)
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- bash -c "echo -n ci | gnome-keyring-daemon --unlock --components=secrets && bun run gate"
