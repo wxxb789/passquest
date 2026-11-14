@@ -1,0 +1,40 @@
+/* Orbit + satellites — ported verbatim from design/prototypes/c-stage.html (lines 336-374). Do not normalise values. */
+/* ==========================================================================
+   ORBIT — one object, satellites in an arc (today, report, settings)
+   ========================================================================== */
+.orbit { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(520px, var(--obj-w, 600px)) minmax(0, 1fr); grid-template-rows: auto minmax(0, auto);
+  column-gap: 44px; align-content: center; max-width: 1360px; margin: 0 auto; }
+.orbit > .facts { grid-column: 1 / -1; grid-row: 1; margin-bottom: 30px; }
+.orbit > .obj, .orbit > .rail { grid-row: 2; }
+.orbit > .obj { grid-column: 2; align-self: center; min-height: 0; max-height: 100%; }
+.rail { display: flex; flex-direction: column; justify-content: center; gap: 64px; min-width: 0; align-self: center; }
+.rail.l { align-items: flex-end; grid-column: 1; } .rail.r { align-items: flex-start; grid-column: 3; }
+.rail.l .sat:nth-child(2) { --dx: -30px; } .rail.r .sat:nth-child(2) { --dx: 30px; }
+.rail.l .sat:nth-child(4) { --dx: 16px; } .rail.r .sat:nth-child(4) { --dx: -16px; }
+.orbit.solo { grid-template-columns: minmax(0, var(--obj-w, 980px)) minmax(0, 300px); justify-content: center; }
+.orbit.solo > .obj { grid-column: 1; }
+.orbit.solo > .rail.r { grid-column: 2; }
+
+.facts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.facts .chip { background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.facts .chip .k { color: var(--ink-3); font-weight: 500; }
+.facts .chip .lnk { margin-left: 2px; }
+
+/* satellite chip */
+.sat { position: relative; display: inline-flex; align-items: center; gap: 12px; min-height: 54px; padding: 8px 20px 8px 9px; border-radius: 30px; max-width: 100%; text-align: left;
+  translate: var(--dx, 0) 0; background: var(--glass); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-1); transition: transform var(--d2) var(--spring), background var(--d2), box-shadow var(--d2); }
+.sat:hover, .sat:focus-visible { transform: translateY(-2px); background: var(--glass-2); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line-2), var(--sh-2); }
+.sat::after { content: ""; position: absolute; top: 50%; width: 30px; height: 1px; pointer-events: none; }
+.rail.l .sat::after { left: calc(100% + 8px); background: linear-gradient(to right, var(--line-2), transparent); }
+.rail.r .sat::after { right: calc(100% + 8px); background: linear-gradient(to left, var(--line-2), transparent); }
+.sat .ico { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; color: var(--ink-2); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
+.sat .ico.cst svg { width: 36px; height: 36px; }
+.cst .ok { fill: var(--ok); } .cst .miss { fill: none; stroke: var(--bad); stroke-width: 1.4; } .cst .as { fill: var(--warm); opacity: .9; }
+.cst .ctr { fill: var(--ink-2); font: 600 10px/1 var(--f-ui); }
+.sat .tx { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.sat .lb { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
+.sat .vl { font-size: 15px; font-weight: 600; color: var(--ink); white-space: nowrap; display: flex; align-items: center; gap: 0; }
+.sat .vl small { font-size: 12.5px; font-weight: 500; color: var(--ink-2); margin-left: 6px; }
+.sat .flag { position: absolute; top: 6px; left: 37px; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--glass-3); }
+.sat .flag.bad { background: var(--bad); } .sat .flag.warm { background: var(--warm); } .sat .flag.ok { background: var(--ok); }

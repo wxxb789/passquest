@@ -10,6 +10,19 @@ const NETWORK_IMPORTS = ["net", "net/http", "net/rpc", "net/smtp"];
 const LINKED_CLIENTS = ["net/http", "net/rpc", "net/smtp"];
 const CONFIDENTIAL_MARKERS = /仅限内部使用|严禁外传/;
 const SCANNED_EXTENSIONS = /\.(go|json|md|txt)$/;
+/** Desktop frontend source and its embed root: a marker in a bundle input ships inside the binary. */
+const DESKTOP_WEB_ROOTS = ["desktop/web/", "internal/desktop/web/"];
+const DESKTOP_WEB_EXTENSIONS = /\.(ts|css|html|json|md|txt)$/;
+/**
+ * The desktop main links MyGo, which itself links net/http, so rule 2 cannot
+ * apply to it; its own packages are still held to rule 1 (no direct import).
+ */
+const DESKTOP_MAIN = "cmd/passquest-desktop";
+
+function scanned(file: string): boolean {
+  if ((file.startsWith("cmd/") || file.startsWith("internal/")) && SCANNED_EXTENSIONS.test(file)) return true;
+  return DESKTOP_WEB_ROOTS.some((root) => file.startsWith(root)) && DESKTOP_WEB_EXTENSIONS.test(file);
+}
 
 export const localOnly: Gate = {
   id: "local-only",
@@ -20,7 +33,9 @@ export const localOnly: Gate = {
       return fail(["cmd/passquest is missing but go.mod exists"]);
     }
 
-    const packagesResult = await runGo(ctx, ["list", "./cmd/passquest", "./internal/..."]);
+    const patterns = ["./cmd/passquest", "./internal/..."];
+    if (existsSync(resolve(ctx.root, DESKTOP_MAIN))) patterns.push(`./${DESKTOP_MAIN}/...`);
+    const packagesResult = await runGo(ctx, ["list", ...patterns]);
     if (packagesResult.code !== 0) return fail(["go list packages:", ...outputLines(packagesResult)]);
     const packages = packagesResult.stdout.split(/\r?\n/).filter(Boolean);
     if (packages.length === 0) return fail(["no first-party packages found"]);
@@ -47,10 +62,7 @@ export const localOnly: Gate = {
       if (LINKED_CLIENTS.includes(dep)) problems.push(`network client linked into the CLI: ${dep}`);
     }
 
-    const scanned = (await ctx.workingTreeFiles()).filter(
-      (file) => (file.startsWith("cmd/") || file.startsWith("internal/")) && SCANNED_EXTENSIONS.test(file),
-    );
-    for (const file of scanned) {
+    for (const file of (await ctx.workingTreeFiles()).filter(scanned)) {
       let text: string;
       try {
         text = readText(ctx.root, file);

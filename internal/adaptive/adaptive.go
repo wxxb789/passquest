@@ -11,6 +11,33 @@ import (
 	"github.com/wxxb789/passquest/internal/attempt"
 )
 
+// Evidence classes of one recorded attempt, in the order Classify tests them.
+// Only ClassIndependent adds to a skill's independent evidence.
+const (
+	ClassAssisted    = "assisted"
+	ClassRevisit     = "revisit"
+	ClassReExposure  = "re_exposure"
+	ClassIndependent = "independent"
+)
+
+// Classify is the rule Recommend counts an attempt by: help shown makes it
+// assisted, a later attempt on the same question a revisit, a first attempt on
+// a passage that already has an attempt a passage re-exposure (Q-0004-01), and
+// only a first, unassisted attempt on unseen content independent evidence.
+// firstOnContent is true when no earlier attempt exists on the content id.
+func Classify(attemptNumber int, assistance attempt.Assistance, firstOnContent bool) string {
+	switch {
+	case !assistance.IndependentEvidence():
+		return ClassAssisted
+	case attemptNumber > 1:
+		return ClassRevisit
+	case !firstOnContent:
+		return ClassReExposure
+	default:
+		return ClassIndependent
+	}
+}
+
 // Skill kinds understood by the policy. The kind decides whether a new skill
 // starts with an explanation (the scoring tactic) or a fresh measurement (a
 // language prerequisite).
@@ -243,31 +270,30 @@ func Recommend(input Input) Result {
 			if record.AttemptNumber > 1 {
 				ev.Revisits++
 			}
-			if record.AttemptNumber == 1 && record.Assistance.IndependentEvidence() {
-				if firstOnContent {
-					ev.IndependentAttempts++
-					ev.IndependentAttemptIDs = append(ev.IndependentAttemptIDs, record.AttemptID)
-					switch record.Status {
-					case attempt.StatusCorrect:
-						ev.IndependentCorrect++
-					case attempt.StatusIncorrect:
-						ev.IndependentIncorrect++
-					case attempt.StatusSkipped:
-						ev.IndependentSkipped++
-					}
-					if record.Status != attempt.StatusSkipped {
-						st.answers++
-						st.latestAnswered = record.Status
-					}
-					ev.LatestIndependentMS = record.ElapsedMS
-					ev.LatestIndependentStatus = record.Status
-					if record.Status == attempt.StatusCorrect &&
-						(ev.FastestIndependentMS == 0 || record.ElapsedMS < ev.FastestIndependentMS) {
-						ev.FastestIndependentMS = record.ElapsedMS
-					}
-				} else {
-					ev.PassageRepeats++
+			switch Classify(record.AttemptNumber, record.Assistance, firstOnContent) {
+			case ClassIndependent:
+				ev.IndependentAttempts++
+				ev.IndependentAttemptIDs = append(ev.IndependentAttemptIDs, record.AttemptID)
+				switch record.Status {
+				case attempt.StatusCorrect:
+					ev.IndependentCorrect++
+				case attempt.StatusIncorrect:
+					ev.IndependentIncorrect++
+				case attempt.StatusSkipped:
+					ev.IndependentSkipped++
 				}
+				if record.Status != attempt.StatusSkipped {
+					st.answers++
+					st.latestAnswered = record.Status
+				}
+				ev.LatestIndependentMS = record.ElapsedMS
+				ev.LatestIndependentStatus = record.Status
+				if record.Status == attempt.StatusCorrect &&
+					(ev.FastestIndependentMS == 0 || record.ElapsedMS < ev.FastestIndependentMS) {
+					ev.FastestIndependentMS = record.ElapsedMS
+				}
+			case ClassReExposure:
+				ev.PassageRepeats++
 			}
 			if material, ok := materialByKey[key]; ok {
 				if candidate, ok := material[skillID]; ok {
