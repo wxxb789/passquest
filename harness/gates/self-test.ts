@@ -12,6 +12,7 @@ import { adaptiveSmoke } from "./adaptive-smoke.ts";
 import { agentSmoke } from "./agent-smoke.ts";
 import { assessSmoke } from "./assess-smoke.ts";
 import { baseline } from "./baseline.ts";
+import { desktopSmoke } from "./desktop-smoke.ts";
 import { docsLinks } from "./docs-links.ts";
 import { findSmoke } from "./find-smoke.ts";
 import { goBuild } from "./go-build.ts";
@@ -239,6 +240,46 @@ function brokenCases(): BrokenCase[] {
       tracked: ["bad.ts", "tsconfig.json"],
     },
     {
+      gate: typecheck,
+      label: "type error in the desktop frontend project",
+      files: {
+        "tsconfig.json": JSON.stringify({
+          compilerOptions: { target: "ES2022", module: "ESNext", strict: true, noEmit: true, types: [] },
+          include: ["ok.ts"],
+        }),
+        "ok.ts": "export const ok: number = 1;\n",
+        "desktop/web/tsconfig.json": JSON.stringify({
+          compilerOptions: {
+            target: "ES2022",
+            module: "ESNext",
+            moduleResolution: "bundler",
+            lib: ["ES2022", "DOM"],
+            strict: true,
+            noEmit: true,
+            types: [],
+          },
+          include: ["src/**/*.ts"],
+        }),
+        "desktop/web/src/main.ts": "export const length: number = document.body.innerText;\n",
+      },
+      tracked: ["ok.ts", "tsconfig.json", "desktop/web/tsconfig.json", "desktop/web/src/main.ts"],
+      postFail: (failures) => {
+        if (!failures.includes("desktop/web/tsconfig.json:")) return "typecheck: did not name the frontend project";
+        if (failures.includes("tsconfig.json:")) return "typecheck: blamed the valid root project";
+        return null;
+      },
+    },
+    {
+      gate: typecheck,
+      label: "desktop frontend without its own project",
+      files: { "desktop/web/src/main.ts": "export const ok = 1;\n" },
+      tracked: ["desktop/web/src/main.ts"],
+      postFail: (failures) =>
+        failures.some((line) => line.includes("desktop/web/tsconfig.json is missing"))
+          ? null
+          : "typecheck: did not report the missing frontend project",
+    },
+    {
       gate: gofmt,
       label: "unformatted Go file",
       files: { "bad.go": "package bad\n\nfunc  F( ) { }\n" },
@@ -322,6 +363,41 @@ function brokenCases(): BrokenCase[] {
         failures.length === 1 && failures[0].includes("confidential source marker")
           ? null
           : `local-only: expected one confidential marker failure, saw ${failures.length}`,
+    },
+    {
+      gate: localOnly,
+      label: "desktop main that imports net/http itself",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": "package main\n\nfunc main() {}\n",
+        "internal/x/x.go": "package x\n",
+        "cmd/passquest-desktop/main.go": 'package main\n\nimport "net/http"\n\nfunc main() { _ = http.MethodGet }\n',
+      },
+      tracked: [],
+      postFail: (failures) => {
+        if (!failures.some((line) => line.includes("first-party network import") && line.includes("cmd/passquest-desktop"))) {
+          return "local-only: did not report the desktop main's network import";
+        }
+        if (failures.some((line) => line.includes("network client linked into the CLI"))) {
+          return "local-only: blamed the CLI for the desktop main's import";
+        }
+        return null;
+      },
+    },
+    {
+      gate: localOnly,
+      label: "confidential marker in desktop frontend source",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": "package main\n\nfunc main() {}\n",
+        "internal/x/x.go": "package x\n",
+        "desktop/web/src/main.ts": 'export const banner = "严禁外传";\n',
+      },
+      tracked: ["desktop/web/src/main.ts"],
+      postFail: (failures) =>
+        failures.length === 1 && failures[0].startsWith("desktop/web/src/main.ts:1: confidential source marker")
+          ? null
+          : `local-only: expected one marker failure in desktop/web/src/main.ts, saw ${failures.join("; ")}`,
     },
     {
       gate: portablePaths,
@@ -657,6 +733,32 @@ function brokenCases(): BrokenCase[] {
         return null;
       },
     },
+    {
+      gate: desktopSmoke,
+      label: "desktop main that exits 0 without writing a result",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest-desktop/main.go": "package main\n\nfunc main() {}\n",
+        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("boot: app exited 0 without writing a result"))
+          ? null
+          : `desktop-smoke: did not report the missing result: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      gate: desktopSmoke,
+      label: "desktop window whose Today stays blank",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest-desktop/main.go": `package main\n\nimport "os"\n\nfunc main() {\n\tblank := \`{"ok":true,"value":{"textLength":0,"stageChildren":0,"stageTextLength":0,"errorBars":0,"ready":null}}\`\n\t_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), []byte(blank), 0o600)\n}\n`,
+        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("boot: blank Today"))
+          ? null
+          : `desktop-smoke: did not report the blank window: ${failures.slice(0, 3).join("; ")}`,
+    },
   ];
 }
 
@@ -672,6 +774,23 @@ function passCases(): PassCase[] {
         detail.includes("1 golden(s) declared by 1 contract document(s)")
           ? null
           : `golden-contract: accepted detail ${JSON.stringify(detail)} does not name the declaring evidence row`,
+    },
+    {
+      gate: localOnly,
+      label: "desktop main that links net/http only through a dependency",
+      files: {
+        "go.mod": 'module example.com/selftest\n\ngo 1.27.3\n\nrequire example.com/dep v0.0.0\n\nreplace example.com/dep => ./dep\n',
+        "dep/go.mod": "module example.com/dep\n\ngo 1.27.3\n",
+        "dep/client.go": 'package dep\n\nimport "net/http"\n\nfunc Client() *http.Client { return &http.Client{} }\n',
+        "cmd/passquest/main.go": "package main\n\nfunc main() {}\n",
+        "cmd/passquest-desktop/main.go": 'package main\n\nimport "example.com/dep"\n\nfunc main() { _ = dep.Client() }\n',
+        "internal/x/x.go": "package x\n",
+      },
+      tracked: [],
+      postPass: (detail) =>
+        detail.startsWith("3 first-party packages")
+          ? null
+          : `local-only: accepted detail ${JSON.stringify(detail)} does not count the desktop main`,
     },
   ];
 }

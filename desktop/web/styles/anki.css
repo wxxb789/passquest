@@ -1,0 +1,72 @@
+/* Anki layout, edit sheet, sync + conflict — ported verbatim from design/prototypes/c-stage.html (lines 752-786, 813-845). Do not normalise values. */
+/* NOTE: `.an-acts .cap` below collides by name with the Settings `.cap` capability cell (settings.css);
+   both are global in the prototype and stay scoped only by their parent selector. */
+/* ==========================================================================
+   ANKI — the card is the object
+   ========================================================================== */
+.anki { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 18px; max-width: 1180px; }
+.an-top { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.an-top .src { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.an-top .src .t { font-weight: 650; font-size: var(--t-b); white-space: nowrap; }
+.an-top .src .muted { font-size: var(--t-s); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.syncs { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: none; }
+.sy { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px 0 11px; border-radius: var(--r-pill); font-size: var(--t-s); color: var(--ink-2); font-weight: 550; white-space: nowrap;
+  background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-1); transition: transform var(--d2) var(--spring), background var(--d2); }
+.sy:hover { transform: translateY(-1px); background: var(--glass-2); }
+.sy b { font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+.sy.warm b, .sy.warm .i { color: var(--warm); } .sy.bad b, .sy.bad .i { color: var(--bad); } .sy.ok .i { color: var(--ok); }
+.sy.bad { box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--bad-line), var(--sh-1); }
+.an-table { position: relative; min-height: 0; display: flex; align-items: center; justify-content: center; transition: transform var(--d3) var(--ease); }
+.pv-row { position: relative; display: flex; align-items: flex-start; justify-content: center; gap: 28px; width: 100%; }
+.pv-row::after { content: ""; position: absolute; left: 14%; right: 14%; bottom: -46px; height: 50px; border-radius: 50%; background: radial-gradient(closest-side, oklch(20% .04 262 / .15), transparent); pointer-events: none; z-index: -1; }
+[data-theme="dark"] .pv-row::after { background: radial-gradient(closest-side, oklch(2% .02 262 / .55), transparent); }
+.pv-side { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 500px; transition: max-width var(--d3) var(--ease); min-height: 0; }
+.an-table.phone .pv-side { max-width: 300px; }
+.pv-lab { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-3); padding: 0 6px; }
+.pv-lab b { color: var(--ink-2); font-weight: 600; }
+.an-tools { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.tgl { display: flex; padding: 3px; border-radius: var(--r-pill); background: var(--glass); box-shadow: inset 0 0 0 1px var(--line); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+.tgl button { height: 28px; padding: 0 12px; border-radius: var(--r-pill); font-size: var(--t-s); font-weight: 600; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tgl button[aria-pressed="true"] { background: var(--glass-3); color: var(--ink); box-shadow: var(--sh-1), inset 0 0 0 1px var(--line); }
+.an-acts { justify-self: center; display: flex; align-items: center; gap: 8px; padding: 7px; border-radius: var(--r-pill); background: var(--glass-2); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-2); }
+.an-acts .div { width: 1px; height: 24px; background: var(--line-2); margin: 0 4px; }
+.an-acts .cap { font-size: 12px; color: var(--ink-3); padding: 0 10px 0 2px; white-space: nowrap; }
+.anki.editing .an-table { transform: translateY(-2%) scale(.84); transform-origin: center top; }
+.anki.editing .an-tools, .anki.editing .an-acts { visibility: hidden; }
+/* the edit sheet owns the bottom edge while it is open; the dock steps aside (Esc / Done brings it back) */
+body.editing .dock { opacity: 0; visibility: hidden; transform: translate(-50%, 24px); transition: opacity var(--d2), transform var(--d2) var(--ease), visibility 0s var(--d2); }
+
+/* edit sheet — non-modal: the card stays visible above and updates live */
+.esheet { position: fixed; left: 50%; bottom: 0; z-index: 40; width: min(1000px, calc(100vw - 64px)); transform: translateX(-50%); border-radius: var(--r-xl) var(--r-xl) 0 0; display: flex; flex-direction: column; max-height: 50vh;
+  background: var(--glass-3); backdrop-filter: blur(30px) saturate(1.4); -webkit-backdrop-filter: blur(30px) saturate(1.4); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
+.enter-edit .esheet { animation: sheetin var(--d3) var(--ease) both; }
+.esheet .grab { width: 40px; height: 4px; border-radius: 2px; background: var(--line-2); margin: 10px auto 0; }
+.es-b { flex: 1; min-height: 0; overflow: auto; padding: 4px 30px 10px; display: grid; grid-template-columns: 1fr 1.25fr; gap: 0 28px; align-content: start; scrollbar-width: thin; }
+.es-f { padding: 12px 30px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+.es-f .sp { flex: 1; }
+.field { display: block; margin-top: 12px; }
+.field .fl { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--ink-2); font-weight: 600; margin-bottom: 6px; }
+.field .fl .id { margin-left: auto; }
+.field textarea { width: 100%; border: 0; outline: 0; resize: none; padding: 9px 12px; border-radius: var(--r-s); background: var(--tile); box-shadow: inset 0 0 0 1px var(--line-2); font-size: var(--t-sm); line-height: 1.55; color: var(--ink); transition: box-shadow var(--d1);
+  field-sizing: content; min-height: 2lh; max-height: calc(6lh + 18px); display: block; }
+.field textarea.one { min-height: calc(1lh + 18px); }
+.field textarea:focus { box-shadow: inset 0 0 0 1.5px var(--acc), 0 0 0 4px var(--acc-soft); }
+.field textarea.serif { font-family: var(--f-read); font-size: 15px; }
+.field .ro { padding: 8px 12px; border-radius: var(--r-s); background: var(--well); font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.field .ro span { font-family: var(--f-ui); font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+
+/* sync sheet + conflict */
+.note { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; padding: 11px 2px; font-size: var(--t-s); border-top: 1px solid var(--line); }
+.note:first-child { border-top: 0; }
+.note .f { font-family: var(--f-read); font-size: 15px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note .st { font-size: 12px; color: var(--ink-3); white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; }
+.note .i { color: var(--ink-3); }
+.note.q .i, .note.q .st { color: var(--warm); }
+.note.c .i, .note.c .st { color: var(--bad); }
+.note.p .i { color: var(--ok); }
+.diff { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0; }
+.diff > div { padding: 14px 16px; border-radius: var(--r-m); background: var(--tile); box-shadow: inset 0 0 0 1px var(--line-2); }
+.diff b { display: block; font-size: 12px; color: var(--ink-3); font-weight: 600; margin-bottom: 6px; }
+.diff p { margin: 0; font-family: var(--f-read); font-size: 15.5px; line-height: 1.6; color: var(--ink); hyphens: manual; word-break: normal; overflow-wrap: normal; }
+.diff ins { text-decoration: none; background: var(--warm-soft); box-shadow: 0 1.5px 0 var(--warm-line); border-radius: 2px; white-space: nowrap; padding: 0 1px; }

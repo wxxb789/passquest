@@ -1106,3 +1106,105 @@ Entry format:
   write row if a later review shows the extra row per write is noise.
 - Revisit when: a learner's ledger grows large enough that the extra row per push costs anything
   measurable, or a view wants a per-push summary instead of per-note history.
+
+### Q-0011-00 — Unattended merge authorization for goals 0011–0013
+- Status: resolved
+- Resolution: (owner, 2026-11-14) the owner asked for goals 0011–0013 to be completed in the "C · Stage"
+  design language and chose "one branch and PR per goal, merged by the agent". Merge conditions are those of
+  Q-0000-01: CI green on the head, the codex marker `has_any_findings: false` on that same head, zero
+  unresolved threads, and a local gate re-run on the merged tree.
+- Context: Q-0000-01 authorised unattended merges for goals 0001–0010 only.
+- Options considered: (A) merge each goal when the merge gate is green; (B) open PRs only; (C) local commits.
+- Default taken: none — the owner chose (A).
+- Revisit when: a merge gate produces a false green, or the owner revokes it.
+
+### Q-0011-01 — Which desktop platform is verified in goal 0011?
+- Status: decided(default taken)
+- Context: the contract asks to refine the primary desktop OS. The development machine is Windows 11 with
+  the WebView2 runtime; CI runs ubuntu, macos and windows.
+- Options considered: (A) Windows verified locally, macOS/Linux launched by the CI smoke; (B) Windows only;
+  (C) all three verified by hand.
+- Default taken: (A). The Linux CI job installs WebKitGTK and runs the smoke under a virtual display; a
+  platform whose smoke cannot launch fails the gate rather than skipping it.
+- Revisit when: the owner studies on macOS or Linux, or a CI image drops a webview prerequisite.
+
+### Q-0011-02 — Which frontend toolchain does the desktop window use?
+- Status: decided(default taken)
+- Context: core design names "Web frontend + TypeScript"; the stack forbids an embedded browser engine and
+  asks for the standard library first. MyGo's template uses Vite.
+- Options considered: (A) plain TypeScript bundled by Bun, no framework; (B) Vite + a UI framework;
+  (C) hand-written JavaScript with no build.
+- Default taken: (A). Bun is already the pinned harness runtime, the prototype is framework-free, and one
+  bundler call keeps the build reproducible on all three OSes. The bundle is generated into a gitignored
+  directory and embedded by `go:embed`; a binary built without it shows a "frontend not built" page instead of
+  a blank window.
+- Revisit when: the frontend outgrows hand-rolled rendering, or Bun's bundler output stops being stable.
+
+### Q-0011-03 — Where does the desktop app keep provider credentials?
+- Status: decided(default taken)
+- Context: core design §7 requires the OS secret store; Q-0005-01 kept environment variables only until goal
+  0011 provides one. A process started from a desktop launcher has no shell environment.
+- Options considered: (A) environment variable first, then the OS credential store; (B) OS store only;
+  (C) environment only.
+- Default taken: (A). The variable still wins so the gates and a developer shell behave as before; the window
+  writes keys only to the OS credential store (Credential Manager, Keychain, Secret Service) and reads back
+  only presence. Nothing is written to SQLite or files. Where no store exists, the window says so and the
+  variable remains the only path.
+- Revisit when: the owner wants one source of truth, or a platform's store prompts too often.
+
+### Q-0011-04 — Where does the desktop app keep its database?
+- Status: decided(default taken)
+- Context: the CLI defaults to `.passquest/passquest.sqlite` relative to the working directory, which is
+  arbitrary when a window is launched from a menu.
+- Options considered: (A) the app's per-user data directory, `PASSQUEST_DB` overriding; (B) the CLI default;
+  (C) ask on first run.
+- Default taken: (A). The CLI default is unchanged. Onboarding and moving an existing CLI database are goal
+  0013 work.
+- Revisit when: goal 0013 defines first-run data location.
+
+### Q-0011-05 — What is a "hint" in ordinary practice?
+- Status: decided(default taken)
+- Context: the contract and the design brief show a hint gated by an "assisted" warning, but the only
+  authored assistance in the domain is the tactic guided walkthrough; ordinary items carry none.
+- Options considered: (A) offer a hint only where an authored walkthrough exists and record it as an
+  exposure; (B) generate a hint with the tutor; (C) show the evidence sentence as a hint.
+- Default taken: (A). No AI text and no answer-bearing evidence becomes a hint. Where no walkthrough exists the
+  hint control says so instead of disappearing.
+- Revisit when: authored hints exist for imported items.
+
+### Q-0011-06 — Are exam date and daily study budget part of the domain?
+- Status: decided(default taken)
+- Context: the design brief shows "exam date: not set" and "daily budget: not set" with a set action; no
+  such fact exists in the store, and the goal series forbids inventing an exam date.
+- Options considered: (A) optional learner settings, display-only; (B) omit them; (C) let them drive policy.
+- Default taken: (A). They are stored only when the learner enters them, shown as entered, and are not
+  inputs to selection, scoring, assessment or any readiness statement. Prep day is derived from the first
+  recorded attempt.
+- Revisit when: the owner wants the plan to use the date, which would need its own contract.
+
+### Q-0011-07 — Can the learner keep Anki's version of a conflicting note?
+- Status: decided(default taken)
+- Context: the design brief shows "keep yours / keep Anki's"; the outbox records a conflict but not the
+  Anki-side field values, so Anki's version cannot be shown or adopted without new reads from AnkiConnect.
+- Options considered: (A) offer "keep mine" (the existing `--force`) and "leave as is"; (B) fetch Anki's
+  fields and offer both; (C) hide conflicts.
+- Default taken: (A). The conflict stays visible and is never overwritten silently.
+- Revisit when: goal 0012 or a later Anki goal adds a read of Anki-side fields.
+
+### Q-0011-08 — When does the window record a presentation?
+- Status: decided(default taken)
+- Context: the CLI's two-step JSON practice records a presentation only at answer time, so an item viewed and
+  abandoned does not spend an assessment unit; `show` and `questions` spend at display.
+- Options considered: (A) record at display; (B) record at answer; (C) never.
+- Default taken: (A). The window shows the passage, so it follows the display rule of `show` (Q-0009-04).
+  The presentation time is also the start of the attempt's elapsed time and the resume point after an
+  interruption.
+- Revisit when: the owner finds the pool spending too fast in practice.
+
+### Q-0011-09 — What does the window show when every provider is unusable?
+- Status: decided(default taken)
+- Context: Q-0010-06 left the aggregated-line choice to be revisited when the desktop workspace lands.
+- Options considered: as Q-0010-06.
+- Default taken: (C) of Q-0010-06 — the coach panel shows the one aggregated line with its action, and
+  Settings shows the per-provider table.
+- Revisit when: a learner reports the aggregated line as unclear.

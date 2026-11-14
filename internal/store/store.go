@@ -21,7 +21,7 @@ import (
 )
 
 // SchemaVersion is the persisted schema this build understands.
-const SchemaVersion = 16
+const SchemaVersion = 17
 
 // schemaV1 is the original version-1 shape. Migrations apply each version in
 // order, so a version-0 database gets both steps and a version-1 database gets
@@ -107,6 +107,7 @@ var migrations = []struct {
 	{14, schemaV14},
 	{15, schemaV15},
 	{16, schemaV16},
+	{17, schemaV17},
 }
 
 // Store is a handle to one attempts database.

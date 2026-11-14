@@ -1,0 +1,133 @@
+/* Design tokens: @property, :root, light/dark themes, rooms — ported verbatim from design/prototypes/c-stage.html (lines 16-141, 602, 604-606). Do not normalise values. */
+/* ==========================================================================
+   STAGE 一念 — design system
+   One primary object at a time; everything else recedes in depth.
+   ========================================================================== */
+@property --a1 { syntax: '<color>'; inherits: true; initial-value: transparent; }
+@property --a2 { syntax: '<color>'; inherits: true; initial-value: transparent; }
+@property --a3 { syntax: '<color>'; inherits: true; initial-value: transparent; }
+
+:root {
+  /* type */
+  --f-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --f-disp: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", -apple-system, "SF Pro Display", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --f-read: "Sitka Text", "Sitka", "Iowan Old Style", "Charter", "Georgia", "Noto Serif SC", "Songti SC", serif;
+  --f-read-h: "Sitka Subheading", "Sitka Text", "Sitka", "Iowan Old Style", "Georgia", serif;
+  --f-mono: "Cascadia Mono", "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
+  /* scale: 11.5 · 12.5 · 13 · 14.5 · 15.5 · 17 · 18 · 21 · 26 · 34 · 44 · 88 */
+  --t-xs: 11.5px; --t-s: 12.5px; --t-sm: 13.5px; --t-b: 14.5px; --t-m: 15.5px; --t-l: 17px;
+  --t-read: 18px; --t-xl: 21px; --t-2xl: 26px; --t-3xl: 34px; --t-4xl: 44px; --t-hero: 88px;
+  /* space (4-base) */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s7: 32px; --s8: 40px; --s9: 56px;
+  /* radii */
+  --r-xs: 6px; --r-s: 10px; --r-m: 14px; --r-l: 20px; --r-xl: 28px; --r-pill: 999px;
+  /* motion */
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  --spring: cubic-bezier(.34, 1.32, .64, 1);
+  --d1: 140ms; --d2: 300ms; --d3: 560ms; --d-room: 1100ms;
+  /* layout */
+  --gut: 40px; --coach-w: 392px;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: oklch(96.9% 0.006 255);
+  --ink: oklch(22.5% 0.026 262);
+  --ink-2: oklch(40% 0.024 262);
+  --ink-3: oklch(49.5% 0.02 262);
+  --ink-4: oklch(68% 0.016 262);           /* decorative only */
+  --line: oklch(28% 0.04 262 / .09);
+  --line-2: oklch(28% 0.04 262 / .15);
+  --glass: oklch(99.5% 0.003 255 / .56);
+  --glass-2: oklch(99.6% 0.003 255 / .80);
+  --glass-3: oklch(100% 0 0 / .94);
+  --tile: oklch(100% 0 0 / .97);
+  --rim: oklch(100% 0 0 / .85);
+  --well: oklch(28% 0.04 262 / .045);
+  --well-2: oklch(28% 0.04 262 / .06);
+  --paper: oklch(99.3% 0.006 88);
+  --paper-ink: oklch(23% 0.018 60);
+  --paper-ink-2: oklch(43% 0.016 60);
+  --paper-line: oklch(40% 0.03 70 / .12);
+  --acc: oklch(48.5% 0.19 268);
+  --acc-hi: oklch(55% 0.2 268);
+  --acc-ink: oklch(99% 0 0);
+  --acc-soft: oklch(48.5% 0.19 268 / .09);
+  --acc-tint: oklch(48.5% 0.19 268 / .12);
+  --acc-line: oklch(48.5% 0.19 268 / .38);
+  --acc-dim: oklch(46% 0.12 268);
+  --ok: oklch(46.5% 0.11 156);    --ok-soft: oklch(60% 0.12 156 / .13);   --ok-line: oklch(46.5% 0.11 156 / .4);
+  --bad: oklch(50.5% 0.165 27);   --bad-soft: oklch(62% 0.15 27 / .11);   --bad-line: oklch(50.5% 0.165 27 / .4);
+  --adv: oklch(49% 0.14 314);     --adv-soft: oklch(60% 0.13 314 / .09);  --adv-line: oklch(49% 0.14 314 / .34);
+  --warm: oklch(49.5% 0.115 58);  --warm-soft: oklch(75% 0.12 70 / .2);   --warm-line: oklch(55% 0.12 60 / .42);
+  --cool: oklch(46% 0.1 222);     --cool-soft: oklch(70% 0.09 215 / .16); --cool-line: oklch(46% 0.1 222 / .34);
+  --mark: oklch(88% 0.12 95 / .55);
+  --sh-1: 0 1px 1px oklch(30% 0.04 262 / .05), 0 3px 10px oklch(30% 0.04 262 / .05);
+  --sh-2: 0 1px 2px oklch(30% 0.04 262 / .05), 0 8px 22px oklch(30% 0.04 262 / .07), 0 24px 56px oklch(30% 0.04 262 / .07);
+  --sh-3: 0 1px 2px oklch(30% 0.04 262 / .06), 0 14px 32px oklch(30% 0.04 262 / .09), 0 40px 90px oklch(30% 0.05 262 / .13);
+  --sh-tile: 0 1px 0 oklch(100% 0 0 / .7) inset, 0 6px 18px -8px oklch(30% 0.06 262 / .2), 0 1px 2px oklch(30% 0.04 262 / .06);
+  --sh-tile-hi: 0 1px 0 oklch(100% 0 0 / .7) inset, 0 14px 28px -10px oklch(30% 0.06 262 / .26), 0 2px 4px oklch(30% 0.04 262 / .06);
+  --grain-o: .028;
+  --orb-core: oklch(70% 0.14 300);
+  --orb-halo: oklch(72% 0.13 290 / .45);
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: oklch(17.5% 0.03 264);
+  --ink: oklch(95% 0.008 260);
+  --ink-2: oklch(82% 0.018 260);
+  --ink-3: oklch(71% 0.022 260);
+  --ink-4: oklch(48% 0.03 262);
+  --line: oklch(90% 0.03 262 / .08);
+  --line-2: oklch(90% 0.03 262 / .14);
+  --glass: oklch(26% 0.035 264 / .52);
+  --glass-2: oklch(25.5% 0.04 264 / .78);
+  --glass-3: oklch(25% 0.04 264 / .94);
+  --tile: oklch(29% 0.04 264 / .92);
+  --rim: oklch(100% 0 0 / .08);
+  --well: oklch(100% 0 0 / .045);
+  --well-2: oklch(100% 0 0 / .07);
+  /* warm ink-paper: a different material from the cool raised card */
+  --paper: oklch(23.4% 0.0085 72);
+  --paper-ink: oklch(90.5% 0.018 82);
+  --paper-ink-2: oklch(76% 0.016 80);
+  --paper-line: oklch(90% 0.02 85 / .08);
+  --acc: oklch(77% 0.13 268);
+  --acc-hi: oklch(83% 0.11 268);
+  --acc-ink: oklch(19% 0.04 268);
+  --acc-soft: oklch(77% 0.13 268 / .13);
+  --acc-tint: oklch(74% 0.13 268 / .17);
+  --acc-line: oklch(77% 0.13 268 / .45);
+  --acc-dim: oklch(80% 0.07 268);
+  --ok: oklch(80% 0.13 158);   --ok-soft: oklch(70% 0.12 158 / .14);  --ok-line: oklch(80% 0.13 158 / .4);
+  --bad: oklch(76% 0.13 26);   --bad-soft: oklch(65% 0.14 26 / .15);  --bad-line: oklch(76% 0.13 26 / .42);
+  --adv: oklch(79% 0.11 312);  --adv-soft: oklch(70% 0.12 312 / .12); --adv-line: oklch(79% 0.11 312 / .36);
+  --warm: oklch(82% 0.11 72);  --warm-soft: oklch(70% 0.11 65 / .16); --warm-line: oklch(82% 0.11 72 / .4);
+  --cool: oklch(81% 0.09 215); --cool-soft: oklch(65% 0.09 215 / .17); --cool-line: oklch(81% 0.09 215 / .36);
+  --mark: oklch(70% 0.12 90 / .35);
+  --sh-1: 0 1px 1px oklch(5% 0.02 262 / .3), 0 4px 12px oklch(5% 0.02 262 / .25);
+  --sh-2: 0 1px 2px oklch(5% 0.02 262 / .35), 0 10px 26px oklch(5% 0.02 262 / .32), 0 28px 60px oklch(5% 0.02 262 / .32);
+  --sh-3: 0 1px 2px oklch(5% 0.02 262 / .4), 0 20px 40px -12px oklch(3% 0.02 262 / .6), 0 46px 100px oklch(4% 0.02 262 / .5);
+  --sh-tile: 0 1px 0 oklch(100% 0 0 / .06) inset, 0 6px 18px -8px oklch(3% 0.02 262 / .6);
+  --sh-tile-hi: 0 1px 0 oklch(100% 0 0 / .08) inset, 0 14px 28px -10px oklch(3% 0.02 262 / .7);
+  --grain-o: .045;
+  --orb-core: oklch(86% 0.1 300);
+  --orb-halo: oklch(72% 0.14 295 / .5);
+}
+
+/* rooms: ambient light carries the attempt condition
+   calm = between attempts · cool = independent (can count) · warm = assisted · still = assessment */
+[data-theme="light"] body[data-room="calm"]  { --a1: oklch(89% 0.045 278); --a2: oklch(92.5% 0.035 222); --a3: oklch(94% 0.03 40); }
+[data-theme="light"] body[data-room="cool"]  { --a1: oklch(85% 0.085 212); --a2: oklch(89% 0.07 190);  --a3: oklch(93% 0.04 232); }
+[data-theme="light"] body[data-room="warm"]  { --a1: oklch(86% 0.1 66);    --a2: oklch(89.5% 0.085 44); --a3: oklch(93% 0.055 86); }
+[data-theme="light"] body[data-room="still"] { --bg: oklch(96.4% 0.001 260); --a1: oklch(93.5% 0.001 260); --a2: oklch(95% 0.001 260); --a3: oklch(95.5% 0 0); }
+[data-theme="dark"]  body[data-room="calm"]  { --a1: oklch(33% 0.085 282); --a2: oklch(29% 0.07 236);  --a3: oklch(25% 0.05 320); }
+[data-theme="dark"]  body[data-room="cool"]  { --a1: oklch(36% 0.1 214);   --a2: oklch(31% 0.08 192);  --a3: oklch(24% 0.05 236); }
+[data-theme="dark"]  body[data-room="warm"]  { --a1: oklch(37% 0.09 62);   --a2: oklch(31% 0.075 38);  --a3: oklch(25% 0.045 84); }
+[data-theme="dark"]  body[data-room="still"] { --bg: oklch(18.5% 0.006 260); --a1: oklch(21.5% 0.004 260); --a2: oklch(20% 0.003 260); --a3: oklch(19.5% 0.002 260); }
+
+/* assess — the room goes still (prototype lines 602, 604-606) */
+body[data-room="still"] { --acc: var(--ink); --acc-hi: var(--ink-2); --acc-ink: var(--bg); --acc-soft: var(--well); --acc-tint: var(--well-2); --acc-line: var(--line-2); --acc-dim: var(--ink-2); }
+[data-theme="light"] body[data-room="still"] .paper { --paper: oklch(99.5% 0 0); }
+[data-theme="dark"] body[data-room="still"] .paper { --paper: oklch(22.5% 0.003 260); --paper-ink: oklch(91% 0.004 260); --paper-ink-2: oklch(75% 0.004 260); }
+[data-theme="dark"] body[data-room="still"] { --glass-2: oklch(25% 0.006 260 / .82); --glass-3: oklch(25% 0.006 260 / .95); --tile: oklch(28.5% 0.006 260 / .95); }
