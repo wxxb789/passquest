@@ -1,13 +1,13 @@
 // Dock (prototype dockHTML). In the assessment it is replaced by the item navigator.
-import type { ActiveRun } from '../api/types';
+import type { AssessmentState } from '../api/types';
 import { html, type Html } from '../core/html';
 import { DOCK, T } from '../core/i18n';
 import type { Route } from '../core/state';
 import { ic } from '../icons';
 import { navigatorHTML } from '../views/assess';
 
-export function dockHTML(route: Route, run: ActiveRun | null, ankiConflicts: number): Html {
-  if (route === 'assess' && run) return navigatorHTML(run);
+export function dockHTML(route: Route, run: AssessmentState | null, attached: boolean, ankiConflicts: number): Html {
+  if (route === 'assess' && run?.run && run.state === 'item') return navigatorHTML(run.navigator, attached && run.item !== null);
   const cur = route === 'feedback' ? 'practice' : route;
   return html`<div class="dock" role="navigation" aria-label="${T('主导航', 'Main')}">${DOCK.map(([r, zh, en]) => {
     const conflict = r === 'anki' && ankiConflicts > 0;

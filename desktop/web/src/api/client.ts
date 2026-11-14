@@ -1,101 +1,62 @@
-// The study API the window talks to: one async method per `cli.Workspace` method in the 0011 plan.
+// The study API the window talks to: exactly the generated `Study` client (./mygo.ts), called
+// through `window.mygo`. ./mygo.ts imports `mygo-runtime`, which is not a dependency here, so it is
+// imported for its types only (erased by the bundler); the runtime MyGo injects into the page is
+// the same `call` (see ./mygo-runtime.d.ts).
 //
-// PROVISIONAL like ./types.ts: the implementation is a thin wrapper over the MyGo-generated
-// `./mygo.ts` client and is bound at boot with `bindApi()`. Until one is bound, every screen renders
-// its "service not connected" state — the window never substitutes demo data.
-import type {
-  AssessmentComparison,
-  AssessmentItem,
-  AssessmentPool,
-  AssessmentReport,
-  AssessmentState,
-  BriefSummary,
-  BudgetView,
-  CoachMode,
-  CoachPreview,
-  CoachReply,
-  ConsentLedger,
-  Feedback,
-  LearnerSettings,
-  ModelRegistry,
-  ModelTestResult,
-  NoteDraft,
-  NoteFields,
-  NoteList,
-  NotePreview,
-  NoteRequest,
-  PracticeItem,
-  PracticeRequest,
-  PushResult,
-  RunSummary,
-  Services,
-  StudioError,
-  Today,
-} from './types';
-import { adaptToday, goLearnerSettings } from './adapt';
+// Error convention (internal/desktop/study.go): a failed Go call rejects with a CallError whose
+// message is the JSON of a studio.Error, `{"code","message","action"}`. `parseCallError` turns it
+// back into a StudioError; a message that is not that JSON becomes code `internal`.
 import type { Study } from './mygo';
+import type { StudioError } from './types';
 
-export interface StudyApi {
-  // Today
-  today(): Promise<Today>;
-  setLearnerSettings(settings: LearnerSettings): Promise<void>;
+type StudyClient = typeof Study;
+export type StudyApi = { [K in keyof StudyClient]: StudyClient[K] };
 
-  // Practice
-  startPractice(request: PracticeRequest): Promise<PracticeItem>;
-  /** The open presentation after an interruption, or null. */
-  resumePractice(): Promise<PracticeItem | null>;
-  openHint(token: string): Promise<PracticeItem>;
-  answer(token: string, label: string): Promise<Feedback>;
-  skip(token: string): Promise<Feedback>;
+/** Every bound method, by its client name. The type check below fails when one is missing. */
+const METHODS = [
+  'abandonAssessment',
+  'acceptNote',
+  'answer',
+  'answerAssessmentItem',
+  'assessmentCompare',
+  'assessmentPool',
+  'assessmentReport',
+  'assessmentRuns',
+  'assessmentState',
+  'briefStatus',
+  'budget',
+  'cancelBrief',
+  'clearCredential',
+  'coachAsk',
+  'coachPreview',
+  'consents',
+  'grantConsent',
+  'models',
+  'notes',
+  'openHint',
+  'presentAssessmentItem',
+  'previewNote',
+  'proposeNote',
+  'pushNotes',
+  'resumeAssessment',
+  'resumeBrief',
+  'resumePractice',
+  'revokeConsent',
+  'services',
+  'setCredential',
+  'setLearnerSettings',
+  'skip',
+  'skipNote',
+  'startAssessment',
+  'startPractice',
+  'testModel',
+  'today',
+  'useModel',
+] as const satisfies readonly (keyof StudyClient)[];
 
-  // Coach
-  coachPreview(attemptId: number, mode: CoachMode): Promise<CoachPreview>;
-  coachAsk(attemptId: number, mode: CoachMode): Promise<CoachReply>;
-  grantConsent(sourceId: string, provider: string): Promise<void>;
-  revokeConsent(sourceId: string, provider: string): Promise<void>;
-
-  // Assessment
-  assessmentPool(): Promise<AssessmentPool>;
-  startAssessment(size: number, minutes: number): Promise<AssessmentState>;
-  assessmentState(): Promise<AssessmentState>;
-  /**
-   * Presents the run's current item. `position` is a provisional extension for the navigator's
-   * goto; the plan's signature takes only the run.
-   */
-  presentAssessmentItem(runId: number, position?: number): Promise<AssessmentItem>;
-  answerAssessmentItem(runId: number, position: number, label: string): Promise<AssessmentState>;
-  resumeAssessment(runId: number): Promise<AssessmentState>;
-  abandonAssessment(runId: number): Promise<AssessmentState>;
-
-  // Report
-  assessmentReport(runId: number): Promise<AssessmentReport>;
-  assessmentCompare(baseRunId: number, otherRunId: number): Promise<AssessmentComparison>;
-  assessmentRuns(): Promise<RunSummary[]>;
-
-  // Anki
-  proposeNote(request: NoteRequest): Promise<NoteDraft>;
-  previewNote(draftId: number, fields: NoteFields): Promise<NotePreview>;
-  acceptNote(draftId: number, fields: NoteFields): Promise<NoteDraft>;
-  skipNote(draftId: number): Promise<NoteDraft>;
-  notes(): Promise<NoteList>;
-  pushNotes(force: boolean): Promise<PushResult>;
-
-  // Settings
-  models(): Promise<ModelRegistry>;
-  useModel(providerId: string, endpoint: string | null): Promise<ModelRegistry>;
-  testModel(providerId: string, endpoint: string | null): Promise<ModelTestResult>;
-  budget(): Promise<BudgetView>;
-  consents(): Promise<ConsentLedger>;
-  /** Stores the key in the OS credential store. The key is never echoed back. */
-  setCredential(providerId: string, key: string): Promise<void>;
-  clearCredential(providerId: string): Promise<void>;
-  services(): Promise<Services>;
-
-  // Brief
-  briefStatus(): Promise<BriefSummary | null>;
-  resumeBrief(): Promise<void>;
-  cancelBrief(): Promise<void>;
-}
+type Unlisted = Exclude<keyof StudyClient, (typeof METHODS)[number]>;
+const everyMethodListed: [Unlisted] extends [never] ? true : Unlisted = true;
+void everyMethodListed;
 
 let bound: StudyApi | null = null;
 
@@ -107,7 +68,7 @@ export function api(): StudyApi | null {
   return bound;
 }
 
-export function isStudioError(value: unknown): value is StudioError {
+function isStudioError(value: unknown): value is { code: string; message: string; action?: unknown } {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -116,10 +77,20 @@ export function isStudioError(value: unknown): value is StudioError {
   );
 }
 
-/** Normalises anything a call rejects with into a StudioError. */
-export function toStudioError(value: unknown): StudioError {
-  if (isStudioError(value)) return { code: value.code, message: value.message, action: value.action ?? null };
-  const message = value instanceof Error ? value.message : String(value);
+function normalise(v: { code: string; message: string; action?: unknown }): StudioError {
+  return { code: v.code, message: v.message, action: typeof v.action === 'string' && v.action !== '' ? v.action : null };
+}
+
+/** Parses what a failed call rejects with (a CallError carrying the JSON) into a StudioError. */
+export function parseCallError(e: unknown): StudioError {
+  if (isStudioError(e)) return normalise(e);
+  const message = e instanceof Error ? e.message : String(e);
+  try {
+    const doc: unknown = JSON.parse(message);
+    if (isStudioError(doc)) return normalise(doc);
+  } catch {
+    // not the convention's JSON
+  }
   return { code: 'internal', message, action: null };
 }
 
@@ -129,105 +100,27 @@ export const NOT_CONNECTED: StudioError = {
   action: null,
 };
 
-// ---------------------------------------------------------------- MyGo binding
-//
-// Error convention (internal/desktop/study.go): a failed Go call rejects with a CallError whose
-// message is the JSON of a studio.Error, `{"code","message","action"}`. `studyCall` parses it back
-// into a StudioError; a message that is not that JSON (a recovered panic, a runtime failure) becomes
-// code `internal`.
-//
-// ./mygo.ts is generated by MyGo from the bound service and imports `mygo-runtime`, which is not a
-// dependency here; it is imported for its types only (erased by the bundler) and the calls go to
-// `window.mygo`, which is what mygo-runtime's `call` does (see ./mygo-runtime.d.ts).
-type StudyClient = typeof Study;
-
-/** Parses the JSON error message of a failed call. */
-export function parseCallError(e: unknown): StudioError {
-  const message = e instanceof Error ? e.message : String(e);
-  try {
-    const doc: unknown = JSON.parse(message);
-    if (isStudioError(doc)) return { code: doc.code, message: doc.message, action: doc.action ?? null };
-  } catch {
-    // not the convention's JSON
-  }
-  return { code: 'internal', message, action: null };
-}
-
 /**
- * The generated client's method `name`, calling `window.mygo`. Go method names are the client's
- * names with the first letter upper-cased (`assessmentPool` ↔ `Study.AssessmentPool`); no Study
- * method starts with an acronym, so the mapping is exact.
+ * The client method `name` over `window.mygo`. Go method names are the client's names with the
+ * first letter upper-cased (`assessmentPool` ↔ `Study.AssessmentPool`); no Study method starts
+ * with an acronym, so the mapping is exact.
  */
-function studyCall<K extends keyof StudyClient>(runtime: MygoRuntime, name: K): StudyClient[K] {
+function studyCall(runtime: MygoRuntime, name: string): (...args: unknown[]) => Promise<unknown> {
   const method = `Study.${name.charAt(0).toUpperCase()}${name.slice(1)}`;
-  const fn = (...args: unknown[]) =>
+  return (...args) =>
     runtime.call(method, ...args).catch((e: unknown) => {
       throw parseCallError(e);
     });
-  return fn as StudyClient[K];
 }
-
-/**
- * StudyApi methods whose provisional types do not yet match the generated ones. They reject with
- * `not_wired` until the views move onto the generated types (the 0011 wiring phase).
- */
-export const NOT_WIRED = [
-  'startPractice',
-  'resumePractice',
-  'openHint',
-  'answer',
-  'skip',
-  'coachPreview',
-  'coachAsk',
-  'assessmentPool',
-  'startAssessment',
-  'assessmentState',
-  'presentAssessmentItem',
-  'answerAssessmentItem',
-  'resumeAssessment',
-  'abandonAssessment',
-  'assessmentReport',
-  'assessmentCompare',
-  'assessmentRuns',
-  'proposeNote',
-  'previewNote',
-  'acceptNote',
-  'skipNote',
-  'notes',
-  'pushNotes',
-  'models',
-  'useModel',
-  'testModel',
-  'budget',
-  'consents',
-  'services',
-  'briefStatus',
-] as const satisfies readonly (keyof StudyApi)[];
-
-type Wired = Exclude<keyof StudyApi, (typeof NOT_WIRED)[number]>;
-
-const notWired = (name: string) => (): Promise<never> =>
-  Promise.reject<never>({
-    code: 'not_wired',
-    message: `${name} is not connected to this window yet.`,
-    action: null,
-  } satisfies StudioError);
 
 /** The StudyApi over the bound Go service, or null outside a MyGo window. */
 export function connectStudy(): StudyApi | null {
   const runtime = window.mygo;
   if (!runtime) return null;
-  const go = <K extends keyof StudyClient>(name: K) => studyCall(runtime, name);
-  const wired: Pick<StudyApi, Wired> = {
-    today: async () => adaptToday(await go('today')()),
-    setLearnerSettings: (settings) => go('setLearnerSettings')(goLearnerSettings(settings)),
-    grantConsent: async (sourceId, provider) => void (await go('grantConsent')(sourceId, provider)),
-    revokeConsent: async (sourceId, provider) => void (await go('revokeConsent')(sourceId, provider)),
-    setCredential: async (providerId, key) => void (await go('setCredential')(providerId, key)),
-    clearCredential: async (providerId) => void (await go('clearCredential')(providerId)),
-    resumeBrief: () => go('resumeBrief')(),
-    cancelBrief: async () => void (await go('cancelBrief')()),
-  };
-  const pending = Object.fromEntries(NOT_WIRED.map((name) => [name, notWired(name)])) as unknown as Omit<StudyApi, Wired>;
-  return { ...pending, ...wired };
+  return Object.fromEntries(METHODS.map((name) => [name, studyCall(runtime, name)])) as unknown as StudyApi;
+}
+
+/** Subscribes to a Go event (e.g. `brief:changed`); a no-op outside a MyGo window. */
+export function onGoEvent<T>(name: string, listener: (payload: T) => void): void {
+  window.mygo?.on<T>(name, listener);
 }

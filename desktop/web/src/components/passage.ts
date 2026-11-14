@@ -5,14 +5,21 @@
 // every evidence boundary, so an evidence range is always whole `.s` spans the CSS can light. Each
 // `.s` carries its UTF-16 range in the paragraph (`data-a`/`data-b`) so a highlight or a mark can be
 // mapped back to paragraph offsets.
-import type { Passage, SourceLabel, TextSpan } from '../api/types';
+import type { Passage, SourceLabel } from '../api/types';
 import { html, type Html } from '../core/html';
-import { T } from '../core/i18n';
+import { sourceKindName, T } from '../core/i18n';
 import type { Mark } from '../core/state';
 import { toast } from '../core/toast';
 import { ic } from '../icons';
 
 export type PassageMode = 'practice' | 'feedback' | 'assess';
+
+/** A half-open range of code points inside one paragraph (the core's `EvidenceSpan` offsets). */
+export interface TextSpan {
+  paragraph: number;
+  start: number;
+  end: number;
+}
 
 export interface PassageOptions {
   mode: PassageMode;
@@ -23,6 +30,8 @@ export interface PassageOptions {
   litKey?: boolean;
   marks?: readonly Mark[];
   foot: Html;
+  /** A small disclosure beside the source label (e.g. the built-in sample is not exam material). */
+  note?: Html | '';
 }
 
 /** Code-point offset → UTF-16 offset in `text`. */
@@ -85,13 +94,9 @@ function paragraphHTML(text: string, pi: number, o: PassageOptions, cutsU16: { p
 }
 
 export function sourceLabel(s: SourceLabel): string {
-  const parts: string[] = [];
-  if (s.kind === 'import') parts.push(T('本地导入', 'Local import'));
-  else if (s.kind === 'assessment') parts.push(T('测评池', 'Assessment pool'));
-  else parts.push(T('内置示例', 'Built-in sample'));
+  const parts: string[] = [sourceKindName(s.kind)];
   if (s.source_id) parts.push(s.source_id);
-  if (s.page !== null) parts.push(T(`第 ${s.page} 页`, `p.${s.page}`));
-  if (s.unit_id) parts.push(T(`未见单元 ${s.unit_id}`, `unseen unit ${s.unit_id}`));
+  if (s.page) parts.push(T(`第 ${s.page} 页`, `p.${s.page}`));
   parts.push(s.reviewed ? T('已审核', 'reviewed') : T('未审核', 'not reviewed'));
   return parts.join(' · ');
 }
@@ -105,8 +110,9 @@ export function passageHTML(p: Passage, o: PassageOptions): Html {
   return html`<section class="paper pas ${o.mode === 'feedback' ? 'receded' : ''} ${o.mode === 'practice' ? 'rise' : ''}" style="--i:0" aria-label="${T('文章', 'Passage')}">
     <div class="pas-head">
       <div class="pas-meta">
-        <span class="src">${ic('seal', 's')}${sourceLabel(p.source)}</span>
-        ${p.source.reviewed ? '' : html`<span class="ph">${ic('info', 'xs')}${T('来源未审核', 'Source not reviewed')}</span>`}
+        <span class="src" data-testid="source">${ic('seal', 's')}${sourceLabel(p.label)}</span>
+        ${p.label.reviewed ? '' : html`<span class="ph">${ic('info', 'xs')}${T('来源未审核', 'Source not reviewed')}</span>`}
+        ${o.note ?? ''}
       </div>
       <h2 class="pas-title exam" lang="en">${p.title}</h2>
     </div>
@@ -116,7 +122,9 @@ export function passageHTML(p: Passage, o: PassageOptions): Html {
 }
 
 export function practiceFoot(marks: number): Html {
-  return html`${ic('mark', 's')}<span id="markcount">${markCountText(marks)}</span><span style="margin-left:auto" class="keyhint"><kbd>M</kbd> ${T('标记', 'mark')}</span>`;
+  return html`${ic('mark', 's')}<span id="markcount">${markCountText(marks)}</span><span style="margin-left:auto" class="acts-row">${
+    marks ? html`<button class="btn quiet sm" data-act="mark-note" data-testid="mark-note">${ic('anki', 'xs')}${T('用标记生成笔记', 'Note from the mark')}</button>` : ''
+  }<span class="keyhint"><kbd>M</kbd> ${T('标记', 'mark')}</span></span>`;
 }
 
 export function markCountText(n: number): string {
@@ -126,15 +134,11 @@ export function markCountText(n: number): string {
 }
 
 export function feedbackFoot(): Html {
-  return html`${ic('eye', 's')}<span>${T('悬停任一选项，原文中对应的依据句会亮起', 'Hover an option to light its supporting sentence')}</span>`;
+  return html`${ic('eye', 's')}<span>${T('高亮的是已核验答案的依据句', 'The lit sentence is the evidence for the verified key')}</span>`;
 }
 
-export function assessFoot(positions: readonly number[]): Html {
-  if (positions.length === 0) return html``;
-  const first = Math.min(...positions);
-  const last = Math.max(...positions);
-  const range = first === last ? `${first}` : `${first}–${last}`;
-  return html`${ic('book', 's')}<span>${T(`本篇含第 ${range} 题`, `This passage carries items ${range}`)}</span>`;
+export function assessFoot(position: number, count: number): Html {
+  return html`${ic('book', 's')}<span>${T(`第 ${position + 1} / ${count} 题 · 不显示提示、词表和对错`, `Item ${position + 1} of ${count} · no hints, glossary or feedback`)}</span>`;
 }
 
 // ---------------------------------------------------------------- live DOM behaviour

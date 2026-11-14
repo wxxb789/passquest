@@ -1,6 +1,6 @@
 // Top bar (prototype topHTML): brand + prep day, the middle slot (run clock in the assessment,
 // session walk on study routes, resume link elsewhere) and the language/theme/shortcut utilities.
-import type { ActiveRun, Today } from '../api/types';
+import type { AssessmentRun, Today } from '../api/types';
 import { html, type Html } from '../core/html';
 import { SESSION, SESSION_IDX, shortDate, T } from '../core/i18n';
 import type { Lang, Route, Theme } from '../core/state';
@@ -13,13 +13,13 @@ export interface TopInput {
   theme: Theme;
   sessionAt: number;
   today: Today | null;
-  run: ActiveRun | null;
+  run: AssessmentRun | null;
 }
 
 function brandDay(t: Today | null): Html {
   if (!t) return html``;
-  if (t.prep_day === null) return html`<span class="brand-day">${T('还没有作答记录', 'No attempts yet')}</span>`;
-  return html`<span class="brand-day">${T('备考第 ', 'Prep day ')}<b class="num">${t.prep_day}</b>${T(' 天 · 始于 ', ' · since ')}${shortDate(t.prep_started_at)}</span>`;
+  if (t.prep.day <= 0) return html`<span class="brand-day">${T('还没有作答记录', 'No attempts yet')}</span>`;
+  return html`<span class="brand-day" data-testid="prep-day">${T('备考第 ', 'Prep day ')}<b class="num">${t.prep.day}</b>${T(' 天 · 始于 ', ' · since ')}${shortDate(t.prep.first_attempt_at)}</span>`;
 }
 
 export function topHTML(i: TopInput): Html {

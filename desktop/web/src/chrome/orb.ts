@@ -1,6 +1,6 @@
 // The coach orb (prototype orbHTML). It leaves the room during an assessment; on Feedback the coach
 // sheet grows from it; elsewhere it opens a small local-policy popover.
-import type { ActiveModel } from '../api/types';
+import type { ModelStatus } from '../api/types';
 import { html, type Html } from '../core/html';
 import { T } from '../core/i18n';
 import type { Route } from '../core/state';
@@ -9,8 +9,14 @@ export interface OrbInput {
   route: Route;
   coachOpen: boolean;
   popOpen: boolean;
-  model: ActiveModel | null;
+  model: ModelStatus | null;
   coachSheet: Html | null;
+}
+
+/** The active provider's calls / limit today, from the core's budget. */
+function budgetOf(m: ModelStatus): string {
+  const b = m.budget.providers.find((p) => p.provider === m.provider);
+  return b ? `${b.calls} / ${b.limit}` : '—';
 }
 
 export function orbHTML(i: OrbInput): Html {
@@ -20,8 +26,10 @@ export function orbHTML(i: OrbInput): Html {
   const st = r === 'today' || r === 'report' ? '' : sheet ? 'open' : 'quiet';
   const say =
     r === 'today'
-      ? i.model
-        ? html`<span class="orb-say"><span class="state-dot ${i.model.verified_at ? 'ok' : 'warm'}"></span>${i.model.model}<span class="sep"></span>${T('今日', 'today')} <b class="num">${i.model.used_today} / ${i.model.limit}</b></span>`
+      ? i.model?.configured && i.model.model
+        ? html`<span class="orb-say" data-testid="orb-model"><span class="state-dot ${i.model.text_chat_state === 'verified' ? 'ok' : 'warm'}"></span>${i.model.model}<span class="sep"></span>${
+            i.model.text_chat_state === 'verified' ? T('已验证', 'verified') : T('未验证', 'not verified')
+          }<span class="sep"></span>${T('今日', 'today')} <b class="num">${budgetOf(i.model)}</b></span>`
         : html`<span class="orb-say"><span class="state-dot off"></span>${T('未选择模型', 'No model chosen')}</span>`
       : r === 'report'
         ? html`<span class="orb-say">${T('报告说明', 'About this report')}</span>`

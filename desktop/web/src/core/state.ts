@@ -2,23 +2,22 @@
 // computed here: the cache is replaced wholesale by the next service response.
 import type {
   AssessmentComparison,
-  AssessmentItem,
   AssessmentPool,
   AssessmentReport,
+  AssessmentRun,
   AssessmentState,
-  BudgetView,
+  Budget,
   CoachMode,
   CoachPreview,
   CoachReply,
-  ConsentLedger,
+  Consent,
   Feedback,
-  ModelRegistry,
+  ModelList,
   NoteDraft,
   NoteFields,
   NoteList,
   NotePreview,
   PracticeItem,
-  RunSummary,
   Services,
   StudioError,
   Today,
@@ -39,6 +38,7 @@ export type Layer =
   | 'learner'
   | 'credential'
   | 'start-run'
+  | 'abandon-run'
   | `sheet:${string}`;
 
 export type Loadable<T> =
@@ -76,10 +76,13 @@ export const ui = {
   coachMode: 'probe' as CoachMode,
   practice: { sel: null as string | null, marks: [] as Mark[] },
   feedback: { ev: null as string | null },
-  assess: { sel: null as string | null },
+  /**
+   * `attached`: this window is driving the active run. A run found on boot or after leaving is
+   * shown as resumable first; resuming counts one resume (`assess resume`).
+   */
+  assess: { sel: null as string | null, attached: false },
   report: { runId: null as number | null, compareWith: null as number | null, annItem: null as number | null },
   anki: {
-    side: 'both' as 'both' | 'front' | 'back',
     card: null as Theme | null,
     width: 'desk' as 'desk' | 'phone',
     editing: false,
@@ -89,13 +92,16 @@ export const ui = {
   },
   settings: {
     open: null as string | null,
-    confirming: null as { source_id: string; provider: string } | null,
     credentialFor: null as string | null,
   },
 };
 
 export const data = {
   today: idle<Today>(),
+  /** Local helpers (Node, AnkiConnect endpoint, search, credential store); Today's brief and Settings read it. */
+  services: idle<Services>(),
+  /** The provider registry; Settings and the coach's aggregated "nothing usable" line read it. */
+  models: idle<ModelList>(),
   practice: idle<PracticeItem | null>(),
   feedback: null as Feedback | null,
   coach: {
@@ -106,11 +112,10 @@ export const data = {
   },
   assess: {
     state: idle<AssessmentState>(),
-    item: idle<AssessmentItem>(),
     pool: idle<AssessmentPool>(),
   },
   report: {
-    runs: idle<RunSummary[]>(),
+    runs: idle<AssessmentRun[]>(),
     report: idle<AssessmentReport>(),
     compare: idle<AssessmentComparison>(),
   },
@@ -120,10 +125,8 @@ export const data = {
     notes: idle<NoteList>(),
   },
   settings: {
-    models: idle<ModelRegistry>(),
-    budget: idle<BudgetView>(),
-    consents: idle<ConsentLedger>(),
-    services: idle<Services>(),
+    budget: idle<Budget>(),
+    consents: idle<Consent[]>(),
   },
 };
 

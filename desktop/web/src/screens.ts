@@ -1,15 +1,15 @@
 // Composition root of the views: turns UI state + the cached service data into the stage, chrome
 // and layer markup that core/render.ts writes into the DOM.
-import type { ActiveRun, Today } from './api/types';
+import type { AssessmentRun, AssessmentState, Today } from './api/types';
 import { coachHTML } from './views/coach';
-import { credentialDialog, hintGate, keysDialog, learnerDialog, leaveDialog, startRunDialog } from './components/dialog';
+import { abandonDialog, credentialDialog, hintGate, keysDialog, learnerDialog, leaveDialog, startRunDialog } from './components/dialog';
 import { centerEvidence } from './components/passage';
 import { sheetWrap } from './components/sheet';
 import { dockHTML } from './chrome/dock';
 import { orbHTML, popHTML } from './chrome/orb';
 import { topHTML } from './chrome/top';
 import { html, type Html } from './core/html';
-import { CONDITION, T, TITLES, TP } from './core/i18n';
+import { conditionOf, T, TITLES, TP } from './core/i18n';
 import type { Screens } from './core/render';
 import { data, ui, valueOf } from './core/state';
 import { vAnki, ankiSheet } from './views/anki';
@@ -17,18 +17,36 @@ import { vAssess } from './views/assess';
 import { vFeedback } from './views/feedback';
 import { vPractice } from './views/practice';
 import { reportPopLines, reportSheet, vReport } from './views/report';
-import { settingsSheet, vSettings } from './views/settings';
+import { settingsSheet, vSettings, type SettingsData } from './views/settings';
 import { errorCard, loadingCard, retryButton, stateCard, withLoadable } from './views/states';
 import { todayPopLines, todaySheet, vToday } from './views/today';
 import { ic } from './icons';
 
 export const today = (): Today | null => valueOf(data.today) ?? null;
-export const activeRun = (): ActiveRun | null => valueOf(data.assess.state)?.active ?? null;
+export const assessState = (): AssessmentState | null => valueOf(data.assess.state) ?? null;
+/** The active run: from the assessment state when loaded, else from Today. */
+export const activeRun = (): AssessmentRun | null => {
+  const s = assessState();
+  if (s) return s.run && s.state === 'item' ? s.run : null;
+  return today()?.active_run ?? null;
+};
 export const practiceItem = () => valueOf(data.practice) ?? null;
 
 function ankiConflicts(): number {
   const n = valueOf(data.anki.notes);
   return n ? n.counts.conflict : (today()?.anki.conflict ?? 0);
+}
+
+/** Private imported sources known locally: the pool's units and the consent ledger. */
+function knownSources(): string[] {
+  const ids = new Set<string>();
+  for (const u of today()?.pool.content_units ?? []) if (u.source_id) ids.add(u.source_id);
+  for (const c of valueOf(data.settings.consents) ?? []) ids.add(c.source_id);
+  return [...ids].sort();
+}
+
+function settingsData(): SettingsData {
+  return { models: data.models, budget: data.settings.budget, consents: data.settings.consents, services: data.services, sources: knownSources() };
 }
 
 function stage(): Html {
@@ -49,18 +67,16 @@ function stage(): Html {
             action: html`<a class="btn primary" href="#/practice">${T('去练习', 'Go to practice')}${ic('arrow', 'xs')}</a>`,
           });
     case 'assess':
-      return withLoadable(data.assess.state, (s) => vAssess(s.active, data.assess.item, data.assess.pool, { sel: ui.assess.sel, busy: ui.busy }), retry);
+      return withLoadable(data.assess.state, (s) => vAssess(s, data.assess.pool, { sel: ui.assess.sel, busy: ui.busy, attached: ui.assess.attached }), retry);
     case 'report': {
       const runs = data.report.runs;
       if (runs.status === 'error') return errorCard(runs.error, retry);
       if (runs.status !== 'ready') return loadingCard();
-      const completed = runs.value.filter((r) => r.state === 'completed');
-      if (completed.length === 0) return vReport(null, runs.value, null, data.report.compare);
+      if (!runs.value.some((r) => r.status !== 'active')) return vReport(null, runs.value, null, data.report.compare);
       return withLoadable(data.report.report, (r) => vReport(r, runs.value, ui.report.compareWith, data.report.compare), retry);
     }
     case 'anki':
       return vAnki(data.anki.draft, ui.anki.fields, data.anki.preview, data.anki.notes, {
-        side: ui.anki.side,
         card: ui.anki.card,
         width: ui.anki.width,
         editing: ui.anki.editing,
@@ -69,7 +85,7 @@ function stage(): Html {
         theme: ui.theme,
       });
     case 'settings':
-      return vSettings(data.settings, { open: ui.settings.open, confirming: ui.settings.confirming, busy: ui.busy });
+      return vSettings(settingsData(), { open: ui.settings.open, busy: ui.busy });
   }
 }
 
@@ -81,7 +97,8 @@ function coachSheet(): Html | null {
       replies: data.coach.replies,
       failure: data.coach.failure,
       sending: data.coach.sending,
-      unusable: today()?.providers_unusable ?? null,
+      busy: ui.busy,
+      models: valueOf(data.models) ?? null,
     },
     ui.coachMode,
     ui.lang,
@@ -95,21 +112,23 @@ function pop(): Html {
     return popHTML(r ? reportPopLines(r, data.report.compare) : [T('及格线未知：这里只有观察到的结果。', 'The pass threshold is unknown: this is observation only.')], '');
   }
   const m = t?.model;
-  const foot = m
-    ? html`<p class="fine" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">${T(`模型 ${m.model} · 今日已用`, `Model ${m.model} · used today`)} <span class="num">${m.used_today} / ${m.limit}</span></p>`
-    : '';
+  const b = m?.budget.providers.find((p) => p.provider === m.provider);
+  const foot =
+    m?.configured && m.model
+      ? html`<p class="fine" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">${T(`模型 ${m.model} · 今日已用`, `Model ${m.model} · used today`)} <span class="num">${b ? `${b.calls} / ${b.limit}` : '—'}</span></p>`
+      : '';
   return popHTML(t ? todayPopLines(t) : [], foot);
 }
 
 function sheet(key: string): Html {
   let out: Html | null = null;
   const t = today();
-  if (ui.route === 'today' && t) out = todaySheet(key, t);
+  if ((ui.route === 'today' || ui.route === 'practice') && t) out = todaySheet(key, t, data.services);
   else if (ui.route === 'report') {
     const r = valueOf(data.report.report);
     if (r) out = reportSheet(key, r, ui.report.annItem);
-  } else if (ui.route === 'anki') out = ankiSheet(key, data.anki.notes, ui.busy);
-  else if (ui.route === 'settings') out = settingsSheet(key, data.settings, { open: ui.settings.open, confirming: ui.settings.confirming, busy: ui.busy });
+  } else if (ui.route === 'anki') out = ankiSheet(key, data.anki.notes, valueOf(data.services)?.anki_endpoint ?? null, ui.busy);
+  else if (ui.route === 'settings') out = settingsSheet(key, settingsData(), { open: ui.settings.open, busy: ui.busy });
   return out ?? sheetWrap('info', T('正在读取……', 'Loading…'), '', html`<p class="fine">${T('数据还没有就绪。', 'The data is not ready yet.')}</p>`);
 }
 
@@ -122,16 +141,24 @@ function layer(): Html {
       return keysDialog();
     case 'hint':
       return hintGate(practiceItem()?.can_count ?? false);
-    case 'leave':
-      return leaveDialog(activeRun()?.current_position ?? null);
+    case 'leave': {
+      const pos = assessState()?.item?.position;
+      return leaveDialog(pos === undefined ? null : pos + 1);
+    }
+    case 'abandon-run': {
+      const run = activeRun();
+      return run ? abandonDialog(run.id) : html``;
+    }
     case 'pop':
       return pop();
-    case 'learner':
-      return learnerDialog(today()?.learner ?? { exam_date: null, daily_minutes: null });
+    case 'learner': {
+      const t = today();
+      return t ? learnerDialog(t.prep) : html``;
+    }
     case 'credential': {
-      const reg = valueOf(data.settings.models);
-      const p = reg?.providers.find((x) => x.id === ui.settings.credentialFor);
-      return credentialDialog(p?.name ?? ui.settings.credentialFor ?? '', reg?.credential_store.available ?? false, reg?.credential_store.reason ?? null);
+      const p = valueOf(data.models)?.providers.find((x) => x.id === ui.settings.credentialFor);
+      const s = valueOf(data.services);
+      return credentialDialog(p?.name ?? ui.settings.credentialFor ?? '', s ? s.credential_store : null, p?.credential_env ?? '');
     }
     case 'start-run': {
       const pool = valueOf(data.assess.pool);
@@ -146,16 +173,16 @@ function room(): string {
   if (ui.route === 'practice') {
     const item = practiceItem();
     if (!item) return 'calm';
-    return item.condition === 'independent' && item.can_count ? 'cool' : CONDITION[item.condition].room;
+    return item.can_count ? 'cool' : conditionOf(item.condition).room;
   }
-  if (ui.route === 'feedback' && data.feedback) return data.feedback.counts ? 'cool' : 'warm';
+  if (ui.route === 'feedback' && data.feedback) return data.feedback.counted ? 'cool' : 'warm';
   return 'calm';
 }
 
 export const screens: Screens = {
-  top: () => topHTML({ route: ui.route, lang: ui.lang, theme: ui.theme, sessionAt: ui.sessionAt, today: today(), run: activeRun() }),
+  top: () => topHTML({ route: ui.route, lang: ui.lang, theme: ui.theme, sessionAt: ui.sessionAt, today: today(), run: ui.assess.attached ? activeRun() : null }),
   stage,
-  dock: () => dockHTML(ui.route, activeRun(), ankiConflicts()),
+  dock: () => dockHTML(ui.route, assessState(), ui.assess.attached, ankiConflicts()),
   orb: () => orbHTML({ route: ui.route, coachOpen: ui.coachOpen, popOpen: ui.layer === 'pop', model: today()?.model ?? null, coachSheet: coachSheet() }),
   layer,
   room,

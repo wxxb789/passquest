@@ -126,6 +126,9 @@ func OpenWorkspace(options WorkspaceOptions) (*Workspace, error) {
 	if w.opt.Now == nil {
 		w.opt.Now = time.Now
 	}
+	if w.opt.NewSession == nil {
+		w.opt.NewSession = newSessionID
+	}
 	// Side-effect exposure rows use the same clock as everything else the
 	// window records.
 	w.opt.PresentationNow = w.opt.Now

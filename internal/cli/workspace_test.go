@@ -356,6 +356,19 @@ func TestWorkspaceHintMakesTacticAttemptAssisted(t *testing.T) {
 	}
 }
 
+// The desktop opens the workspace without a session minter; answering must
+// still record the attempt under a fresh session.
+func TestWorkspaceAnswerWithDefaultSession(t *testing.T) {
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.NewSession = nil })
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, item.Options[0].Label)
+	mustNoErr(t, err)
+	if feedback.AttemptID == 0 || listAttempts(t, f.db) != 1 {
+		t.Fatalf("feedback = %+v, attempts = %d", feedback, listAttempts(t, f.db))
+	}
+}
+
 func TestWorkspaceResumesPracticeAfterReopen(t *testing.T) {
 	f := newWSFixture(t, nil)
 	if none, err := f.w.ResumePractice(); err != nil || none != nil {

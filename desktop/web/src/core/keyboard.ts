@@ -25,8 +25,7 @@ export interface KeyActions {
   feedbackCycle(step: 1 | -1): void;
   assessPick(key: string): boolean;
   assessConfirm(): void;
-  assessMove(step: 1 | -1): void;
-  ankiFlip(): void;
+  assessSkip(): void;
   ankiEdit(): void;
 }
 
@@ -96,12 +95,10 @@ export function installKeyboard(a: KeyActions): void {
       case 'assess':
         if (k.length === 1 && a.assessPick(k)) break;
         if (k === 'Enter' && !onControl) a.assessConfirm();
-        else if (k === 'ArrowRight') a.assessMove(1);
-        else if (k === 'ArrowLeft') a.assessMove(-1);
+        else if (up === 'S') a.assessSkip();
         break;
       case 'anki':
-        if (up === 'F') a.ankiFlip();
-        else if (up === 'E') a.ankiEdit();
+        if (up === 'E') a.ankiEdit();
         break;
     }
   });

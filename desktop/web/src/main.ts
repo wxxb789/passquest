@@ -1,11 +1,12 @@
 // Pass Quest desktop window — entry point. Installs the error bar, wires the delegated events, the
 // router, the keyboard and the display clock, then renders the current route.
 //
-// Inside a MyGo window the study service is bound at boot (`connectStudy()`, src/api/client.ts).
+// Inside a MyGo window the study service is bound at boot (`connectStudy()`, src/api/client.ts), and
+// an interrupted item or run is recovered (`recoverOnBoot`).
 // Elsewhere every screen shows its "service not connected" state; nothing is invented.
 import '../styles/index.css';
 import { bindApi, connectStudy } from './api/client';
-import { ACT, doMark, keyActions, onDeadline, onFieldInput, onRoute, setEv } from './actions';
+import { ACT, doMark, keyActions, onDeadline, onFieldInput, onRoute, recoverOnBoot, setEv, watchBrief } from './actions';
 import { checkSelection, hideMarkPop, onMark } from './components/passage';
 import { startClock } from './core/clock';
 import { installKeyboard } from './core/keyboard';
@@ -46,6 +47,8 @@ function delegate(): void {
     const form = e.target instanceof HTMLFormElement ? e.target.dataset.form : undefined;
     if (form === 'learner') ACT['learner-save']?.(undefined, document.body);
     else if (form === 'credential') ACT['credential-save']?.(undefined, document.body);
+    else if (form === 'consent') ACT['consent-form']?.(undefined, document.body);
+    else if (form === 'run') ACT['run-start']?.(undefined, document.body);
   });
   document.addEventListener('input', (e) => {
     const t = e.target;
@@ -116,6 +119,8 @@ function boot(): void {
   startClock(ui.shot, onDeadline);
   onRoute(parseHash(location.hash));
   render(true, false);
+  watchBrief();
+  void recoverOnBoot();
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

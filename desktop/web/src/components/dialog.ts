@@ -1,7 +1,7 @@
 // Centered dialogs (prototype .dlg): the shortcut sheet, the hint gate, leave-assessment, and the
 // small forms the port adds (learner settings, credential entry, start a run). The safer choice
 // carries `autofocus`.
-import type { AssessmentPool, LearnerSettings } from '../api/types';
+import type { AssessmentPool, PrepStatus } from '../api/types';
 import { html, type Html, type Interp } from '../core/html';
 import { T } from '../core/i18n';
 import { ic, type IconName } from '../icons';
@@ -46,9 +46,8 @@ export function keysDialog(): Html {
           [T('看选项依据', 'Option evidence'), ['↑', '↓']],
           [T('生成笔记', 'Propose note'), ['K']],
           [T('下一题', 'Next item'), ['N']],
-          [T('测评：上 / 下一题', 'Assess: prev / next'), ['←', '→']],
+          [T('测评：跳过本题', 'Assess: skip the item'), ['S']],
           [T('测评：确认', 'Assess: confirm'), ['Enter']],
-          [T('笔记：翻面', 'Anki: flip'), ['F']],
           [T('笔记：编辑字段', 'Anki: edit fields'), ['E']],
         ])}
       </div></div>`;
@@ -70,6 +69,18 @@ export function hintGate(canCountNow: boolean): Html {
   );
 }
 
+/** Abandoning keeps answered items readable in the report; it cannot be undone. */
+export function abandonDialog(runId: number): Html {
+  return dlg(
+    'warm',
+    'stop',
+    'dab',
+    T(`放弃第 ${runId} 轮？`, `Abandon run #${runId}?`),
+    html`<p>${T('已作答的题仍可在报告里查看。放弃不能撤销，展示过的题不会回到测评池。', 'Answered items stay readable in the report. This cannot be undone, and presented items do not return to the pool.')}</p>`,
+    html`<button class="btn quiet" data-act="run-abandon">${T('放弃本轮', 'Abandon the run')}</button><button class="btn primary" data-act="close" autofocus>${T('不放弃', 'Keep it')}</button>`,
+  );
+}
+
 export function leaveDialog(position: number | null): Html {
   return dlg(
     'neutral',
@@ -85,35 +96,37 @@ export function leaveDialog(position: number | null): Html {
 }
 
 /** Optional, display-only learner settings (Q-0011-06). */
-export function learnerDialog(s: LearnerSettings): Html {
+export function learnerDialog(s: PrepStatus): Html {
   return dlg(
     'neutral',
     'clock',
     'dlr',
     T('考试日期与每日时长', 'Exam date and daily time'),
-    html`<p>${T('只用于显示，不影响选题、评分或测评。', 'Display only — never used for selection, scoring or assessment.')}</p>
+    html`<p>${T('只用于显示，不影响选题、评分或测评。留空即清除。', 'Display only — never used for selection, scoring or assessment. Leave empty to clear.')}</p>
       <form class="pq-form" id="learnerform" data-form="learner">
-        <label class="field"><span class="fl">${T('考试日期', 'Exam date')}</span><input type="date" name="exam_date" value="${s.exam_date ?? ''}"></label>
-        <label class="field"><span class="fl">${T('每日学习时长（分钟）', 'Daily study time (minutes)')}</span><input type="number" name="daily_minutes" min="1" max="1440" step="1" value="${s.daily_minutes ?? ''}"></label>
+        <label class="field"><span class="fl">${T('考试日期', 'Exam date')}</span><input type="date" name="exam_date" value="${s.exam_date}"></label>
+        <label class="field"><span class="fl">${T('每日学习时长（分钟）', 'Daily study time (minutes)')}</span><input type="number" name="daily_minutes" min="1" max="1440" step="1" value="${s.daily_minutes > 0 ? s.daily_minutes : ''}"></label>
       </form>`,
     html`<button class="btn quiet" data-act="close" autofocus>${T('取消', 'Cancel')}</button><button class="btn primary" data-act="learner-save">${T('保存', 'Save')}</button>`,
   );
 }
 
 /** Credential entry. The value goes to the OS credential store and is cleared from the DOM at once. */
-export function credentialDialog(providerName: string, storeAvailable: boolean, reason: string | null): Html {
+export function credentialDialog(providerName: string, storeAvailable: boolean | null, env: string): Html {
   return dlg(
     'neutral',
     'key',
     'dcr',
     T(`${providerName} 的密钥`, `${providerName} key`),
-    storeAvailable
-      ? html`<p>${T('密钥写入系统密钥库。之后这里只显示有 / 无，从不显示密钥本身。', 'The key goes to the OS credential store. Afterwards it is shown only as present / missing, never displayed.')}</p>
+    storeAvailable !== false
+      ? html`<p>${T('密钥写入系统密钥库。之后这里只显示有 / 无，从不显示密钥本身。', 'The key goes to the OS credential store. Afterwards it is shown only as present / missing, never displayed.')}${
+          env ? html` ${T('若设置了环境变量', 'If the variable')} <code>${env}</code>${T('，它优先。', ' is set, it wins.')}` : ''
+        }</p>
       <form class="pq-form" id="credform" data-form="credential" autocomplete="off">
         <label class="field"><span class="fl">${T('API 密钥', 'API key')}</span><input type="password" name="key" autocomplete="off" spellcheck="false"></label>
       </form>`
-      : html`<p>${T('本机没有可用的系统密钥库：', 'No OS credential store is available here: ')}${reason ?? ''}${T('。请改用环境变量。', '. Use the environment variable instead.')}</p>`,
-    storeAvailable
+      : html`<p>${T('本机没有可用的系统密钥库。请改用环境变量', 'No OS credential store is available here. Use the environment variable')} <code>${env}</code>${T('。', '.')}</p>`,
+    storeAvailable !== false
       ? html`<button class="btn quiet" data-act="close" autofocus>${T('取消', 'Cancel')}</button><button class="btn primary" data-act="credential-save">${T('保存到密钥库', 'Save to the store')}</button>`
       : html`<button class="btn primary" data-act="close" autofocus>${T('好', 'OK')}</button>`,
   );
@@ -126,9 +139,13 @@ export function startRunDialog(pool: AssessmentPool): Html {
     'dsr',
     T('开始限时测评？', 'Start a timed assessment?'),
     html`<p>${T(
-      `${pool.default_size} 题 / ${pool.default_minutes} 分钟，限时、无辅助，作答后不显示对错。离开后计时不暂停。展示过的题会从未见测评池中用掉。`,
-      `${pool.default_size} items / ${pool.default_minutes} min, timed and unassisted, no feedback after answering. The clock keeps running if you leave. Presented items are spent from the unseen pool.`,
-    )}</p>`,
+      '限时、无辅助，作答后不显示对错。离开后计时不暂停。展示过的题会从未见测评池中用掉。只有题数和时长都相同、来自同一题池族的两轮才能比较。',
+      'Timed and unassisted, no feedback after answering. The clock keeps running if you leave. Presented items are spent from the unseen pool. Only runs with the same size, time window and pool family can be compared.',
+    )}</p>
+      <form class="pq-form" id="runform" data-form="run">
+        <label class="field"><span class="fl">${T(`题数（剩余 ${pool.qualifying_items} 题）`, `Items (${pool.qualifying_items} left)`)}</span><input type="number" name="size" min="1" max="${pool.qualifying_items}" step="1" value="${Math.min(pool.default_size, pool.qualifying_items)}"></label>
+        <label class="field"><span class="fl">${T('时长（分钟）', 'Time window (minutes)')}</span><input type="number" name="minutes" min="1" max="1440" step="1" value="${pool.default_minutes}"></label>
+      </form>`,
     html`<button class="btn quiet" data-act="close" autofocus>${T('取消', 'Cancel')}</button><button class="btn primary" data-act="run-start">${T('开始', 'Start')}</button>`,
   );
 }
