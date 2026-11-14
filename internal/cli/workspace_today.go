@@ -33,7 +33,7 @@ func (w *Workspace) Today() (studio.Today, error) {
 			Skills:      []studio.SkillEvidence{},
 			Limitations: todayLimitations,
 		}
-		if _, err := st.ReconcileAssessmentRuns(now); err != nil {
+		if _, err := w.reconcileAssessments(st, func(string, int) {}); err != nil {
 			return err
 		}
 		if err := w.todayRecommendation(st, &today, now); err != nil {

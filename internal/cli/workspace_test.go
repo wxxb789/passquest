@@ -552,6 +552,37 @@ func TestWorkspaceAssessmentWindowElapseAbandons(t *testing.T) {
 	}
 }
 
+// The desktop renders Today on boot. Reopening it after a run's window has
+// passed must close the run under the CLI loop's rule, so the item that was
+// on screen is recorded as timed out, not silently dropped from the report.
+func TestWorkspaceTodayAfterElapsedRunTimesOutPresentedItem(t *testing.T) {
+	f := newWSFixture(t, nil)
+	seedAssessmentSource(t, f.db, 22, 1)
+	state, err := f.w.StartAssessment(2, 1)
+	mustNoErr(t, err)
+	if state.Item == nil || state.Item.Position != 0 {
+		t.Fatalf("start = %+v", state)
+	}
+	f.clock.Advance(2 * time.Minute)
+	f.reopen(t)
+	today, err := f.w.Today()
+	mustNoErr(t, err)
+	if today.ActiveRun != nil || today.LastRun == nil || today.LastRun.ID != state.Run.ID {
+		t.Fatalf("today runs = %+v / %+v", today.LastRun, today.ActiveRun)
+	}
+	report, err := f.w.AssessmentReport(state.Run.ID)
+	mustNoErr(t, err)
+	if report.Run.Status != assess.StatusAbandoned || report.Run.AbandonedReason != "window_elapsed" {
+		t.Fatalf("expired run = %+v", report.Run)
+	}
+	if report.Counts.TimedOut != 1 || report.Counts.Finalized != 1 {
+		t.Fatalf("on-screen item not timed out: %+v", report.Counts)
+	}
+	if len(report.Items) == 0 || !report.Items[0].TimedOut {
+		t.Fatalf("presented item = %+v", report.Items[0])
+	}
+}
+
 func TestWorkspaceCredentialStoreLayering(t *testing.T) {
 	creds := newMemCredentials()
 	const storeKey = "store-key-0123456789-not-real"

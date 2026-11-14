@@ -1263,3 +1263,13 @@ Entry format:
   (C) GUI binary that attaches to a parent console when one exists.
 - Default taken: (A) for goal 0011, which ships no installer.
 - Revisit when: goal 0013 packages the app.
+
+### Q-0011-15 — Does the CLI lose an on-screen assessment item when `assess report` runs first after the window elapsed?
+- Status: open
+- Context: the window now times out the presented item of an elapsed run before abandoning it, on every entry
+  point including Today (codex review on PR #24). The CLI's `assess` subcommands reconcile through the store
+  only, so `assess report RUN` run before `assess resume RUN` after the window elapsed may abandon the run with
+  the presented item still unfinalized. Not verified; CLI output is protocol and was not changed in goal 0011.
+- Options considered: (A) route the CLI through the same workspace reconciler; (B) leave as is.
+- Default taken: (B) for this goal.
+- Revisit when: a follow-up fix confirms or refutes the CLI behaviour with a test.

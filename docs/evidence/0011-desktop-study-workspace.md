@@ -16,7 +16,7 @@ gnome-keyring inside `dbus-run-session`). macOS was not run locally; CI is its o
 |---|---|
 | `bun run gate` (final tree, Windows) | 21 passed, 2 failed, 0 skipped, 7 m 30 s. Failed: `agent smoke`, `provider smoke` — see below |
 | `bun run gate` on `main` before any change (`1f409b5`), same machine | 20 passed, 2 failed: the same two gates with byte-identical failure lines |
-| `go test` gate | 22 packages, 830 tests, 0 skipped (786 before this goal) |
+| `go test` gate | 22 packages, 831 tests, 0 skipped (786 before this goal) |
 | `typecheck` | 0 errors in `tsconfig.json` and `desktop/web/tsconfig.json` |
 | `local-only` | 21 first-party packages (incl. `cmd/passquest-desktop`), 0 network imports, 0 confidential markers; `go list -deps ./cmd/passquest` contains no `net/http` |
 | `desktop smoke` | 239 assertions over 11 scenarios (four full local runs: 78–94 s each) |
