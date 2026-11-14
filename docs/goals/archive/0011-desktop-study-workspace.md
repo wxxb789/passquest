@@ -21,8 +21,8 @@ orchestration lives in unexported `internal/cli` functions that print to a write
 protocol loses the learner's elapsed time, and nothing can be done without a terminal.
 
 The owner chose the **"C · Stage"** design direction
-([`design/prototypes/c-stage.html`](../../design/prototypes/c-stage.html), brief
-[`design/prototypes/BRIEF.md`](../../design/prototypes/BRIEF.md)). This goal adopts its tokens, layout and
+([`design/prototypes/c-stage.html`](../../../design/prototypes/c-stage.html), brief
+[`design/prototypes/BRIEF.md`](../../../design/prototypes/BRIEF.md)). This goal adopts its tokens, layout and
 component vocabulary so that 0012 refines one design language instead of replacing a placeholder, but its
 evidence is functional behaviour, not visual polish.
 

@@ -3,7 +3,7 @@
 Goal 0011 puts the headless study engine in a MyGo desktop window. The window is a second surface over
 the same Go core: it never reimplements a scoring, selection, consent, budget or assessment rule.
 
-Contract: [`goals/0011-desktop-study-workspace.md`](goals/0011-desktop-study-workspace.md). Plan:
+Contract: [`goals/archive/0011-desktop-study-workspace.md`](goals/archive/0011-desktop-study-workspace.md). Plan:
 [`plans/2026-11-14-1600-0011-desktop-study-workspace.md`](plans/2026-11-14-1600-0011-desktop-study-workspace.md).
 Design direction ("C · Stage", chosen by the owner): [`../design/prototypes/c-stage.html`](../design/prototypes/c-stage.html)
 and its brief [`../design/prototypes/BRIEF.md`](../design/prototypes/BRIEF.md).

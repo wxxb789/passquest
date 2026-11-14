@@ -1,6 +1,6 @@
 # 0011 — Desktop study workspace
 
-Contract: [`../goals/0011-desktop-study-workspace.md`](../goals/0011-desktop-study-workspace.md)
+Contract: [`../goals/archive/0011-desktop-study-workspace.md`](../goals/archive/0011-desktop-study-workspace.md)
 Prerequisites: 0005, 0007, 0009 (all done). Owner decisions: Q-0011-00. Defaults: Q-0011-01 … Q-0011-09.
 Design reference: [`../../design/prototypes/c-stage.html`](../../design/prototypes/c-stage.html) and
 [`../../design/prototypes/BRIEF.md`](../../design/prototypes/BRIEF.md).
