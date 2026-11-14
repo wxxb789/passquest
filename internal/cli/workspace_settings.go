@@ -203,7 +203,7 @@ func (w *Workspace) registryProvider(providerID string) (provider.Provider, erro
 func (w *Workspace) credentialStatus(providerID string) studio.CredentialStatus {
 	env := provider.CredentialEnvFor(providerID)
 	status := studio.CredentialStatus{Provider: providerID, Env: env, From: "none"}
-	if strings.TrimSpace(w.baseGetenv(env)) != "" {
+	if _, _, present := provider.CredentialValue(w.baseGetenv, providerID); present {
 		status.Present, status.From = true, "env"
 		return status
 	}
@@ -214,11 +214,7 @@ func (w *Workspace) credentialStatus(providerID string) studio.CredentialStatus 
 			status.Problem = "the credential store could not be read"
 		case found && strings.TrimSpace(value) != "":
 			status.Present, status.From = true, "store"
-			return status
 		}
-	}
-	if _, _, present := provider.CredentialValue(w.baseGetenv, providerID); present {
-		status.Present, status.From = true, "env"
 	}
 	return status
 }

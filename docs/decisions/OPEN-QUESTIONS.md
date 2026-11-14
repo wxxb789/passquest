@@ -1208,3 +1208,58 @@ Entry format:
 - Default taken: (C) of Q-0010-06 — the coach panel shows the one aggregated line with its action, and
   Settings shows the per-provider table.
 - Revisit when: a learner reports the aggregated line as unclear.
+
+### Q-0011-10 — What identity does the desktop app use, and is an overridden data directory a separate instance?
+- Status: decided(default taken)
+- Context: MyGo keys the single-instance lock, the WebView profile and the credential-store service on the
+  app's name and identifier. The smoke gate launches the app on temporary data directories while a learner's
+  own window may be open.
+- Options considered: (A) one fixed identity; (B) fixed identity, and an overridden data directory
+  (`PASSQUEST_DESKTOP_DATA`) gets a name suffixed with a hash of that directory; (C) a per-launch identity.
+- Default taken: (B). Name "Pass Quest", identifier `com.github.wxxb789.passquest` (also the default
+  credential service). A second launch on the same data directory focuses the first window; a launch on a
+  different overridden directory is an independent instance, so a smoke run can never hand its commands to the
+  learner's window.
+- Revisit when: goal 0013 signs and packages the app, which may fix the identifier for good.
+
+### Q-0011-11 — How long does quit wait for in-flight work?
+- Status: decided(default taken)
+- Context: a coach call, a model test, an Anki push or a brief may be running when the window closes; clause 10
+  forbids a surviving Node host.
+- Options considered: (A) quit immediately and kill children; (B) refuse new calls, wait a bounded time, then
+  end every host; (C) wait indefinitely.
+- Default taken: (B) — up to 5 s for in-flight bound calls, then every spawned host is ended: a job object on
+  Windows, SIGTERM then SIGKILL to the host (and the durable host's process group) on macOS and Linux. The
+  durable host pauses on SIGTERM, so a brief interrupted by quit resumes later.
+- Revisit when: a learner loses a reply by closing the window too early.
+
+### Q-0011-12 — Which consent unlocks imported text in an Anki note?
+- Status: decided(default taken)
+- Context: notes accept only a global (all-provider) consent event for an imported source (Q-0007-08); the coach
+  panel records per-provider consent. A one-click grant from the Anki preview would silently widen scope.
+- Options considered: (A) a per-destination consent for notes; (B) keep the global rule and make the window name
+  the scope and ask for confirmation; (C) remove the action from the Anki screen.
+- Default taken: (B). The dialog lists every provider the grant covers, says future providers are included, and
+  defaults focus to Cancel; per-provider grants stay in the coach panel and Settings.
+- Revisit when: a later goal introduces consent scoped to notes.
+
+### Q-0011-13 — Does `passquest next` spend an assessment unit during an active run?
+- Status: open
+- Context: the window's Today spends no `next` presentation while a run is active, because Today renders on
+  every navigation and its recommendation can name a pending run item, which would then be reported as
+  contaminated. The CLI's `next` still records its presentation during a run (pre-existing behaviour, unchanged
+  here because CLI output is protocol), though a learner has to type it.
+- Options considered: (A) leave the CLI as is; (B) make `next` spend nothing during a run; (C) refuse `next`
+  during a run as `tutor`/`skill`/`find` are refused.
+- Default taken: (A) for this goal; no CLI behaviour changed.
+- Revisit when: the owner decides; (C) matches the existing assessment guard best.
+
+### Q-0011-14 — Console or GUI subsystem for the Windows desktop binary?
+- Status: open
+- Context: a `go build` binary is a console program, so launching it from Explorer also opens a console window;
+  linking with `-H windowsgui` hides it but drops the stdout of the CLI branch (`passquest-desktop report …`)
+  that the durable host relies on.
+- Options considered: (A) console binary in 0011; (B) GUI binary plus a separate console CLI shipped beside it;
+  (C) GUI binary that attaches to a parent console when one exists.
+- Default taken: (A) for goal 0011, which ships no installer.
+- Revisit when: goal 0013 packages the app.

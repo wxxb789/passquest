@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -43,10 +44,14 @@ type storage struct {
 
 // resolveStorage picks the data directory (EnvData, else the app's per-user
 // directory from userData) and the database (EnvDB, else DatabaseFile in the
-// data directory), creating the data directory.
+// data directory), creating the data directory 0700. The app-owned default
+// directory is tightened to 0700 on POSIX even when it already exists, because
+// MyGo creates it 0755 (Q-0002-02: the default database lives in a 0700
+// directory).
 func resolveStorage(getenv func(string) string, userData func() (string, error)) (storage, error) {
 	dir := strings.TrimSpace(getenv(EnvData))
-	if dir == "" {
+	appOwned := dir == ""
+	if appOwned {
 		var err error
 		if dir, err = userData(); err != nil {
 			return storage{}, err
@@ -61,6 +66,11 @@ func resolveStorage(getenv func(string) string, userData func() (string, error))
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return storage{}, err
+	}
+	if appOwned && runtime.GOOS != "windows" {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return storage{}, err
+		}
 	}
 	db := strings.TrimSpace(getenv(EnvDB))
 	if db == "" {

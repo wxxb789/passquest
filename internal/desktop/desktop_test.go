@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,8 +24,9 @@ func envOf(values map[string]string) func(string) string {
 }
 
 func TestResolveStorage(t *testing.T) {
-	userDir := t.TempDir()
-	userData := func() (string, error) { return userDir, nil }
+	userDir := filepath.Join(t.TempDir(), "Pass Quest")
+	// MyGo's PathUserData creates the directory 0755 before resolveStorage runs.
+	userData := func() (string, error) { return userDir, os.MkdirAll(userDir, 0o755) }
 
 	got, err := resolveStorage(envOf(nil), userData)
 	if err != nil {
@@ -31,6 +34,11 @@ func TestResolveStorage(t *testing.T) {
 	}
 	if got.DataDir != userDir || got.Database != filepath.Join(userDir, DatabaseFile) {
 		t.Fatalf("default storage = %+v", got)
+	}
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(userDir); err != nil || info.Mode().Perm() != 0o700 {
+			t.Fatalf("app-owned data directory mode = %v (%v), want 0700", info.Mode().Perm(), err)
+		}
 	}
 
 	override := filepath.Join(t.TempDir(), "nested", "data")
@@ -46,6 +54,8 @@ func TestResolveStorage(t *testing.T) {
 	}
 	if info, err := os.Stat(override); err != nil || !info.IsDir() {
 		t.Fatalf("data directory not created: %v", err)
+	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Fatalf("created data directory mode = %v, want 0700", info.Mode().Perm())
 	}
 
 	db := filepath.Join(t.TempDir(), "elsewhere.sqlite")
@@ -360,6 +370,96 @@ func TestSmokeHook(t *testing.T) {
 	h.run(func(context.Context, string) (any, error) { return 1, nil })
 	if !h.writeFailed.Load() {
 		t.Fatal("an unwritable result was not reported")
+	}
+}
+
+// fakePage loads when told to and evaluates with eval.
+type fakePage struct {
+	mu     sync.Mutex
+	loaded []func()
+	eval   func(ctx context.Context, code string) (any, error)
+}
+
+func (p *fakePage) OnDidFinishLoad(fn func()) func() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.loaded = append(p.loaded, fn)
+	return func() {}
+}
+
+func (p *fakePage) EvalContext(ctx context.Context, code string) (any, error) {
+	return p.eval(ctx, code)
+}
+
+func (p *fakePage) load() {
+	p.mu.Lock()
+	fns := append([]func(){}, p.loaded...)
+	p.mu.Unlock()
+	for _, fn := range fns {
+		fn()
+	}
+}
+
+// A page that loads late gets its whole script budget: the load watchdog stops
+// at load and never races the running script, and the result is written once.
+func TestSmokeLoadWatchdogDoesNotRaceALateScript(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "scenario.js")
+	if err := os.WriteFile(script, []byte("return 'done'"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := filepath.Join(dir, "result.json")
+	var quits atomic.Int32
+	h, err := smokeFromEnv(envOf(map[string]string{EnvScript: script, EnvResult: result}), func() { quits.Add(1) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The script needs longer than what is left of the load watchdog after
+	// the late load, but less than its own timeout.
+	h.timeout = 400 * time.Millisecond
+	h.loadTimeout = 200 * time.Millisecond
+	page := &fakePage{eval: func(ctx context.Context, _ string) (any, error) {
+		select {
+		case <-time.After(250 * time.Millisecond):
+			return "done", nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}}
+	h.attach(page)
+	time.Sleep(100 * time.Millisecond)
+	page.load()
+	page.load() // a second load event starts nothing
+	for deadline := time.Now().Add(5 * time.Second); quits.Load() == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("no result")
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	if doc := readResult(t, result); doc["ok"] != true || doc["value"] != "done" || quits.Load() != 1 {
+		t.Fatalf("late-loaded script result = %v, quits %d", doc, quits.Load())
+	}
+
+	// A page that never loads still gets a failure result from the watchdog.
+	never, err := smokeFromEnv(envOf(map[string]string{EnvScript: script, EnvResult: filepath.Join(dir, "never.json")}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	never.loadTimeout = 20 * time.Millisecond
+	never.attach(&fakePage{eval: func(context.Context, string) (any, error) {
+		t.Error("evaluated without a load")
+		return nil, nil
+	}})
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(filepath.Join(dir, "never.json")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no watchdog result")
+		}
+	}
+	if doc := readResult(t, filepath.Join(dir, "never.json")); doc["ok"] != false || !strings.Contains(fmt.Sprint(doc["error"]), "did not finish loading") {
+		t.Fatalf("never-loaded result = %v", doc)
 	}
 }
 

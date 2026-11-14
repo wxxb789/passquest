@@ -19,8 +19,12 @@ import (
 // CLI command and displays it: the presentation is recorded now (Q-0011-08),
 // spending the unit exactly as `show` does, and a guided tactic walkthrough is
 // recorded as delivered. The returned token binds the answer to this display;
-// any other open item is closed as abandoned.
+// any other open item is closed as abandoned. An empty kind is sample
+// practice.
 func (w *Workspace) StartPractice(request studio.PracticeRequest) (studio.PracticeItem, error) {
+	if request.Kind == "" {
+		request.Kind = studio.PracticeSample
+	}
 	var item studio.PracticeItem
 	err := w.withStore(func(st *store.Store) error {
 		if err := w.guard(st, "practice"); err != nil {
@@ -236,7 +240,7 @@ func storedFeedback(st *store.Store, p store.PracticePresentation) (studio.Feedb
 // selectPractice applies the CLI selection rule for one request kind.
 func (w *Workspace) selectPractice(st *store.Store, request studio.PracticeRequest) (practiceSelection, error) {
 	switch request.Kind {
-	case studio.PracticeSample, "":
+	case studio.PracticeSample:
 		records, err := st.List()
 		if err != nil {
 			return practiceSelection{}, err
@@ -411,9 +415,10 @@ func hintTactic(selection practiceSelection) (tactic.Tactic, bool) {
 }
 
 // practiceItemOf renders a displayed selection. The condition is the one the
-// recorded attempt will carry, using the evidence report's rules: assisted
-// when help was shown, a revisit after an earlier attempt, a re-exposure for
-// skill practice on a seen passage, otherwise independent.
+// recorded attempt will carry under adaptive.Classify, the rule Today's skill
+// evidence counts by: assisted when help was shown, a revisit after an earlier
+// attempt, a re-exposure on a passage that already has an attempt (whatever
+// the practice kind), otherwise independent.
 func practiceItemOf(st *store.Store, selection practiceSelection, p store.PracticePresentation) (studio.PracticeItem, error) {
 	records, err := st.List()
 	if err != nil {
@@ -460,17 +465,22 @@ func practiceItemOf(st *store.Store, selection practiceSelection, p store.Practi
 		item.SkillID = selection.Skill.Skill.ID
 	}
 	guided := selection.Tactic != nil && selection.Tactic.Stage == stageGuided
-	switch {
-	case guided:
-		item.Condition, item.ConditionReason = studio.ConditionAssisted,
-			"the guided walkthrough is shown with this question, so the attempt is assisted"
-	case exposed || item.HintOpened:
+	assistance := attempt.AssistanceIndependent
+	if guided || exposed || item.HintOpened {
+		assistance = attempt.AssistanceAssisted
+	}
+	firstOnContent := passageExposureBefore(selection.Content.ID, records, 0) == passageFresh
+	switch adaptive.Classify(prior+1, assistance, firstOnContent) {
+	case adaptive.ClassAssisted:
 		item.Condition, item.ConditionReason = studio.ConditionAssisted,
 			"a tactic walkthrough was shown for this question, so the attempt is assisted"
-	case prior > 0:
+		if guided {
+			item.ConditionReason = "the guided walkthrough is shown with this question, so the attempt is assisted"
+		}
+	case adaptive.ClassRevisit:
 		item.Condition, item.ConditionReason = studio.ConditionRevisit,
 			fmt.Sprintf("this question has %d earlier attempt(s); the answer and evidence were already shown", prior)
-	case selection.Skill != nil && passageExposureBefore(selection.Content.ID, records, 0) == passageSeen:
+	case adaptive.ClassReExposure:
 		item.Condition, item.ConditionReason = studio.ConditionReExposure,
 			"this passage was already seen, so the attempt is repeat exposure, not independent transfer"
 	default:
@@ -534,12 +544,13 @@ func feedbackOf(selection practiceSelection, record attempt.Attempt, p store.Pra
 		fb.Evidence = studio.EvidenceSpan{Text: explained.Evidence, Located: true, Paragraph: span.Paragraph, Start: span.Start, End: span.End}
 	}
 	fb.Tactic = tacticLinkOf(record, question)
-	switch {
-	case record.Assistance == attempt.AssistanceAssisted:
+	firstOnContent := passageExposureBefore(record.ContentID, records, record.ID) == passageFresh
+	switch adaptive.Classify(record.AttemptNumber, record.Assistance, firstOnContent) {
+	case adaptive.ClassAssisted:
 		fb.Condition = studio.ConditionAssisted
-	case record.AttemptNumber > 1:
+	case adaptive.ClassRevisit:
 		fb.Condition = studio.ConditionRevisit
-	case p.SkillID != "" && passageExposureBefore(record.ContentID, records, record.ID) == passageSeen:
+	case adaptive.ClassReExposure:
 		fb.Condition = studio.ConditionReExposure
 	default:
 		fb.Condition = studio.ConditionIndependent

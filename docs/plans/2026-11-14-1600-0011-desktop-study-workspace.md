@@ -24,7 +24,7 @@ store core design §7 requires; no second module is added for that.
 cmd/passquest-desktop/        main: CLI args → cli.Run (same exit codes); no args → desktop.Run
 internal/studio/              exported DTO types shared by the Go service and the bound API (pure data)
 internal/cli/workspace*.go    exported Workspace facade reusing the CLI's unexported orchestration
-internal/store/               additions only: learner settings, open presentation lookup, run list (schema 16)
+internal/store/               additions only: learner settings, open presentation lookup, run list (schema 17)
 internal/desktop/             MyGo app: bound service, data path, secret-backed getenv, lifecycle, smoke hook
 internal/desktop/web/         go:embed root: committed index.html + generated dist/ (gitignored)
 desktop/web/                  TypeScript + CSS source (tsconfig of its own), bundled by Bun
@@ -60,13 +60,17 @@ error codes (`invalid_input`, `assessment_active`, `pool_floor`, `no_credential`
 The desktop binds one service struct (`desktop.Study`) that forwards to the workspace; MyGo generates the
 TypeScript client and types from it.
 
-## Store additions (schema 16, additive, migration-tested)
+## Store additions (schema 17, additive, migration-tested)
+
+Schema 16 was taken by goal 0014 (deck read-back); this goal adds migration 17.
 
 - `learner_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)` for `exam_date` and
   `daily_minutes` only.
 - `practice_presentations(token TEXT PRIMARY KEY, kind, content_id, question_id, source_id, tactic_id,
-  skill_id, stage, presented_at, closed_at NULL)` — the open item for resume; `closed_at` set when an attempt
-  is appended or the learner abandons the item. Attempts stay append-only and unchanged.
+  skill_id, stage, content_version, presented_at, hint_opened_at, closed_at, closed_reason, attempt_id)` — the
+  open item for resume (`closed_at` is empty while open, as in the assessment tables); it is closed in the same
+  transaction that appends the attempt, which makes a repeated answer return the stored feedback. Attempts stay
+  append-only and unchanged.
 - read queries: latest open presentation; list assessment runs.
 
 ## Frontend

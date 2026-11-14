@@ -11,8 +11,9 @@ import { go, subAction, type Location } from './core/router';
 import { data, idle, ui, valueOf, type Loadable, type Route } from './core/state';
 import { savePref } from './core/prefs';
 import { toast } from './core/toast';
-import { activeRun, assessState, practiceItem, today } from './screens';
+import { activeRun, assessState, practiceItem } from './screens';
 import { previewHTML, ankiStatus, pushSummary } from './views/anki';
+import { opensItem } from './views/today';
 import { optionSpan } from './views/feedback';
 import { qcolHTML } from './views/practice';
 import { tickClocks } from './core/clock';
@@ -51,13 +52,27 @@ async function load<T>(fn: (a: StudyApi) => Promise<T>, set: (l: Loadable<T>) =>
   return r.ok ? r.value : undefined;
 }
 
+/**
+ * True, with a toast, while another write is in flight: the new write is refused (never queued, so
+ * nothing runs later against a screen that has moved on). Callers that recover from a failed write
+ * check this first, so a refused call is never mistaken for a core failure.
+ */
+function busyRefused(): boolean {
+  if (!ui.busy) return false;
+  toast(T('上一步还在进行，稍后再试', 'Still working on the previous step — try again in a moment'));
+  return true;
+}
+
 /** A write: one at a time, re-rendering around it. Failures surface as a toast. */
 async function write<T>(fn: (a: StudyApi) => Promise<T>): Promise<T | undefined> {
-  if (ui.busy) return undefined;
+  if (busyRefused()) return undefined;
+  const route = ui.route;
   ui.busy = true;
   render(true, false);
   const r = await call(fn);
   ui.busy = false;
+  // The learner moved on while the call ran: the room now shown was rendered busy (disabled).
+  if (ui.route !== route) render(true, false);
   if (!r.ok) {
     toast(failureLine(r.error));
     render(true, false);
@@ -250,7 +265,34 @@ export function watchBrief(): void {
 
 // ---------------------------------------------------------------- routing
 
+/**
+ * Leaving a run this window drives, by any path: the window stops driving it, so coming back goes
+ * through the resume card and `assess resume` (one resume counted), whichever way the learner left.
+ */
+function detachRun(): void {
+  const pos = assessState()?.item?.position;
+  ui.assess.attached = false;
+  ui.assess.leaveTo = null;
+  toast(
+    pos !== undefined
+      ? T(`测评停在第 ${pos + 1} 题 · 计时继续`, `Run left at item ${pos + 1} · the clock keeps running`)
+      : T('已离开测评 · 计时继续', 'Left the run · the clock keeps running'),
+  );
+}
+
+/** Route changes asked for inside the window: an attached run is left through the leave dialog. */
+function navigate(route: Route): void {
+  if (ui.route === 'assess' && route !== 'assess' && ui.assess.attached && activeRun()) {
+    ui.assess.leaveTo = route;
+    openLayer('leave');
+    return;
+  }
+  go(route);
+}
+
 export function onRoute(loc: Location): void {
+  // Any other way out (a link, history) still detaches, exactly as the leave dialog would.
+  if (ui.route === 'assess' && loc.route !== 'assess' && ui.assess.attached) detachRun();
   ui.route = loc.route;
   ui.sub = loc.sub;
   const idx = SESSION_IDX[loc.route];
@@ -351,6 +393,7 @@ function requestFor(v: string | undefined): PracticeRequest {
 }
 
 async function startPractice(req: PracticeRequest): Promise<void> {
+  if (busyRefused()) return;
   closeLayer();
   const item = await write((a) => a.startPractice(req));
   if (!item) return;
@@ -367,10 +410,11 @@ function resetCoach(): void {
 
 async function answered(fbPromise: (a: StudyApi, token: string) => Promise<Feedback>): Promise<void> {
   const item = practiceItem();
-  if (!item) return;
+  // A second submit while the first is in flight is refused here, before the failure path below.
+  if (!item || busyRefused()) return;
   const fb = await write((a) => fbPromise(a, item.token));
   if (!fb) {
-    // A closed or changed item cannot be answered: show the core's current state instead.
+    // The core refused: a closed or changed item cannot be answered, so show its current state.
     data.practice = idle();
     void loadPracticeResume();
     return;
@@ -524,7 +568,7 @@ export const ACT: Record<string, Act> = {
   },
   'hint-yes'() {
     const item = practiceItem();
-    if (!item) return;
+    if (!item || busyRefused()) return;
     ui.layer = null;
     renderLayer(false);
     void write((a) => a.openHint(item.token)).then((next) => {
@@ -602,6 +646,19 @@ export const ACT: Record<string, Act> = {
     const k = consentArgs(v);
     if (k) void writeOk((a) => a.revokeConsent(k[0], k[1])).then((ok) => ok && consentChanged());
   },
+  'consent-all-ask'(v) {
+    if (!v) return;
+    ui.anki.consentSource = v;
+    // The dialog lists the registry's providers the grant reaches; the load re-renders it in place.
+    if (data.models.status === 'idle' || data.models.status === 'error') void loadModels();
+    openLayer('consent-all');
+  },
+  'consent-all'(v) {
+    if (!v || v !== ui.anki.consentSource) return;
+    closeLayer();
+    ui.anki.consentSource = null;
+    void writeOk((a) => a.grantConsent(v, '')).then((ok) => ok && consentChanged());
+  },
   'consent-form'() {
     const form = $<HTMLFormElement>('#consentform');
     if (!form) return;
@@ -635,7 +692,7 @@ export const ACT: Record<string, Act> = {
   },
   'run-resume'() {
     const run = activeRun();
-    if (!run) return;
+    if (!run || busyRefused()) return;
     void write((a) => a.resumeAssessment(run.id)).then((s) => {
       if (!s) {
         void refreshAssess();
@@ -671,18 +728,14 @@ export const ACT: Record<string, Act> = {
     void answerItem('skip');
   },
   leave() {
+    ui.assess.leaveTo = null;
     openLayer('leave');
   },
   'leave-yes'() {
-    const pos = assessState()?.item?.position;
+    const to = ui.assess.leaveTo ?? 'today';
     ui.layer = null;
-    ui.assess.attached = false;
-    go('today');
-    toast(
-      pos !== undefined
-        ? T(`测评停在第 ${pos + 1} 题 · 计时继续`, `Run left at item ${pos + 1} · the clock keeps running`)
-        : T('已离开测评 · 计时继续', 'Left the run · the clock keeps running'),
-    );
+    detachRun();
+    go(to);
   },
 
   // report
@@ -827,7 +880,7 @@ export const ACT: Record<string, Act> = {
 async function answerItem(label: string): Promise<void> {
   const s = assessState();
   const item = s?.item;
-  if (!s?.run || !item) return;
+  if (!s?.run || !item || busyRefused()) return;
   const res = await write((a) => a.answerAssessmentItem(item.run_id, item.position, label));
   if (!res) {
     void refreshAssess();
@@ -859,11 +912,14 @@ export const keyActions = {
   keys: () => ACT.keys!(undefined, document.body),
   theme: () => ACT.theme!(undefined, document.body),
   lang: () => ACT.lang!(undefined, document.body),
-  go: (r: Route) => go(r),
+  go: navigate,
   todayStart: () => {
-    const t = today();
-    if (t?.active_run) go('assess');
-    else ACT.start!(t?.recommendation ? 'recommended' : 'sample', document.body);
+    // Only a Today that loaded and is on screen has a start action; loading or failed → nothing.
+    if (data.today.status !== 'ready') return;
+    const t = data.today.value;
+    if (t.active_run) go('assess');
+    else if (!t.recommendation) ACT.start!('sample', document.body);
+    else if (opensItem(t.recommendation)) ACT.start!('recommended', document.body);
   },
   practicePick: (key: string) => {
     const item = practiceItem();

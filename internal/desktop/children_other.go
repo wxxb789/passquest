@@ -2,8 +2,7 @@
 
 package desktop
 
-// killChildrenOnExit has no portable equivalent here: on Linux and macOS a
-// Node host still running after the bounded quit drain ends at its own
-// timeout (the tutor and Anki hosts' request timeouts, the durable host's
-// run timeout), and the durable host keeps its work resumable.
+// killChildrenOnExit has no job-object equivalent here. On Linux and macOS
+// hostproc.Shutdown, called when the window's run loop returns, ends every
+// Node host the app started and the process group of a durable host.
 func killChildrenOnExit() error { return nil }

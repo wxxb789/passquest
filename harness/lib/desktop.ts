@@ -5,7 +5,7 @@
  * reused WebView2 profile does exactly that), so a missing deadline would stall
  * the gate until the CI job limit.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -47,7 +47,27 @@ export async function buildDesktop(ctx: GateContext, outBinary: string): Promise
   if (build.code !== 0) {
     return { ok: false, failures: [`go build ${DESKTOP_PACKAGE} failed (exit ${build.code})`, ...outputLines(build)] };
   }
+  copyAgentHosts(ctx.root, path.dirname(outBinary));
   return { ok: true, failures: [] };
+}
+
+/**
+ * Copies agent/*.mjs to <binary dir>/agent, the `<exe dir>/agent` candidate the
+ * Go host resolvers check, so a binary started from anywhere finds its Node
+ * hosts. node_modules is not copied: the dependency-free tutor, Anki and search
+ * hosts run from the copy; the durable host still needs its packages
+ * (repository checkout or PASSQUEST_AGENT_HOST) until packaging (goal 0013).
+ * A tree without agent/ (a self-test fixture) has nothing to copy.
+ */
+export function copyAgentHosts(root: string, binaryDir: string): string[] {
+  const source = resolve(root, "agent");
+  const target = path.join(binaryDir, "agent");
+  if (path.resolve(target) === path.resolve(source) || !existsSync(source)) return [];
+  rmSync(target, { recursive: true, force: true });
+  mkdirSync(target, { recursive: true });
+  const hosts = readdirSync(source).filter((name) => name.endsWith(".mjs"));
+  for (const name of hosts) copyFileSync(path.join(source, name), path.join(target, name));
+  return hosts;
 }
 
 export interface LaunchOptions {

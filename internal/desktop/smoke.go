@@ -31,10 +31,59 @@ type smokeHook struct {
 	readErr    error
 	resultPath string
 	timeout    time.Duration
+	// loadTimeout is how long the page may take to load before the hook
+	// gives up on it.
+	loadTimeout time.Duration
 
+	mu          sync.Mutex
+	phase       int
 	once        sync.Once
 	writeFailed atomic.Bool
 	quit        func()
+}
+
+// Smoke phases. The hook waits for the page; exactly one of the first load
+// (the script runs) and the load watchdog (a failure is written) moves it on.
+const (
+	smokeWaiting = iota
+	smokeRunning
+	smokeDone
+)
+
+// smokePage is the part of a MyGo page the smoke hook drives.
+type smokePage interface {
+	OnDidFinishLoad(fn func()) (off func())
+	EvalContext(ctx context.Context, code string) (any, error)
+}
+
+// attach drives the hook from page. The first load stops the load watchdog
+// and runs the script under its own timeout; a watchdog that fires first
+// writes the failure. The transition out of waiting happens once, under h.mu,
+// so a late load can never race the watchdog and the result is written once.
+func (h *smokeHook) attach(page smokePage) {
+	watchdog := time.AfterFunc(h.loadTimeout, func() {
+		if h.advance(smokeWaiting, smokeDone) {
+			h.finish(nil, fmt.Errorf("the page did not finish loading within %s", h.loadTimeout))
+		}
+	})
+	page.OnDidFinishLoad(func() {
+		if h.advance(smokeWaiting, smokeRunning) {
+			watchdog.Stop()
+			go h.run(page.EvalContext)
+		}
+	})
+}
+
+// advance moves the hook from one phase to another and reports whether it
+// was in from.
+func (h *smokeHook) advance(from, to int) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.phase != from {
+		return false
+	}
+	h.phase = to
+	return true
 }
 
 // smokeFromEnv returns the hook when EnvScript is set. A script that cannot
@@ -48,7 +97,7 @@ func smokeFromEnv(getenv func(string) string, quit func()) (*smokeHook, error) {
 	if resultPath == "" {
 		return nil, fmt.Errorf("%s is set but %s is not", EnvScript, EnvResult)
 	}
-	h := &smokeHook{resultPath: resultPath, timeout: smokeTimeout, quit: quit}
+	h := &smokeHook{resultPath: resultPath, timeout: smokeTimeout, loadTimeout: smokeTimeout + smokeLoadGrace, quit: quit}
 	script, err := os.ReadFile(scriptPath)
 	if err != nil {
 		h.readErr = fmt.Errorf("read script: %w", err)

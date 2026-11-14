@@ -3,7 +3,7 @@
 // contamination, and per-item annotations that were withheld during the run.
 import type { AssessmentComparison, AssessmentReport, AssessmentReportItem, AssessmentRun, StudioError } from '../api/types';
 import { html, type Html } from '../core/html';
-import { errorTitle, monthDay, RSTATE, sec, shortDate, skillName, T, type ItemOutcome } from '../core/i18n';
+import { contaminationLabel, errorLabel, errorTitle, monthDay, RSTATE, sec, shortDate, skillName, T, type ItemOutcome } from '../core/i18n';
 import { ui, type Loadable } from '../core/state';
 import { sat } from '../components/satellite';
 import { kv, sheetWrap } from '../components/sheet';
@@ -47,7 +47,7 @@ function refusal(e: StudioError, base: AssessmentRun, other: AssessmentRun | und
   const why = d ? T(`${dimName(d)}不同，不做比较。`, `The ${dimName(d)} differs, so the runs are not compared.`) : '';
   // The localized sentence states the core's refusal; without one, the core's own message is shown.
   const detail = why && ui.lang === 'zh' ? '' : html`<span class="muted" lang="en"> ${e.message}</span>`;
-  return html`<div class="refuse" data-testid="compare-refused" data-code="${e.code}" title="${e.message}">${ic('stop', 's')} <b>${errorTitle(e.code)}</b> ${why}${detail}</div>`;
+  return html`<div class="refuse" data-testid="compare-refused" data-code="${e.code}" title="${e.message}">${ic('stop', 's')} <b>${errorLabel(e.code)}</b> ${why}${detail}</div>`;
 }
 
 function comparison(r: AssessmentReport, others: AssessmentRun[], compareWith: number | null, cmp: Loadable<AssessmentComparison>): Html {
@@ -157,7 +157,9 @@ function annSheet(r: AssessmentReport, n: number | null): Html {
         st[1],
       )}</span></h3>
       <p class="fine">${T(`用时 ${sec(it.elapsed_ms)} 秒`, `${sec(it.elapsed_ms)} s`)}${it.after_resume ? T(' · 恢复后作答', ' · answered after a resume') : ''}${
-        it.contamination_reasons?.length ? T(' · 已排除：', ' · excluded: ') + it.contamination_reasons.join(', ') : ''
+        it.contamination_reasons?.length
+          ? html`${T(' · 已排除：', ' · excluded: ')}${it.contamination_reasons.map((c, i) => html`${i ? T('、', ', ') : ''}${contaminationLabel(c)}`)}`
+          : ''
       }</p>
       ${
         a.withheld || !a.available

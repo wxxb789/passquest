@@ -332,7 +332,10 @@ func TestWorkspaceHintMakesTacticAttemptAssisted(t *testing.T) {
 	}
 	independent, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeTactic, Tactic: "not-except-polarity"})
 	mustNoErr(t, err)
-	if independent.Stage != stageIndependent || independent.Condition != studio.ConditionIndependent || !independent.CanCount || !independent.HintAvailable || independent.Hint != nil {
+	// The independent stage reuses the guided passage, so under Q-0004-01 (B)
+	// it is passage re-exposure: recorded unassisted, but never counted as
+	// independent transfer in Today's evidence.
+	if independent.Stage != stageIndependent || independent.Condition != studio.ConditionReExposure || independent.CanCount || !independent.HintAvailable || independent.Hint != nil {
 		t.Fatalf("independent item = %+v", independent)
 	}
 	hinted, err := f.w.OpenHint(independent.Token)
@@ -505,19 +508,44 @@ func TestWorkspaceAssessmentStepFlow(t *testing.T) {
 
 func TestWorkspaceAssessmentWindowElapseAbandons(t *testing.T) {
 	f := newWSFixture(t, nil)
-	seedAssessmentSource(t, f.db, 20, 1)
+	seedAssessmentSource(t, f.db, 22, 1)
 	state, err := f.w.StartAssessment(2, 1)
 	mustNoErr(t, err)
 	f.clock.Advance(2 * time.Minute)
-	// The reconcile every assess call runs first records the expired window,
-	// exactly as a CLI assess command does, so the late answer is refused.
-	if _, err := f.w.AnswerAssessmentItem(state.Run.ID, 0, "A"); studioCode(err) != "run_state" {
-		t.Fatalf("late answer after window = %v", err)
+	// As in the CLI loop (abandonElapsedAssessment), an answer after the run
+	// window records the item on screen as timed out at its deadline and only
+	// then abandons the run, so the item stays in the timeout count.
+	late, err := f.w.AnswerAssessmentItem(state.Run.ID, 0, "A")
+	mustNoErr(t, err)
+	if late.Outcome != assess.StatusAbandoned || late.State.State != studio.AssessmentAbandonedState || late.State.Message == "" {
+		t.Fatalf("late answer after window = %+v", late)
+	}
+	if again, err := f.w.AnswerAssessmentItem(state.Run.ID, 0, "A"); studioCode(err) != "run_state" {
+		t.Fatalf("answer on an abandoned run = %+v %v", again, err)
 	}
 	report, err := f.w.AssessmentReport(state.Run.ID)
 	mustNoErr(t, err)
 	if report.Run.Status != assess.StatusAbandoned || report.Run.AbandonedReason != "window_elapsed" {
 		t.Fatalf("expired run = %+v", report.Run)
+	}
+	if report.Counts.TimedOut != 1 || report.Counts.Finalized != 1 {
+		t.Fatalf("on-screen item not timed out: %+v", report.Counts)
+	}
+
+	// Any other call that finds the window elapsed (here the frontend reading
+	// state) applies the same rule before the store-level reconcile.
+	other, err := f.w.StartAssessment(2, 1)
+	mustNoErr(t, err)
+	f.clock.Advance(2 * time.Minute)
+	read, err := f.w.AssessmentState()
+	mustNoErr(t, err)
+	if read.State != studio.AssessmentNoneState {
+		t.Fatalf("state after window = %+v", read)
+	}
+	otherReport, err := f.w.AssessmentReport(other.Run.ID)
+	mustNoErr(t, err)
+	if otherReport.Counts.TimedOut != 1 || otherReport.Run.AbandonedReason != "window_elapsed" {
+		t.Fatalf("second run = %+v / %+v", otherReport.Counts, otherReport.Run)
 	}
 	if _, err := f.w.ResumeAssessment(state.Run.ID); studioCode(err) != "run_abandoned" {
 		t.Fatalf("resume abandoned = %v", err)
@@ -744,5 +772,105 @@ func TestWorkspaceBriefWithoutRun(t *testing.T) {
 	mustNoErr(t, err)
 	if status.Found || status.State != "none" {
 		t.Fatalf("brief status = %+v", status)
+	}
+}
+
+func TestWorkspaceTodaySpendsNothingDuringAnActiveRun(t *testing.T) {
+	f := newWSFixture(t, nil)
+	seedAssessmentSource(t, f.db, 22, 1)
+	state, err := f.w.StartAssessment(2, 30)
+	mustNoErr(t, err)
+	// The window renders Today on boot and on leaving a run; that must not
+	// spend a unit that could be a pending item of the active run.
+	today, err := f.w.Today()
+	mustNoErr(t, err)
+	if today.ActiveRun == nil || today.ActiveRun.ID != state.Run.ID {
+		t.Fatalf("active run = %+v", today.ActiveRun)
+	}
+	if spent := countSpends(t, f.db, assess.SurfaceNext); spent != 0 {
+		t.Fatalf("Today spent %d next presentation(s) during an active run", spent)
+	}
+	_, err = f.w.AbandonAssessment(state.Run.ID)
+	mustNoErr(t, err)
+	_, err = f.w.Today()
+	mustNoErr(t, err)
+	if spent := countSpends(t, f.db, assess.SurfaceNext); spent != 1 {
+		t.Fatalf("Today after the run spent %d next presentation(s), want 1", spent)
+	}
+}
+
+func TestWorkspaceCanCountAgreesWithAdaptiveEvidence(t *testing.T) {
+	f := newWSFixture(t, nil)
+	first, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q1"})
+	mustNoErr(t, err)
+	_, err = f.w.Answer(first.Token, "B")
+	mustNoErr(t, err)
+	// q2 shares q1's passage. Today's evidence (adaptive.Classify) counts only
+	// the first attempt on a content id, so sample practice must not promise
+	// independent evidence either.
+	second, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
+	mustNoErr(t, err)
+	if second.ContentID != first.ContentID {
+		t.Fatalf("fixture: q2 content %q differs from q1 %q", second.ContentID, first.ContentID)
+	}
+	if second.CanCount || second.Condition != studio.ConditionReExposure {
+		t.Fatalf("seen-passage sample item = %s can_count=%v", second.Condition, second.CanCount)
+	}
+	feedback, err := f.w.Answer(second.Token, "A")
+	mustNoErr(t, err)
+	if feedback.Counted || feedback.Condition != studio.ConditionReExposure {
+		t.Fatalf("seen-passage feedback = %s counted=%v", feedback.Condition, feedback.Counted)
+	}
+}
+
+func TestWorkspaceEmptyPracticeKindIsSample(t *testing.T) {
+	f := newWSFixture(t, nil)
+	item, err := f.w.StartPractice(studio.PracticeRequest{})
+	mustNoErr(t, err)
+	if item.Kind != studio.PracticeSample || item.Passage.Label.Kind != studio.SourceSample {
+		t.Fatalf("empty-kind item = %s / %s", item.Kind, item.Passage.Label.Kind)
+	}
+}
+
+// Q-0011-03: an environment variable still wins over a stored key, including
+// the custom provider's legacy fallback that provider.CredentialValue reads.
+func TestWorkspaceLegacyCustomCredentialBeatsStoredKey(t *testing.T) {
+	creds := newMemCredentials()
+	const storeKey = "store-key-0123456789-not-real"
+	const legacyKey = "legacy-key-9876543210-not-real"
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.Credentials = creds })
+	_, err := f.w.SetCredential(provider.CustomProvider, storeKey)
+	mustNoErr(t, err)
+	primary := provider.CredentialEnvFor(provider.CustomProvider)
+	if _, value, _ := provider.CredentialValue(f.w.getenv, provider.CustomProvider); value != storeKey {
+		t.Fatalf("stored custom key not used without an environment key: %q", value)
+	}
+
+	f.env[provider.LegacyCredentialEnv] = legacyKey
+	if name, value, _ := provider.CredentialValue(f.w.getenv, provider.CustomProvider); value != legacyKey || name != provider.LegacyCredentialEnv {
+		t.Fatalf("legacy environment key lost to the store: %s=%q", name, value)
+	}
+	if containsExact(f.w.environ(), primary+"="+storeKey) {
+		t.Fatal("stored custom key shadows the legacy variable in the child environment")
+	}
+	if status := f.w.credentialStatus(provider.CustomProvider); !status.Present || status.From != "env" {
+		t.Fatalf("custom status with legacy variable = %+v", status)
+	}
+}
+
+func TestLoopbackEndpointParsesTheHost(t *testing.T) {
+	for endpoint, want := range map[string]bool{
+		"http://127.0.0.1:11434/v1/chat/completions":        true,
+		"http://localhost:8080/v1/chat/completions":         true,
+		"http://[::1]:8080/v1/chat/completions":             true,
+		"https://127.0.0.1.attacker.example/v1":             false,
+		"https://127.evil.example/v1/chat/completions":      false,
+		"https://localhost.attacker.example/v1":             false,
+		"https://api.example.com/v1/chat/completions":       false,
+		"https://user@127.0.0.1.example:443/v1/completions": false,
+	} {
+		if got := loopbackEndpoint(endpoint); got != want {
+			t.Errorf("loopbackEndpoint(%q) = %v, want %v", endpoint, got, want)
+		}
 	}
 }

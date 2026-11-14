@@ -18,7 +18,7 @@ import (
 var todayLimitations = []string{
 	"Skill evidence is inferred from the local attempts shown; it is not an exam score, pass estimate or readiness claim.",
 	"The exam blueprint, time limit and pass threshold are unknown; the exam date and daily minutes are your own display-only settings.",
-	"The recommendation spends the unseen-assessment unit it names, once, as `passquest next` does (Q-0009-06).",
+	"The recommendation spends the unseen-assessment unit it names, once, as `passquest next` does (Q-0009-06); while an assessment run is active nothing is spent, so opening Today cannot expose a pending run item.",
 }
 
 // Today assembles the opening view. It reads the same evidence `next`
@@ -73,8 +73,17 @@ func (w *Workspace) todayRecommendation(st *store.Store, today *studio.Today, no
 		return err
 	}
 	result := adaptive.Recommend(input)
-	if err := recordNextPresentation(st, result.Recommendation, now); err != nil {
+	// The window renders Today on boot and on leaving a run without the
+	// learner asking for `next`; a spend then could name a pending item of the
+	// active run and mark it prior exposure. No spend while a run is active.
+	_, running, err := st.ActiveAssessmentRun()
+	if err != nil {
 		return err
+	}
+	if !running {
+		if err := recordNextPresentation(st, result.Recommendation, now); err != nil {
+			return err
+		}
 	}
 	shell, err := detectShell(w.getenv, runtime.GOOS)
 	if err != nil {

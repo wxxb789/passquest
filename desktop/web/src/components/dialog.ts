@@ -95,6 +95,37 @@ export function leaveDialog(position: number | null): Html {
   );
 }
 
+/**
+ * The Anki preview's consent: note text accepts only the global decision (`tutor consent` without a
+ * provider), and that same event reaches every model provider without its own decision. The dialog
+ * names that scope and the registry's providers before anything is recorded; Cancel is the default.
+ */
+export function consentAllDialog(source: string, providers: readonly string[] | 'loading' | 'unreadable'): Html {
+  const list =
+    providers === 'loading'
+      ? html`<span class="muted">${T('正在读取模型注册表……', 'Reading the model registry…')}</span>`
+      : providers === 'unreadable'
+        ? html`<span class="muted">${T('模型注册表读取失败，见设置', 'the model registry could not be read; see Settings')}</span>`
+        : providers.length
+        ? html`<b>${providers.join(T('、', ', '))}</b>`
+        : html`<span class="muted">${T('注册表里还没有提供方', 'no provider is registered yet')}</span>`;
+  return dlg(
+    'warm',
+    'shield',
+    'dca',
+    T(`授权 ${source} 的原文用于笔记和所有提供方？`, `Allow the text of ${source} for notes and every provider?`),
+    html`<p>${T(
+      `Anki 笔记只接受对所有去向生效的授权。这一次授权同样允许每个没有单独决定的模型提供方在导师调用里收到 ${source} 的原文，包括以后添加的提供方：`,
+      `Anki notes accept only a grant that covers every destination. The same grant lets every model provider without its own decision receive the text of ${source} in coach calls, including providers added later: `,
+    )}${list}</p>
+      <p class="fine" data-testid="consent-scope" data-scope="all-providers">${T(
+        '只想给某一个提供方授权，请在反馈页的导师面板或设置里按提供方授权（那样不会解锁笔记）。可随时在设置里撤回。',
+        'To allow one provider only, grant per provider from the coach panel or Settings (that does not unlock notes). Revocable in Settings at any time.',
+      )}</p>`,
+    html`<button class="btn quiet" data-act="consent-all" data-v="${source}" data-testid="consent-all-confirm">${T('授权：笔记与所有提供方', 'Allow for notes and every provider')}</button><button class="btn primary" data-act="close" autofocus>${T('取消', 'Cancel')}</button>`,
+  );
+}
+
 /** Optional, display-only learner settings (Q-0011-06). */
 export function learnerDialog(s: PrepStatus): Html {
   return dlg(

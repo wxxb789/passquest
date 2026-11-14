@@ -3,7 +3,7 @@
 // where the presence comes from); keys entered here go to the OS credential store.
 import type { Budget, Consent, CredentialStatus, Model, ModelList, ModelProvider, Services } from '../api/types';
 import { html, type Html } from '../core/html';
-import { capabilityOf, shortStamp, T } from '../core/i18n';
+import { capabilityOf, failureTypeLabel, shortStamp, T } from '../core/i18n';
 import type { Loadable } from '../core/state';
 import { sat, type Flag } from '../components/satellite';
 import { sheetWrap } from '../components/sheet';
@@ -64,7 +64,7 @@ function modelLine(p: ModelProvider, m: Model, busy: boolean): Html {
         return html`<span class="cg ${s[3]}"><code>${k.id}</code><span>${T(s[0], s[1])}${k.checked_at ? html` · <span class="num">${shortStamp(k.checked_at)}</span>` : ''}</span></span>`;
       })}
       <span class="acts-row">${m.active ? '' : html`<button class="btn ghost sm" data-act="model-use" data-v="${p.id}/${m.id}" ${d}>${T('设为使用', 'Use this model')}</button>`}<button class="btn ghost sm" data-act="model-test" data-v="${p.id}/${m.id}" ${d}>${T('测试（1 次外部调用）', 'Test (1 external call)')}</button>${
-        tc?.failure_type ? html`<span class="fine" style="margin:0">${T('上次失败', 'last failure')}: ${tc.failure_type}</span>` : ''
+        tc?.failure_type ? html`<span class="fine" style="margin:0">${T('上次失败', 'last failure')}: ${failureTypeLabel(tc.failure_type)}</span>` : ''
       }</span></div>`;
 }
 

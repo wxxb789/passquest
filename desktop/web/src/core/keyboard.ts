@@ -72,6 +72,11 @@ export function installKeyboard(a: KeyActions): void {
       return;
     }
     const onControl = tag === 'a' || tag === 'button';
+    // An answer option is a button, but Enter on it means submit / confirm (the key cap says so),
+    // never the browser's own activation, which would only pick the same option again.
+    const onOption = !!target?.closest('.opt');
+    const submitKey = k === 'Enter' && (!onControl || onOption);
+    if (submitKey && onOption) e.preventDefault();
     switch (ui.route) {
       case 'today':
         if (k === 'Enter' && !onControl) a.todayStart();
@@ -79,7 +84,7 @@ export function installKeyboard(a: KeyActions): void {
       case 'practice':
         if (up === 'M' && a.practiceMark()) break;
         if (k.length === 1 && a.practicePick(k)) break;
-        if (k === 'Enter' && tag !== 'button') a.practiceSubmit();
+        if (submitKey) a.practiceSubmit();
         else if (up === 'H') a.practiceHint();
         else if (up === 'S') a.practiceSkip();
         break;
@@ -94,7 +99,7 @@ export function installKeyboard(a: KeyActions): void {
         break;
       case 'assess':
         if (k.length === 1 && a.assessPick(k)) break;
-        if (k === 'Enter' && !onControl) a.assessConfirm();
+        if (submitKey) a.assessConfirm();
         else if (up === 'S') a.assessSkip();
         break;
       case 'anki':

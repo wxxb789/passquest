@@ -168,36 +168,48 @@ func newPresentationToken() string {
 
 // getenv is the environment the workspace hands to every provider, tutor,
 // Anki and agent path: a non-empty variable wins; a provider credential
-// variable that is unset falls back to the credential store.
+// variable that is unset falls back to the credential store only when the
+// environment supplies no credential for that provider at all.
 func (w *Workspace) getenv(name string) string {
 	if value := w.baseGetenv(name); strings.TrimSpace(value) != "" {
 		return value
 	}
-	if providerID, ok := w.credentialEnvs[name]; ok && w.credentials != nil {
-		if value, found, err := w.credentials.Get(providerID); err == nil && found && strings.TrimSpace(value) != "" {
-			return value
-		}
+	if value, ok := w.storedCredential(name); ok {
+		return value
 	}
 	return w.baseGetenv(name)
 }
 
 // environ is the child-process environment: the process environment plus a
-// stored credential for every provider variable the environment leaves unset,
+// stored credential for every provider the environment leaves without one,
 // because the durable host reads its key from its own environment.
 func (w *Workspace) environ() []string {
 	env := w.baseEnviron()
-	if w.credentials == nil {
-		return env
-	}
-	for name, providerID := range w.credentialEnvs {
-		if strings.TrimSpace(w.baseGetenv(name)) != "" {
-			continue
-		}
-		if value, found, err := w.credentials.Get(providerID); err == nil && found && strings.TrimSpace(value) != "" {
+	for name := range w.credentialEnvs {
+		if value, ok := w.storedCredential(name); ok {
 			env = append(env, name+"="+value)
 		}
 	}
 	return env
+}
+
+// storedCredential is the stored key for the provider whose credential
+// variable is name. The environment wins (Q-0011-03): any variable
+// provider.CredentialValue reads for that provider, including the custom
+// provider's legacy fallback, suppresses the stored key.
+func (w *Workspace) storedCredential(name string) (string, bool) {
+	providerID, ok := w.credentialEnvs[name]
+	if !ok || w.credentials == nil {
+		return "", false
+	}
+	if _, _, present := provider.CredentialValue(w.baseGetenv, providerID); present {
+		return "", false
+	}
+	value, found, err := w.credentials.Get(providerID)
+	if err != nil || !found || strings.TrimSpace(value) == "" {
+		return "", false
+	}
+	return value, true
 }
 
 func (w *Workspace) open() (*store.Store, error) {

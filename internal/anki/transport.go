@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/wxxb789/passquest/internal/hostproc"
 )
 
 const maxHostResponseBytes = 4 << 20
@@ -143,7 +145,7 @@ func (t HostTransport) Call(ctx context.Context, req HostRequest) (HostResponse,
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = 2 * time.Second
 
-	runErr := cmd.Run()
+	runErr := hostproc.Run(cmd)
 	if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
 		return HostResponse{}, fmt.Errorf("anki: host did not finish within %d ms", req.TimeoutMS+5000)
 	}

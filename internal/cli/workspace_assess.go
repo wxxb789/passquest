@@ -15,11 +15,46 @@ import (
 // subcommand runs first, so an expired window is recorded before it is read.
 func (w *Workspace) withAssessmentStore(fn func(st *store.Store) error) error {
 	return w.withStore(func(st *store.Store) error {
-		if _, err := st.ReconcileAssessmentRuns(w.opt.Now()); err != nil {
+		if _, err := w.reconcileAssessments(st, func(string, int) {}); err != nil {
 			return err
 		}
 		return fn(st)
 	})
+}
+
+// reconcileAssessments closes an active run whose whole window has passed
+// under the CLI loop's rule (abandonElapsedAssessment): the item on screen is
+// recorded as a timed-out attempt at its deadline before the run is abandoned,
+// so it stays in the timeout count and the score denominator. The store-level
+// reconcile then catches anything else. It reports the active run it closed,
+// or zero.
+func (w *Workspace) reconcileAssessments(st *store.Store, notify assessmentNotice) (int64, error) {
+	var closed int64
+	active, found, err := st.ActiveAssessmentRun()
+	if err != nil {
+		return 0, err
+	}
+	if found && !w.opt.Now().Before(active.DeadlineAt) {
+		run, items, err := st.AssessmentRunItems(active.ID)
+		if err != nil {
+			return 0, err
+		}
+		var onScreen assess.Item
+		for _, item := range items {
+			if item.State == assess.StatePresented {
+				onScreen = item
+				break
+			}
+		}
+		if err := abandonElapsedAssessment(w.opt, st, run, onScreen, notify); err != nil {
+			return 0, err
+		}
+		closed = run.ID
+	}
+	if _, err := st.ReconcileAssessmentRuns(w.opt.Now()); err != nil {
+		return 0, err
+	}
+	return closed, nil
 }
 
 // AssessmentPool reports the unseen-assessment pool as `assess pool` does.
@@ -119,10 +154,22 @@ func (w *Workspace) PresentAssessmentItem(runID int64) (studio.AssessmentState, 
 // never says whether the answer was correct.
 func (w *Workspace) AnswerAssessmentItem(runID int64, position int, label string) (studio.AssessmentAnswer, error) {
 	var answer studio.AssessmentAnswer
-	err := w.withAssessmentStore(func(st *store.Store) error {
+	err := w.withStore(func(st *store.Store) error {
+		var notices []string
+		closed, err := w.reconcileAssessments(st, collectNotices(&notices))
+		if err != nil {
+			return err
+		}
 		run, items, err := st.AssessmentRunItems(runID)
 		if err != nil {
 			return err
+		}
+		if closed == runID {
+			answer.Position = position
+			answer.Outcome = assess.StatusAbandoned
+			answer.State = assessmentStateOf(w.opt.Now(), run, items, nil, notices)
+			answer.State.Message = abandonedRunMessage(run)
+			return nil
 		}
 		if run.Status != assess.StatusActive {
 			return refuse("run_state", "assessment run %d is %s", run.ID, run.Status)
@@ -138,7 +185,6 @@ func (w *Workspace) AnswerAssessmentItem(runID int64, position int, label string
 		if !ok {
 			return refuse("content_unavailable", "item %d of run %d is no longer available; present the run again", position+1, run.ID)
 		}
-		var notices []string
 		outcome, parseErr, err := submitAssessmentAnswer(w.opt, st, run, item, question, label, collectNotices(&notices))
 		if err != nil {
 			return err

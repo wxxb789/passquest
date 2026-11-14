@@ -5,9 +5,7 @@
 package desktop
 
 import (
-	"context"
 	"embed"
-	"fmt"
 	"io/fs"
 	"log"
 	"os"
@@ -16,6 +14,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/wxxb789/passquest/internal/cli"
+	"github.com/wxxb789/passquest/internal/hostproc"
 )
 
 // web is the page: the committed index.html and not-built.html plus the
@@ -26,6 +25,10 @@ var web embed.FS
 
 // quitGrace bounds how long a quit waits for calls still running.
 const quitGrace = 5 * time.Second
+
+// hostStopGrace bounds how long a host asked to stop at exit may take before
+// it is killed.
+const hostStopGrace = 3 * time.Second
 
 // BriefChanged is broadcast when a brief resumed in the background starts and
 // when its host returns.
@@ -71,8 +74,8 @@ func Run() int {
 		win.Show()
 		win.Focus()
 	})
-	// A quit waits, bounded, for calls still running; the job object then
-	// ends any host they left (Windows).
+	// A quit waits, bounded, for calls still running; hostproc.Shutdown
+	// then ends any host they left.
 	drained := false
 	mygo.App.OnWillQuit(func(e *mygo.QuitEvent) {
 		if drained || e.SessionEnding || !study.busy() {
@@ -103,12 +106,17 @@ func Run() int {
 			StateKey:  "main",
 		})
 		if smoke != nil {
-			attachSmoke(smoke, win)
+			smoke.attach(win.Page())
 		}
 	})
 
-	if err := mygo.App.Run(); err != nil {
-		log.Printf("passquest-desktop: %v", err)
+	runErr := mygo.App.Run()
+	// No Node host the window started may outlive it (goal 0011 clause 10):
+	// stop the ones a call left running, then kill what remains. This is the
+	// only mechanism on Linux and macOS; Windows also has the job object.
+	hostproc.Shutdown(hostStopGrace)
+	if runErr != nil {
+		log.Printf("passquest-desktop: %v", runErr)
 		return 1
 	}
 	if smoke != nil && smoke.writeFailed.Load() {
@@ -147,23 +155,4 @@ func startURL(frontend fs.FS) string {
 		return "/not-built.html"
 	}
 	return "/"
-}
-
-// attachSmoke runs the smoke script once the page has loaded, and gives up
-// with a failure result when it never does.
-func attachSmoke(h *smokeHook, win *mygo.Window) {
-	watchdog := time.AfterFunc(h.timeout+smokeLoadGrace, func() {
-		h.finish(nil, fmt.Errorf("the page did not finish loading within %s", h.timeout+smokeLoadGrace))
-	})
-	started := false
-	win.Page().OnDidFinishLoad(func() {
-		if started {
-			return
-		}
-		started = true
-		go func() {
-			h.run(func(ctx context.Context, script string) (any, error) { return win.Page().EvalContext(ctx, script) })
-			watchdog.Stop()
-		}()
-	})
 }

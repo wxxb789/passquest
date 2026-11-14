@@ -1,14 +1,14 @@
 // Empty, unknown and error states in the stage's own visual language: one centered object card.
 import type { StudioError } from '../api/types';
 import { html, type Html, type Interp } from '../core/html';
-import { errorTitle, T } from '../core/i18n';
+import { errorLabel, T } from '../core/i18n';
 import type { Loadable } from '../core/state';
 import { ic, type IconName } from '../icons';
 
 export interface StateCard {
   ico: IconName;
   eyebrow: string;
-  title: string;
+  title: Interp;
   body: Interp;
   /** The typed error code, kept as a data attribute for tests; never shown as text. */
   code?: string | null;
@@ -43,14 +43,14 @@ export function errorCard(e: StudioError, retry: Interp = ''): Html {
     return stateCard({
       ico: 'server',
       eyebrow: T('未连接', 'Not connected'),
-      title: errorTitle(e.code),
+      title: errorLabel(e.code),
       body: T('窗口没有拿到本地学习服务，因此不显示任何数字。', 'This window has no local study service, so it shows no numbers at all.'),
       code: e.code,
     });
   return stateCard({
     ico: 'info',
     eyebrow: T('无法完成', 'Could not complete'),
-    title: errorTitle(e.code),
+    title: errorLabel(e.code),
     body: errorDetail(e),
     code: e.code,
     action: retry,

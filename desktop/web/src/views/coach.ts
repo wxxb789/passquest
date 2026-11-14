@@ -4,7 +4,7 @@
 // and never change the grade.
 import type { CoachMode, CoachPreview, CoachReply, ModelList, StudioError } from '../api/types';
 import { html, type Html } from '../core/html';
-import { COACH_MODES, errorTitle, T } from '../core/i18n';
+import { COACH_MODES, errorLabel, T } from '../core/i18n';
 import type { Loadable } from '../core/state';
 import { callStrip } from '../components/callstrip';
 import { ic } from '../icons';
@@ -49,7 +49,7 @@ function settingsLink(code: string): Html {
   return html``;
 }
 
-function held(code: string, title: string, message: string, action: string | null | undefined): Html {
+function held(code: string, title: Html | string, message: string, action: string | null | undefined): Html {
   return html`<div class="pending held" data-testid="coach-failure" data-code="${code}"><b>${title}</b> <span class="muted" lang="en">${message}</span>${
     action ? html`<div class="muted">${T('下一步：', 'Next: ')}${action}</div>` : ''
   }
@@ -65,16 +65,16 @@ function body(d: CoachData, mode: CoachMode, lang: string, unusable: string | nu
         }<span class="sep"></span><span class="num nw">${(reply.latency_ms / 1000).toFixed(1)} s</span></div></div>`;
   if (reply?.state === 'failed' && reply.failure)
     return held(reply.failure.code, T('这次调用没有成功，评分不变。', 'The call did not succeed; the grade is unchanged.'), reply.failure.message, reply.failure.action);
-  if (d.failure) return held(d.failure.code, errorTitle(d.failure.code), d.failure.message, d.failure.action);
+  if (d.failure) return held(d.failure.code, errorLabel(d.failure.code), d.failure.message, d.failure.action);
   const p = d.preview;
   if (p.status === 'error') {
     // With no usable provider the aggregated line above already says what to do.
     if (unusable && (p.error.code === 'not_configured' || p.error.code === 'no_credential')) return html``;
-    return held(p.error.code, errorTitle(p.error.code), p.error.message, p.error.action);
+    return held(p.error.code, errorLabel(p.error.code), p.error.message, p.error.action);
   }
   if (p.status !== 'ready') return html`<div class="pending">${T('正在准备发送预览……', 'Preparing the send preview…')}</div>`;
   const v = p.value;
-  if (!v.provider) return held('not_configured', errorTitle('not_configured'), T('先在设置里选择一个模型。', 'Choose a model in Settings first.'), null);
+  if (!v.provider) return held('not_configured', errorLabel('not_configured'), T('先在设置里选择一个模型。', 'Choose a model in Settings first.'), null);
   const where = v.external ? T('外部调用', 'external call') : T('本地调用', 'local call');
   return html`<div class="pending">${T(
     `这一模式还没有回复。发送将进行一次${where}，消耗 1 次预算`,

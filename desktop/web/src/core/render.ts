@@ -87,11 +87,53 @@ export function renderOrb(): void {
   moreCue();
 }
 
+/** A control inside the layer that can be found again after a rebuild: a form field by name, else focusKey. */
+function layerKey(el: Element | null): string | null {
+  if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) {
+    if (el.form?.id && el.name) return `#${CSS.escape(el.form.id)} [name="${CSS.escape(el.name)}"]`;
+  }
+  return focusKey(el);
+}
+
+type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+const fieldsOf = (root: ParentNode): Field[] => Array.from(root.querySelectorAll<Field>('form[id] input[name], form[id] select[name], form[id] textarea[name]'));
+
+/**
+ * Rebuilding the layer that is already shown (a background load, a language switch) keeps what the
+ * learner typed or chose in its forms, the caret, and the focus; only the surrounding markup is new.
+ * Opening a different layer starts clean.
+ */
+function rebuildLayer(layer: HTMLElement, markup: string): void {
+  const same = !!ui.layer && layer.dataset.layer === ui.layer;
+  const active = same && layer.contains(document.activeElement) ? document.activeElement : null;
+  const focus = layerKey(active);
+  const caret = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] : null;
+  const kept = same ? fieldsOf(layer).map((f) => ({ key: layerKey(f), value: f.value, checked: f instanceof HTMLInputElement ? f.checked : false })) : [];
+  layer.innerHTML = markup;
+  layer.dataset.layer = ui.layer ?? '';
+  for (const k of kept) {
+    const f = k.key ? layer.querySelector<Field>(k.key) : null;
+    if (!f) continue;
+    if (f instanceof HTMLInputElement && (f.type === 'checkbox' || f.type === 'radio')) f.checked = k.checked;
+    else f.value = k.value;
+  }
+  if (!focus) return;
+  const el = layer.querySelector<HTMLElement>(focus);
+  el?.focus({ preventScroll: true });
+  if (caret && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+    try {
+      el.setSelectionRange(caret[0], caret[1]);
+    } catch {
+      // input types without a caret (number, date) refuse a selection range
+    }
+  }
+}
+
 export function renderLayer(anim: boolean): void {
   const layer = $('#layer');
   if (!screens || !layer) return;
   layer.classList.toggle('enter-layer', anim);
-  layer.innerHTML = screens.layer().value;
+  rebuildLayer(layer, screens.layer().value);
   const modal = isModal(ui.layer);
   for (const sel of ['.app', '#dock', '#orb']) {
     const el = $(sel);

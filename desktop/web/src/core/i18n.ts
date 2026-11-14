@@ -1,8 +1,10 @@
 // Inline bilingual strings: T(zh, en), as in the prototype. Exam content stays English in both
 // languages (rendered with lang="en"); only the chrome switches. Core codes (states, actions,
-// conditions, error codes) are mapped here; a code without a mapping shows as "unknown", never raw.
+// conditions, error codes, failure types, contamination reasons) are mapped here; a code without a
+// mapping shows a generic localized label first, with the code itself only as a muted mono detail.
 import type { CoachMode, SkillEvidence } from '../api/types';
 import type { IconName } from '../icons';
+import { html, type Html } from './html';
 import { ui, type Route } from './state';
 
 export type Pair = readonly [zh: string, en: string];
@@ -223,42 +225,148 @@ export function sourceKindName(kind: string): string {
   }
 }
 
-/** Titles for the typed errors a learner can meet; the core's message follows as the detail. */
-export function errorTitle(code: string): string {
-  const titles: Record<string, Pair> = {
-    assessment_active: ['测评进行中', 'An assessment is in progress'],
-    pool_floor: ['未见测评池不足', 'The unseen pool is too small'],
-    no_credential: ['没有密钥', 'No credential'],
-    consent_required: ['需要先授权', 'Consent is needed first'],
-    node_unavailable: ['本地 Node 不可用', 'Node is not available'],
-    budget_exhausted: ['今日预算已用完', "Today's budget is spent"],
-    capability_unverified: ['模型还没有验证', 'The model is not verified'],
-    not_configured: ['还没有选择模型', 'No model chosen yet'],
-    hint_unavailable: ['这道题没有提示', 'No hint for this item'],
-    unknown_token: ['这道题已不在屏幕上', 'This item is no longer on screen'],
-    presentation_closed: ['这道题已经关闭', 'This item was closed'],
-    content_changed: ['题目内容已更新', 'The item changed'],
-    invalid_answer: ['答案无效', 'Invalid answer'],
-    invalid_input: ['输入无效', 'Invalid input'],
-    invalid_mark: ['标记无效', 'Invalid mark'],
-    low_value: ['这一题不值得做成卡片', 'Not worth a card'],
-    content_unavailable: ['内容已不可用', 'The content is no longer available'],
-    incomparable_runs: ['两轮不可比较', 'The runs are not comparable'],
-    run_abandoned: ['这轮测评已放弃', 'The run was abandoned'],
-    run_state: ['测评状态已变化', 'The run changed state'],
-    no_recommendation: ['没有可打开的练习', 'No practice to open'],
-    unknown_skill: ['技能未注册', 'Unknown skill'],
-    unknown_tactic: ['战术未注册', 'Unknown tactic'],
-    credential_store_unavailable: ['系统密钥库不可用', 'No OS credential store'],
-    credential_store_error: ['密钥库拒绝了密钥', 'The credential store refused the key'],
-    brief_running: ['简报正在运行', 'The brief is already running'],
-    quitting: ['正在退出', 'Closing'],
-    starting: ['正在启动', 'Starting'],
-    not_connected: ['学习服务未连接', 'The study service is not connected'],
-  };
-  const t = titles[code];
-  return t ? TP(t) : T('没有完成', 'Could not complete');
+/**
+ * A code the window has no wording for: a generic localized label first, then the code itself in a
+ * muted mono span (secondary, for a bug report), never as the primary text.
+ */
+function coded(map: Record<string, Pair>, code: string, generic: Pair): Html {
+  const known = map[code];
+  return known ? html`${TP(known)}` : html`${TP(generic)} <span class="id" data-unmapped-code="${code}">${code}</span>`;
 }
+
+/** Plain-text form of `coded`, for toasts and popover lines (no markup there). */
+function codedText(map: Record<string, Pair>, code: string, generic: Pair): string {
+  const known = map[code];
+  return known ? TP(known) : `${TP(generic)} (${code})`;
+}
+
+/**
+ * Titles for the typed errors a learner can meet (studio errors, refusals, coach and push failures);
+ * the core's message follows as the detail.
+ */
+const ERRORS: Record<string, Pair> = {
+  assessment_active: ['测评进行中', 'An assessment is in progress'],
+  pool_floor: ['未见测评池不足', 'The unseen pool is too small'],
+  pool_short: ['未见测评池不足', 'The unseen pool is too small'],
+  run_active: ['已有一轮测评在进行', 'A run is already active'],
+  run_completed: ['这轮测评已结束', 'The run is finished'],
+  no_credential: ['没有密钥', 'No credential'],
+  missing_credential: ['没有密钥', 'No credential'],
+  consent_required: ['需要先授权', 'Consent is needed first'],
+  consent_scope_differs: ['授权范围不同', 'The consent scope differs'],
+  node_unavailable: ['本地 Node 不可用', 'Node is not available'],
+  agent_unavailable: ['本地 Agent 宿主不可用', 'The local agent host is not available'],
+  budget_exhausted: ['今日预算已用完', "Today's budget is spent"],
+  budget_exceeded: ['今日预算已用完', "Today's budget is spent"],
+  total_limit: ['已到今日调用上限', "Today's call limit is reached"],
+  per_provider_limit: ['已到这个提供方的调用上限', "This provider's call limit is reached"],
+  capability_unverified: ['模型还没有验证', 'The model is not verified'],
+  capability_not_declared: ['模型没有声明这项能力', 'The model does not declare this capability'],
+  not_configured: ['还没有选择模型', 'No model chosen yet'],
+  no_provider: ['没有可用的提供方', 'No usable provider'],
+  no_eligible_provider: ['没有可用的提供方', 'No usable provider'],
+  unknown_provider: ['提供方不在注册表里', 'The provider is not in the registry'],
+  unknown_model: ['模型不在注册表里', 'The model is not in the registry'],
+  invalid_registry: ['模型注册表无效', 'The model registry is invalid'],
+  unauthorized: ['密钥被拒绝', 'The key was rejected'],
+  auth_failed: ['密钥被拒绝', 'The key was rejected'],
+  rate_limited: ['调用过于频繁', 'Rate-limited by the provider'],
+  model_missing: ['提供方不认识这个模型', 'The provider does not know this model'],
+  endpoint_unreachable: ['连不上端点', 'The endpoint could not be reached'],
+  unreachable: ['连不上端点', 'The endpoint could not be reached'],
+  network_error: ['网络错误', 'Network error'],
+  timeout: ['调用超时', 'The call timed out'],
+  invalid_response: ['回复无法读取', 'The response could not be read'],
+  provider_error: ['提供方报告了错误', 'The provider reported an error'],
+  config_error: ['配置无法使用', 'The configuration could not be used'],
+  invalid_config: ['配置无效', 'Invalid configuration'],
+  invalid_endpoint: ['端点地址无效', 'Invalid endpoint'],
+  host_error: ['本地宿主出错', 'The local host failed'],
+  host_protocol: ['本地宿主的回复无法读取', 'The local host reply could not be read'],
+  storage_error: ['本地存储出错', 'Local storage failed'],
+  search_unavailable: ['搜索不可用', 'Search is not available'],
+  nothing_to_find: ['没有可查找的内容', 'Nothing to search for'],
+  candidate_limit: ['候选结果超出上限', 'Too many candidates'],
+  candidate_limit_exceeded: ['候选结果超出上限', 'Too many candidates'],
+  hint_unavailable: ['这道题没有提示', 'No hint for this item'],
+  guided_required: ['先完成引导阶段', 'The guided stage comes first'],
+  not_practiceable: ['这份内容还不能练习', 'This content cannot be practised yet'],
+  unknown_token: ['这道题已不在屏幕上', 'This item is no longer on screen'],
+  presentation_closed: ['这道题已经关闭', 'This item was closed'],
+  content_changed: ['题目内容已更新', 'The item changed'],
+  content_unavailable: ['内容已不可用', 'The content is no longer available'],
+  invalid_answer: ['答案无效', 'Invalid answer'],
+  invalid_input: ['输入无效', 'Invalid input'],
+  invalid_request: ['请求无效', 'Invalid request'],
+  invalid_mode: ['导师模式无效', 'Invalid coach mode'],
+  invalid_model: ['模型无效', 'Invalid model'],
+  invalid_mark: ['标记无效', 'Invalid mark'],
+  invalid_tactic: ['战术无效', 'Invalid tactic'],
+  invalid_front: ['正面内容无效', 'Invalid front'],
+  invalid_back: ['背面内容无效', 'Invalid back'],
+  invalid_annotations: ['注释无效', 'Invalid annotations'],
+  low_value: ['这一题不值得做成卡片', 'Not worth a card'],
+  license_not_open: ['来源的许可不允许', 'The source licence does not allow this'],
+  no_draft: ['没有打开的草稿', 'No open draft'],
+  draft_closed: ['草稿已关闭', 'The draft is closed'],
+  no_notes: ['还没有笔记', 'No notes yet'],
+  no_attempts: ['还没有作答记录', 'No attempts yet'],
+  not_found: ['没有找到', 'Not found'],
+  unknown_attempt: ['作答记录不存在', 'Unknown attempt'],
+  unknown_question: ['题目不存在', 'Unknown question'],
+  unknown_draft: ['草稿不存在', 'Unknown draft'],
+  unknown_note: ['笔记不存在', 'Unknown note'],
+  unknown_source: ['来源不存在', 'Unknown source'],
+  unknown_call: ['调用记录不存在', 'Unknown call'],
+  anki_unavailable: ['Anki 连接不上', 'Anki is not reachable'],
+  anki_error: ['Anki 报告了错误', 'Anki reported an error'],
+  anki_failed: ['推送到 Anki 失败', 'The push to Anki failed'],
+  anki_protocol: ['Anki 的回复无法读取', 'The Anki reply could not be read'],
+  anki_conflict: ['你在 Anki 里改过这张卡', 'The card was edited in Anki'],
+  anki_deck_mismatch: ['卡片进了别的牌组', 'The card landed in another deck'],
+  incomparable_runs: ['两轮不可比较', 'The runs are not comparable'],
+  run_abandoned: ['这轮测评已放弃', 'The run was abandoned'],
+  run_state: ['测评状态已变化', 'The run changed state'],
+  no_recommendation: ['没有可打开的练习', 'No practice to open'],
+  unknown_skill: ['技能未注册', 'Unknown skill'],
+  unknown_tactic: ['战术未注册', 'Unknown tactic'],
+  credential_store_unavailable: ['系统密钥库不可用', 'No OS credential store'],
+  credential_store_error: ['密钥库拒绝了密钥', 'The credential store refused the key'],
+  brief_running: ['简报正在运行', 'The brief is already running'],
+  internal_error: ['内部错误', 'Internal error'],
+  quitting: ['正在退出', 'Closing'],
+  starting: ['正在启动', 'Starting'],
+  not_connected: ['学习服务未连接', 'The study service is not connected'],
+};
+const ERROR_GENERIC: Pair = ['没有完成', 'Could not complete'];
+
+/** An error title as markup: the mapped title, or the generic title with the code muted beside it. */
+export const errorLabel = (code: string): Html => coded(ERRORS, code, ERROR_GENERIC);
+/** An error title as plain text (toasts, popover lines). */
+export const errorTitle = (code: string): string => codedText(ERRORS, code, ERROR_GENERIC);
+
+/** Typed provider failures (`provider.Failure*`), as recorded by a model test. */
+const FAILURE_TYPES: Record<string, Pair> = {
+  no_credential: ['没有密钥', 'no credential'],
+  unauthorized: ['密钥被拒绝', 'key rejected'],
+  rate_limited: ['调用过于频繁', 'rate-limited'],
+  model_missing: ['提供方不认识这个模型', 'model unknown to the provider'],
+  endpoint_unreachable: ['连不上端点', 'endpoint unreachable'],
+  invalid_response: ['回复无法读取', 'unreadable response'],
+  provider_error: ['提供方报告了错误', 'provider error'],
+  agent_unavailable: ['本地 Agent 宿主不可用', 'local agent host unavailable'],
+  config_error: ['配置无法使用', 'configuration error'],
+};
+export const failureTypeLabel = (type: string): Html => coded(FAILURE_TYPES, type, ['未知失败', 'unknown failure']);
+
+/** Why a report item is excluded from the score (`assess.Reason*`), in the contamination sheet's words. */
+const CONTAMINATION: Record<string, Pair> = {
+  prior_exposure: ['运行前见过', 'seen before the run'],
+  repeated_variant: ['重复变体', 'repeated variant'],
+  hints_during_run: ['运行中看过提示', 'hint during the run'],
+  resumed_after_window: ['超过时限后恢复', 'resumed after the window'],
+};
+export const contaminationLabel = (reason: string): Html => coded(CONTAMINATION, reason, ['其他原因', 'another reason']);
 
 /** Local date-time for a server timestamp: MM-DD HH:MM (the prototype's compact form). */
 export function shortStamp(iso: string | null | undefined): string {

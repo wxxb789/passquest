@@ -2,7 +2,7 @@
 // and layer markup that core/render.ts writes into the DOM.
 import type { AssessmentRun, AssessmentState, Today } from './api/types';
 import { coachHTML } from './views/coach';
-import { abandonDialog, credentialDialog, hintGate, keysDialog, learnerDialog, leaveDialog, startRunDialog } from './components/dialog';
+import { abandonDialog, consentAllDialog, credentialDialog, hintGate, keysDialog, learnerDialog, leaveDialog, startRunDialog } from './components/dialog';
 import { centerEvidence } from './components/passage';
 import { sheetWrap } from './components/sheet';
 import { dockHTML } from './chrome/dock';
@@ -53,7 +53,7 @@ function stage(): Html {
   const retry = retryButton('reload');
   switch (ui.route) {
     case 'today':
-      return withLoadable(data.today, vToday, retry);
+      return withLoadable(data.today, (t) => vToday(t, ui.busy), retry);
     case 'practice':
       return withLoadable(data.practice, (item) => vPractice(item, { sel: ui.practice.sel, marks: ui.practice.marks, busy: ui.busy }), retry);
     case 'feedback':
@@ -163,6 +163,12 @@ function layer(): Html {
     case 'start-run': {
       const pool = valueOf(data.assess.pool);
       return pool ? startRunDialog(pool) : html``;
+    }
+    case 'consent-all': {
+      const source = ui.anki.consentSource;
+      const m = data.models;
+      const names = m.status === 'ready' ? m.value.providers.map((p) => p.name) : m.status === 'error' ? 'unreadable' : 'loading';
+      return source ? consentAllDialog(source, names) : html``;
     }
   }
   return html``;

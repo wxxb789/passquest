@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/wxxb789/passquest/internal/hostproc"
 )
 
 // HostTransport runs the Node host as a child process and exchanges one JSON
@@ -176,7 +178,7 @@ func (t HostTransport) Call(ctx context.Context, req HostRequest) (HostResponse,
 	cmd.WaitDelay = 2 * time.Second
 
 	key := t.credentialFor(req)
-	runErr := cmd.Run()
+	runErr := hostproc.Run(cmd)
 	if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
 		return HostResponse{}, fmt.Errorf("tutor: agent host did not finish within %d ms", req.TimeoutMS+5000)
 	}

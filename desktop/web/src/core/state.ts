@@ -39,6 +39,7 @@ export type Layer =
   | 'credential'
   | 'start-run'
   | 'abandon-run'
+  | 'consent-all'
   | `sheet:${string}`;
 
 export type Loadable<T> =
@@ -78,9 +79,10 @@ export const ui = {
   feedback: { ev: null as string | null },
   /**
    * `attached`: this window is driving the active run. A run found on boot or after leaving is
-   * shown as resumable first; resuming counts one resume (`assess resume`).
+   * shown as resumable first; resuming counts one resume (`assess resume`). `leaveTo`: where the
+   * leave dialog goes when confirmed (a G-chord asked for that room); null = Today.
    */
-  assess: { sel: null as string | null, attached: false },
+  assess: { sel: null as string | null, attached: false, leaveTo: null as Route | null },
   report: { runId: null as number | null, compareWith: null as number | null, annItem: null as number | null },
   anki: {
     card: null as Theme | null,
@@ -89,6 +91,8 @@ export const ui = {
     /** Local edits of the draft's fields; null = unedited. */
     fields: null as NoteFields | null,
     dirty: false,
+    /** The source whose every-provider grant the consent dialog is asking about. */
+    consentSource: null as string | null,
   },
   settings: {
     open: null as string | null,

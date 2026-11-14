@@ -1,7 +1,7 @@
 // Today (prototype vToday + the today sheets): the one next action with its reason and evidence,
 // and quiet satellites for the other skills, the last run, the pool, Anki and the study brief.
 // Every number is the core's; what the core does not report is shown as unknown.
-import type { AssessmentRun, BriefSummary, Services, SkillEvidence, Today } from '../api/types';
+import type { AssessmentRun, BriefSummary, Recommendation, Services, SkillEvidence, Target, Today } from '../api/types';
 import { html, type Html } from '../core/html';
 import {
   actName,
@@ -60,28 +60,53 @@ function briefLine(b: BriefSummary | null): string {
   return `${briefStateName(b.state)} · ${b.step} / ${b.max_steps}`;
 }
 
-/** What the recommended action will record, as the policy's reasons state it. */
-function promise(action: string): Html {
-  if (action === 'practice_new')
-    return html`<div class="promise" data-testid="promise" data-can-count="true"><span class="glow"></span><span><b>${T('新文章 · 可以计入', 'Fresh passage · can count')}</b>${T(
-      '答题前会再次显示本题的条件',
-      'The item shows its condition again before you answer',
-    )}</span></div>`;
-  const text =
-    action === 'review'
-      ? [T('见过的题 · 不计入', 'A seen question · will not count'), T('重做不算独立迁移', 'A repeat is not independent transfer')]
-      : [T('引导讲解 · 记为有辅助', 'Guided walkthrough · recorded as assisted'), T('讲解可见的那一题不计入', 'The item shown with the walkthrough will not count')];
-  return html`<div class="promise warm" data-testid="promise" data-can-count="false"><span class="glow"></span><span><b>${text[0]}</b>${text[1]}</span></div>`;
+/**
+ * The practice target Start opens (`next`): the recommendation's target, or for a lesson its
+ * follow-up, exactly as the core's selectNextPractice swaps it. Null when nothing can be opened.
+ */
+export function openedTarget(r: Recommendation): Target | null {
+  const t = r.target.kind === 'lesson' ? r.follow_up : r.target;
+  return t && (t.kind === 'tactic' || t.kind === 'skill') ? t : null;
+}
+export const opensItem = (r: Recommendation): boolean => openedTarget(r) !== null;
+
+/**
+ * What the item Start opens will record, read from that target (not from the policy action): a
+ * guided tactic shows the walkthrough (assisted), a pinned seen question is a revisit, a skill
+ * target on fresh material can count. The item restates its condition before any answer.
+ */
+function promise(r: Recommendation): Html {
+  const t = openedTarget(r);
+  const box = (canCount: 'true' | 'false' | 'none', head: string, sub: string) =>
+    html`<div class="promise ${canCount === 'true' ? '' : 'warm'}" data-testid="promise" data-can-count="${canCount}" data-target="${t?.kind ?? 'none'}"><span class="glow"></span><span><b>${head}</b>${sub}</span></div>`;
+  if (!t)
+    return box(
+      'none',
+      T('只有讲解 · 没有可打开的题', 'A lesson only · no item to open'),
+      T(`讲解在命令行：passquest skill show ${r.skill.id}；也可以选其他练习`, `The lesson is in the CLI: passquest skill show ${r.skill.id}; or choose other practice`),
+    );
+  // The lesson itself is not shown in this window; say so instead of promising an explanation.
+  const skipped = r.target.kind === 'lesson' ? T(`讲解不在这里显示（passquest skill show ${r.skill.id}）· `, `The lesson is not shown here (passquest skill show ${r.skill.id}) · `) : '';
+  if (t.kind === 'tactic') {
+    if (t.stage === 'guided')
+      return box('false', T('引导讲解 · 记为有辅助', 'Guided walkthrough · recorded as assisted'), T('讲解可见的那一题不计入', 'The item shown with the walkthrough will not count'));
+    if (t.stage === 'independent')
+      return box('true', T('独立战术练习 · 可以计入', 'Independent tactic practice · can count'), T('答题前会再次显示本题的条件', 'The item shows its condition again before you answer'));
+    return box('false', T('条件未知', 'Unknown condition'), T('答题前会显示本题的条件', 'The item shows its condition before you answer'));
+  }
+  if (t.question_id)
+    return box('false', T('见过的题 · 不计入', 'A seen question · will not count'), skipped + T('重做不算独立迁移', 'A repeat is not independent transfer'));
+  return box('true', T('新文章 · 可以计入', 'Fresh passage · can count'), skipped + T('答题前会再次显示本题的条件', 'The item shows its condition again before you answer'));
 }
 
-function hero(t: Today): Html {
+function hero(t: Today, busy: boolean): Html {
   const r = t.recommendation;
   if (!r)
     return html`<article class="obj hero card rise" style="--i:1" aria-labelledby="hero-t" data-testid="hero">
       <div class="obj-top"><span class="eyebrow">${T('下一步', 'Next')}</span><span class="r">${ic('local', 'xs')}${T('透明策略 · 本地计算', 'Transparent policy · local')}</span></div>
       <h1 class="hero-title h-disp" id="hero-t">${T('还没有可推荐的练习', 'No practice to recommend yet')}</h1>
       <p class="reason">${T('策略需要可练习的内容。可以先做内置示例，或导入并审核一份本地资料。', 'The policy needs practice content. Start with the built-in sample, or import and review a local source.')}</p>
-      <div class="obj-foot"><span></span><span class="acts-row"><button class="btn ghost" data-act="sheet" data-v="pick">${T('选择练习…', 'Choose practice…')}</button><button class="btn primary lg" data-act="start" data-v="sample" id="start">${T('练习内置示例', 'Practice the sample')}<kbd>Enter</kbd></button></span></div>
+      <div class="obj-foot"><span></span><span class="acts-row"><button class="btn ghost" data-act="sheet" data-v="pick">${T('选择练习…', 'Choose practice…')}</button><button class="btn primary lg" data-act="start" data-v="sample" id="start" ${busy ? 'disabled' : ''}>${T('练习内置示例', 'Practice the sample')}<kbd>Enter</kbd></button></span></div>
     </article>`;
   const ev = t.skills.find((s) => s.skill.id === r.skill.id) ?? null;
   const evid = ev
@@ -108,8 +133,8 @@ function hero(t: Today): Html {
       <p class="reason" data-testid="reason">${policyReason(r.reason, ev)}</p>
       ${evid}
       <div class="obj-foot">
-        ${promise(r.action)}
-        <span class="acts-row"><button class="btn ghost" data-act="sheet" data-v="pick">${T('其他练习…', 'Other practice…')}</button><button class="btn primary lg" data-act="start" data-v="recommended" id="start">${T('开始练习', 'Start practice')}<kbd>Enter</kbd></button></span>
+        ${promise(r)}
+        <span class="acts-row"><button class="btn ghost" data-act="sheet" data-v="pick">${T('其他练习…', 'Other practice…')}</button><button class="btn primary lg" data-act="start" data-v="recommended" id="start" ${busy || !opensItem(r) ? 'disabled' : ''}>${T('开始练习', 'Start practice')}<kbd>Enter</kbd></button></span>
       </div>
     </article>`;
 }
@@ -119,7 +144,7 @@ function runLine(r: AssessmentRun): Html {
   return html`#${r.id} <small>${st} · ${T(`${r.actual_size} 题`, `${r.actual_size} items`)}</small>`;
 }
 
-export function vToday(t: Today): Html {
+export function vToday(t: Today, busy = false): Html {
   if (t.active_run)
     return stateCard({
       ico: 'assess',
@@ -149,7 +174,7 @@ export function vToday(t: Today): Html {
         3,
       )}
     </div>
-    ${hero(t)}
+    ${hero(t, busy)}
     <div class="rail r">
       ${sat(
         'pool',
@@ -251,7 +276,7 @@ function pickSheet(t: Today): Html {
     'practice',
     T('选择练习', 'Choose practice'),
     T('打开一道题就会记录它的展示时间', 'Opening an item records when it was shown'),
-    html`${t.recommendation ? html`<div class="svc"><span class="state-dot ok"></span><span>${T('策略推荐', 'The recommendation')} · ${skillName(t.recommendation.skill.id, t.recommendation.skill.title)}</span><span class="st"><button class="btn primary sm" data-act="start" data-v="recommended">${T('开始', 'Start')}</button></span></div>` : ''}
+    html`${t.recommendation && opensItem(t.recommendation) ? html`<div class="svc"><span class="state-dot ok"></span><span>${T('策略推荐', 'The recommendation')} · ${skillName(t.recommendation.skill.id, t.recommendation.skill.title)}</span><span class="st"><button class="btn primary sm" data-act="start" data-v="recommended">${T('开始', 'Start')}</button></span></div>` : ''}
       ${rows}
       <div class="svc"><span class="state-dot off"></span><span>${T('内置示例', 'Built-in sample')}</span><span class="st"><button class="btn ghost sm" data-act="start" data-v="sample">${T('开始', 'Start')}</button></span></div>
       <p class="fine">${T('引导阶段会显示战术讲解，那一题记为有辅助。', 'The guided stage shows the tactic walkthrough; that item is recorded as assisted.')}</p>`,

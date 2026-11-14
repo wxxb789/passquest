@@ -4,7 +4,7 @@
 // proposes; the learner edits, accepts or skips; the outbox pushes.
 import type { Note, NoteDraft, NoteFields, NoteList, NotePreview, NotePush } from '../api/types';
 import { html, type Html } from '../core/html';
-import { ankiStateOf, errorTitle, T } from '../core/i18n';
+import { ankiStateOf, errorLabel, errorTitle, T } from '../core/i18n';
 import type { Loadable, Theme } from '../core/state';
 import { sheetWrap } from '../components/sheet';
 import { ic } from '../icons';
@@ -36,12 +36,13 @@ export function previewHTML(p: Loadable<NotePreview>, u: AnkiUi, d: NoteDraft | 
     const source = d?.target.source_id;
     const grant =
       p.error.code === 'consent_required' && source
-        ? html`<div class="acts-row" style="margin-top:10px"><button class="btn ghost sm" data-act="consent-grant" data-v="${source}|" ${u.busy ? 'disabled' : ''}>${ic('shield', 'xs')}${T(
-            `授权使用 ${source} 的原文`,
-            `Allow the text of ${source}`,
-          )}</button><span class="muted">${T('记录一次授权事件，可在设置里撤回', 'Records a consent event; revocable in Settings')}</span></div>`
+        ? // Notes accept only the global (every-provider) decision, so the scope is named and confirmed first.
+          html`<div class="acts-row" style="margin-top:10px"><button class="btn ghost sm" data-act="consent-all-ask" data-v="${source}" ${u.busy ? 'disabled' : ''}>${ic('shield', 'xs')}${T(
+            `授权 ${source} 的原文…`,
+            `Allow the text of ${source}…`,
+          )}</button><span class="muted">${T('笔记只接受对所有提供方生效的授权；下一步会列出范围', 'Notes accept only a grant for every provider; the next step shows that scope')}</span></div>`
         : '';
-    return html`<div class="pv-row"><div class="fine" data-testid="preview-error" data-code="${p.error.code}"><b>${errorTitle(p.error.code)}</b> ${errorDetail(p.error)}${grant}</div></div>`;
+    return html`<div class="pv-row"><div class="fine" data-testid="preview-error" data-code="${p.error.code}"><b>${errorLabel(p.error.code)}</b> ${errorDetail(p.error)}${grant}</div></div>`;
   }
   if (p.status !== 'ready') return html`<div class="pv-row"><p class="fine">${T('正在渲染预览……', 'Rendering the preview…')}</p></div>`;
   const v = p.value;

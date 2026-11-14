@@ -9,6 +9,7 @@ import (
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/tutor"
 )
 
 // consentReviewer attributes a consent decision made in the window.
@@ -133,15 +134,16 @@ func coachConsentOf(context tutorContextView) studio.CoachConsent {
 	}
 }
 
-// loopbackEndpoint reports whether an endpoint stays on this machine. Only an
-// explicit loopback host counts as local; anything else is external.
+// loopbackEndpoint reports whether an endpoint stays on this machine. The
+// parsed host must be exactly one of the loopback hosts the provider registry
+// and the tutor host accept (tutor.IsLoopback); any other name, including a
+// DNS name that merely starts with "127.", is external.
 func loopbackEndpoint(endpoint string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(endpoint))
 	if err != nil {
 		return false
 	}
-	host := strings.ToLower(parsed.Hostname())
-	return host == "localhost" || host == "::1" || strings.HasPrefix(host, "127.")
+	return tutor.IsLoopback(parsed.Hostname())
 }
 
 // GrantConsent records consent for a source's text to reach providers;

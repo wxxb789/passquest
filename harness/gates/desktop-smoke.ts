@@ -568,18 +568,22 @@ const lifecycle: Scenario = {
 const practice: Scenario = {
   id: "practice",
   async run(s) {
-    // The recommendation opens the guided walkthrough (assisted); the tactic's
-    // independent stage can count. Both are answered by keyboard.
+    // The recommendation opens the guided walkthrough (assisted). After it, skill
+    // practice picks a passage with no attempt: independent, it can count. The
+    // tactic's independent stage reuses the walkthrough's passage, so it is a
+    // re-exposure that cannot count (Q-0004-01). All answered by keyboard.
     const launched = await launch(s, {
       label: "practice",
       script: pageScript(`
 await today();
-const skill = data('[data-testid="hero"]').skill;
+const promise = data('[data-testid="promise"]');
 press("Enter");
 const guided = await answer("1");
-await startFromSheet("start-tactic", skill + "|independent");
+await startFromSheet("start-skill", "${SKILL}");
 const independent = await answer("2");
-return { answers: [guided, independent] };
+await startFromSheet("start-tactic", "${SKILL}|independent");
+const repeated = await answer("1");
+return { promise, answers: [guided, independent, repeated] };
 `),
     });
     if (!launched) return;
@@ -590,10 +594,43 @@ return { answers: [guided, independent] };
       `practice: report --json lists ${attempts.length} attempt(s) for ${answers.length} answer(s) in the window`,
     );
     checkAttempts(s, answers, attempts);
-    const shown = answers.map((answered) => stringField(field(answered, "condition"), "condition") ?? "");
+    const expected = [
+      ["guided", "assisted", "false"],
+      ["skill", "independent", "true"],
+      ["tactic independent", "re_exposure", "false"],
+    ];
+    expected.forEach(([label, condition, canCount], index) => {
+      const answered = answers[index];
+      const shown = field(answered, "condition");
+      const counted = field(answered, "counted");
+      s.check(
+        stringField(shown, "condition") === condition && stringField(shown, "canCount") === canCount,
+        `practice: the ${label} item showed ${String(stringField(shown, "condition"))} (can count ${String(stringField(shown, "canCount"))}) before answering, expected ${condition} (can count ${canCount})`,
+      );
+      s.check(
+        stringField(counted, "condition") === condition && stringField(counted, "counted") === canCount,
+        `practice: the ${label} feedback recorded ${String(stringField(counted, "condition"))} (counted ${String(stringField(counted, "counted"))}), the item showed ${condition}`,
+      );
+    });
+    const promise = field(launched.value, "promise");
     s.check(
-      shown.includes("assisted") && shown.includes("independent"),
-      `practice: expected an assisted and an independent item, the window showed ${shown.join(", ")}`,
+      stringField(promise, "canCount") === stringField(field(answers[0], "condition"), "canCount"),
+      `practice: Today promised can count ${String(stringField(promise, "canCount"))}, the opened item showed ${String(stringField(field(answers[0], "condition"), "canCount"))}`,
+    );
+    // The adaptive evidence a second process reads counts exactly the item the window said could count.
+    const ids = answers.map((answered) => Number(stringField(field(answered, "feedback"), "attempt")));
+    const skill = arrayField((await cli(s, ["next"])).doc, "skills").find(
+      (entry) => stringField(field(entry, "skill"), "id") === SKILL,
+    );
+    const evidence = field(skill, "evidence");
+    const counted = arrayField(evidence, "independent_attempt_ids").map(Number);
+    s.check(
+      counted.length === 1 && counted[0] === ids[1],
+      `practice: next --json counts independent attempt(s) [${counted.join(", ")}], the window showed only attempt ${ids[1]} as counting`,
+    );
+    s.check(
+      (numberField(evidence, "passage_repeats") ?? 0) === 1,
+      `practice: next --json passage_repeats = ${String(numberField(evidence, "passage_repeats"))} after one re-exposure attempt ${ids[2]}`,
     );
   },
 };
@@ -601,12 +638,13 @@ return { answers: [guided, independent] };
 const hint: Scenario = {
   id: "hint",
   async run(s) {
-    // The tactic's independent stage follows its guided walkthrough.
+    // After the guided walkthrough, skill practice opens a passage with no
+    // attempt, so the item can count until the hint is opened.
     if (!(await setup(s, [["tactic", "practice", SKILL, "--stage", "guided", "--answer", "A"]]))) return;
     const launched = await launch(s, {
       label: "hint",
       script: pageScript(`
-await startFromSheet("start-tactic", "${SKILL}|independent");
+await startFromSheet("start-skill", "${SKILL}");
 const before = { item: data('[data-testid="practice-item"]'), condition: data('[data-testid="condition"]'), button: !!q('[data-act="hint"]') };
 press("h");
 await until("the hint gate", () => q('[data-act="hint-yes"]'));
@@ -621,7 +659,7 @@ return { before, gated, answered };
     const before = field(launched.value, "before");
     const answered = field(launched.value, "answered");
     const after = field(answered, "condition");
-    s.check(stringField(field(before, "condition"), "condition") === "independent", "hint: the item was not independent before the hint");
+    s.check(stringField(field(before, "condition"), "condition") === "independent", `hint: the item was ${String(stringField(field(before, "condition"), "condition"))}, not independent, before the hint`);
     s.check(stringField(field(before, "condition"), "canCount") === "true", "hint: the item could not count before the hint");
     s.check(field(before, "button") === true, "hint: no hint button on an item with an authored hint");
     s.check(field(launched.value, "gated") === true, "hint: the hint opened without the gate");
