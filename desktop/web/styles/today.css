@@ -8,7 +8,9 @@
 .obj-top { display: flex; align-items: center; gap: 10px; }
 .obj-top .r { margin-left: auto; font-size: var(--t-s); color: var(--ink-3); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .pol { display: inline-flex; align-items: baseline; gap: 8px; height: 26px; align-items: center; padding: 0 10px; border-radius: 8px; color: var(--acc); background: var(--acc-soft); font-size: 13px; font-weight: 600; }
-.pol .id { color: inherit; opacity: .7; }
+.pol .pst { font-weight: 500; }
+/* dark: the accent on its own soft tint over the hero card needs the brighter accent for AA */
+[data-theme="dark"] .pol { color: var(--acc-hi); }
 .hero-title { margin: 18px 0 6px; font-size: var(--t-4xl); }
 .hero-sub { font-size: var(--t-sm); color: var(--ink-2); display: flex; align-items: center; gap: 0; }
 .reason { margin: 20px 0 0; font-size: 19px; line-height: 1.6; color: var(--ink); max-width: 31em; }

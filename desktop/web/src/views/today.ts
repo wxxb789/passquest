@@ -83,10 +83,10 @@ function promise(r: Recommendation): Html {
     return box(
       'none',
       T('只有讲解 · 没有可打开的题', 'A lesson only · no item to open'),
-      T(`讲解在命令行：passquest skill show ${r.skill.id}；也可以选其他练习`, `The lesson is in the CLI: passquest skill show ${r.skill.id}; or choose other practice`),
+      T('讲解不在这个窗口里显示；可以先选其他练习', 'The lesson is not shown in this window; choose other practice meanwhile'),
     );
   // The lesson itself is not shown in this window; say so instead of promising an explanation.
-  const skipped = r.target.kind === 'lesson' ? T(`讲解不在这里显示（passquest skill show ${r.skill.id}）· `, `The lesson is not shown here (passquest skill show ${r.skill.id}) · `) : '';
+  const skipped = r.target.kind === 'lesson' ? T('讲解不在这里显示 · ', 'The lesson is not shown here · ') : '';
   if (t.kind === 'tactic') {
     if (t.stage === 'guided')
       return box('false', T('引导讲解 · 记为有辅助', 'Guided walkthrough · recorded as assisted'), T('讲解可见的那一题不计入', 'The item shown with the walkthrough will not count'));
@@ -106,7 +106,7 @@ function hero(t: Today, busy: boolean): Html {
       <div class="obj-top"><span class="eyebrow">${T('下一步', 'Next')}</span><span class="r">${ic('local', 'xs')}${T('透明策略 · 本地计算', 'Transparent policy · local')}</span></div>
       <h1 class="hero-title h-disp" id="hero-t">${T('还没有可推荐的练习', 'No practice to recommend yet')}</h1>
       <p class="reason">${T('策略需要可练习的内容。可以先做内置示例，或导入并审核一份本地资料。', 'The policy needs practice content. Start with the built-in sample, or import and review a local source.')}</p>
-      <div class="obj-foot"><span></span><span class="acts-row"><button class="btn ghost" data-act="sheet" data-v="pick">${T('选择练习…', 'Choose practice…')}</button><button class="btn primary lg" data-act="start" data-v="sample" id="start" ${busy ? 'disabled' : ''}>${T('练习内置示例', 'Practice the sample')}<kbd>Enter</kbd></button></span></div>
+      <div class="obj-foot"><span></span><span class="acts-row"><button class="btn ghost" data-act="sheet" data-v="pick">${T('选择练习…', 'Choose practice…')}</button><button class="btn primary lg" data-act="start" data-v="sample" id="start" data-primary ${busy ? 'disabled' : ''}>${T('练习内置示例', 'Practice the sample')}<kbd>Enter</kbd></button></span></div>
     </article>`;
   const ev = t.skills.find((s) => s.skill.id === r.skill.id) ?? null;
   const evid = ev
@@ -125,16 +125,16 @@ function hero(t: Today, busy: boolean): Html {
     : '';
   return html`<article class="obj hero card rise" style="--i:1" aria-labelledby="hero-t" data-testid="hero" data-action="${r.action}" data-skill="${r.skill.id}">
       <div class="obj-top">
-        <span class="eyebrow">${T('下一步', 'Next')}</span><span class="pol">${actName(r.action)}<span class="id">${policyStateName(r.state)}</span></span>
-        <span class="r" title="${r.command}">${ic('local', 'xs')}${T('透明策略 · 本地计算', 'Transparent policy · local')}</span>
+        <span class="eyebrow">${T('下一步', 'Next')}</span><span class="pol">${actName(r.action)}<span class="pst">${policyStateName(r.state)}</span></span>
+        <span class="r">${ic('local', 'xs')}${T('透明策略 · 本地计算', 'Transparent policy · local')}</span>
       </div>
       <h1 class="hero-title h-disp" id="hero-t">${skillName(r.skill.id, r.skill.title)}</h1>
-      <div class="hero-sub">${skillKindName(r.skill.kind)}<span class="sep"></span><span class="id">${r.skill.id}</span></div>
+      <div class="hero-sub">${skillKindName(r.skill.kind)}</div>
       <p class="reason" data-testid="reason">${policyReason(r.reason, ev)}</p>
       ${evid}
       <div class="obj-foot">
         ${promise(r)}
-        <span class="acts-row"><button class="btn ghost" data-act="sheet" data-v="pick">${T('其他练习…', 'Other practice…')}</button><button class="btn primary lg" data-act="start" data-v="recommended" id="start" ${busy || !opensItem(r) ? 'disabled' : ''}>${T('开始练习', 'Start practice')}<kbd>Enter</kbd></button></span>
+        <span class="acts-row"><button class="btn ghost" data-act="sheet" data-v="pick">${T('其他练习…', 'Other practice…')}</button><button class="btn primary lg" data-act="start" data-v="recommended" id="start" data-primary ${busy || !opensItem(r) ? 'disabled' : ''}>${T('开始练习', 'Start practice')}<kbd>Enter</kbd></button></span>
       </div>
     </article>`;
 }
@@ -150,7 +150,7 @@ export function vToday(t: Today, busy = false): Html {
       ico: 'assess',
       eyebrow: T('测评进行中', 'Assessment in progress'),
       title: T(`第 ${t.active_run.id} 轮测评尚未结束`, `Run #${t.active_run.id} is not finished`),
-      body: T('测评期间不能练习、看导师或改模型。计时一直在走。', 'Practice, coach and model changes wait until the run ends. Its clock keeps running.'),
+      body: html`${T('测评期间不能练习、看导师或改模型。计时一直在走，剩余 ', 'Practice, coach and model changes wait until the run ends. Its clock keeps running: ')}<b class="num" data-clock="until" data-t="${t.active_run.deadline_at}">—</b>${T('。', ' left.')}`,
       code: 'assessment_active',
       action: html`<a class="btn primary lg" href="#/assess" data-testid="back-to-run">${T('回到测评', 'Back to the run')}${ic('arrow', 'xs')}</a>`,
     });
@@ -208,14 +208,14 @@ function skillSheet(s: SkillEvidence, t: Today): Html {
   return sheetWrap(
     'pulse',
     sname(s),
-    html`<span class="id">${s.skill.id}</span><span class="sep"></span>${skillKindName(s.skill.kind)}`,
+    skillKindName(s.skill.kind),
     html`<div class="cols2">
       <div class="blk"><h3>${T('证据', 'Evidence')}</h3><div style="display:flex;gap:6px;margin:10px 0 8px;flex-wrap:wrap">${evDots(answered, e.independent_correct, e.assisted_attempts, e.passage_repeats)}</div>
         <p>${T(
           `独立迁移 ${answered} 次，答对 ${e.independent_correct} 次 · 有辅助 ${e.assisted_attempts} 次 · 重复接触 ${e.passage_repeats} 次 · 重做 ${e.revisits} 次（后三者不计入）`,
           `${answered} independent transfers, ${e.independent_correct} correct · assisted ${e.assisted_attempts} · re-exposure ${e.passage_repeats} · revisits ${e.revisits} (none of the last three counts)`,
         )}</p></div>
-      <div class="blk"><h3>${T('策略建议', 'Policy action')}</h3><p style="font-size:var(--t-sm);color:var(--ink)">${actName(s.inference.action)} <span class="id">${policyStateName(s.inference.state)}</span></p>
+      <div class="blk"><h3>${T('策略建议', 'Policy action')}</h3><p style="font-size:var(--t-sm);color:var(--ink)">${actName(s.inference.action)} <span class="muted">· ${policyStateName(s.inference.state)}</span></p>
         <p>${causalText(s.inference.causal_diagnosis)}${causalDetail(s.inference.causal_diagnosis) ? html` · ${causalDetail(s.inference.causal_diagnosis)}` : ''}</p></div>
     </div>
     <p class="fine">${policyReason(s.inference.reason, s)}</p>
@@ -239,20 +239,20 @@ function briefSheet(b: BriefSummary | null, services: Loadable<Services>): Html 
       : '';
   const nodeLine =
     node === null
-      ? html` · <span class="muted">${T('Node 未检查', 'Node not checked')}</span>`
+      ? html` · <span class="muted">${T('宿主未检查', 'host not checked')}</span>`
       : node
         ? ''
-        : html` · <span class="held">${T('Node 不可用', 'Node unavailable')}</span>`;
+        : html` · <span class="held">${T('宿主不可用', 'host unavailable')}</span>`;
   return sheetWrap(
     b.state === 'running' ? 'pulse' : 'pause',
     T('学习简报', 'Study brief'),
-    html`<span class="id">${b.run_id}</span><span class="sep"></span>${T('耐久任务 · 可恢复', 'durable run · resumable')}`,
+    T('耐久任务 · 可恢复', 'durable run · resumable'),
     html`${kv(T('状态', 'State'), `${briefStateName(b.state)} · ${T(`第 ${b.step} / ${b.max_steps} 步`, `step ${b.step} / ${b.max_steps}`)}`)}
       <div class="seg-bar" style="margin-bottom:14px">${stepBar}</div>
       <div class="ledger">
-        <div><span class="lk">${T('执行', 'Runs on')}</span><span class="lv">${ic('local', 'xs')} ${T('本地 Agent 宿主（Node）', 'Local agent host (Node)')}${nodeLine}</span></div>
+        <div><span class="lk">${T('执行', 'Runs on')}</span><span class="lv">${ic('local', 'xs')} ${T('本机的助手宿主', 'Local agent host')}${nodeLine}</span></div>
         <div><span class="lk">${T('调用', 'Calls')}</span><span class="lv">${
-          b.provider ? html`<span class="ext">${ic('ext', 'xs')}${T('外部', 'External')}</span> · ${b.provider} · <code>${b.model}</code>` : html`<span class="muted">${T('未记录', 'not recorded')}</span>`
+          b.provider ? html`<span class="ext">${ic('ext', 'xs')}${T('外部', 'External')}</span> · <span translate="no">${b.provider} · ${b.model}</span>` : html`<span class="muted">${T('未记录', 'not recorded')}</span>`
         }</span></div>
         <div><span class="lk">${T('开始', 'Started')}</span><span class="lv">${shortDate(b.created_at)}</span></div>
       </div>
@@ -276,7 +276,7 @@ function pickSheet(t: Today): Html {
     'practice',
     T('选择练习', 'Choose practice'),
     T('打开一道题就会记录它的展示时间', 'Opening an item records when it was shown'),
-    html`${t.recommendation && opensItem(t.recommendation) ? html`<div class="svc"><span class="state-dot ok"></span><span>${T('策略推荐', 'The recommendation')} · ${skillName(t.recommendation.skill.id, t.recommendation.skill.title)}</span><span class="st"><button class="btn primary sm" data-act="start" data-v="recommended">${T('开始', 'Start')}</button></span></div>` : ''}
+    html`${t.recommendation && opensItem(t.recommendation) ? html`<div class="svc"><span class="state-dot ok"></span><span>${T('策略推荐', 'The recommendation')} · ${skillName(t.recommendation.skill.id, t.recommendation.skill.title)}</span><span class="st"><button class="btn primary sm" data-act="start" data-v="recommended" data-primary>${T('开始', 'Start')}</button></span></div>` : ''}
       ${rows}
       <div class="svc"><span class="state-dot off"></span><span>${T('内置示例', 'Built-in sample')}</span><span class="st"><button class="btn ghost sm" data-act="start" data-v="sample">${T('开始', 'Start')}</button></span></div>
       <p class="fine">${T('引导阶段会显示战术讲解，那一题记为有辅助。', 'The guided stage shows the tactic walkthrough; that item is recorded as assisted.')}</p>`,
@@ -336,8 +336,8 @@ export function todaySheet(key: string, t: Today, services: Loadable<Services>):
         html`${kv(T('本地笔记', 'Local notes'), a.total)}
         ${kv(T('已推送', 'Pushed'), a.pushed)}
         ${kv(T('已存在', 'Already present'), a.already_present)}
-        <div class="kv"><span>${T('排队 · 可连接时推送一次', 'Queued · pushes once when reachable')}</span><b class="num" style="color:var(--warm)">${a.queued}</b></div>
-        <div class="kv"><span>${T('冲突 · 你在 Anki 里改过，不会被静默覆盖', 'Conflict · edited in Anki, never overwritten silently')}</span><b class="num" style="color:var(--bad)">${a.conflict}</b></div>
+        <div class="kv"><span>${T('排队 · 可连接时推送一次', 'Queued · pushes once when reachable')}</span><b class="num" style="${a.queued ? 'color:var(--warm)' : ''}">${a.queued}</b></div>
+        <div class="kv"><span>${T('冲突 · 你在 Anki 里改过，不会被静默覆盖', 'Conflict · edited in Anki, never overwritten silently')}</span><b class="num" style="${a.conflict ? 'color:var(--bad)' : ''}">${a.conflict}</b></div>
         ${a.failed + a.deck_mismatch ? kv(T('失败 / 牌组不符', 'Failed / wrong deck'), `${a.failed} / ${a.deck_mismatch}`) : ''}
         <div class="sh-acts"><a class="btn ghost sm" href="#/anki">${T('打开 Anki 笔记', 'Open Anki notes')}${ic('arrow', 'xs')}</a></div>`,
       );

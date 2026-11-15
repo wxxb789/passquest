@@ -177,6 +177,21 @@ type AssessmentReportItem struct {
 	Scored      bool                  `json:"scored"`
 	Reasons     []string              `json:"contamination_reasons,omitempty"`
 	Annotations AssessmentAnnotations `json:"annotations"`
+	// Question is the item as it was asked, with the learner's choice and the
+	// verified key. Like the annotations it appears only after the run; it is
+	// nil while they are withheld or when the item's content is unavailable.
+	Question *AssessmentItemQuestion `json:"question"`
+}
+
+// AssessmentItemQuestion is one finished item's question for the report's
+// annotation view: the stem and options, the label the learner chose (empty
+// for a skip, a timeout or no answer) and the verified key.
+type AssessmentItemQuestion struct {
+	Stem     string   `json:"stem"`
+	Options  []Option `json:"options"`
+	Selected string   `json:"selected"`
+	Key      string   `json:"key"`
+	Skills   []string `json:"skills"`
 }
 
 // AssessmentAnnotations are the per-item explanations shown after the run.

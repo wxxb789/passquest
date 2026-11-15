@@ -14,7 +14,7 @@ export const TP = (pair: Pair): string => T(pair[0], pair[1]);
 
 /** Known skill names; an unknown id falls back to the core's title, then the id (never a guessed name). */
 export const SK: Record<string, Pair> = {
-  'not-except-polarity': ['NOT/EXCEPT 极性', 'NOT/EXCEPT polarity'],
+  'not-except-polarity': ['否定/除外题', 'NOT/EXCEPT polarity'],
   'vocabulary-in-context': ['语境词汇', 'Vocabulary in context'],
   'sentence-structure': ['句子结构', 'Sentence structure'],
   unclassified: ['未分类推断', 'Unclassified inference'],
@@ -67,61 +67,92 @@ export const causalDetail = (id: string): string =>
     : '';
 
 /**
- * The policy's reason in the window's language. The core writes the reason in English from the
- * skill's state, its action and the evidence counts; in Chinese the same facts are stated from
- * those structured fields (state, action, counts). English shows the core's own sentence.
+ * The policy's reason in the window's language, stated from the structured fields the core decided
+ * on (state, action, evidence counts); the core's English sentence (which names the skill by its id)
+ * is used only for a state or action the window has no wording for.
  */
 export function policyReason(reason: string, s: SkillEvidence | null): string {
-  if (ui.lang === 'en' || !s) return reason;
+  if (!s) return reason;
   const e = s.evidence;
   const i = s.inference;
   const answered = e.independent_correct + e.independent_incorrect;
-  const skipped = e.independent_skipped ? `、跳过 ${e.independent_skipped}` : '';
+  const times = (n: number) => (n === 1 ? 'once' : `${n} times`);
   let first: string;
   switch (i.state) {
     case 'no_material':
-      return '当前材料里没有标注这个技能的可练习题。导入并审核一份带标注的来源后再练。';
+      return T(
+        '当前材料里没有标注这个技能的可练习题。导入并审核一份带标注的来源后再练。',
+        'No practice item in the current material is tagged with this skill. Import and review a tagged source first.',
+      );
     case 'no_evidence':
-      first = '这个技能还没有作答记录。';
+      first = T('这个技能还没有作答记录。', 'No answer for this skill yet.');
       break;
     case 'familiarity_only':
-      first = `已有 ${e.attempts} 次作答，但没有一次是独立迁移（有辅助 ${e.assisted_attempts}、重做 ${e.revisits}、重复接触 ${e.passage_repeats}）。`;
+      first = T(
+        `已有 ${e.attempts} 次作答，但没有一次是独立迁移（有辅助 ${e.assisted_attempts}、重做 ${e.revisits}、重复接触 ${e.passage_repeats}）。`,
+        `Answered ${times(e.attempts)}, never as independent transfer (assisted ${e.assisted_attempts}, revisits ${e.revisits}, re-exposure ${e.passage_repeats}).`,
+      );
       break;
     case 'insufficient':
-      first = `只有 ${answered} 次已作答的独立迁移（答对 ${e.independent_correct}、答错 ${e.independent_incorrect}${skipped}），一次观察分不清是技能还是运气。`;
+      first = T(
+        `只有 ${answered} 次已作答的独立迁移（答对 ${e.independent_correct}、答错 ${e.independent_incorrect}${e.independent_skipped ? `、跳过 ${e.independent_skipped}` : ''}），一次观察分不清是技能还是运气。`,
+        `Only ${answered} independent answer${answered === 1 ? '' : 's'} so far (${e.independent_correct} right, ${e.independent_incorrect} wrong${e.independent_skipped ? `, ${e.independent_skipped} skipped` : ''}); one observation cannot tell skill from luck.`,
+      );
       break;
     case 'weak':
-      first = `已作答的 ${answered} 次独立迁移全部答错。`;
+      first = T(`已作答的 ${answered} 次独立迁移全部答错。`, `All ${answered} independent answers were wrong.`);
       break;
     case 'mixed':
-      first = `${answered} 次已作答的独立迁移中答对 ${e.independent_correct} 次，最近一次独立作答${e.latest_independent_status === 'incorrect' ? '答错' : '答对'}。`;
+      first = T(
+        `${answered} 次已作答的独立迁移中答对 ${e.independent_correct} 次，最近一次独立作答${e.latest_independent_status === 'incorrect' ? '答错' : '答对'}。`,
+        `${e.independent_correct} of ${answered} independent answers were right; the latest was ${e.latest_independent_status === 'incorrect' ? 'wrong' : 'right'}.`,
+      );
       break;
     case 'supported':
-      first = `已作答的 ${answered} 次独立迁移全部答对。`;
+      first = T(`已作答的 ${answered} 次独立迁移全部答对。`, `All ${answered} independent answers were right.`);
       break;
     default:
       return reason;
   }
   const slow = e.latest_independent_ms > 0 && e.fastest_independent_ms > 0 && e.latest_independent_ms >= 2 * e.fastest_independent_ms;
+  const latest = Math.round(e.latest_independent_ms / 1000);
+  const fastest = Math.round(e.fastest_independent_ms / 1000);
   switch (i.action) {
     case 'practice_new':
-      return first + '选一篇新文章，不给提示，可以计入独立迁移。';
+      return first + T('选一篇新文章，不给提示，可以计入独立迁移。', ' Next: a fresh passage with no hint, which can count.');
     case 'review':
       return (
         first +
         (i.state === 'supported' && slow
-          ? `最近一次答对用了 ${Math.round(e.latest_independent_ms / 1000)} 秒，至少是最快 ${Math.round(e.fastest_independent_ms / 1000)} 秒的两倍，选一道见过的题复习；重做不算独立迁移。`
-          : '没有新文章了，选一道见过的题复习；重做不算独立迁移。')
+          ? T(
+              `最近一次答对用了 ${latest} 秒，至少是最快 ${fastest} 秒的两倍，选一道见过的题复习；重做不算独立迁移。`,
+              ` The latest right answer took ${latest} s, at least twice the fastest ${fastest} s: review a seen item (a repeat does not count).`,
+            )
+          : T('没有新文章了，选一道见过的题复习；重做不算独立迁移。', ' No fresh passage is left: review a seen item (a repeat does not count).'))
       );
     case 'explain':
-      if (s.skill.kind === 'scoring' && e.guided_attempts === 0) return first + '得分技能先做一次引导讲解（那一次记为有辅助），再做独立练习。';
-      if (i.state === 'weak') return first + '先看讲解：同样的缺口重复出现，而错选项本身看不出原因。';
-      if (i.state === 'mixed' && e.latest_independent_status === 'incorrect') return first + '在下一道新题之前先看讲解。';
-      return first + '没有新文章或可复习的题了，因此先看讲解。';
+      if (s.skill.kind === 'scoring' && e.guided_attempts === 0)
+        return first + T('得分技能先做一次引导讲解（那一次记为有辅助），再做独立练习。', ' A scoring skill starts with one guided walkthrough (recorded as assisted), then independent practice.');
+      if (i.state === 'weak') return first + T('先看讲解：同样的缺口重复出现，而错选项本身看不出原因。', ' Explanation first: the same gap repeats, and a wrong option alone does not show why.');
+      if (i.state === 'mixed' && e.latest_independent_status === 'incorrect') return first + T('在下一道新题之前先看讲解。', ' Explanation before the next fresh item.');
+      return first + T('没有新文章或可复习的题了，因此先看讲解。', ' No fresh or reviewable item is left, so explanation first.');
     default:
       return reason;
   }
 }
+
+/** The language of a text the window did not write (model replies, authored glossary): CJK → zh-CN, else en. */
+export const langOf = (text: string): 'zh-CN' | 'en' => (/\p{Script=Han}/u.test(text) ? 'zh-CN' : 'en');
+
+/** Capability ids (`provider.Capability`), as the window names them. */
+const CAPNAME: Record<string, Pair> = {
+  'text.chat': ['文本对话', 'Text chat'],
+  'tool.calls': ['工具调用', 'Tool calls'],
+  vision: ['识图', 'Vision'],
+  search: ['搜索', 'Search'],
+  'speech.synthesis': ['语音合成', 'Speech'],
+};
+export const capName = (id: string): string => (CAPNAME[id] ? TP(CAPNAME[id]) : id);
 
 export const DOCK: readonly (readonly [Route & IconName, string, string])[] = [
   ['today', '今日', 'Today'],
@@ -231,7 +262,7 @@ export function sourceKindName(kind: string): string {
  */
 function coded(map: Record<string, Pair>, code: string, generic: Pair): Html {
   const known = map[code];
-  return known ? html`${TP(known)}` : html`${TP(generic)} <span class="id" data-unmapped-code="${code}">${code}</span>`;
+  return known ? html`${TP(known)}` : html`${TP(generic)} <span class="id" data-raw data-unmapped-code="${code}">${code}</span>`;
 }
 
 /** Plain-text form of `coded`, for toasts and popover lines (no markup there). */
@@ -344,6 +375,55 @@ const ERROR_GENERIC: Pair = ['没有完成', 'Could not complete'];
 export const errorLabel = (code: string): Html => coded(ERRORS, code, ERROR_GENERIC);
 /** An error title as plain text (toasts, popover lines). */
 export const errorTitle = (code: string): string => codedText(ERRORS, code, ERROR_GENERIC);
+
+/**
+ * The learner's next step for a typed failure, in the window's words. The core's own `action` is a
+ * CLI command line; the window never shows it as the instruction (it stays in the raw detail).
+ */
+const NEXT: Record<string, Pair> = {
+  no_credential: ['在设置里为这个提供方添加密钥。', 'Add a key for this provider in Settings.'],
+  missing_credential: ['在设置里为这个提供方添加密钥。', 'Add a key for this provider in Settings.'],
+  unauthorized: ['在设置里更换密钥，再测试模型。', 'Replace the key in Settings, then test the model.'],
+  auth_failed: ['在设置里更换密钥，再测试模型。', 'Replace the key in Settings, then test the model.'],
+  not_configured: ['在设置里选择并测试一个模型。', 'Choose and test a model in Settings.'],
+  capability_unverified: ['先在设置里测试这个模型。', 'Test this model in Settings first.'],
+  capability_not_declared: ['在设置里换一个支持文本对话的模型。', 'Choose a model with text chat in Settings.'],
+  model_missing: ['在设置里换一个提供方认识的模型。', 'Choose a model the provider knows in Settings.'],
+  provider_error: ['稍后重试；仍失败就在设置里重新测试模型。', 'Retry later; if it keeps failing, test the model again in Settings.'],
+  invalid_response: ['稍后重试；仍失败就在设置里重新测试模型。', 'Retry later; if it keeps failing, test the model again in Settings.'],
+  rate_limited: ['稍等片刻再试。', 'Wait a moment, then retry.'],
+  endpoint_unreachable: ['检查网络和端点地址后重试。', 'Check the network and the endpoint, then retry.'],
+  unreachable: ['检查网络和端点地址后重试。', 'Check the network and the endpoint, then retry.'],
+  network_error: ['检查网络后重试。', 'Check the network, then retry.'],
+  timeout: ['稍后重试。', 'Retry later.'],
+  budget_exhausted: ['今日预算已用完，明天再试。', "Today's budget is spent; try again tomorrow."],
+  budget_exceeded: ['今日预算已用完，明天再试。', "Today's budget is spent; try again tomorrow."],
+  total_limit: ['今日预算已用完，明天再试。', "Today's budget is spent; try again tomorrow."],
+  per_provider_limit: ['这个提供方今日的次数已用完，明天再试或换一个提供方。', "This provider's calls are spent today; try tomorrow or use another provider."],
+  consent_required: ['先授权这份资料的原文，再预览。', "Allow this source's text first, then preview again."],
+  node_unavailable: ['安装或修复本机的 Node 后重试。', 'Install or repair Node on this machine, then retry.'],
+  agent_unavailable: ['安装或修复本机的 Node 后重试。', 'Install or repair Node on this machine, then retry.'],
+  anki_unavailable: ['打开 Anki 并启用 AnkiConnect，再推送。', 'Open Anki with AnkiConnect enabled, then push.'],
+  assessment_active: ['先回到测评，完成或放弃这一轮。', 'Go back to the run and finish or abandon it.'],
+  pool_floor: ['导入并审核更多来源，未见题达到下限后再测评。', 'Import and review more sources until the unseen pool reaches its floor.'],
+  pool_short: ['导入并审核更多来源，未见题达到下限后再测评。', 'Import and review more sources until the unseen pool reaches its floor.'],
+  credential_store_unavailable: ['这台机器只能用环境变量提供密钥。', 'On this machine a key can only come from an environment variable.'],
+};
+export const nextStep = (code: string): string | null => (NEXT[code] ? TP(NEXT[code]) : null);
+/** Codes whose next step is in Settings: a failure line offers an "Open Settings" button for them. */
+export const SETTINGS_CODES = new Set([
+  'no_credential',
+  'missing_credential',
+  'unauthorized',
+  'auth_failed',
+  'not_configured',
+  'capability_unverified',
+  'capability_not_declared',
+  'model_missing',
+  'provider_error',
+  'invalid_response',
+  'budget_exhausted',
+]);
 
 /** Typed provider failures (`provider.Failure*`), as recorded by a model test. */
 const FAILURE_TYPES: Record<string, Pair> = {

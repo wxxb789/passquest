@@ -32,6 +32,8 @@ export interface PassageOptions {
   foot: Html;
   /** A small disclosure beside the source label (e.g. the built-in sample is not exam material). */
   note?: Html | '';
+  /** A panel under the passage text (practice: the opened hint or the guided walkthrough). */
+  drawer?: Html | '';
 }
 
 /** Code-point offset → UTF-16 offset in `text`. */
@@ -76,7 +78,14 @@ function markedText(text: string, offset: number, marks: readonly Mark[]): Html[
   return out;
 }
 
-function paragraphHTML(text: string, pi: number, o: PassageOptions, cutsU16: { p: number; a: number; b: number }[], lit: { p: number; a: number; b: number } | null): Html {
+function paragraphHTML(
+  text: string,
+  pi: number,
+  o: PassageOptions,
+  cutsU16: { p: number; a: number; b: number }[],
+  lit: { p: number; a: number; b: number } | null,
+  shift: number,
+): Html {
   const points = new Set<number>([0, text.length, ...sentenceStarts(text)]);
   for (const c of cutsU16) if (c.p === pi) points.add(c.a).add(c.b);
   const sorted = [...points].filter((n) => n >= 0 && n <= text.length).sort((x, y) => x - y);
@@ -90,12 +99,27 @@ function paragraphHTML(text: string, pi: number, o: PassageOptions, cutsU16: { p
     const cls = 's' + (isLit ? ' ev' + (o.litKey ? ' key' : '') : '');
     spans.push(html`<span class="${cls}" data-s="${pi}-${a}" data-a="${a}" data-b="${b}">${markedText(text.slice(a, b), a, marks)}</span>`);
   }
-  return html`<p data-n="${pi + 1}">${spans}</p>`;
+  return html`<p data-n="${pi + 1}" data-l="${pi + 1 - shift}">${spans}</p>`;
 }
 
+/** Text compared as a heading: case, spacing and closing punctuation do not matter. */
+const headingKey = (s: string) => s.replace(/\s+/g, ' ').replace(/[.:：。]+$/, '').trim().toLowerCase();
+
+/**
+ * The paragraphs shown under the title. Some sources repeat the title as their first paragraph; that
+ * paragraph is not shown a second time unless something (evidence, a mark) points into it. Paragraph
+ * indexes stay the core's (`data-n`); the visible number (`data-l`) counts what is shown.
+ */
+function shownFrom(p: Passage, o: PassageOptions): number {
+  const first = p.paragraphs[0];
+  if (first === undefined || p.paragraphs.length < 2 || headingKey(first) !== headingKey(p.title)) return 0;
+  const used = [...(o.cuts ?? []), ...(o.lit ? [o.lit] : [])].some((s) => s.paragraph === 0) || (o.marks ?? []).some((m) => m.p === 0);
+  return used ? 0 : 1;
+}
+
+/** The source in words: kind, page and review state. The source id is data, not a label. */
 export function sourceLabel(s: SourceLabel): string {
   const parts: string[] = [sourceKindName(s.kind)];
-  if (s.source_id) parts.push(s.source_id);
   if (s.page) parts.push(T(`第 ${s.page} 页`, `p.${s.page}`));
   parts.push(s.reviewed ? T('已审核', 'reviewed') : T('未审核', 'not reviewed'));
   return parts.join(' · ');
@@ -106,17 +130,19 @@ export function passageHTML(p: Passage, o: PassageOptions): Html {
     .map((s) => u16Span(p.paragraphs, s))
     .filter((s): s is NonNullable<typeof s> => s !== null);
   const lit = o.lit ? u16Span(p.paragraphs, o.lit) : null;
-  const body = p.paragraphs.map((text, pi) => paragraphHTML(text, pi, o, cutsU16, lit));
+  const shift = shownFrom(p, o);
+  const body = p.paragraphs.map((text, pi) => (pi < shift ? '' : paragraphHTML(text, pi, o, cutsU16, lit, shift)));
   return html`<section class="paper pas ${o.mode === 'feedback' ? 'receded' : ''} ${o.mode === 'practice' ? 'rise' : ''}" style="--i:0" aria-label="${T('文章', 'Passage')}">
     <div class="pas-head">
       <div class="pas-meta">
-        <span class="src" data-testid="source">${ic('seal', 's')}${sourceLabel(p.label)}</span>
+        <span class="src" data-testid="source" data-source="${p.label.source_id ?? ''}">${ic('seal', 's')}${sourceLabel(p.label)}</span>
         ${p.label.reviewed ? '' : html`<span class="ph">${ic('info', 'xs')}${T('来源未审核', 'Source not reviewed')}</span>`}
         ${o.note ?? ''}
       </div>
       <h2 class="pas-title exam" lang="en">${p.title}</h2>
     </div>
     <div class="pas-body exam" lang="en" id="passage" data-mode="${o.mode}">${body}</div>
+    ${o.drawer ?? ''}
     <div class="pas-foot">${o.foot}</div>
   </section>`;
 }

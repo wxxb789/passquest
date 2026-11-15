@@ -18,7 +18,7 @@ export function keysDialog(): Html {
   const g = (h: string, rows: [string, string[]][]) =>
     html`<div><h3>${h}</h3>${rows.map(([a, k]) => html`<div class="row"><span>${a}</span><span>${k.map((x) => html`<kbd>${x}</kbd>`)}</span></div>`)}</div>`;
   return html`<div class="scrim" data-act="close"></div><div class="dlg keys" role="dialog" aria-modal="true" aria-labelledby="dk">
-      <div class="hd"><span class="ico" style="width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--well);box-shadow:inset 0 0 0 1px var(--line-2)">${ic('help')}</span><h2 class="h-disp" id="dk" style="margin:0">${T('快捷键', 'Keyboard shortcuts')}</h2><button class="icon-btn" style="margin-left:auto" data-act="close" aria-label="${T('关闭', 'Close')}">${ic('x')}</button></div>
+      <div class="hd"><span class="ico" style="width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--well);box-shadow:inset 0 0 0 1px var(--line-2)">${ic('help')}</span><h2 class="h-disp" id="dk" style="margin:0">${T('快捷键', 'Keyboard shortcuts')}</h2><button class="icon-btn" style="margin-left:auto" data-act="close" data-primary aria-label="${T('关闭', 'Close')}">${ic('x')}</button></div>
       <div class="grid">
         ${g(T('全局', 'Anywhere'), [
           [T('快捷键面板', 'This sheet'), ['?']],

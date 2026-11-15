@@ -67,6 +67,7 @@ export function render(full = true, anim = false): void {
   document.title = screens.title();
   top.innerHTML = screens.top().value;
   stage.classList.toggle('enter', anim);
+  stage.classList.remove('enter-hint');
   stage.classList.toggle('with-coach', screens.withCoach());
   if (full) stage.innerHTML = screens.stage().value;
   dock.innerHTML = screens.dock().value;
@@ -78,6 +79,19 @@ export function render(full = true, anim = false): void {
   tickClocks();
   moreCue();
   if (fk && !ui.layer) $(fk)?.focus({ preventScroll: true });
+  landFocus();
+}
+
+const lost = () => !document.activeElement || document.activeElement === document.body || document.activeElement === document.documentElement;
+
+/**
+ * After a re-render that removed the focused control (a route change, a new item), focus lands on
+ * the stage itself (`#stage`, tabindex -1) instead of falling back to <body>: the next Tab starts in
+ * the new view and the room's keys keep working (the stage is not a control, so Enter is not a click).
+ */
+export function landFocus(): void {
+  if (ui.layer || !lost()) return;
+  $('#stage')?.focus({ preventScroll: true });
 }
 
 export function renderOrb(): void {
@@ -139,7 +153,9 @@ export function renderLayer(anim: boolean): void {
     const el = $(sel);
     if (el) el.inert = modal;
   }
-  if (ui.layer && anim) {
+  // Focus enters a layer when it opens, and also when a modal's content arrives later (a dialog whose
+  // data was still loading opened empty): focus never stays behind the inert page.
+  if (ui.layer && (anim || (modal && !layer.contains(document.activeElement)))) {
     const af = layer.querySelector<HTMLElement>('[autofocus]') ?? layer.querySelector<HTMLElement>('.sheet .icon-btn, .dlg button, .csheet button');
     af?.focus({ preventScroll: true });
   }
@@ -161,4 +177,5 @@ export function closeLayer(): void {
     $(ui.ret)?.focus({ preventScroll: true });
     ui.ret = null;
   }
+  landFocus();
 }

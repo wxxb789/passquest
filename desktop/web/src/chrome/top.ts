@@ -1,8 +1,9 @@
 // Top bar (prototype topHTML): brand + prep day, the middle slot (run clock in the assessment,
-// session walk on study routes, resume link elsewhere) and the language/theme/shortcut utilities.
-import type { AssessmentRun, Today } from '../api/types';
-import { html, type Html } from '../core/html';
-import { SESSION, SESSION_IDX, shortDate, T } from '../core/i18n';
+// session walk on study routes, elsewhere a way back to real unfinished work: an active run or an
+// item shown and not answered; nothing when there is none) and the language/theme/shortcut utilities.
+import type { AssessmentRun, PracticeItem, Today } from '../api/types';
+import { html, mmss, type Html } from '../core/html';
+import { SESSION, SESSION_IDX, shortDate, skillName, T } from '../core/i18n';
 import type { Lang, Route, Theme } from '../core/state';
 import { ic } from '../icons';
 import { runClockHTML } from '../views/assess';
@@ -11,9 +12,13 @@ export interface TopInput {
   route: Route;
   lang: Lang;
   theme: Theme;
-  sessionAt: number;
   today: Today | null;
+  /** The run this window drives (its clock replaces the middle slot in the assessment). */
   run: AssessmentRun | null;
+  /** An active run this window is not driving: the way back to it. */
+  pendingRun: AssessmentRun | null;
+  /** An item shown and not answered yet. */
+  openItem: PracticeItem | null;
 }
 
 function brandDay(t: Today | null): Html {
@@ -41,9 +46,17 @@ export function topHTML(i: TopInput): Html {
       )}</div>
       <span class="tl-label">${T(cur[0], cur[1])}<span class="n num">${now + 1} / ${total}</span></span>
     </div>`;
-  } else if (i.sessionAt > 0) {
-    const s = SESSION[i.sessionAt]!;
-    mid = html`<a class="resume" href="#/${s[2]}"><span class="d"></span>${T(`回到今日会话 · ${s[0]} ${i.sessionAt + 1}/${total}`, `Resume session · ${s[1]} ${i.sessionAt + 1}/${total}`)}${ic('arrow', 'xs')}</a>`;
+  } else if (i.pendingRun) {
+    const r = i.pendingRun;
+    mid = html`<a class="resume" href="#/assess" data-testid="resume-pill" data-run="${r.id}"><span class="d"></span>${T(`测评进行中 · 第 ${r.id} 轮 · 剩余 `, `Run #${r.id} in progress · `)}<span class="num" data-clock="until" data-t="${r.deadline_at}">${mmss(
+      r.window_minutes * 60,
+    )}</span>${T('', ' left')}${ic('arrow', 'xs')}</a>`;
+  } else if (i.openItem) {
+    const it = i.openItem;
+    const skill = it.skills[0] ? skillName(it.skills[0]) : '';
+    mid = html`<a class="resume" href="#/practice" data-testid="resume-pill" data-token="${it.token}"><span class="d"></span>${T('回到未答完的题', 'Back to the unanswered item')}${
+      skill ? html` · ${skill}` : ''
+    }${ic('arrow', 'xs')}</a>`;
   }
   const util = html`<div class="util">
       <div class="seg" role="group" aria-label="${T('界面语言', 'Interface language')}">

@@ -22,7 +22,7 @@
 body[data-room="cool"] .util:not(:hover):not(:focus-within), body[data-room="warm"] .util:not(:hover):not(:focus-within),
 body[data-room="still"] .util:not(:hover):not(:focus-within) { background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .util .seg { display: flex; padding: 2px; border-radius: var(--r-pill); background: var(--well); }
-.util .seg button { height: 26px; min-width: 34px; padding: 0 10px; border-radius: var(--r-pill); font-size: var(--t-s); color: var(--ink-3); font-weight: 600; }
+.util .seg button { height: 26px; min-width: 34px; padding: 0 10px; border-radius: var(--r-pill); font-size: var(--t-s); color: var(--ink-2); font-weight: 600; }
 .util .seg button[aria-pressed="true"] { background: var(--glass-3); color: var(--ink); box-shadow: var(--sh-1); }
 .icon-btn { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-2); transition: background var(--d1), color var(--d1); flex: none; }
 .icon-btn:hover { background: var(--well); color: var(--ink); }

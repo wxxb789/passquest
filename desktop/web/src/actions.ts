@@ -5,18 +5,16 @@ import { api, NOT_CONNECTED, onGoEvent, parseCallError, type StudyApi } from './
 import type { AssessmentState, CoachMode, Feedback, NoteFields, NoteRequest, PracticeRequest, StudioError } from './api/types';
 import { hideMarkPop, lightSpan, markCountText, takeMark, passageHTML, practiceFoot } from './components/passage';
 import { labelForKey } from './components/options';
-import { COACH_MODES, errorTitle, SESSION_IDX, T } from './core/i18n';
+import { COACH_MODES, errorTitle, nextStep, T } from './core/i18n';
 import { closeLayer, openLayer, render, renderLayer, renderOrb } from './core/render';
 import { go, subAction, type Location } from './core/router';
 import { data, idle, ui, valueOf, type Loadable, type Route } from './core/state';
 import { savePref } from './core/prefs';
 import { toast } from './core/toast';
 import { activeRun, assessState, practiceItem } from './screens';
-import { previewHTML, ankiStatus, pushSummary } from './views/anki';
+import { previewHTML, ankiStatus, pushSummary, refinePanelHTML } from './views/anki';
 import { opensItem } from './views/today';
 import { optionSpan } from './views/feedback';
-import { qcolHTML } from './views/practice';
-import { tickClocks } from './core/clock';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: StudioError };
 
@@ -24,8 +22,14 @@ const $ = <E extends Element = HTMLElement>(sel: string) => document.querySelect
 const reduced = () => ui.shot || matchMedia('(prefers-reduced-motion: reduce)').matches;
 const ready = <T>(value: T): Loadable<T> => ({ status: 'ready', value });
 
-/** A failure as one toast line: the localized title, the core's message and its next step. */
-const failureLine = (e: StudioError) => `${errorTitle(e.code)} · ${e.message}${e.action ? ' — ' + e.action : ''}`;
+/**
+ * A failure as one toast line in the window's words: the localized title and the localized next step.
+ * The core's English message and CLI step are not toast text (failure cards keep them as details).
+ */
+const failureLine = (e: StudioError) => {
+  const next = nextStep(e.code);
+  return next ? `${errorTitle(e.code)} · ${next}` : errorTitle(e.code);
+};
 
 async function call<T>(fn: (a: StudyApi) => Promise<T>): Promise<Result<T>> {
   const a = api();
@@ -100,15 +104,25 @@ async function loadPracticeResume(): Promise<void> {
   await load((a) => a.resumePractice(), (l) => (data.practice = l));
 }
 
-async function loadCoachPreview(): Promise<void> {
+/**
+ * The send preview of the current mode. `afterSend`: a reply just arrived; the preview is read again
+ * in place (no loading state) so the call strip shows the budget slot the send spent.
+ */
+let previewSeq = 0;
+
+async function loadCoachPreview(afterSend = false): Promise<void> {
   const fb = data.feedback;
   if (!fb) return;
   const mode = ui.coachMode;
-  if (data.coach.replies[mode]) return;
-  data.coach.preview = { status: 'loading' };
-  renderOrb();
+  // Every request (even one that stops here) supersedes reads still in flight: only the newest lands.
+  const seq = ++previewSeq;
+  if (data.coach.replies[mode] && !afterSend) return;
+  if (!afterSend) {
+    data.coach.preview = { status: 'loading' };
+    renderOrb();
+  }
   const r = await call((a) => a.coachPreview(fb.attempt_id, mode));
-  if (ui.coachMode !== mode || data.feedback !== fb) return;
+  if (seq !== previewSeq || ui.coachMode !== mode || data.feedback !== fb) return;
   data.coach.preview = r.ok ? ready(r.value) : { status: 'error', error: r.error };
   renderOrb();
 }
@@ -164,6 +178,14 @@ async function loadReport(): Promise<void> {
   ui.report.runId = id;
   const current = valueOf(data.report.report);
   if (!current || current.run.id !== id) await load((a) => a.assessmentReport(id), (l) => (data.report.report = l));
+  // By default the shown run is compared with the newest earlier completed run of the same shape
+  // (size, window, pool family), else with the newest earlier one, whose refusal says what differs.
+  if (ui.report.compareWith === null) {
+    const base = runs.find((r) => r.id === id);
+    const earlier = runs.filter((r) => r.id !== id && r.status === 'completed' && (!base || r.started_at < base.started_at));
+    const like = base ? earlier.find((r) => r.actual_size === base.actual_size && r.window_minutes === base.window_minutes && r.pool_family === base.pool_family) : undefined;
+    ui.report.compareWith = (like ?? earlier[0])?.id ?? null;
+  }
   if (ui.report.compareWith !== null) await loadCompare(ui.report.compareWith);
 }
 
@@ -174,7 +196,44 @@ async function loadCompare(other: number): Promise<void> {
   await load((a) => a.assessmentCompare(other, base), (l) => (data.report.compare = l));
 }
 
+/** The attempt's recorded coach calls; rendered in the coach sheet's history view. */
+async function loadCoachHistory(): Promise<void> {
+  const fb = data.feedback;
+  if (!fb) return;
+  data.coach.history = { status: 'loading' };
+  renderOrb();
+  const r = await call((a) => a.coachHistory(fb.attempt_id));
+  if (data.feedback !== fb) return;
+  data.coach.history = r.ok ? ready(r.value) : { status: 'error', error: r.error };
+  renderOrb();
+}
+
 const ankiFields = (): NoteFields | null => ui.anki.fields ?? data.anki.draft?.fields ?? null;
+
+function resetRefine(): void {
+  ui.anki.refine = false;
+  data.anki.refine = { preview: idle(), suggestion: null, failure: null, sending: false };
+}
+
+/** Re-renders only the refinement panel when it is on screen; otherwise the whole stage. */
+function refreshRefine(): void {
+  const panel = $('.es-refine');
+  const d = data.anki.draft;
+  if (panel && d && ui.anki.refine) panel.outerHTML = refinePanelHTML(d, data.anki.refine, ui.busy, valueOf(data.models) ?? null).value;
+  else render(true, false);
+}
+
+/** What a refinement would send, from the core; nothing is sent. */
+async function loadRefinePreview(): Promise<void> {
+  const d = data.anki.draft;
+  if (!d) return;
+  data.anki.refine.preview = { status: 'loading' };
+  refreshRefine();
+  const r = await call((a) => a.refineNotePreview(d.id));
+  if (data.anki.draft !== d || !ui.anki.refine) return;
+  data.anki.refine.preview = r.ok ? ready(r.value) : { status: 'error', error: r.error };
+  refreshRefine();
+}
 
 async function loadPreview(): Promise<void> {
   const d = data.anki.draft;
@@ -198,10 +257,12 @@ async function restoreDraft(): Promise<void> {
   data.anki.preview = idle();
   ui.anki.fields = null;
   ui.anki.dirty = false;
+  resetRefine();
 }
 
 async function loadAnki(): Promise<void> {
   if (data.services.status === 'idle') void loadServices();
+  if (data.models.status === 'idle') void loadModels();
   if (!data.anki.draft) await restoreDraft();
   await load((a) => a.notes(), (l) => (data.anki.notes = l), valueOf(data.anki.notes));
   if (data.anki.draft && data.anki.preview.status !== 'ready') await loadPreview();
@@ -310,8 +371,6 @@ export function onRoute(loc: Location): void {
   if (ui.route === 'assess' && loc.route !== 'assess' && ui.assess.attached) detachRun();
   ui.route = loc.route;
   ui.sub = loc.sub;
-  const idx = SESSION_IDX[loc.route];
-  if (idx !== undefined) ui.sessionAt = idx;
   ui.layer = null;
   hideMarkPop();
   const sa = subAction(loc);
@@ -345,7 +404,7 @@ function refreshPreview(): void {
   const p = $('#preview');
   if (!p || !data.anki.draft) return;
   p.classList.toggle('phone', ui.anki.width === 'phone');
-  p.innerHTML = previewHTML(data.anki.preview, { ...ui.anki, busy: ui.busy, theme: ui.theme }, data.anki.draft).value;
+  p.innerHTML = previewHTML(data.anki.preview, { ...ui.anki, busy: ui.busy, theme: ui.theme, models: valueOf(data.models) ?? null }, data.anki.draft).value;
 }
 
 function refreshAnkiChrome(): void {
@@ -420,7 +479,8 @@ async function startPractice(req: PracticeRequest): Promise<void> {
 }
 
 function resetCoach(): void {
-  data.coach = { preview: idle(), replies: {}, failed: null, failure: null, sending: false };
+  data.coach = { preview: idle(), replies: {}, failed: null, failure: null, sending: false, history: idle() };
+  ui.coachHistory = false;
 }
 
 async function answered(fbPromise: (a: StudyApi, token: string) => Promise<Feedback>): Promise<void> {
@@ -450,6 +510,7 @@ async function propose(req: NoteRequest): Promise<void> {
   data.anki.preview = idle();
   ui.anki.fields = null;
   ui.anki.dirty = false;
+  resetRefine();
   if (ui.route === 'anki') void loadAnki();
   else go('anki');
 }
@@ -467,6 +528,7 @@ function consentChanged(): void {
   if (ui.route === 'anki') {
     data.anki.preview = idle();
     void loadPreview();
+    if (ui.anki.refine && !data.anki.refine.suggestion) void loadRefinePreview();
   }
   render(true, false);
 }
@@ -592,13 +654,9 @@ export const ACT: Record<string, Act> = {
         return;
       }
       data.practice = ready(next);
-      document.body.dataset.room = next.can_count ? 'cool' : 'warm';
-      const q = $('#qcol');
-      if (q) {
-        q.classList.add('enter-hint');
-        q.innerHTML = qcolHTML(next, { sel: ui.practice.sel, marks: ui.practice.marks, busy: ui.busy }).value;
-        tickClocks();
-      }
+      // The hint opens in the drawer under the passage; the passage keeps its scroll.
+      render(true, false);
+      $('#stage')?.classList.add('enter-hint');
       ($('.opt[aria-checked="true"]') ?? $('.opt'))?.focus({ preventScroll: true });
     });
   },
@@ -631,6 +689,7 @@ export const ACT: Record<string, Act> = {
     const m = COACH_MODES.find(([k]) => k === v)?.[0];
     if (!m) return;
     ui.coachMode = m as CoachMode;
+    ui.coachHistory = false;
     data.coach.failed = null;
     data.coach.failure = null;
     data.coach.preview = idle();
@@ -649,6 +708,8 @@ export const ACT: Record<string, Act> = {
     void call((a) => a.coachAsk(fb.attempt_id, mode)).then((r) => {
       data.coach.sending = false;
       if (data.feedback !== fb) return;
+      // The call is recorded either way: the history is stale.
+      data.coach.history = idle();
       // Only an advisory reply is kept for the mode; a failure stays retryable (coach-retry).
       if (r.ok && r.value.state === 'advisory') data.coach.replies[mode] = r.value;
       else if (ui.coachMode === mode) {
@@ -657,7 +718,16 @@ export const ACT: Record<string, Act> = {
       }
       renderOrb();
       void loadToday();
+      // The call spent a budget slot: the strip reads the core's count again.
+      if (ui.coachMode === mode) void loadCoachPreview(true);
     });
+  },
+  'coach-history'() {
+    if (!data.feedback) return;
+    ui.coachHistory = !ui.coachHistory;
+    renderOrb();
+    $('[data-act="coach-history"]')?.focus({ preventScroll: true });
+    if (ui.coachHistory) void loadCoachHistory();
   },
   'coach-retry'() {
     if (data.coach.sending) return;
@@ -797,6 +867,12 @@ export const ACT: Record<string, Act> = {
     refreshPreview();
     syncPressed('ctheme', v);
   },
+  side(v) {
+    if (v !== 'both' && v !== 'front' && v !== 'back') return;
+    ui.anki.side = v;
+    refreshPreview();
+    syncPressed('side', v);
+  },
   cwidth(v) {
     if (v !== 'desk' && v !== 'phone') return;
     ui.anki.width = v;
@@ -810,6 +886,57 @@ export const ACT: Record<string, Act> = {
     if (ui.anki.editing) $('[data-field="front"]')?.focus();
     else $('[data-act="edit"]')?.focus();
   },
+  refine() {
+    if (!data.anki.draft) return;
+    ui.anki.editing = true;
+    if (!ui.anki.refine) {
+      ui.anki.refine = true;
+      data.anki.refine = { preview: idle(), suggestion: null, failure: null, sending: false };
+    }
+    render();
+    $('.es-refine [data-act="refine-close"]')?.focus({ preventScroll: true });
+    void loadRefinePreview();
+  },
+  'refine-close'() {
+    resetRefine();
+    render();
+    $('[data-act="refine"]')?.focus({ preventScroll: true });
+  },
+  'refine-send'() {
+    const d = data.anki.draft;
+    const r = data.anki.refine;
+    if (!d || r.sending) return;
+    r.sending = true;
+    r.failure = null;
+    refreshRefine();
+    void call((a) => a.refineNote(d.id)).then((res) => {
+      r.sending = false;
+      if (data.anki.draft !== d || data.anki.refine !== r) return;
+      if (res.ok) r.suggestion = res.value;
+      else r.failure = res.error;
+      refreshRefine();
+      void loadToday();
+    });
+  },
+  'refine-retry'() {
+    const r = data.anki.refine;
+    if (r.sending) return;
+    // Retry only shows the preview again; the learner sends from it.
+    r.failure = null;
+    r.suggestion = null;
+    void loadRefinePreview();
+  },
+  'refine-use'() {
+    const s = data.anki.refine.suggestion;
+    const f = ankiFields();
+    if (!s || !f) return;
+    // Fills the editor only; accepting stays the learner's action and sends these full fields.
+    ui.anki.fields = { ...f, front: s.suggestion.front, back: s.suggestion.back };
+    ui.anki.dirty = true;
+    render();
+    $('[data-field="front"]')?.focus({ preventScroll: true });
+    void loadPreview();
+  },
   accept() {
     const d = data.anki.draft;
     const f = ankiFields();
@@ -821,6 +948,7 @@ export const ACT: Record<string, Act> = {
       ui.anki.fields = null;
       ui.anki.dirty = false;
       ui.anki.editing = false;
+      resetRefine();
       toast(T(`已接受 · 修订 ${res.note.revision} · 推送时写入 Anki`, `Accepted · revision ${res.note.revision} · written to Anki on push`));
       void loadAnki();
       void loadToday();
@@ -836,6 +964,7 @@ export const ACT: Record<string, Act> = {
       ui.anki.fields = null;
       ui.anki.dirty = false;
       ui.anki.editing = false;
+      resetRefine();
       toast(T('已跳过 · 不生成笔记', 'Skipped · no note'));
       render();
     });
@@ -866,11 +995,7 @@ export const ACT: Record<string, Act> = {
     if (!v) return;
     void write((a) => a.testModel(v, '')).then((res) => {
       if (!res) return;
-      toast(
-        res.failure
-          ? `${T('测试未通过', 'Test failed')} · ${res.failure.message}${res.failure.action ? ' — ' + res.failure.action : ''}`
-          : T(`${res.provider_name} · ${res.model} 已验证`, `${res.provider_name} · ${res.model} verified`),
-      );
+      toast(res.failure ? `${T('测试未通过', 'Test failed')} · ${failureLine({ code: res.failure.code, message: res.failure.message, action: null })}` : T(`${res.provider_name} · ${res.model} 已验证`, `${res.provider_name} · ${res.model} verified`));
       void loadSettings();
     });
   },
@@ -926,6 +1051,7 @@ async function answerItem(label: string): Promise<void> {
 async function push(force: boolean): Promise<void> {
   const res = await write((a) => a.pushNotes(force));
   if (!res) return;
+  data.anki.lastPush = res;
   toast(pushSummary(res));
   closeLayer();
   await loadAnki();

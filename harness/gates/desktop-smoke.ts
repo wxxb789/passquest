@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,6 +13,7 @@ import {
   desktopSurface,
   launchPage,
   pageScript,
+  parse,
   SKILL,
   startProviderStub,
   STUB_CREDENTIAL_ENV,
@@ -46,6 +47,9 @@ const IMPORT_FIXTURE = "internal/cli/testdata/import";
 const IMPORTED_SENTENCE = "The Westbridge Community Library closes at 4 p.m. on Saturdays.";
 /** Markup a model could return; it must reach the learner as text, never as elements. */
 const HOSTILE_MARKUP = '<b>x</b><img src=x onerror="document.title=\'pwned\'">';
+/** The AI refinement the stub returns; its back carries markup that must stay text. */
+const REFINED_FRONT = "smoke-refined NOT EXCEPT";
+const REFINED_BACK = `Refined back: read the options against the passage. ${HOSTILE_MARKUP}`;
 const NAVIGATOR_STATES = ["pending", "presented", "answered", "timed_out", "unavailable"];
 const NAVIGATOR_CLASSES = ["cell", "cur", "ans", "to"];
 const NAVIGATOR_ATTRIBUTES = ["class", "role", "data-state", "data-position", "aria-label", "title", "aria-current"];
@@ -555,7 +559,15 @@ await sleep(300);
 const retrySentAt = Date.now();
 await click('[data-act="coach-send"]');
 const after = await until("the retried reply", () => q('[data-testid="coach-reply"]') || q('[data-testid="coach-failure"]'), 30000);
-return { answered, withheld, reply: shown, granted, failure: failed, retried, retrySentAt, retry: { failed: after.dataset.testid !== "coach-reply", code: after.dataset.code ?? null, text: after.textContent } };
+// The history view lists this attempt's calls, oldest first, each reply as text.
+await click('[data-act="coach-history"]');
+await until("the coach history", () => q('[data-testid="coach-history"]'), 20000);
+const history = {
+  calls: all('[data-testid="coach-call"]').map((c) => ({ call: c.dataset.call, state: c.dataset.state, mode: c.dataset.mode, text: c.textContent })),
+  elements: document.querySelectorAll('[data-testid="coach-history"] p b, [data-testid="coach-history"] p img, [data-testid="coach-history"] script').length,
+  title: document.title,
+};
+return { answered, withheld, reply: shown, granted, failure: failed, retried, retrySentAt, retry: { failed: after.dataset.testid !== "coach-reply", code: after.dataset.code ?? null, text: after.textContent }, history };
 `),
     });
     provider.respond = () => chatReply("OK");
@@ -596,6 +608,32 @@ return { answered, withheld, reply: shown, granted, failure: failed, retried, re
       "coach: Retry called the provider before the learner sent from the preview",
     );
     s.check(third.sha256 === stringField(field(value, "retried"), "sha"), "coach: the preview shown after Retry is not the body the provider received");
+    // History: the window lists exactly the attempt's recorded calls, in order, replies as text.
+    const attemptID = stringField(field(field(value, "answered"), "feedback"), "attempt");
+    const recorded = attemptID === undefined ? null : await cli(s, ["tutor", "history", "--attempt", attemptID]);
+    const recordedCalls = recorded ? arrayField(recorded.doc, "calls") : [];
+    const history = field(value, "history");
+    const shownCalls = arrayField(history, "calls");
+    s.check(
+      recordedCalls.length === 3 && shownCalls.length === recordedCalls.length,
+      `coach: history shows ${shownCalls.length} call(s); tutor history --attempt records ${recordedCalls.length}, want 3`,
+    );
+    s.check(
+      shownCalls.map((c) => stringField(c, "call")).join(",") === recordedCalls.map((c) => String(numberField(c, "id"))).join(","),
+      "coach: the history's calls are not the attempt's recorded calls in order",
+    );
+    s.check(
+      shownCalls.map((c) => stringField(c, "state")).join(",") === "advisory,failed,advisory",
+      `coach: history states ${shownCalls.map((c) => stringField(c, "state")).join(",")}, want advisory,failed,advisory`,
+    );
+    s.check(
+      shownCalls.map((c) => stringField(c, "mode")).join(",") === recordedCalls.map((c) => stringField(c, "mode")).join(","),
+      "coach: the history's modes are not the recorded modes",
+    );
+    s.check((stringField(shownCalls[0], "text") ?? "").includes(HOSTILE_MARKUP), "coach: the history does not show the earlier advisory reply as literal text");
+    s.check((stringField(shownCalls[1], "text") ?? "").includes("auth_failed"), "coach: the history does not show the failed call's code");
+    s.check((stringField(shownCalls[2], "text") ?? "").includes("Retried"), "coach: the history does not show the retried reply");
+    s.check(numberField(history, "elements") === 0 && stringField(history, "title") !== "pwned", "coach: the history's reply markup became elements");
   },
 };
 
@@ -701,6 +739,16 @@ return { resumed, answered, navigators, report: data('[data-testid="report"]'), 
 const anki: Scenario = {
   id: "anki",
   async run(s) {
+    const { provider } = s.shared;
+    const key = `sk-smoke-${randomBytes(12).toString("hex")}`;
+    const keyEnv = { [STUB_CREDENTIAL_ENV]: key };
+    // The refinement goes to the loopback provider stub through the real Node tutor host.
+    if (!(await setup(s, [["model", "test", STUB_MODEL], ["model", "use", STUB_MODEL]], keyEnv))) return;
+    // `note model` reads no database: the model is the package's own.
+    const model = await run(s.shared.cli, ["note", "model", "--json"], { cwd: s.shared.ctx.root });
+    const modelCSS = stringField(parse(model.stdout), "css");
+    if (!s.check(model.code === 0 && modelCSS !== undefined, `anki: note model exit = ${model.code}`)) return;
+    const modelCSSSHA = createHash("sha256").update(modelCSS!).digest("hex");
     const stub = startAnkiStub();
     // After the first push has verified its card, Anki stops listening.
     stub.afterAction = (action) => {
@@ -721,20 +769,103 @@ return { draft: data('[data-testid="anki"]').draft, preview: data('[data-testid=
 `),
       });
       if (!pending) return;
+      provider.received.length = 0;
+      // The first refinement is not a JSON object (a typed failure); the one sent after Retry is.
+      provider.respond = () =>
+        provider.received.length === 1
+          ? chatReply("I would rather not answer in JSON.")
+          : chatReply(JSON.stringify({ front: REFINED_FRONT, back: REFINED_BACK }));
       const launched = await launch(s, {
         label: "anki",
-        env: { PASSQUEST_ANKI_ENDPOINT: stub.endpoint },
+        env: { PASSQUEST_ANKI_ENDPOINT: stub.endpoint, ...keyEnv },
         script: pageScript(`
 location.hash = "#/anki";
 await until("the restored draft", () => q('[data-testid="anki"][data-draft]') && q('[data-testid="card-preview"]'), 20000);
 const restored = { draft: data('[data-testid="anki"]').draft, preview: data('[data-testid="card-preview"]') };
 // The restored draft is the one edited, accepted and pushed below.
 const proposed = restored.preview;
+// Every shown frame against the backend's own document for the shown side and theme.
+const opened = await window.mygo.call("Study.OpenNoteDraft");
+const backend = await window.mygo.call("Study.PreviewNote", opened.id, opened.fields);
+const frameState = (f) => {
+  const doc = f.contentDocument;
+  const root = doc ? doc.documentElement : null;
+  return {
+    side: f.dataset.side,
+    theme: f.dataset.theme,
+    same: f.getAttribute("srcdoc") === backend[f.dataset.side][f.dataset.theme],
+    body: doc && doc.body ? doc.body.className : null,
+    scrollHeight: root ? root.scrollHeight : -1,
+    contentHeight: root ? Math.ceil(root.getBoundingClientRect().height) : -1,
+    bodyHeight: doc && doc.body ? Math.ceil(doc.body.getBoundingClientRect().height) : -1,
+    scrollWidth: root ? root.scrollWidth : -1,
+    height: f.clientHeight,
+    width: f.clientWidth,
+    scripts: doc ? doc.scripts.length : -1,
+  };
+};
+const settled = async (what, sides, theme) => {
+  await until(what, () => {
+    const frames = all('[data-testid="card-frame"]');
+    return frames.length === sides.length && frames.every((f, i) => f.dataset.side === sides[i] && f.dataset.theme === theme && f.contentDocument && f.contentDocument.readyState === "complete" && f.contentDocument.body && f.clientHeight > 40);
+  }, 20000);
+  await sleep(700);
+  return all('[data-testid="card-frame"]').map(frameState);
+};
+await click('[data-act="ctheme"][data-v="light"]');
+const frames = [];
+frames.push(...(await settled("both light sides", ["question", "answer"], "light")));
+await click('[data-act="ctheme"][data-v="dark"]');
+frames.push(...(await settled("both night sides", ["question", "answer"], "night")));
+await click('[data-act="side"][data-v="front"]');
+frames.push(...(await settled("the night front", ["question"], "night")));
+await click('[data-act="cwidth"][data-v="phone"]');
+await click('[data-act="side"][data-v="back"]');
+const phone = await settled("the phone back", ["answer"], "night");
+frames.push(...phone);
+await click('[data-act="cwidth"][data-v="desk"]');
+await click('[data-act="side"][data-v="both"]');
+await click('[data-act="ctheme"][data-v="light"]');
+await settled("both light sides again", ["question", "answer"], "light");
+const card = { frames, phone, cssSha: data('[data-testid="card-preview"]').cssSha, backendCssSha: backend.css_sha256, sha: data('[data-testid="card-preview"]').sha, backendSha: backend.fields_sha256, document: backend.question.light };
 press("e");
-const front = await until("the front field", () => q('[data-field="front"]'));
+await until("the front field", () => q('[data-field="front"]'));
+// Refine: preview → a typed failure → Retry (preview only) → send → an advisory suggestion.
+await click('[data-act="refine"]');
+const strip = () => q('[data-testid="refine-strip"]');
+await until("the refinement preview", () => strip() && q('[data-act="refine-send"]:not([disabled])'), 20000);
+const refinePreview = data('[data-testid="refine-strip"]');
+await click('[data-act="refine-send"]');
+const refineFailure = await until("the refinement failure", () => q('[data-testid="refine-failure"]'), 30000);
+const refineFailed = { code: refineFailure.dataset.code, text: refineFailure.textContent };
+await click('[data-testid="refine-failure"] [data-act="refine-retry"]');
+await until("the preview after Retry", () => !q('[data-testid="refine-failure"]') && strip() && q('[data-act="refine-send"]:not([disabled])'), 20000);
+const refineRetried = data('[data-testid="refine-strip"]');
+await click('[data-act="refine-send"]');
+const sug = await until("the suggestion", () => q('[data-testid="refine-suggestion"]'), 30000);
+const suggestion = {
+  front: q('[data-testid="suggested-front"]').textContent,
+  back: q('[data-testid="suggested-back"]').textContent,
+  elements: sug.querySelectorAll("b, img, script").length,
+  injected: document.querySelectorAll('img[src="x"]').length,
+  title: document.title,
+  fieldsBefore: { front: q('[data-field="front"]').value, back: q('[data-field="back"]').value },
+};
+await click('[data-act="refine-use"]');
+await until("the suggestion in the fields", () => q('[data-field="front"]').value === suggestion.front && q('[data-field="back"]').value === suggestion.back);
+// The suggestion as it stands is the refined card, not a learner edit.
+await until("the used suggestion's preview", () => { const preview = q('[data-testid="card-preview"]'); return preview && preview.dataset.sha !== proposed.sha; });
+const used = {
+  preview: data('[data-testid="card-preview"]'),
+  draft: data('[data-testid="anki"]').draft,
+  notes: (await window.mygo.call("Study.Notes")).notes.length,
+  localNotes: all('[data-testid="note"]').length,
+  editing: !!q('[data-field="front"]'),
+};
+const front = q('[data-field="front"]');
 front.value = front.value + " smoke-edit";
 front.dispatchEvent(new Event("input", { bubbles: true }));
-await until("the edited preview", () => { const preview = q('[data-testid="card-preview"]'); return preview && preview.dataset.sha !== proposed.sha && preview.dataset.edited === "true"; });
+await until("the edited preview", () => { const preview = q('[data-testid="card-preview"]'); return preview && preview.dataset.sha !== used.preview.sha && preview.dataset.edited === "true"; });
 const edited = data('[data-testid="card-preview"]');
 await click("#acceptbtn2");
 await until("the accepted note", () => q('[data-testid="note"]') && q('[data-act="push"]'), 20000);
@@ -752,7 +883,7 @@ await until("the second accepted note", () => q('[data-testid="note"][data-state
 await sleep(300);
 await click('[data-act="push"]');
 await until("a queued note", () => q('[data-testid="sync-counts"]')?.dataset.queued === "1", 30000);
-return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-counts"]'), notes: all('[data-testid="note"]').map((note) => note.dataset.state) };
+return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-counts"]'), notes: all('[data-testid="note"]').map((note) => note.dataset.state), card, refinePreview, refineFailed, refineRetried, suggestion, used };
 `),
       });
       if (!launched) return;
@@ -780,7 +911,86 @@ return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-co
       s.check(stringField(field(value, "queued"), "queued") === "1", "anki: an unreachable Anki did not queue the note");
       const states = arrayField(value, "notes").map(String);
       s.check(states.includes("pushed") && states.includes("queued"), `anki: note states ${states.join(", ")}`);
+
+      // The card preview is the backend's documents, byte for byte, with the model stylesheet.
+      const card = field(value, "card");
+      const frames = arrayField(card, "frames");
+      s.check(frames.length === 6, `anki: ${frames.length} card frame(s) observed, want 6`);
+      for (const frame of frames) {
+        const where = `${String(stringField(frame, "side"))}/${String(stringField(frame, "theme"))}`;
+        s.check(field(frame, "same") === true, `anki: the ${where} frame's srcdoc is not the backend document for that side and theme`);
+        const night = stringField(frame, "theme") === "night";
+        s.check(
+          stringField(frame, "body") === (night ? "card card1 nightMode night_mode" : "card card1"),
+          `anki: the ${where} frame's body class is ${String(stringField(frame, "body"))}`,
+        );
+        const height = numberField(frame, "height") ?? 0;
+        s.check(
+          height > 40 && (numberField(frame, "scrollHeight") ?? Infinity) <= height,
+          `anki: the ${where} frame clips or scrolls (content ${String(numberField(frame, "scrollHeight"))} px, frame ${height} px)`,
+        );
+        s.check(
+          Math.abs(height - (numberField(frame, "contentHeight") ?? -100)) <= 1,
+          `anki: the ${where} frame is not sized to its card (document ${String(numberField(frame, "contentHeight"))} px, body ${String(numberField(frame, "bodyHeight"))} px, frame ${height} px)`,
+        );
+        s.check(
+          (numberField(frame, "scrollWidth") ?? Infinity) <= (numberField(frame, "width") ?? 0),
+          `anki: the ${where} frame scrolls sideways (content ${String(numberField(frame, "scrollWidth"))} px, frame ${String(numberField(frame, "width"))} px)`,
+        );
+        s.check(numberField(frame, "scripts") === 0, `anki: the ${where} frame contains a script`);
+      }
+      const phone = arrayField(card, "phone");
+      s.check(phone.length === 1 && (numberField(phone[0], "width") ?? Infinity) <= 300, `anki: the phone frame is ${String(numberField(phone[0], "width"))} px wide`);
+      s.check(stringField(card, "cssSha") === modelCSSSHA, "anki: the preview's css_sha256 is not the sha256 of `note model --json` css");
+      s.check(stringField(card, "backendCssSha") === modelCSSSHA, "anki: PreviewNote's css_sha256 is not the sha256 of `note model --json` css");
+      s.check((stringField(card, "document") ?? "").includes(`<style>${modelCSS}</style>`), "anki: the card document does not carry the `note model` stylesheet");
+      s.check(
+        stringField(card, "sha") !== undefined && stringField(card, "sha") === stringField(card, "backendSha"),
+        "anki: the preview's data-sha is not PreviewNote's fields_sha256",
+      );
+
+      // Refine: the preview is the body the provider received; failures are typed; the suggestion
+      // is text and only fills the editor; accepting records the learner's edit.
+      if (s.check(provider.received.length === 2, `anki: the provider received ${provider.received.length} refinement request(s), want 2`)) {
+        const [failedBody, refinedBody] = provider.received;
+        const refinePreview = field(value, "refinePreview");
+        s.check(failedBody.sha256 === stringField(refinePreview, "sha"), "anki: the refinement preview sha256 is not the sha256 of the body the provider received");
+        s.check(String(Buffer.byteLength(failedBody.raw)) === stringField(refinePreview, "bytes"), "anki: the refinement preview size is not the size of the body sent");
+        s.check(refinedBody.sha256 === stringField(field(value, "refineRetried"), "sha"), "anki: the preview shown after Retry is not the body the provider received");
+        s.check(failedBody.authorization === `Bearer ${key}`, "anki: the provider did not receive the credential");
+      }
+      s.check(
+        stringField(field(value, "refineFailed"), "code") === "invalid_response",
+        `anki: a non-JSON refinement shows failure code ${String(stringField(field(value, "refineFailed"), "code"))}`,
+      );
+      const suggestion = field(value, "suggestion");
+      s.check(stringField(suggestion, "front") === REFINED_FRONT, `anki: the suggested front is ${String(stringField(suggestion, "front"))}`);
+      s.check((stringField(suggestion, "back") ?? "").includes(HOSTILE_MARKUP), "anki: the suggestion's markup is not shown as literal text");
+      s.check(
+        numberField(suggestion, "elements") === 0 && numberField(suggestion, "injected") === 0 && stringField(suggestion, "title") !== "pwned",
+        "anki: the suggestion's markup became elements",
+      );
+      s.check(
+        stringField(field(suggestion, "fieldsBefore"), "front") !== REFINED_FRONT,
+        "anki: the suggestion filled the fields before the learner used it",
+      );
+      const used = field(value, "used");
+      s.check(stringField(field(used, "preview"), "edited") === "false", "anki: the card built from the unchanged suggestion is marked as a learner edit");
+      s.check(
+        numberField(used, "notes") === 0 && numberField(used, "localNotes") === 0 && stringField(used, "draft") === stringField(restored, "draft") && field(used, "editing") === true,
+        "anki: using the suggestion accepted the note or closed the draft",
+      );
+      const shown = await cli(s, ["note", "show"]);
+      const accepted = arrayField(shown.doc, "notes")
+        .map((item) => field(item, "note"))
+        .find((n) => (stringField(n, "front") ?? "").includes("smoke-edit"));
+      s.check(
+        accepted !== undefined && (stringField(accepted, "front") ?? "").startsWith(REFINED_FRONT) && stringField(accepted, "origin") === "edited",
+        `anki: the accepted note is front ${String(stringField(accepted, "front"))}, origin ${String(stringField(accepted, "origin"))}; want the edited suggestion, origin edited`,
+      );
+      s.check(fronts.length === 1 && fronts[0].includes(REFINED_FRONT), "anki: the pushed note does not carry the used suggestion");
     } finally {
+      provider.respond = () => chatReply("OK");
       stub.stop();
     }
   },

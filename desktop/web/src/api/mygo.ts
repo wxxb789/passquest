@@ -120,6 +120,19 @@ export interface AssessmentItem {
   run_deadline_at: string;
 }
 
+/**
+ * AssessmentItemQuestion is one finished item's question for the report's
+ * annotation view: the stem and options, the label the learner chose (empty
+ * for a skip, a timeout or no answer) and the verified key.
+ */
+export interface AssessmentItemQuestion {
+  stem: string;
+  options: Option[];
+  selected: string;
+  key: string;
+  skills: string[];
+}
+
 /** AssessmentPool is the unseen-assessment pool. */
 export interface AssessmentPool {
   qualifying_items: number;
@@ -167,6 +180,12 @@ export interface AssessmentReportItem {
   scored: boolean;
   contamination_reasons?: string[];
   annotations: AssessmentAnnotations;
+  /**
+   * Question is the item as it was asked, with the learner's choice and the
+   * verified key. Like the annotations it appears only after the run; it is
+   * nil while they are withheld or when the item's content is unavailable.
+   */
+  question: AssessmentItemQuestion | null;
 }
 
 /**

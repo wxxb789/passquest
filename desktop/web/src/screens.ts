@@ -72,18 +72,30 @@ function stage(): Html {
       const runs = data.report.runs;
       if (runs.status === 'error') return errorCard(runs.error, retry);
       if (runs.status !== 'ready') return loadingCard();
-      if (!runs.value.some((r) => r.status !== 'active')) return vReport(null, runs.value, null, data.report.compare);
-      return withLoadable(data.report.report, (r) => vReport(r, runs.value, ui.report.compareWith, data.report.compare), retry);
+      const pool = today()?.pool ?? null;
+      if (!runs.value.some((r) => r.status !== 'active')) return vReport(null, runs.value, null, data.report.compare, pool);
+      return withLoadable(data.report.report, (r) => vReport(r, runs.value, ui.report.compareWith, data.report.compare, pool), retry);
     }
     case 'anki':
-      return vAnki(data.anki.draft, ui.anki.fields, data.anki.preview, data.anki.notes, {
-        card: ui.anki.card,
-        width: ui.anki.width,
-        editing: ui.anki.editing,
-        dirty: ui.anki.dirty,
-        busy: ui.busy,
-        theme: ui.theme,
-      });
+      return vAnki(
+        data.anki.draft,
+        ui.anki.fields,
+        data.anki.preview,
+        data.anki.notes,
+        {
+          card: ui.anki.card,
+          width: ui.anki.width,
+          side: ui.anki.side,
+          editing: ui.anki.editing,
+          refine: ui.anki.refine,
+          dirty: ui.anki.dirty,
+          busy: ui.busy,
+          theme: ui.theme,
+          models: valueOf(data.models) ?? null,
+        },
+        data.anki.refine,
+        data.anki.lastPush,
+      );
     case 'settings':
       return vSettings(settingsData(), { open: ui.settings.open, busy: ui.busy });
   }
@@ -100,9 +112,10 @@ function coachSheet(): Html | null {
       sending: data.coach.sending,
       busy: ui.busy,
       models: valueOf(data.models) ?? null,
+      history: data.coach.history,
+      showHistory: ui.coachHistory,
     },
     ui.coachMode,
-    ui.lang,
   );
 }
 
@@ -116,7 +129,7 @@ function pop(): Html {
   const b = m?.budget.providers.find((p) => p.provider === m.provider);
   const foot =
     m?.configured && m.model
-      ? html`<p class="fine" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">${T(`模型 ${m.model} · 今日已用`, `Model ${m.model} · used today`)} <span class="num">${b ? `${b.calls} / ${b.limit}` : '—'}</span></p>`
+      ? html`<p class="fine" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">${T('模型 ', 'Model ')}<span translate="no">${m.model}</span>${T(' · 今日已用 ', ' · used today ')}<span class="num">${b ? `${b.calls} / ${b.limit}` : '—'}</span></p>`
       : '';
   return popHTML(t ? todayPopLines(t) : [], foot);
 }
@@ -127,7 +140,8 @@ function sheet(key: string): Html {
   if ((ui.route === 'today' || ui.route === 'practice') && t) out = todaySheet(key, t, data.services);
   else if (ui.route === 'report') {
     const r = valueOf(data.report.report);
-    if (r) out = reportSheet(key, r, ui.report.annItem);
+    if (key === 'pool' && t) out = todaySheet(key, t, data.services);
+    else if (r) out = reportSheet(key, r, ui.report.annItem);
   } else if (ui.route === 'anki') out = ankiSheet(key, data.anki.notes, valueOf(data.services)?.anki_endpoint ?? null, ui.busy);
   else if (ui.route === 'settings') out = settingsSheet(key, settingsData(), { open: ui.settings.open, busy: ui.busy });
   return out ?? sheetWrap('info', T('正在读取……', 'Loading…'), '', html`<p class="fine">${T('数据还没有就绪。', 'The data is not ready yet.')}</p>`);
@@ -187,7 +201,16 @@ function room(): string {
 }
 
 export const screens: Screens = {
-  top: () => topHTML({ route: ui.route, lang: ui.lang, theme: ui.theme, sessionAt: ui.sessionAt, today: today(), run: ui.assess.attached ? activeRun() : null }),
+  top: () =>
+    topHTML({
+      route: ui.route,
+      lang: ui.lang,
+      theme: ui.theme,
+      today: today(),
+      run: ui.assess.attached ? activeRun() : null,
+      pendingRun: ui.assess.attached ? null : activeRun(),
+      openItem: practiceItem(),
+    }),
   stage,
   dock: () => dockHTML(ui.route, assessState(), ui.assess.attached, ankiConflicts()),
   orb: () => orbHTML({ route: ui.route, coachOpen: ui.coachOpen, popOpen: ui.layer === 'pop', model: today()?.model ?? null, coachSheet: coachSheet() }),

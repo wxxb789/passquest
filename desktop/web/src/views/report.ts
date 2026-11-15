@@ -1,10 +1,11 @@
 // Assessment report (prototype vReport + annSheet + the report sheets): the observed score with
 // `pass threshold: unknown`, the like-for-like comparison or its refusal, per-skill counts, timing,
 // contamination, and per-item annotations that were withheld during the run.
-import type { AssessmentComparison, AssessmentReport, AssessmentReportItem, AssessmentRun, StudioError } from '../api/types';
+import type { AssessmentComparison, AssessmentPool, AssessmentReport, AssessmentReportItem, AssessmentRun, StudioError } from '../api/types';
 import { html, type Html } from '../core/html';
-import { contaminationLabel, errorLabel, errorTitle, monthDay, RSTATE, sec, shortDate, skillName, T, type ItemOutcome } from '../core/i18n';
-import { ui, type Loadable } from '../core/state';
+import { contaminationLabel, errorLabel, errorTitle, langOf, monthDay, RSTATE, sec, shortDate, skillName, T, type ItemOutcome } from '../core/i18n';
+import type { Loadable } from '../core/state';
+import { rawDetail } from '../components/failure';
 import { sat } from '../components/satellite';
 import { kv, sheetWrap } from '../components/sheet';
 import { ic } from '../icons';
@@ -44,10 +45,9 @@ function unlike(a: AssessmentRun, b: AssessmentRun): string | null {
 
 function refusal(e: StudioError, base: AssessmentRun, other: AssessmentRun | undefined): Html {
   const d = other ? unlike(other, base) : null;
-  const why = d ? T(`${dimName(d)}不同，不做比较。`, `The ${dimName(d)} differs, so the runs are not compared.`) : '';
-  // The localized sentence states the core's refusal; without one, the core's own message is shown.
-  const detail = why && ui.lang === 'zh' ? '' : html`<span class="muted" lang="en"> ${e.message}</span>`;
-  return html`<div class="refuse" data-testid="compare-refused" data-code="${e.code}" title="${e.message}">${ic('stop', 's')} <b>${errorLabel(e.code)}</b> ${why}${detail}</div>`;
+  const why = d ? T(`${dimName(d)}不同，不做比较。`, `The ${dimName(d)} differs, so the runs are not compared.`) : T('两轮的条件不同，不做比较。', 'The runs differ, so they are not compared.');
+  // The localized sentence states the core's refusal; the core's own message folds into the details.
+  return html`<div class="refuse" data-testid="compare-refused" data-code="${e.code}">${ic('stop', 's')} <b>${errorLabel(e.code)}</b> ${why}${rawDetail(e)}</div>`;
 }
 
 function comparison(r: AssessmentReport, others: AssessmentRun[], compareWith: number | null, cmp: Loadable<AssessmentComparison>): Html {
@@ -79,7 +79,13 @@ function comparison(r: AssessmentReport, others: AssessmentRun[], compareWith: n
       </div>`;
 }
 
-export function vReport(r: AssessmentReport | null, runs: AssessmentRun[], compareWith: number | null, cmp: Loadable<AssessmentComparison>): Html {
+export function vReport(
+  r: AssessmentReport | null,
+  runs: AssessmentRun[],
+  compareWith: number | null,
+  cmp: Loadable<AssessmentComparison>,
+  pool: AssessmentPool | null,
+): Html {
   if (!r)
     return stateCard({
       ico: 'report',
@@ -112,7 +118,7 @@ export function vReport(r: AssessmentReport | null, runs: AssessmentRun[], compa
       ${runPick}
       <div class="score">
         <div class="n num" data-testid="score" aria-label="${T(`答对 ${r.counts.correct} / ${r.counts.scored}`, `${r.counts.correct} of ${r.counts.scored} correct`)}">${r.counts.correct}<small>/ ${r.counts.scored}</small></div>
-        <div class="side"><span class="chip" id="pass-threshold" data-testid="pass-threshold" data-value="${r.pass_threshold}">${T('及格线：未知', 'Pass threshold: unknown')}</span><span class="t">${T('只报告观察到的结果，', 'Observed result only —')}<br>${T(
+        <div class="side"><span class="chip" id="pass-threshold" data-testid="pass-threshold" data-value="${r.pass_threshold}">${T('及格线：未知', 'Pass threshold: unknown')}</span><span class="t">${T('只报告观察到的结果：', 'Observed result only:')}<br>${T(
           `计分 ${r.counts.scored} 题 · 跳过 ${r.counts.skipped} · 超时 ${r.counts.timed_out}`,
           `${r.counts.scored} scored · ${r.counts.skipped} skipped · ${r.counts.timed_out} timed out`,
         )}</span></div>
@@ -129,6 +135,18 @@ export function vReport(r: AssessmentReport | null, runs: AssessmentRun[], compa
     <div class="rail r">
       ${sat('ann', 'eye', T('逐题注释 · 已解锁', 'Annotations · unlocked'), html`<span class="num">${annotated}</span><small>${T('题 · 证据与解析', 'items · evidence & reasoning')}</small>`, 'ok', 4)}
       ${sat('resume', 'door', T('恢复', 'Resumes'), html`<span class="num">${r.run.resume_count}</span><small>${T(`次 · 恢复后作答 ${r.counts.answered_after_resume} 题`, `· ${r.counts.answered_after_resume} answered after`)}</small>`, '', 5)}
+      ${
+        pool && pool.source_count > 0
+          ? sat(
+              'pool',
+              'lock',
+              T('剩余未见测评池', 'Unseen pool left'),
+              html`<span class="num">${pool.qualifying_items}</span><small>${T(`题 · ${pool.qualifying_units} 单元`, `items · ${pool.qualifying_units} units`)}</small>`,
+              pool.floor_met ? '' : 'warm',
+              6,
+            )
+          : ''
+      }
     </div>
   </div>`;
 }
@@ -151,8 +169,35 @@ function annSheet(r: AssessmentReport, n: number | null): Html {
     const a = it.annotations;
     const reasons = Object.entries(a.option_reasoning ?? {}).sort(([x], [y]) => x.localeCompare(y));
     const missing = a.option_reasoning_missing ?? [];
-    det = html`<div class="blk" style="margin-top:16px" data-testid="annotation" data-position="${it.position}">
-      <h3>${T(`第 ${it.position + 1} 题`, `Item ${it.position + 1}`)}<span class="id">${it.question_id}</span><span class="chip ${out === 'correct' ? 'ok' : out === 'incorrect' ? 'bad' : ''} sm" style="margin-left:auto">${T(
+    const q = it.question;
+    const skill = q?.skills[0] ? html`<span class="muted" style="font-weight:500">${skillName(q.skills[0])}</span>` : '';
+    // The question as asked (prototype annSheet): stem, then the options with the verified key lit and
+    // the learner's own choice marked; each option's authored reasoning (or its missing state) under it.
+    const optionsBlock = q
+      ? html`<p class="exam ann-stem" lang="en">${q.stem}</p>
+        <div class="ann-opts">${q.options.map((o) => {
+          const key = o.label === q.key;
+          const mine = o.label === q.selected;
+          const why = a.option_reasoning?.[o.label];
+          return html`<div class="ann-o ${key ? 'is-key' : ''} ${mine && !key ? 'is-mine' : ''}" data-option="${o.label}"><b>${o.label}</b><span><span class="exam" lang="en">${o.text}</span>${
+            key ? html` <span class="chip ok sm">${mine ? T('你的选择 · 答案', 'Yours · key') : T('答案 · 已核验', 'Key · verified')}</span>` : mine ? html` <span class="chip bad sm">${T('你的选择', 'Yours')}</span>` : ''
+          }${
+            why
+              ? html`<span class="why" lang="en">${why}</span>`
+              : (a.option_reasoning_missing ?? []).includes(o.label)
+                ? html`<span class="why muted">${T('原书未提供该选项的解析。', 'The source provides no explanation for this option.')}</span>`
+                : ''
+          }</span></div>`;
+        })}</div>
+        ${q.selected ? '' : html`<p class="fine">${out === 'timed_out' ? T('这一题超时，没有作答。', 'This item timed out with no answer.') : T('这一题没有选择选项。', 'No option was chosen for this item.')}</p>`}`
+      : html`<div class="ann-opts">${[
+          ...reasons.map(([label, text]) => ({ label, row: html`<div class="ann-o"><b>${label}</b><span><span class="why" lang="en">${text}</span></span></div>` })),
+          ...missing.map((label) => ({ label, row: html`<div class="ann-o"><b>${label}</b><span><span class="why muted">${T('原书未提供该选项的解析。', 'The source provides no explanation for this option.')}</span></span></div>` })),
+        ]
+          .sort((x, y) => x.label.localeCompare(y.label))
+          .map((x) => x.row)}</div>`;
+    det = html`<div class="blk ann" style="margin-top:16px" data-testid="annotation" data-position="${it.position}">
+      <h3>${T(`第 ${it.position + 1} 题`, `Item ${it.position + 1}`)}${skill}<span class="chip ${out === 'correct' ? 'ok' : out === 'incorrect' ? 'bad' : ''} sm" style="margin-left:auto">${T(
         st[0],
         st[1],
       )}</span></h3>
@@ -164,20 +209,16 @@ function annSheet(r: AssessmentReport, n: number | null): Html {
       ${
         a.withheld || !a.available
           ? html`<p class="fine">${a.withheld ? T('这一题的注释仍被扣留。', 'Annotations for this item are still withheld.') : T('这一题没有已编写的注释。', 'No annotations are authored for this item.')}</p>`
-          : html`${a.evidence ? html`<div class="tactic" style="margin:12px 0 0;background:var(--glass-3)"><span class="ic">${ic('seal', 's')}</span><div class="k">${T('证据', 'Evidence')}</div><p class="exam" lang="en" style="font-size:15px;color:var(--ink)">“${a.evidence}”</p></div>` : ''}${
-              a.reasoning ? html`<p class="fine" lang="en">${a.reasoning}</p>` : ''
-            }
-            <div style="display:grid;grid-template-columns:1fr;gap:6px;font-size:var(--t-sm)">${[
-              ...reasons.map(([label, text]) => ({ label, row: html`<div><b>${label}</b> <span lang="en" class="muted">${text}</span></div>` })),
-              ...missing.map((label) => ({ label, row: html`<div><b>${label}</b> <span class="muted">${T('原书未提供该选项的解析。', 'No explanation provided for this option.')}</span></div>` })),
-            ]
-              .sort((x, y) => x.label.localeCompare(y.label))
-              .map((x) => x.row)}</div>
-            ${a.glossary?.length ? html`<p class="fine">${T('词表', 'Glossary')}：${a.glossary.map((g, i) => html`${i ? ' · ' : ''}<b lang="en">${g.term}</b> ${g.meaning}`)}</p>` : ''}`
+          : html`${optionsBlock}${
+              a.evidence
+                ? html`<div class="tactic" style="margin:12px 0 0;background:var(--glass-3)"><span class="ic">${ic('seal', 's')}</span><div class="k">${T('证据', 'Evidence')}</div><p class="exam" lang="en" style="font-size:15px;color:var(--ink)">“${a.evidence}”</p></div>`
+                : ''
+            }${a.reasoning ? html`<p class="fine" lang="en">${a.reasoning}</p>` : ''}
+            ${a.glossary?.length ? html`<p class="fine">${T('词表：', 'Glossary: ')}${a.glossary.map((g, i) => html`${i ? ' · ' : ''}<b lang="en">${g.term}</b> <span lang="${langOf(g.meaning)}">${g.meaning}</span>`)}</p>` : ''}`
       }
     </div>`;
   }
-  return sheetWrap('eye', T(`逐题注释 · 第 ${r.run.id} 轮`, `Annotations · run #${r.run.id}`), T('证据与解析在测评中被扣留，现在可逐题查看', 'Evidence and reasoning were withheld during the run'), html`${grid}${det}`, true);
+  return sheetWrap('eye', T(`逐题注释 · 第 ${r.run.id} 轮`, `Annotations · run #${r.run.id}`), T('证据与解析在测评中被扣留，现在可逐题查看', 'Evidence and reasoning were withheld during the run'), html`${grid}${det}`, true, true);
 }
 
 function speedBand(b: string): string {

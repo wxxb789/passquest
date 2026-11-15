@@ -54,6 +54,34 @@ first-party package imports a network package directly (the local-only gate chec
 - **Exam date and daily minutes** are optional, display-only settings (Q-0011-06). The pass threshold is always
   shown as unknown.
 
+## Anki card, AI refinement and coach history (goal 0012)
+
+- **Card preview from the backend.** `PreviewNote(draftID, fields)` returns the card as complete documents:
+  `question` and `answer`, each with `light` and `night` (`NoteCardSide`), built by `note.CardDocument` from
+  the real templates and stylesheet with the body classes Anki uses (`card card1`, plus `nightMode night_mode`
+  at night). The window composes no card markup: each shown side is the document placed byte for byte in an
+  `<iframe sandbox="allow-same-origin" scrolling="no" srcdoc>`. No script runs in the frame; the window reads
+  the frame document's height and sizes the frame to it, so the card is never clipped and never scrolls.
+  Side (both/front/back), light/night and desktop/phone width are window toggles over the same documents.
+  `fields_sha256` identifies the field payload a push would send (`html_sha256` is the same value under its
+  earlier name); `css_sha256` is the sha256 of the model stylesheet `passquest note model --json` prints, and
+  `model_version` its design version. `html`/`css` remain for older readers.
+- **Push outcome.** `PushNotes` also reports `model_updated` (an earlier Pass Quest card design in Anki was
+  replaced in place) and `model_customized` (the note type was changed in Anki and left as it is; the notes
+  were still pushed). The window shows either one after a push.
+- **Refine with AI.** `RefineNotePreview(draftID)` shows, before anything is sent, the provider and model,
+  local or external, verification and credential state, the consent covering the provider, the exact
+  messages with their sha256 and size, and the budget slot; while consent withholds the source text it
+  carries no messages and no hash. `RefineNote(draftID)` makes one call through the same path as
+  `note propose --refine` and returns an advisory suggestion (`NoteRefinement`) or a typed error. The window
+  renders the suggestion as text beside the fields; "Use suggestion" only fills the editor, and accepting
+  stays the learner's action. Because a refined draft falls back to the suggestion for empty fields, the
+  window always sends its full editor fields to `PreviewNote` and `AcceptNote`: an unchanged suggestion is
+  recorded as `refined`, a changed one as `edited`. Retry after a failure only shows the preview again.
+- **Coach history.** `CoachHistory(attemptID)` lists the attempt's recorded coach calls, oldest first, with
+  mode, provider, model, time and state; an advisory call carries its reply text, a failed one its typed
+  failure. It carries no credential and no request body. The coach sheet shows it as text in its history view.
+
 ## Credentials
 
 A key entered in Settings goes to the OS credential store (Windows Credential Manager, macOS Keychain, Secret

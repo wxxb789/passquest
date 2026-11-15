@@ -1,8 +1,8 @@
 /* Port additions — NOT from the prototype. Only what the desktop port adds on top of c-stage.html:
    the sandboxed Anki card frame and the small dialog forms (learner settings, credential entry).
    Values reuse the prototype's tokens and its .field textarea treatment. */
-.pv-side .ac-frame { display: block; width: 100%; height: 340px; border: 0; border-radius: 22px; background: transparent; color-scheme: normal; }
-.an-table.phone .pv-side .ac-frame { height: 420px; }
+/* The frame's height is set from its document once loaded (fitCardFrame); this is only the first paint. */
+.pv-side .ac-frame { display: block; width: 100%; height: 180px; border: 0; border-radius: 22px; background: transparent; color-scheme: normal; }
 .pq-form { margin-top: 4px; }
 .pq-form .field input { width: 100%; border: 0; outline: 0; padding: 9px 12px; border-radius: var(--r-s); background: var(--tile); box-shadow: inset 0 0 0 1px var(--line-2); font: inherit; font-size: var(--t-sm); color: var(--ink); transition: box-shadow var(--d1); }
 .pq-form .field input:focus { box-shadow: inset 0 0 0 1.5px var(--acc), 0 0 0 4px var(--acc-soft); }
@@ -18,10 +18,14 @@
 .rr-more .capgrid { padding-left: 38px; }
 .notes-list { flex-direction: column; align-items: stretch; gap: 6px; overflow: auto; }
 .pq-form .field select { width: 100%; border: 0; outline: 0; padding: 8px 10px; border-radius: var(--r-s); background: var(--tile); box-shadow: inset 0 0 0 1px var(--line-2); font: inherit; font-size: var(--t-sm); color: var(--ink); }
-/* An authored walkthrough can be long: it scrolls inside its box so the options stay in the card. */
+/* The opened hint / guided walkthrough is a drawer under the passage text (not inside the question
+   card), so every option and Submit stay in view. A long walkthrough scrolls in its own drawer. */
 .qcol { justify-content: safe center; }
-.qcard { overflow-x: hidden; overflow-y: auto; }
-.qcard .hintbox { flex: none; max-height: min(28vh, 240px); overflow: auto; }
+.pas-drawer { flex: none; max-height: 42%; overflow: auto; margin: 0 44px 14px 68px; }
+.pas-drawer .hb-p { margin: 4px 0 6px; }
+.pas-drawer ol { margin: 0; padding-left: 18px; }
+.enter-hint .pas-drawer { animation: rise var(--d3) var(--ease) both; }
+.q-foot { flex-wrap: wrap; row-gap: 8px; }
 /* Registry names come from the registry file and can be long: they truncate inside their column. */
 .pv-name { min-width: 0; }
 .pv-name .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -30,6 +34,48 @@
 /* A preview the core refused (e.g. consent first) reads as one quiet card, not loose text. */
 .pv-row [data-testid="preview-error"] { max-width: 640px; padding: 16px 18px; border-radius: var(--r-m); background: var(--tile); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-1); line-height: 1.6; }
 .pv-row [data-testid="preview-error"] .acts-row { display: flex; }
-/* The hero's foot keeps its buttons on one line; the promise text wraps instead. */
-.obj-foot > .promise { flex: 1 1 auto; min-width: 0; }
-.obj-foot > .acts-row { flex: none; flex-wrap: nowrap; }
+/* The hero's foot keeps its buttons on one line; the promise keeps a readable width, and when both
+   cannot share the line the buttons move under it (right-aligned) instead of squeezing the promise. */
+.obj-foot { flex-wrap: wrap; row-gap: 14px; }
+.obj-foot > .promise { flex: 1 1 260px; min-width: 0; }
+.obj-foot > .acts-row { flex: none; flex-wrap: nowrap; margin-left: auto; }
+/* The refinement strip in the Anki editor: a third column beside the fields, the coach's call strip
+   and advisory-reply treatment. */
+.es-b.refining { grid-template-columns: 1fr 1.15fr 1.35fr; }
+.es-refine { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding-top: 6px; }
+.es-refine .rf-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.es-refine .pending, .es-refine .reply { margin-top: 0; }
+.es-refine .rf-sug .field p { margin: 2px 0 8px; white-space: pre-line; font-size: var(--t-sm); line-height: 1.6; color: var(--ink); }
+.es-refine .rf-sug .field p.serif { font-family: var(--f-read); font-size: var(--t-m); }
+/* A failure line: localized title, next step, its buttons; the raw detail folds under it. */
+.pending.fail > b { display: block; }
+.pending.fail .next { display: block; margin-top: 2px; color: var(--ink-2); }
+.pending.fail .acts-row { margin-top: 8px; }
+/* Settings: one model per block, its chips on one line and its own actions under them. */
+.rr-model + .rr-model { margin-top: 10px; }
+.rr-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-left: 38px; margin-top: 6px; }
+.capgrid .cg.mdl code { font-weight: 600; }
+/* The first sentence of an advisory reply carries it (prototype: the opening line is set bolder). */
+.reply > p:first-of-type::first-line { font-weight: 600; }
+/* The coach's call history: one advisory or failed call per entry, text only. */
+.hist ol { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.hcall { padding: 12px 14px; border-radius: var(--r-m); background: var(--adv-soft); }
+.hcall.failed { background: var(--well); }
+.hcall .hmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); margin-bottom: 6px; }
+.hcall .hmeta b { color: var(--ink-2); font-weight: 600; }
+.hcall .hmeta .chip { margin-left: auto; }
+.hcall p { margin: 0 0 6px; font-size: var(--t-sm); line-height: 1.65; }
+.hcall p:last-child { margin-bottom: 0; }
+.co-head .icon-btn[aria-pressed="true"] { color: var(--acc); }
+.co-head .icon-btn[data-act="coach-history"] { margin-right: 0; }
+/* The report's annotation sheet (prototype annSheet): the stem, the options with the verified key lit
+   and the learner's choice marked, each option's authored reasoning under it, then the evidence. */
+.ann .ann-stem { font-size: 17px; line-height: 1.5; color: var(--ink); margin: 8px 0 10px; }
+.ann-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; font-size: var(--t-sm); }
+.ann-o { display: flex; gap: 8px; align-items: baseline; color: var(--ink-2); }
+.ann-o > span { min-width: 0; }
+.ann-o .why { display: block; margin-top: 2px; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+.ann-o .why.muted { color: var(--ink-3); }
+.ann-o.is-key { color: var(--ok); }
+.ann-o.is-key .exam { font-weight: 600; }
+.ann-o .chip { vertical-align: 1px; }

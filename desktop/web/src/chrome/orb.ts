@@ -27,7 +27,7 @@ export function orbHTML(i: OrbInput): Html {
   const say =
     r === 'today'
       ? i.model?.configured && i.model.model
-        ? html`<span class="orb-say" data-testid="orb-model"><span class="state-dot ${i.model.text_chat_state === 'verified' ? 'ok' : 'warm'}"></span>${i.model.model}<span class="sep"></span>${
+        ? html`<span class="orb-say" data-testid="orb-model"><span class="state-dot ${i.model.text_chat_state === 'verified' ? 'ok' : 'warm'}"></span><span translate="no">${i.model.model}</span><span class="sep"></span>${
             i.model.text_chat_state === 'verified' ? T('已验证', 'verified') : T('未验证', 'not verified')
           }<span class="sep"></span>${T('今日', 'today')} <b class="num">${budgetOf(i.model)}</b></span>`
         : html`<span class="orb-say"><span class="state-dot off"></span>${T('未选择模型', 'No model chosen')}</span>`

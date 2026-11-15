@@ -1,8 +1,9 @@
 // Empty, unknown and error states in the stage's own visual language: one centered object card.
 import type { StudioError } from '../api/types';
 import { html, type Html, type Interp } from '../core/html';
-import { errorLabel, T } from '../core/i18n';
+import { errorLabel, nextStep, T } from '../core/i18n';
 import type { Loadable } from '../core/state';
+import { rawDetail, settingsLink } from '../components/failure';
 import { ic, type IconName } from '../icons';
 
 export interface StateCard {
@@ -30,11 +31,10 @@ export function loadingCard(): Html {
   return html`<div class="scene orbit" aria-busy="true"><article class="obj hero card" aria-label="${T('加载中', 'Loading')}" data-testid="loading"><p class="reason muted">${T('正在读取本地学习记录……', 'Reading local study records…')}</p></article></div>`;
 }
 
-/** The core's message and next step for a typed failure, as one line of escaped text. */
+/** A typed failure's next step in the window's words; the core's message and CLI step fold into details. */
 export function errorDetail(e: StudioError): Html {
-  return html`<span data-testid="error-message" lang="en">${e.message}</span>${
-    e.action ? html`<br><span class="muted">${T('下一步：', 'Next: ')}<span data-testid="error-action">${e.action}</span></span>` : ''
-  }`;
+  const next = nextStep(e.code);
+  return html`${next ?? T('这一步没有完成，可以重试。', 'This step did not complete; you can retry.')}${rawDetail(e)}`;
 }
 
 /** Error card for a failed or unavailable call. The message is core text: rendered escaped. */
@@ -53,7 +53,7 @@ export function errorCard(e: StudioError, retry: Interp = ''): Html {
     title: errorLabel(e.code),
     body: errorDetail(e),
     code: e.code,
-    action: retry,
+    action: html`${settingsLink(e.code)}${retry}`,
   });
 }
 

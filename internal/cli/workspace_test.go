@@ -471,6 +471,19 @@ func TestWorkspaceAssessmentStepFlow(t *testing.T) {
 	if report.PassThreshold != "unknown" || report.Counts.TimedOut != 1 || report.Counts.Finalized != 2 || len(report.Items) != 2 {
 		t.Fatalf("report = %+v", report)
 	}
+	// After the run each item carries its question, the learner's choice and the verified key.
+	for _, item := range report.Items {
+		q := item.Question
+		if q == nil || q.Stem == "" || len(q.Options) == 0 || q.Key == "" {
+			t.Fatalf("report item %d question = %+v", item.Position, q)
+		}
+	}
+	if got := report.Items[0].Question.Selected; got != "A" {
+		t.Fatalf("item 1 selected = %q, want A", got)
+	}
+	if got := report.Items[1].Question.Selected; got != "" {
+		t.Fatalf("timed-out item 2 selected = %q, want none", got)
+	}
 
 	second, err := f.w.StartAssessment(2, 2)
 	mustNoErr(t, err)
