@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wxxb789/passquest/internal/hostproc"
 	"github.com/wxxb789/passquest/internal/provider"
 )
 
@@ -240,12 +241,17 @@ func (r HostRunner) Run(ctx context.Context, request HostRequest) (RunOutcome, e
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	configureProcess(cmd)
-	if err := cmd.Start(); err != nil {
+	release, err := hostproc.Start(cmd)
+	if err != nil {
 		return RunOutcome{}, &UnavailableError{Err: fmt.Errorf("start agent host: %w", err)}
 	}
 
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() {
+		err := cmd.Wait()
+		release()
+		done <- err
+	}()
 	var interrupted bool
 	interruptReason := ""
 	select {

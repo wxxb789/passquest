@@ -1,0 +1,35 @@
+/* Port additions — NOT from the prototype. Only what the desktop port adds on top of c-stage.html:
+   the sandboxed Anki card frame and the small dialog forms (learner settings, credential entry).
+   Values reuse the prototype's tokens and its .field textarea treatment. */
+.pv-side .ac-frame { display: block; width: 100%; height: 340px; border: 0; border-radius: 22px; background: transparent; color-scheme: normal; }
+.an-table.phone .pv-side .ac-frame { height: 420px; }
+.pq-form { margin-top: 4px; }
+.pq-form .field input { width: 100%; border: 0; outline: 0; padding: 9px 12px; border-radius: var(--r-s); background: var(--tile); box-shadow: inset 0 0 0 1px var(--line-2); font: inherit; font-size: var(--t-sm); color: var(--ink); transition: box-shadow var(--d1); }
+.pq-form .field input:focus { box-shadow: inset 0 0 0 1.5px var(--acc), 0 0 0 4px var(--acc-soft); }
+/* Wiring additions: button rows, the warm "will not count" promise, the exact coach request,
+   the per-model lines under a provider row, the note list and the consent form's selects. */
+.acts-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.promise.warm .glow { background: var(--warm); box-shadow: 0 0 0 4px var(--warm-soft); }
+.promise.warm b { color: var(--warm); }
+.callstrip .payload { grid-column: 2; font-size: 12px; }
+.callstrip .payload summary { cursor: pointer; color: var(--ink-3); }
+.callstrip .payload .msg { margin-top: 6px; }
+.callstrip .payload pre { margin: 2px 0 0; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--f-mono); padding: 8px 10px; border-radius: var(--r-s); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
+.rr-more .capgrid { padding-left: 38px; }
+.notes-list { flex-direction: column; align-items: stretch; gap: 6px; overflow: auto; }
+.pq-form .field select { width: 100%; border: 0; outline: 0; padding: 8px 10px; border-radius: var(--r-s); background: var(--tile); box-shadow: inset 0 0 0 1px var(--line-2); font: inherit; font-size: var(--t-sm); color: var(--ink); }
+/* An authored walkthrough can be long: it scrolls inside its box so the options stay in the card. */
+.qcol { justify-content: safe center; }
+.qcard { overflow-x: hidden; overflow-y: auto; }
+.qcard .hintbox { flex: none; max-height: min(28vh, 240px); overflow: auto; }
+/* Registry names come from the registry file and can be long: they truncate inside their column. */
+.pv-name { min-width: 0; }
+.pv-name .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rrow .model { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.reg-h p.held { color: var(--warm); margin-top: 8px; }
+/* A preview the core refused (e.g. consent first) reads as one quiet card, not loose text. */
+.pv-row [data-testid="preview-error"] { max-width: 640px; padding: 16px 18px; border-radius: var(--r-m); background: var(--tile); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-1); line-height: 1.6; }
+.pv-row [data-testid="preview-error"] .acts-row { display: flex; }
+/* The hero's foot keeps its buttons on one line; the promise text wraps instead. */
+.obj-foot > .promise { flex: 1 1 auto; min-width: 0; }
+.obj-foot > .acts-row { flex: none; flex-wrap: nowrap; }

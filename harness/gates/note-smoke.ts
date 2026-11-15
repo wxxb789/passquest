@@ -2,16 +2,12 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { startAnkiStub } from "../lib/anki-stub.ts";
 import { runGo } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
-
-interface StubAction {
-  action: string;
-  params: Record<string, unknown>;
-}
 
 const FORBIDDEN_PHONE_CLAIMS = [
   "pushed to your phone",
@@ -57,99 +53,8 @@ export const noteSmoke: Gate = {
       return condition;
     };
 
-    const notes = new Map<number, Record<string, string>>();
-    const noteDecks = new Map<number, string>();
-    const noteCards = new Map<number, number[]>();
-    const models: string[] = [];
-    const actions: StubAction[] = [];
-    let nextID = 101;
-    let nextCard = 501;
-    let duplicate = false;
-    let misassigned: string | null = null;
-    const stub = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      async fetch(request) {
-        const body = asRecord(parse(await request.text()));
-        const action = stringField(body, "action") ?? "";
-        const params = asRecord(body.params);
-        actions.push({ action, params });
-        let result: unknown = null;
-        let error: string | null = null;
-        switch (action) {
-          case "version":
-            result = 6;
-            break;
-          case "createDeck":
-            result = 1;
-            break;
-          case "modelNames":
-            result = [...models];
-            break;
-          case "createModel":
-            models.push(stringField(params, "modelName") ?? "");
-            result = null;
-            break;
-          case "addNote": {
-            if (duplicate) {
-              error = "cannot create note because it is a duplicate";
-              break;
-            }
-            const note = asRecord(params.note);
-            const fields = asRecord(note.fields);
-            const stored: Record<string, string> = {};
-            for (const [name, value] of Object.entries(fields)) stored[name] = String(value);
-            const id = nextID++;
-            notes.set(id, stored);
-            noteDecks.set(id, misassigned ?? stringField(note, "deckName") ?? "");
-            noteCards.set(id, [nextCard++]);
-            result = id;
-            break;
-          }
-          case "updateNoteFields": {
-            const note = asRecord(params.note);
-            const id = Number(note.id);
-            if (!notes.has(id)) {
-              error = "note was not found";
-              break;
-            }
-            const fields = notes.get(id)!;
-            for (const [name, value] of Object.entries(asRecord(note.fields))) fields[name] = String(value);
-            result = null;
-            break;
-          }
-          case "notesInfo": {
-            const ids = Array.isArray(params.notes) ? params.notes.map(Number) : [];
-            result = ids
-              .filter((id) => notes.has(id))
-              .map((id) => ({
-                noteId: id,
-                modelName: "PassQuest Note",
-                fields: Object.fromEntries(
-                  Object.entries(notes.get(id)!).map(([name, value]) => [name, { value, order: 0 }]),
-                ),
-                cards: noteCards.get(id) ?? [],
-              }));
-            break;
-          }
-          case "cardsInfo": {
-            const asked = Array.isArray(params.cards) ? params.cards.map(Number) : [];
-            result = asked.flatMap((cardID) => {
-              for (const [noteID, ids] of noteCards) {
-                if (!ids.includes(cardID)) continue;
-                return [{ cardId: cardID, note: noteID, modelName: "PassQuest Note", deckName: noteDecks.get(noteID) ?? "" }];
-              }
-              return [];
-            });
-            break;
-          }
-          default:
-            error = "unsupported action";
-        }
-        return Response.json({ result, error });
-      },
-    });
-    const endpoint = `http://127.0.0.1:${stub.port}`;
+    const anki = startAnkiStub();
+    const { actions, notes, noteDecks, endpoint } = anki;
     const hostPath = path.join(ctx.root, "agent", "anki-host.mjs");
     const baseEnv = { PASSQUEST_ANKI_HOST: hostPath };
 
@@ -422,7 +327,7 @@ export const noteSmoke: Gate = {
       const reportBeforeMismatch = (await callJSON(["report", "--json"])).stdout;
       const nextBeforeMismatch = (await callJSON(["next", "--json"])).stdout;
       const questionsBeforeMismatch = (await callJSON(["questions", sourceID!, "--json"])).stdout;
-      misassigned = "Default";
+      anki.misassigned = "Default";
       const mislocatedProposal = await callJSON([
         "note",
         "propose",
@@ -538,7 +443,7 @@ export const noteSmoke: Gate = {
         "a matching deck was counted as a mismatch",
       );
       check(field(arrayField(moved.doc, "notes")[0], "deck") === undefined, "a matching card carries a deck field");
-      misassigned = null;
+      anki.misassigned = null;
       await callJSON(["note", "skip", "--draft", String(mislocatedDraft)]);
 
       check(
@@ -592,7 +497,7 @@ export const noteSmoke: Gate = {
       ]);
       const duplicateDraftID = numberField(field(duplicateDraft.doc, "draft"), "id");
       await callJSON(["note", "accept", "--draft", String(duplicateDraftID)]);
-      duplicate = true;
+      anki.duplicate = true;
       const duplicatePush = await callJSON(["note", "push", "--endpoint", endpoint]);
       check(duplicatePush.code === 0, `duplicate push exit = ${duplicatePush.code}`);
       check(field(duplicatePush.doc, "state") === "already_present", "duplicate push is not already_present");
@@ -601,7 +506,7 @@ export const noteSmoke: Gate = {
       const duplicateRevision = await callJSON(["note", "push", "--endpoint", endpoint]);
       check(duplicateRevision.code === 3, `duplicate revision exit = ${duplicateRevision.code}`);
       check(field(duplicateRevision.failure, "state") === "conflict", "duplicate revision is not a conflict");
-      duplicate = false;
+      anki.duplicate = false;
 
       // Revoked consent blocks a push before any endpoint contact.
       await callJSON(["note", "accept", "--front", "revoked word"]);
@@ -676,7 +581,7 @@ export const noteSmoke: Gate = {
     } catch (error) {
       checks.push(error instanceof Error ? error.message : String(error));
     } finally {
-      stub.stop(true);
+      anki.stop();
       rmSync(temp, { recursive: true, force: true });
     }
 

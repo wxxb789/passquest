@@ -4,6 +4,7 @@ import { adaptiveSmoke } from "./adaptive-smoke.ts";
 import { agentSmoke } from "./agent-smoke.ts";
 import { assessSmoke } from "./assess-smoke.ts";
 import { baseline } from "./baseline.ts";
+import { desktopSmoke } from "./desktop-smoke.ts";
 import { docsLinks } from "./docs-links.ts";
 import { findSmoke } from "./find-smoke.ts";
 import { goBuild } from "./go-build.ts";
@@ -45,5 +46,6 @@ export const gates: Gate[] = [
   portablePaths,
   providerSmoke,
   goldenContract,
+  desktopSmoke,
   selfTest,
 ];

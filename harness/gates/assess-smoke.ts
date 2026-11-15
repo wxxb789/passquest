@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -6,6 +6,7 @@ import { runGo } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
 import type { RunResult } from "../lib/process.ts";
+import { seedReviewedSource, writeFixtureQuestion } from "../lib/reviewed-source.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
@@ -19,51 +20,6 @@ function parse(raw: string): unknown {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function fixturePageText(page: number): string {
-  return `Page ${page}. The library closes at 4 p.m. on Saturdays. It opens at 9 a.m. on weekdays.\n`;
-}
-
-function writeFixtureQuestion(dir: string, page: number, index: number): string {
-  const id = `p${String(page).padStart(2, "0")}-q${index}`;
-  writeFileSync(
-    path.join(dir, "questions", `${id}.json`),
-    JSON.stringify({
-      id,
-      stem: `Page ${page} question ${index}: When does the library close on Saturdays?`,
-      options: [
-        { label: "A", text: "At 9 a.m." },
-        { label: "B", text: "At 4 p.m." },
-      ],
-      answer: "B",
-      evidence: "closes at 4 p.m. on Saturdays",
-      reasoning: `Reasoning for page ${page} question ${index}.`,
-      option_reasoning: {
-        A: "Nine is the weekday opening time.",
-        B: "The passage states 4 p.m. on Saturdays.",
-      },
-      tactics: [index === 1 ? "not-except-polarity" : "vocabulary-in-context"],
-      glossary: [{ term: "closes", meaning: "shuts" }],
-    }),
-  );
-  return id;
-}
-
-function writeFixtureTree(dir: string, pages: number, firstPageQuestions: number): Array<{ page: number; id: string }> {
-  const pagesDir = path.join(dir, "pages");
-  const questionsDir = path.join(dir, "questions");
-  mkdirSync(pagesDir, { recursive: true });
-  mkdirSync(questionsDir, { recursive: true });
-  const written: Array<{ page: number; id: string }> = [];
-  for (let page = 1; page <= pages; page++) {
-    writeFileSync(path.join(pagesDir, `page-${String(page).padStart(3, "0")}.txt`), fixturePageText(page));
-    const count = page === 1 ? firstPageQuestions : 1;
-    for (let index = 1; index <= count; index++) {
-      written.push({ page, id: writeFixtureQuestion(dir, page, index) });
-    }
-  }
-  return written;
 }
 
 export const assessSmoke: Gate = {
@@ -111,29 +67,8 @@ export const assessSmoke: Gate = {
         return { code, stdout, stderr };
       };
 
-      const seedSource = async (db: string, dir: string, pages: number, firstPageQuestions: number): Promise<string | null> => {
-        const questions = writeFixtureTree(dir, pages, firstPageQuestions);
-        const imported = await callJSON(db, ["import", "--path", dir]);
-        if (!check(imported.code === 0, `import ${dir} exit = ${imported.code}: ${imported.stderr}`)) return null;
-        const sourceID = stringField(field(imported.doc, "source"), "id");
-        if (!sourceID) {
-          check(false, `import ${dir} returned no source id`);
-          return null;
-        }
-        for (const question of questions) {
-          const added = await callJSON(db, ["question", "add", sourceID, String(question.page), "--file", path.join(dir, "questions", `${question.id}.json`)]);
-          if (!check(added.code === 0, `question add ${question.id} exit = ${added.code}: ${added.stderr}`)) return null;
-        }
-        for (let page = 1; page <= pages; page++) {
-          const reviewedPage = await callJSON(db, ["page", "review", sourceID, String(page), "--reviewer", "smoke"]);
-          if (!check(reviewedPage.code === 0, `page review ${page} exit = ${reviewedPage.code}: ${reviewedPage.stderr}`)) return null;
-        }
-        for (const question of questions) {
-          const reviewed = await callJSON(db, ["question", "review", sourceID, question.id, "--answer", "B", "--reviewer", "smoke"]);
-          if (!check(reviewed.code === 0, `question review ${question.id} exit = ${reviewed.code}: ${reviewed.stderr}`)) return null;
-        }
-        return sourceID;
-      };
+      const seedSource = (db: string, dir: string, pages: number, firstPageQuestions: number): Promise<string | null> =>
+        seedReviewedSource((args) => callJSON(db, args), check, dir, pages, firstPageQuestions);
 
       const richDir = path.join(temp, "rich-source");
       const richDB = path.join(temp, "rich.sqlite");

@@ -1,0 +1,87 @@
+/* Chrome: frame, brand, util, session timeline, dock, orb, coach sheet shell — ported verbatim from design/prototypes/c-stage.html (lines 183-268). Do not normalise values. */
+/* ---------- frame ---------- */
+.app { position: relative; z-index: 1; height: 100vh; display: grid; grid-template-rows: 64px minmax(0, 1fr); }
+.top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 var(--s6); }
+.stage { position: relative; min-height: 0; padding: 4px var(--gut) 104px; transition: padding var(--d3) var(--ease); }
+.stage.with-coach { padding-right: calc(var(--coach-w) + 24px + 32px); }
+.scene { height: 100%; margin: 0 auto; max-width: 1360px; }
+
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+/* brand mark: one ink dot with a soft halo — 一念, the same light as the coach */
+.brand-mark { width: 24px; height: 24px; position: relative; flex: none; }
+.brand-mark::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in oklab, var(--acc) 28%, transparent), transparent); }
+.brand-mark::after { content: ""; position: absolute; left: 7px; top: 7px; width: 10px; height: 10px; border-radius: 54% 46% 52% 48% / 47% 55% 45% 53%; background: radial-gradient(circle at 38% 34%, color-mix(in oklab, var(--acc) 55%, white), var(--acc) 70%); opacity: .92; }
+.brand-name { font-family: var(--f-disp); font-weight: 600; font-size: 15px; letter-spacing: -.005em; }
+.brand-day { font-size: var(--t-s); color: var(--ink-3); padding-left: 12px; border-left: 1px solid var(--line-2); line-height: 1.2; white-space: nowrap; }
+.brand-day b { color: var(--ink); font-weight: 600; }
+
+.util { justify-self: end; display: flex; align-items: center; gap: 6px; padding: 4px; border-radius: var(--r-pill);
+  background: var(--glass); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: inset 0 0 0 1px var(--line), var(--sh-1); transition: background var(--d2), box-shadow var(--d2); }
+/* during an attempt the chrome recedes by material, not by contrast */
+body[data-room="cool"] .util:not(:hover):not(:focus-within), body[data-room="warm"] .util:not(:hover):not(:focus-within),
+body[data-room="still"] .util:not(:hover):not(:focus-within) { background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.util .seg { display: flex; padding: 2px; border-radius: var(--r-pill); background: var(--well); }
+.util .seg button { height: 26px; min-width: 34px; padding: 0 10px; border-radius: var(--r-pill); font-size: var(--t-s); color: var(--ink-3); font-weight: 600; }
+.util .seg button[aria-pressed="true"] { background: var(--glass-3); color: var(--ink); box-shadow: var(--sh-1); }
+.icon-btn { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-2); transition: background var(--d1), color var(--d1); flex: none; }
+.icon-btn:hover { background: var(--well); color: var(--ink); }
+
+/* session timeline */
+.tl { display: flex; align-items: center; gap: 14px; height: 32px; padding: 0 16px 0 14px; color: var(--ink-3); font-size: var(--t-s); }
+.tl-dots { display: flex; align-items: center; }
+.tl-dot { position: relative; width: 22px; height: 18px; display: grid; place-items: center; }
+.tl-dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-4); transition: all var(--d2) var(--spring); }
+.tl-dot.done::before { background: var(--ink-2); }
+.tl-dot.now::before { width: 10px; height: 10px; background: var(--acc); box-shadow: 0 0 0 4px var(--acc-soft), 0 0 14px var(--acc-line); }
+.tl-dot + .tl-dot::after { content: ""; position: absolute; right: 15px; top: 8.5px; width: 14px; height: 1px; background: var(--line-2); }
+.tl-dot .tip { position: absolute; top: calc(100% + 6px); left: 50%; transform: translate(-50%, -3px); opacity: 0; pointer-events: none; z-index: 5;
+  padding: 4px 9px; border-radius: 7px; background: var(--ink); color: var(--bg); font-size: 12px; white-space: nowrap; transition: all var(--d1) var(--ease); }
+.tl-dot:hover .tip { opacity: 1; transform: translate(-50%, 0); }
+.tl-label { color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+.tl-label .n { color: var(--ink-3); font-weight: 400; margin-left: 8px; }
+.resume { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px 0 12px; border-radius: var(--r-pill); font-size: var(--t-s); color: var(--ink-2); font-weight: 600;
+  background: var(--glass); box-shadow: inset 0 0 0 1px var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.resume:hover { background: var(--glass-2); color: var(--ink); }
+.resume .d { width: 7px; height: 7px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft); }
+
+/* dock */
+.dock { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 2px; padding: 6px;
+  border-radius: var(--r-pill); background: var(--glass-2); backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-2); }
+.dock a { position: relative; height: 44px; min-width: 44px; padding: 0 13px; border-radius: var(--r-pill); display: flex; align-items: center; justify-content: center; gap: 8px;
+  color: var(--ink-2); font-size: var(--t-sm); font-weight: 600; transition: background var(--d1), color var(--d1), padding var(--d2) var(--ease); }
+.dock a:hover, .dock a:focus-visible { background: var(--well); color: var(--ink); }
+.dock a .lbl { display: none; white-space: nowrap; }
+.dock a[aria-current="page"] { background: var(--acc-tint); color: var(--acc); padding: 0 18px 0 15px; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--acc) 18%, transparent); }
+[data-theme="dark"] .dock a[aria-current="page"] { color: oklch(87% 0.07 268); }
+.dock a[aria-current="page"] .lbl { display: inline; }
+.dock a .tip { position: absolute; bottom: calc(100% + 12px); left: 50%; transform: translate(-50%, 4px); opacity: 0; pointer-events: none;
+  padding: 5px 10px; border-radius: 8px; background: var(--ink); color: var(--bg); font-size: 12px; font-weight: 600; white-space: nowrap; transition: all var(--d1) var(--ease); }
+.dock a:not([aria-current]):hover .tip, .dock a:not([aria-current]):focus-visible .tip { opacity: 1; transform: translate(-50%, 0); }
+.dock a[aria-current] .tip { display: none; }
+.dock .badge { position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px var(--glass-3); }
+.dock a[aria-current] .badge { top: 6px; right: 6px; }
+
+/* coach orb */
+.orb-wrap { position: fixed; right: 24px; bottom: 20px; z-index: 31; display: flex; align-items: center; gap: 10px; }
+.orb-say { height: 34px; padding: 0 14px 0 12px; display: flex; align-items: center; gap: 8px; border-radius: var(--r-pill); font-size: var(--t-s); color: var(--ink-2);
+  background: var(--glass); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); box-shadow: inset 0 0 0 1px var(--line); white-space: nowrap; }
+.orb-say b { color: var(--ink); font-weight: 600; }
+.orb { width: 56px; height: 56px; border-radius: 50%; position: relative; display: grid; place-items: center;
+  background: var(--glass-2); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-2); }
+.orb .core { width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #fff, var(--orb-core) 60%);
+  box-shadow: 0 0 0 6px var(--orb-halo), 0 0 26px 8px var(--orb-halo); animation: breathe 4.8s ease-in-out infinite; }
+.orb.quiet .core { box-shadow: 0 0 0 4px color-mix(in oklab, var(--orb-halo) 50%, transparent), 0 0 14px 2px color-mix(in oklab, var(--orb-halo) 50%, transparent); animation-duration: 7s; }
+.orb.open { box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1.5px var(--adv-line), var(--sh-2); }
+@keyframes breathe { 0%, 100% { transform: scale(1); box-shadow: 0 0 0 5px var(--orb-halo), 0 0 22px 6px var(--orb-halo); } 50% { transform: scale(1.12); box-shadow: 0 0 0 9px color-mix(in oklab, var(--orb-halo) 60%, transparent), 0 0 34px 12px color-mix(in oklab, var(--orb-halo) 70%, transparent); } }
+
+/* coach sheet — grows out of the orb */
+.csheet { position: fixed; right: 24px; bottom: 90px; z-index: 30; width: var(--coach-w); max-height: calc(100vh - 68px - 90px); display: flex; flex-direction: column; border-radius: 24px;
+  background: var(--glass-3); backdrop-filter: blur(28px) saturate(1.4); -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); transform-origin: calc(100% - 28px) calc(100% + 40px); animation: grow var(--d3) var(--spring) both; }
+.csheet::after { content: ""; position: absolute; right: 22px; bottom: -6px; width: 12px; height: 12px; transform: rotate(45deg); border-radius: 0 0 3px 0;
+  background: var(--glass-3); box-shadow: inset -1px -1px 0 var(--line); }
+.csheet::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: radial-gradient(70% 40% at 100% 100%, var(--adv-soft), transparent); }
+.csheet.small { width: 368px; padding: 20px 22px 16px; }
+@keyframes grow { from { opacity: 0; transform: scale(.88) translateY(12px); } }

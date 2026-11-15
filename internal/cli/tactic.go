@@ -173,28 +173,54 @@ func runTacticPractice(args []string, opt Options) int {
 		return internalError(opt, *jsonFlag, err)
 	}
 	defer st.Close()
+	selection, err := selectTacticPractice(st, lesson, *stageFlag, *sourceFlag, *questionFlag)
+	if err != nil {
+		return tacticError(opt, *jsonFlag, err)
+	}
+
+	if *jsonFlag {
+		if !answerSet && !*skipFlag {
+			if err := recordGuidedExposure(st, selection.Tactic, selection.Content.ID, selection.Question.ID, opt.Now()); err != nil {
+				return internalError(opt, *jsonFlag, err)
+			}
+			return writeJSON(opt, awaitingDoc{
+				SchemaVersion: ProtocolVersion,
+				State:         "awaiting_answer",
+				Tactic:        tacticRunViewOf(selection.Tactic),
+				Guidance:      selection.Tactic.Guidance,
+				Content:       contentViewOf(selection.Content),
+				Question:      questionViewOf(selection),
+			})
+		}
+		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true)
+	}
+	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
+}
+
+// selectTacticPractice applies the tactic stage rule and picks the question a
+// `tactic practice` invocation would show. A guided selection carries the
+// walkthrough it delivers.
+func selectTacticPractice(st *store.Store, lesson tactic.Tactic, requestedStage, sourceID, questionID string) (practiceSelection, error) {
 	records, err := st.List()
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return practiceSelection{}, err
 	}
 	exposures, err := st.ListExposures()
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return practiceSelection{}, err
 	}
-
-	stage, err := resolveTacticStage(*stageFlag, lesson.ID, records)
+	stage, err := resolveTacticStage(requestedStage, lesson.ID, records)
 	if err != nil {
-		return tacticError(opt, *jsonFlag, err)
+		return practiceSelection{}, err
 	}
-	candidates, err := tacticCandidates(st, lesson, *sourceFlag)
+	candidates, err := tacticCandidates(st, lesson, sourceID)
 	if err != nil {
-		return tacticError(opt, *jsonFlag, err)
+		return practiceSelection{}, err
 	}
-	candidate, err := pickTacticCandidate(lesson, stage, *questionFlag, candidates, records, exposures)
+	candidate, err := pickTacticCandidate(lesson, stage, questionID, candidates, records, exposures)
 	if err != nil {
-		return tacticError(opt, *jsonFlag, err)
+		return practiceSelection{}, err
 	}
-
 	selection := practiceSelection{
 		Content:  candidate.Content,
 		Question: candidate.Question,
@@ -211,24 +237,7 @@ func runTacticPractice(args []string, opt Options) int {
 	if stage == stageGuided {
 		selection.Tactic.Guidance = guidanceFor(lesson)
 	}
-
-	if *jsonFlag {
-		if !answerSet && !*skipFlag {
-			if err := recordGuidedExposure(st, selection.Tactic, candidate.Content.ID, candidate.Question.ID, opt.Now()); err != nil {
-				return internalError(opt, *jsonFlag, err)
-			}
-			return writeJSON(opt, awaitingDoc{
-				SchemaVersion: ProtocolVersion,
-				State:         "awaiting_answer",
-				Tactic:        tacticRunViewOf(selection.Tactic),
-				Guidance:      selection.Tactic.Guidance,
-				Content:       contentViewOf(selection.Content),
-				Question:      questionViewOf(selection),
-			})
-		}
-		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true)
-	}
-	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
+	return selection, nil
 }
 
 func tacticError(opt Options, jsonMode bool, err error) int {

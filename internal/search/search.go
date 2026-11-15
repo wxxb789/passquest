@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/wxxb789/passquest/internal/hostproc"
 )
 
 const (
@@ -385,7 +387,7 @@ func (t HostTransport) Search(ctx context.Context, req Request) (Result, error) 
 	cmd.WaitDelay = 2 * time.Second
 
 	key := strings.TrimSpace(t.getenv(KeyEnv))
-	runErr := cmd.Run()
+	runErr := hostproc.Run(cmd)
 	if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
 		return Result{}, &ProviderError{
 			Code:        "timeout",

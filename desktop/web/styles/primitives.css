@@ -1,0 +1,66 @@
+/* Primitives: materials, type roles, chips, kbd, buttons, motion — ported verbatim from design/prototypes/c-stage.html (lines 270-334). Do not normalise values. */
+/* ---------- materials ---------- */
+.glass { background: var(--glass); backdrop-filter: blur(20px) saturate(1.35); -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-1); }
+.card { background: var(--glass-2); backdrop-filter: blur(28px) saturate(1.4); -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  border-radius: var(--r-xl); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
+.paper { background: var(--paper); color: var(--paper-ink); border-radius: var(--r-xl);
+  box-shadow: inset 0 0 0 1px var(--paper-line), var(--sh-2); }
+[data-theme="dark"] .paper { box-shadow: inset 0 1px 0 oklch(100% 0 0 / .03), var(--sh-2); }
+
+/* typography roles — one label style in both locales */
+.eyebrow { font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--ink-3); line-height: 1.35; }
+.h-disp { font-family: var(--f-disp); font-weight: 600; letter-spacing: -.022em; line-height: 1.12; }
+html[lang="zh-CN"] .h-disp { letter-spacing: .01em; line-height: 1.25; }
+.muted { color: var(--ink-3); }
+.sub { color: var(--ink-2); }
+.num { font-variant-numeric: tabular-nums lining-nums; }
+.sep { display: inline-block; width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .55; vertical-align: middle; margin: 0 8px; flex: none; }
+
+/* chips */
+.chip { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px; border-radius: var(--r-pill); font-size: var(--t-s); font-weight: 550; white-space: nowrap;
+  background: var(--glass-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); }
+.chip.ok { color: var(--ok); background: var(--ok-soft); box-shadow: inset 0 0 0 1px var(--ok-line); }
+.chip.bad { color: var(--bad); background: var(--bad-soft); box-shadow: inset 0 0 0 1px var(--bad-line); }
+.chip.adv { color: var(--adv); background: var(--adv-soft); box-shadow: inset 0 0 0 1px var(--adv-line); }
+.chip.warm { color: var(--warm); background: var(--warm-soft); box-shadow: inset 0 0 0 1px var(--warm-line); }
+.chip.cool { color: var(--cool); background: var(--cool-soft); box-shadow: inset 0 0 0 1px var(--cool-line); }
+.chip.acc { color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc-line); }
+.chip.ghost { background: transparent; }
+.chip.sm { height: 22px; padding: 0 9px; font-size: var(--t-xs); gap: 5px; }
+html[lang="zh-CN"] .chip.sm { font-size: 12px; }
+.chip b { color: var(--ink); font-weight: 600; }
+
+kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 6px; font-family: var(--f-mono); font-size: 11px; font-weight: 600; line-height: 1;
+  color: var(--ink-2); background: var(--glass-3); box-shadow: inset 0 0 0 1px var(--line-2), inset 0 -1.5px 0 var(--line-2); letter-spacing: 0; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; height: 40px; padding: 0 18px; border-radius: var(--r-pill); font-size: var(--t-b); font-weight: 600; white-space: nowrap;
+  transition: transform var(--d1) var(--ease), box-shadow var(--d2) var(--ease), background var(--d1), color var(--d1); }
+.btn:active { transform: translateY(1px) scale(.99); }
+.btn.primary { background: var(--acc); color: var(--acc-ink); box-shadow: inset 0 1px 0 oklch(100% 0 0 / .22), 0 1px 2px oklch(20% .1 268 / .2), 0 8px 22px -6px var(--acc-line); }
+.btn.primary:hover { background: var(--acc-hi); box-shadow: inset 0 1px 0 oklch(100% 0 0 / .22), 0 1px 2px oklch(20% .1 268 / .2), 0 12px 28px -6px var(--acc-line); }
+.btn.primary kbd { background: oklch(100% 0 0 / .18); color: inherit; box-shadow: inset 0 0 0 1px oklch(100% 0 0 / .28); }
+[data-theme="dark"] .btn.primary kbd { background: oklch(0% 0 0 / .1); box-shadow: inset 0 0 0 1px oklch(0% 0 0 / .2); }
+.btn.primary[disabled] { background: var(--acc-soft); color: var(--acc-dim); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--acc) 14%, transparent); }
+.btn.primary[disabled] kbd { background: transparent; box-shadow: inset 0 0 0 1px var(--acc-line); opacity: .6; }
+.btn.ghost { background: var(--glass-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-1); }
+.btn.ghost:hover { background: var(--glass-3); }
+.btn.quiet { color: var(--ink-2); padding: 0 12px; }
+.btn.quiet:hover { background: var(--well); color: var(--ink); }
+.btn.lg { height: 52px; padding: 0 26px; font-size: var(--t-m); }
+.btn.sm { height: 32px; padding: 0 13px; font-size: var(--t-s); gap: 7px; }
+.btn[disabled] { cursor: not-allowed; }
+.btn.ghost[disabled], .btn.quiet[disabled], .btn.adv[disabled] { opacity: .55; box-shadow: inset 0 0 0 1px var(--line); }
+.btn.adv { color: var(--adv); box-shadow: inset 0 0 0 1px var(--adv-line); background: var(--adv-soft); }
+.lnk { color: var(--acc); font-weight: 600; border-radius: 4px; }
+.lnk:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* motion primitives — only on arrival in a room (.enter), never on in-place updates */
+@keyframes rise { from { opacity: 0; transform: translateY(14px) scale(.985); } }
+@keyframes settle { from { opacity: 0; transform: translateY(8px) scale(.94); } }
+@keyframes unfold { from { opacity: .2; transform: perspective(1400px) rotateY(-12deg) scale(.96); } }
+@keyframes recede { from { transform: scale(1.03); opacity: .6; } }
+@keyframes fade { from { opacity: 0; } }
+.enter .rise { animation: rise var(--d3) var(--ease) both; animation-delay: calc(var(--i, 0) * 60ms); }
+.enter .settle { animation: settle var(--d3) var(--spring) both; animation-delay: calc(160ms + var(--i, 0) * 55ms); }

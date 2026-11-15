@@ -5,8 +5,8 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
 ## Design and development
 
 - [Core Design](docs/core-design.md) — product purpose, safety, quality and architecture principles.
-- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0010
-  are done; 0011 is provisional.
+- [Goal series](docs/goals/README.md) — numbered, observable development outcomes. Goals 0001–0011
+  and 0014 are done; 0012 and 0013 are provisional.
 - [Harness](docs/harness.md) — the single `bun run gate` entry point and what each gate reads.
 - [Cross-platform rules](docs/cross-platform.md) — Windows, macOS and Linux: paths, processes, mode
   bits, goldens, and the path literals the `portable-paths` gate refuses.
@@ -20,6 +20,8 @@ An AI-native, desktop-first, local-first exam coach focused on **passing a parti
   consent-gated private text, revision history, atomic export and a loopback AnkiConnect push.
 - [Find practice](docs/find.md) — one evidence rule, a bounded search intent, candidate rights and
   provenance, a visible query/candidate budget and inert fetched text.
+- [Desktop workspace](docs/desktop.md) — a MyGo window over the same Go core: Today, practice and
+  feedback, advisory coaching, assessment, Anki and settings, with OS-stored credentials.
 - [Timed unseen assessment](docs/assess.md) — a holdout pool per content unit, a timed unassisted
   run, withheld annotations, a contamination-aware report and a like-for-like comparison.
 
@@ -243,6 +245,24 @@ median/p90 time, timed-out and contaminated items, and `pass threshold: unknown`
 pass probability or verdict. A comparison refuses unlike item counts, windows or pool families.
 Details: [`docs/assess.md`](docs/assess.md). Measured evidence:
 [`docs/evidence/0009-unseen-exam-assessment.md`](docs/evidence/0009-unseen-exam-assessment.md).
+
+## Study in the desktop window
+
+Goal 0011 moves the whole study loop into a MyGo desktop window in the owner-chosen "C · Stage" design
+language. The window calls the same Go core as the CLI: it shows before answering whether an attempt can
+count, records the real elapsed time, warns before a hint turns an attempt assisted, highlights the evidence
+sentence in feedback, previews exactly what an advisory coach call sends, runs timed assessments with
+server-side clocks, edits Anki notes against the real card model, and keeps provider keys in the OS
+credential store.
+
+```bash
+bun install
+bun run desktop:build
+build/desktop/passquest-desktop
+```
+
+Details: [`docs/desktop.md`](docs/desktop.md). Measured evidence:
+[`docs/evidence/0011-desktop-study-workspace.md`](docs/evidence/0011-desktop-study-workspace.md).
 
 ## Run the gates
 

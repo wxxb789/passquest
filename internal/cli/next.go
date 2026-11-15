@@ -289,30 +289,68 @@ func nextDocOf(result adaptive.Result, unclassified []unclassifiedAttemptView, s
 }
 
 func nextCommands(rec *adaptive.Recommendation, dbArg string, quoter commandQuoter) (string, string) {
+	primary, followUp := nextTargetsOf(rec)
+	return primary.command(dbArg, quoter), followUp.command(dbArg, quoter)
+}
+
+// Recommendation target kinds: a guided tactic practice, a skill practice
+// (optionally on named material) or a skill lesson.
+const (
+	nextTargetTactic = "tactic"
+	nextTargetSkill  = "skill"
+	nextTargetLesson = "lesson"
+)
+
+// nextTarget is one destination a recommendation names. The CLI renders it as
+// a command; the desktop workspace opens it directly.
+type nextTarget struct {
+	kind            string
+	skillID         string
+	material        *adaptive.Material
+	includeQuestion bool
+}
+
+// nextTargetsOf maps a recommendation to its primary destination and an
+// optional follow-up.
+func nextTargetsOf(rec *adaptive.Recommendation) (primary, followUp *nextTarget) {
+	skillTarget := func(material *adaptive.Material, includeQuestion bool) *nextTarget {
+		return &nextTarget{kind: nextTargetSkill, skillID: rec.Skill.ID, material: material, includeQuestion: includeQuestion}
+	}
+	lesson := &nextTarget{kind: nextTargetLesson, skillID: rec.Skill.ID}
 	switch rec.Action {
 	case adaptive.ActionExplain:
-		followUp := ""
 		if rec.FreshMaterial != nil {
-			followUp = skillPracticeCommand(rec.Skill.ID, rec.FreshMaterial, false, dbArg, quoter)
+			followUp = skillTarget(rec.FreshMaterial, false)
 		} else if rec.ReviewMaterial != nil {
-			followUp = skillPracticeCommand(rec.Skill.ID, rec.ReviewMaterial, true, dbArg, quoter)
+			followUp = skillTarget(rec.ReviewMaterial, true)
 		}
 		if rec.Skill.Kind == adaptive.KindScoring {
-			return tacticPracticeCommand(rec.Skill.ID, dbArg, quoter), followUp
+			return &nextTarget{kind: nextTargetTactic, skillID: rec.Skill.ID}, followUp
 		}
-		return fmt.Sprintf("passquest skill show %s", rec.Skill.ID), followUp
+		return lesson, followUp
 	case adaptive.ActionPracticeNew:
-		if rec.FreshMaterial != nil {
-			return skillPracticeCommand(rec.Skill.ID, rec.FreshMaterial, false, dbArg, quoter), ""
-		}
-		return withDatabaseArgument(fmt.Sprintf("passquest skill practice %s", rec.Skill.ID), dbArg, quoter), ""
+		return skillTarget(rec.FreshMaterial, false), nil
 	case adaptive.ActionReview:
 		if rec.ReviewMaterial != nil {
-			return skillPracticeCommand(rec.Skill.ID, rec.ReviewMaterial, true, dbArg, quoter), ""
+			return skillTarget(rec.ReviewMaterial, true), nil
 		}
-		return fmt.Sprintf("passquest skill show %s", rec.Skill.ID), ""
+		return lesson, nil
 	default:
-		return "", ""
+		return nil, nil
+	}
+}
+
+func (t *nextTarget) command(dbArg string, quoter commandQuoter) string {
+	if t == nil {
+		return ""
+	}
+	switch t.kind {
+	case nextTargetTactic:
+		return tacticPracticeCommand(t.skillID, dbArg, quoter)
+	case nextTargetLesson:
+		return fmt.Sprintf("passquest skill show %s", t.skillID)
+	default:
+		return skillPracticeCommand(t.skillID, t.material, t.includeQuestion, dbArg, quoter)
 	}
 }
 

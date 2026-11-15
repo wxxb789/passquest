@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "gate": "bun run harness/gate.ts"
+    "gate": "bun run harness/gate.ts",
+    "desktop:build": "bun run harness/desktop-build.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",

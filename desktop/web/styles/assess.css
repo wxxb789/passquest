@@ -1,0 +1,27 @@
+/* Assess (the still-room token overrides live in tokens.css) — ported verbatim from design/prototypes/c-stage.html (lines 601, 603, 607-630). Do not normalise values. */
+/* assess — the room goes still */
+.read.assess .paper.pas { box-shadow: inset 0 0 0 1px var(--paper-line), var(--sh-1); }
+.as-top { display: flex; align-items: center; gap: 16px; }
+.as-top .meta { font-size: var(--t-s); color: var(--ink-3); margin-top: 2px; }
+.runclock { display: flex; align-items: baseline; gap: 10px; line-height: 1; }
+.runclock .t { font-family: var(--f-disp); font-weight: 400; font-size: 32px; letter-spacing: .01em; line-height: 1; font-variant-numeric: tabular-nums; }
+.runclock .l { font-size: 13px; color: var(--ink-3); line-height: 1; }
+.ring { position: relative; width: 56px; height: 56px; flex: none; }
+.ring svg { position: absolute; inset: 0; width: 56px; height: 56px; transform: rotate(-90deg); }
+.ring .bg { stroke: var(--line-2); } .ring .fg { stroke: var(--ink); transition: stroke-dashoffset 1s linear; }
+.ring .ring-t { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+.nav40 { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 16px; padding: 10px 10px 10px 20px; border-radius: var(--r-pill);
+  background: var(--glass-2); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-2); }
+.cells { display: grid; grid-template-columns: repeat(20, 16px); grid-auto-rows: 16px; gap: 4px; }
+.cell { width: 16px; height: 16px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--line-2); position: relative; transition: transform var(--d1) var(--spring); }
+.cell:hover { transform: scale(1.18); }
+.cell.ans { background: var(--ink-2); box-shadow: none; }
+.cell.to { box-shadow: inset 0 0 0 1px var(--ink-3); background: linear-gradient(135deg, transparent 45%, var(--ink-2) 45%, var(--ink-2) 57%, transparent 57%); }
+.cell.cur { background: transparent; box-shadow: inset 0 0 0 2px var(--ink), 0 0 0 3px var(--well-2); }
+.legend { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-3); line-height: 1.3; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend b { color: var(--ink-2); font-weight: 600; }
+.legend .cell { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.legend .cell:hover { transform: none; }
+.leave { display: flex; align-items: center; gap: 10px; padding-left: 14px; border-left: 1px solid var(--line); }
+.leave .n { font-size: 12px; color: var(--ink-3); line-height: 1.4; white-space: nowrap; }

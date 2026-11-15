@@ -1,0 +1,25 @@
+/* Anki card (.ac) — self-contained offline style — ported verbatim from design/prototypes/c-stage.html (lines 788-811). Do not normalise values. */
+/* the Anki card itself — self-contained offline style */
+.ac { --c-bg: #fbfaf7; --c-ink: #1d2230; --c-ink2: #4a5163; --c-ink3: #646a7c; --c-line: rgba(29,34,48,.1); --c-acc: #3a43c4; --c-hl: rgba(240,200,80,.38);
+  position: relative; border-radius: 22px; background: var(--c-bg); color: var(--c-ink); padding: 28px 32px 24px; box-shadow: 0 1px 2px rgba(20,24,40,.06), 0 18px 40px -12px rgba(20,24,40,.22), inset 0 0 0 1px var(--c-line); overflow: hidden; }
+.ac.dark { --c-bg: #161b2b; --c-ink: #eceef5; --c-ink2: #c2c7d6; --c-ink3: #9aa1b5; --c-line: rgba(236,238,245,.1); --c-acc: #a9b0ff; --c-hl: rgba(240,200,80,.22);
+  box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 18px 40px -12px rgba(0,0,0,.6), inset 0 0 0 1px var(--c-line); }
+.ac .ac-t { display: flex; justify-content: space-between; align-items: center; font: 600 11px/1 var(--f-ui); letter-spacing: .08em; color: var(--c-ink3); }
+.ac .ac-t .sd { letter-spacing: .04em; }
+.ac .pol { display: inline-flex; align-items: center; gap: 7px; letter-spacing: .1em; text-transform: uppercase; height: auto; padding: 0; background: none; color: var(--c-ink3); font-size: 10.5px; }
+.ac .pol i { width: 13px; height: 13px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--c-acc); position: relative; }
+.ac .pol i::after { content: ""; position: absolute; left: 1px; right: 1px; top: 5.5px; height: 1.5px; background: var(--c-acc); transform: rotate(-45deg); }
+.ac .phr { margin: 20px 0 8px; font-family: var(--f-read); font-size: 30px; line-height: 1.28; letter-spacing: -.005em; text-wrap: balance; }
+.ac .phr .x { color: var(--c-acc); font-weight: 700; letter-spacing: .04em; border-bottom: 2px solid var(--c-acc); }
+.ac .ask { font: 500 13px/1.5 var(--f-ui); color: var(--c-ink3); }
+.ac.back .phr { font-size: 20px; margin: 14px 0 12px; padding-bottom: 12px; border-bottom: 1px solid var(--c-line); }
+.ac .exp { font: 400 15px/1.62 var(--f-ui); color: var(--c-ink); margin: 0 0 12px; letter-spacing: 0; white-space: pre-line; }
+.ac .eg { margin: 0; font-family: var(--f-read); font-style: italic; font-size: 15px; line-height: 1.6; color: var(--c-ink2); padding-left: 14px; border-left: 2px solid var(--c-line); }
+.ac .eg em { font-style: italic; background: linear-gradient(transparent 55%, var(--c-hl) 55%); color: var(--c-ink); font-weight: 600; }
+.ac .ac-f { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; font: 500 11px/1 var(--f-mono); color: var(--c-ink3); letter-spacing: 0; }
+.ac .ac-f .tac { font-family: var(--f-ui); font-weight: 600; font-size: 11px; padding: 4px 8px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--c-line); color: var(--c-ink2); }
+.an-table.phone .ac { padding: 22px 20px 18px; }
+.an-table.phone .ac .phr { font-size: 22px; }
+.an-table.phone .ac.back .phr { font-size: 16.5px; }
+.an-table.phone .ac .exp { font-size: 13.5px; }
+.an-table.phone .ac .eg { font-size: 14px; }

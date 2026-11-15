@@ -1,0 +1,2191 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pass Quest — Stage 一念</title>
+<script>
+window.onerror = function (msg, src, line, col) {
+  var b = document.getElementById('errbar');
+  if (!b) { b = document.createElement('div'); b.id = 'errbar'; document.documentElement.appendChild(b); }
+  b.textContent = 'JS error: ' + msg + ' @' + line + ':' + col;
+  b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#c4122f;color:#fff;font:600 14px/1.4 Consolas,monospace;padding:10px 16px';
+};
+</script>
+<style>
+/* ==========================================================================
+   STAGE 一念 — design system
+   One primary object at a time; everything else recedes in depth.
+   ========================================================================== */
+@property --a1 { syntax: '<color>'; inherits: true; initial-value: transparent; }
+@property --a2 { syntax: '<color>'; inherits: true; initial-value: transparent; }
+@property --a3 { syntax: '<color>'; inherits: true; initial-value: transparent; }
+
+:root {
+  /* type */
+  --f-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --f-disp: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", -apple-system, "SF Pro Display", "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --f-read: "Sitka Text", "Sitka", "Iowan Old Style", "Charter", "Georgia", "Noto Serif SC", "Songti SC", serif;
+  --f-read-h: "Sitka Subheading", "Sitka Text", "Sitka", "Iowan Old Style", "Georgia", serif;
+  --f-mono: "Cascadia Mono", "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
+  /* scale: 11.5 · 12.5 · 13 · 14.5 · 15.5 · 17 · 18 · 21 · 26 · 34 · 44 · 88 */
+  --t-xs: 11.5px; --t-s: 12.5px; --t-sm: 13.5px; --t-b: 14.5px; --t-m: 15.5px; --t-l: 17px;
+  --t-read: 18px; --t-xl: 21px; --t-2xl: 26px; --t-3xl: 34px; --t-4xl: 44px; --t-hero: 88px;
+  /* space (4-base) */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s7: 32px; --s8: 40px; --s9: 56px;
+  /* radii */
+  --r-xs: 6px; --r-s: 10px; --r-m: 14px; --r-l: 20px; --r-xl: 28px; --r-pill: 999px;
+  /* motion */
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  --spring: cubic-bezier(.34, 1.32, .64, 1);
+  --d1: 140ms; --d2: 300ms; --d3: 560ms; --d-room: 1100ms;
+  /* layout */
+  --gut: 40px; --coach-w: 392px;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: oklch(96.9% 0.006 255);
+  --ink: oklch(22.5% 0.026 262);
+  --ink-2: oklch(40% 0.024 262);
+  --ink-3: oklch(49.5% 0.02 262);
+  --ink-4: oklch(68% 0.016 262);           /* decorative only */
+  --line: oklch(28% 0.04 262 / .09);
+  --line-2: oklch(28% 0.04 262 / .15);
+  --glass: oklch(99.5% 0.003 255 / .56);
+  --glass-2: oklch(99.6% 0.003 255 / .80);
+  --glass-3: oklch(100% 0 0 / .94);
+  --tile: oklch(100% 0 0 / .97);
+  --rim: oklch(100% 0 0 / .85);
+  --well: oklch(28% 0.04 262 / .045);
+  --well-2: oklch(28% 0.04 262 / .06);
+  --paper: oklch(99.3% 0.006 88);
+  --paper-ink: oklch(23% 0.018 60);
+  --paper-ink-2: oklch(43% 0.016 60);
+  --paper-line: oklch(40% 0.03 70 / .12);
+  --acc: oklch(48.5% 0.19 268);
+  --acc-hi: oklch(55% 0.2 268);
+  --acc-ink: oklch(99% 0 0);
+  --acc-soft: oklch(48.5% 0.19 268 / .09);
+  --acc-tint: oklch(48.5% 0.19 268 / .12);
+  --acc-line: oklch(48.5% 0.19 268 / .38);
+  --acc-dim: oklch(46% 0.12 268);
+  --ok: oklch(46.5% 0.11 156);    --ok-soft: oklch(60% 0.12 156 / .13);   --ok-line: oklch(46.5% 0.11 156 / .4);
+  --bad: oklch(50.5% 0.165 27);   --bad-soft: oklch(62% 0.15 27 / .11);   --bad-line: oklch(50.5% 0.165 27 / .4);
+  --adv: oklch(49% 0.14 314);     --adv-soft: oklch(60% 0.13 314 / .09);  --adv-line: oklch(49% 0.14 314 / .34);
+  --warm: oklch(49.5% 0.115 58);  --warm-soft: oklch(75% 0.12 70 / .2);   --warm-line: oklch(55% 0.12 60 / .42);
+  --cool: oklch(46% 0.1 222);     --cool-soft: oklch(70% 0.09 215 / .16); --cool-line: oklch(46% 0.1 222 / .34);
+  --mark: oklch(88% 0.12 95 / .55);
+  --sh-1: 0 1px 1px oklch(30% 0.04 262 / .05), 0 3px 10px oklch(30% 0.04 262 / .05);
+  --sh-2: 0 1px 2px oklch(30% 0.04 262 / .05), 0 8px 22px oklch(30% 0.04 262 / .07), 0 24px 56px oklch(30% 0.04 262 / .07);
+  --sh-3: 0 1px 2px oklch(30% 0.04 262 / .06), 0 14px 32px oklch(30% 0.04 262 / .09), 0 40px 90px oklch(30% 0.05 262 / .13);
+  --sh-tile: 0 1px 0 oklch(100% 0 0 / .7) inset, 0 6px 18px -8px oklch(30% 0.06 262 / .2), 0 1px 2px oklch(30% 0.04 262 / .06);
+  --sh-tile-hi: 0 1px 0 oklch(100% 0 0 / .7) inset, 0 14px 28px -10px oklch(30% 0.06 262 / .26), 0 2px 4px oklch(30% 0.04 262 / .06);
+  --grain-o: .028;
+  --orb-core: oklch(70% 0.14 300);
+  --orb-halo: oklch(72% 0.13 290 / .45);
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: oklch(17.5% 0.03 264);
+  --ink: oklch(95% 0.008 260);
+  --ink-2: oklch(82% 0.018 260);
+  --ink-3: oklch(71% 0.022 260);
+  --ink-4: oklch(48% 0.03 262);
+  --line: oklch(90% 0.03 262 / .08);
+  --line-2: oklch(90% 0.03 262 / .14);
+  --glass: oklch(26% 0.035 264 / .52);
+  --glass-2: oklch(25.5% 0.04 264 / .78);
+  --glass-3: oklch(25% 0.04 264 / .94);
+  --tile: oklch(29% 0.04 264 / .92);
+  --rim: oklch(100% 0 0 / .08);
+  --well: oklch(100% 0 0 / .045);
+  --well-2: oklch(100% 0 0 / .07);
+  /* warm ink-paper: a different material from the cool raised card */
+  --paper: oklch(23.4% 0.0085 72);
+  --paper-ink: oklch(90.5% 0.018 82);
+  --paper-ink-2: oklch(76% 0.016 80);
+  --paper-line: oklch(90% 0.02 85 / .08);
+  --acc: oklch(77% 0.13 268);
+  --acc-hi: oklch(83% 0.11 268);
+  --acc-ink: oklch(19% 0.04 268);
+  --acc-soft: oklch(77% 0.13 268 / .13);
+  --acc-tint: oklch(74% 0.13 268 / .17);
+  --acc-line: oklch(77% 0.13 268 / .45);
+  --acc-dim: oklch(80% 0.07 268);
+  --ok: oklch(80% 0.13 158);   --ok-soft: oklch(70% 0.12 158 / .14);  --ok-line: oklch(80% 0.13 158 / .4);
+  --bad: oklch(76% 0.13 26);   --bad-soft: oklch(65% 0.14 26 / .15);  --bad-line: oklch(76% 0.13 26 / .42);
+  --adv: oklch(79% 0.11 312);  --adv-soft: oklch(70% 0.12 312 / .12); --adv-line: oklch(79% 0.11 312 / .36);
+  --warm: oklch(82% 0.11 72);  --warm-soft: oklch(70% 0.11 65 / .16); --warm-line: oklch(82% 0.11 72 / .4);
+  --cool: oklch(81% 0.09 215); --cool-soft: oklch(65% 0.09 215 / .17); --cool-line: oklch(81% 0.09 215 / .36);
+  --mark: oklch(70% 0.12 90 / .35);
+  --sh-1: 0 1px 1px oklch(5% 0.02 262 / .3), 0 4px 12px oklch(5% 0.02 262 / .25);
+  --sh-2: 0 1px 2px oklch(5% 0.02 262 / .35), 0 10px 26px oklch(5% 0.02 262 / .32), 0 28px 60px oklch(5% 0.02 262 / .32);
+  --sh-3: 0 1px 2px oklch(5% 0.02 262 / .4), 0 20px 40px -12px oklch(3% 0.02 262 / .6), 0 46px 100px oklch(4% 0.02 262 / .5);
+  --sh-tile: 0 1px 0 oklch(100% 0 0 / .06) inset, 0 6px 18px -8px oklch(3% 0.02 262 / .6);
+  --sh-tile-hi: 0 1px 0 oklch(100% 0 0 / .08) inset, 0 14px 28px -10px oklch(3% 0.02 262 / .7);
+  --grain-o: .045;
+  --orb-core: oklch(86% 0.1 300);
+  --orb-halo: oklch(72% 0.14 295 / .5);
+}
+
+/* rooms: ambient light carries the attempt condition
+   calm = between attempts · cool = independent (can count) · warm = assisted · still = assessment */
+[data-theme="light"] body[data-room="calm"]  { --a1: oklch(89% 0.045 278); --a2: oklch(92.5% 0.035 222); --a3: oklch(94% 0.03 40); }
+[data-theme="light"] body[data-room="cool"]  { --a1: oklch(85% 0.085 212); --a2: oklch(89% 0.07 190);  --a3: oklch(93% 0.04 232); }
+[data-theme="light"] body[data-room="warm"]  { --a1: oklch(86% 0.1 66);    --a2: oklch(89.5% 0.085 44); --a3: oklch(93% 0.055 86); }
+[data-theme="light"] body[data-room="still"] { --bg: oklch(96.4% 0.001 260); --a1: oklch(93.5% 0.001 260); --a2: oklch(95% 0.001 260); --a3: oklch(95.5% 0 0); }
+[data-theme="dark"]  body[data-room="calm"]  { --a1: oklch(33% 0.085 282); --a2: oklch(29% 0.07 236);  --a3: oklch(25% 0.05 320); }
+[data-theme="dark"]  body[data-room="cool"]  { --a1: oklch(36% 0.1 214);   --a2: oklch(31% 0.08 192);  --a3: oklch(24% 0.05 236); }
+[data-theme="dark"]  body[data-room="warm"]  { --a1: oklch(37% 0.09 62);   --a2: oklch(31% 0.075 38);  --a3: oklch(25% 0.045 84); }
+[data-theme="dark"]  body[data-room="still"] { --bg: oklch(18.5% 0.006 260); --a1: oklch(21.5% 0.004 260); --a2: oklch(20% 0.003 260); --a3: oklch(19.5% 0.002 260); }
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: var(--f-ui); font-size: var(--t-b); line-height: 1.55; color: var(--ink);
+  background: var(--bg); overflow: hidden; transition: background var(--d-room);
+  font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
+  text-autospace: normal; text-spacing-trim: space-first;
+}
+html[lang="zh-CN"] body { line-height: 1.65; }
+p, li { text-wrap: pretty; }
+button, input, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+a { color: inherit; text-decoration: none; }
+code, .mono { font-family: var(--f-mono); font-size: .88em; letter-spacing: 0; font-variant-ligatures: none; }
+.id { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0; color: var(--ink-3); font-weight: 400; font-variant-ligatures: none; }
+.nw { white-space: nowrap; }
+svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+svg.i.s { width: 15px; height: 15px; } svg.i.xs { width: 13px; height: 13px; stroke-width: 1.8; } svg.i.l { width: 22px; height: 22px; }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; border-radius: 8px; }
+::selection { background: var(--acc-tint); }
+.exam { font-family: var(--f-read); letter-spacing: 0; font-variant-numeric: lining-nums proportional-nums; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- atmosphere ---------- */
+.atmos {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(58% 62% at 16% 14%, var(--a1), transparent 72%),
+    radial-gradient(52% 58% at 88% 22%, var(--a2), transparent 70%),
+    radial-gradient(70% 55% at 50% 108%, var(--a3), transparent 72%),
+    var(--bg);
+  transition: --a1 var(--d-room) ease, --a2 var(--d-room) ease, --a3 var(--d-room) ease;
+}
+.atmos::after {
+  content: ""; position: absolute; inset: 0; opacity: var(--grain-o); mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+body[data-room="still"] .atmos::after { opacity: calc(var(--grain-o) * .4); }
+
+/* ---------- frame ---------- */
+.app { position: relative; z-index: 1; height: 100vh; display: grid; grid-template-rows: 64px minmax(0, 1fr); }
+.top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 var(--s6); }
+.stage { position: relative; min-height: 0; padding: 4px var(--gut) 104px; transition: padding var(--d3) var(--ease); }
+.stage.with-coach { padding-right: calc(var(--coach-w) + 24px + 32px); }
+.scene { height: 100%; margin: 0 auto; max-width: 1360px; }
+
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+/* brand mark: one ink dot with a soft halo — 一念, the same light as the coach */
+.brand-mark { width: 24px; height: 24px; position: relative; flex: none; }
+.brand-mark::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in oklab, var(--acc) 28%, transparent), transparent); }
+.brand-mark::after { content: ""; position: absolute; left: 7px; top: 7px; width: 10px; height: 10px; border-radius: 54% 46% 52% 48% / 47% 55% 45% 53%; background: radial-gradient(circle at 38% 34%, color-mix(in oklab, var(--acc) 55%, white), var(--acc) 70%); opacity: .92; }
+.brand-name { font-family: var(--f-disp); font-weight: 600; font-size: 15px; letter-spacing: -.005em; }
+.brand-day { font-size: var(--t-s); color: var(--ink-3); padding-left: 12px; border-left: 1px solid var(--line-2); line-height: 1.2; white-space: nowrap; }
+.brand-day b { color: var(--ink); font-weight: 600; }
+
+.util { justify-self: end; display: flex; align-items: center; gap: 6px; padding: 4px; border-radius: var(--r-pill);
+  background: var(--glass); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: inset 0 0 0 1px var(--line), var(--sh-1); transition: background var(--d2), box-shadow var(--d2); }
+/* during an attempt the chrome recedes by material, not by contrast */
+body[data-room="cool"] .util:not(:hover):not(:focus-within), body[data-room="warm"] .util:not(:hover):not(:focus-within),
+body[data-room="still"] .util:not(:hover):not(:focus-within) { background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.util .seg { display: flex; padding: 2px; border-radius: var(--r-pill); background: var(--well); }
+.util .seg button { height: 26px; min-width: 34px; padding: 0 10px; border-radius: var(--r-pill); font-size: var(--t-s); color: var(--ink-3); font-weight: 600; }
+.util .seg button[aria-pressed="true"] { background: var(--glass-3); color: var(--ink); box-shadow: var(--sh-1); }
+.icon-btn { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-2); transition: background var(--d1), color var(--d1); flex: none; }
+.icon-btn:hover { background: var(--well); color: var(--ink); }
+
+/* session timeline */
+.tl { display: flex; align-items: center; gap: 14px; height: 32px; padding: 0 16px 0 14px; color: var(--ink-3); font-size: var(--t-s); }
+.tl-dots { display: flex; align-items: center; }
+.tl-dot { position: relative; width: 22px; height: 18px; display: grid; place-items: center; }
+.tl-dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-4); transition: all var(--d2) var(--spring); }
+.tl-dot.done::before { background: var(--ink-2); }
+.tl-dot.now::before { width: 10px; height: 10px; background: var(--acc); box-shadow: 0 0 0 4px var(--acc-soft), 0 0 14px var(--acc-line); }
+.tl-dot + .tl-dot::after { content: ""; position: absolute; right: 15px; top: 8.5px; width: 14px; height: 1px; background: var(--line-2); }
+.tl-dot .tip { position: absolute; top: calc(100% + 6px); left: 50%; transform: translate(-50%, -3px); opacity: 0; pointer-events: none; z-index: 5;
+  padding: 4px 9px; border-radius: 7px; background: var(--ink); color: var(--bg); font-size: 12px; white-space: nowrap; transition: all var(--d1) var(--ease); }
+.tl-dot:hover .tip { opacity: 1; transform: translate(-50%, 0); }
+.tl-label { color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+.tl-label .n { color: var(--ink-3); font-weight: 400; margin-left: 8px; }
+.resume { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px 0 12px; border-radius: var(--r-pill); font-size: var(--t-s); color: var(--ink-2); font-weight: 600;
+  background: var(--glass); box-shadow: inset 0 0 0 1px var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.resume:hover { background: var(--glass-2); color: var(--ink); }
+.resume .d { width: 7px; height: 7px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft); }
+
+/* dock */
+.dock { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 2px; padding: 6px;
+  border-radius: var(--r-pill); background: var(--glass-2); backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-2); }
+.dock a { position: relative; height: 44px; min-width: 44px; padding: 0 13px; border-radius: var(--r-pill); display: flex; align-items: center; justify-content: center; gap: 8px;
+  color: var(--ink-2); font-size: var(--t-sm); font-weight: 600; transition: background var(--d1), color var(--d1), padding var(--d2) var(--ease); }
+.dock a:hover, .dock a:focus-visible { background: var(--well); color: var(--ink); }
+.dock a .lbl { display: none; white-space: nowrap; }
+.dock a[aria-current="page"] { background: var(--acc-tint); color: var(--acc); padding: 0 18px 0 15px; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--acc) 18%, transparent); }
+[data-theme="dark"] .dock a[aria-current="page"] { color: oklch(87% 0.07 268); }
+.dock a[aria-current="page"] .lbl { display: inline; }
+.dock a .tip { position: absolute; bottom: calc(100% + 12px); left: 50%; transform: translate(-50%, 4px); opacity: 0; pointer-events: none;
+  padding: 5px 10px; border-radius: 8px; background: var(--ink); color: var(--bg); font-size: 12px; font-weight: 600; white-space: nowrap; transition: all var(--d1) var(--ease); }
+.dock a:not([aria-current]):hover .tip, .dock a:not([aria-current]):focus-visible .tip { opacity: 1; transform: translate(-50%, 0); }
+.dock a[aria-current] .tip { display: none; }
+.dock .badge { position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px var(--glass-3); }
+.dock a[aria-current] .badge { top: 6px; right: 6px; }
+
+/* coach orb */
+.orb-wrap { position: fixed; right: 24px; bottom: 20px; z-index: 31; display: flex; align-items: center; gap: 10px; }
+.orb-say { height: 34px; padding: 0 14px 0 12px; display: flex; align-items: center; gap: 8px; border-radius: var(--r-pill); font-size: var(--t-s); color: var(--ink-2);
+  background: var(--glass); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); box-shadow: inset 0 0 0 1px var(--line); white-space: nowrap; }
+.orb-say b { color: var(--ink); font-weight: 600; }
+.orb { width: 56px; height: 56px; border-radius: 50%; position: relative; display: grid; place-items: center;
+  background: var(--glass-2); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-2); }
+.orb .core { width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #fff, var(--orb-core) 60%);
+  box-shadow: 0 0 0 6px var(--orb-halo), 0 0 26px 8px var(--orb-halo); animation: breathe 4.8s ease-in-out infinite; }
+.orb.quiet .core { box-shadow: 0 0 0 4px color-mix(in oklab, var(--orb-halo) 50%, transparent), 0 0 14px 2px color-mix(in oklab, var(--orb-halo) 50%, transparent); animation-duration: 7s; }
+.orb.open { box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1.5px var(--adv-line), var(--sh-2); }
+@keyframes breathe { 0%, 100% { transform: scale(1); box-shadow: 0 0 0 5px var(--orb-halo), 0 0 22px 6px var(--orb-halo); } 50% { transform: scale(1.12); box-shadow: 0 0 0 9px color-mix(in oklab, var(--orb-halo) 60%, transparent), 0 0 34px 12px color-mix(in oklab, var(--orb-halo) 70%, transparent); } }
+
+/* coach sheet — grows out of the orb */
+.csheet { position: fixed; right: 24px; bottom: 90px; z-index: 30; width: var(--coach-w); max-height: calc(100vh - 68px - 90px); display: flex; flex-direction: column; border-radius: 24px;
+  background: var(--glass-3); backdrop-filter: blur(28px) saturate(1.4); -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); transform-origin: calc(100% - 28px) calc(100% + 40px); animation: grow var(--d3) var(--spring) both; }
+.csheet::after { content: ""; position: absolute; right: 22px; bottom: -6px; width: 12px; height: 12px; transform: rotate(45deg); border-radius: 0 0 3px 0;
+  background: var(--glass-3); box-shadow: inset -1px -1px 0 var(--line); }
+.csheet::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: radial-gradient(70% 40% at 100% 100%, var(--adv-soft), transparent); }
+.csheet.small { width: 368px; padding: 20px 22px 16px; }
+@keyframes grow { from { opacity: 0; transform: scale(.88) translateY(12px); } }
+
+/* ---------- materials ---------- */
+.glass { background: var(--glass); backdrop-filter: blur(20px) saturate(1.35); -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-1); }
+.card { background: var(--glass-2); backdrop-filter: blur(28px) saturate(1.4); -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  border-radius: var(--r-xl); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
+.paper { background: var(--paper); color: var(--paper-ink); border-radius: var(--r-xl);
+  box-shadow: inset 0 0 0 1px var(--paper-line), var(--sh-2); }
+[data-theme="dark"] .paper { box-shadow: inset 0 1px 0 oklch(100% 0 0 / .03), var(--sh-2); }
+
+/* typography roles — one label style in both locales */
+.eyebrow { font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--ink-3); line-height: 1.35; }
+.h-disp { font-family: var(--f-disp); font-weight: 600; letter-spacing: -.022em; line-height: 1.12; }
+html[lang="zh-CN"] .h-disp { letter-spacing: .01em; line-height: 1.25; }
+.muted { color: var(--ink-3); }
+.sub { color: var(--ink-2); }
+.num { font-variant-numeric: tabular-nums lining-nums; }
+.sep { display: inline-block; width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .55; vertical-align: middle; margin: 0 8px; flex: none; }
+
+/* chips */
+.chip { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px; border-radius: var(--r-pill); font-size: var(--t-s); font-weight: 550; white-space: nowrap;
+  background: var(--glass-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); }
+.chip.ok { color: var(--ok); background: var(--ok-soft); box-shadow: inset 0 0 0 1px var(--ok-line); }
+.chip.bad { color: var(--bad); background: var(--bad-soft); box-shadow: inset 0 0 0 1px var(--bad-line); }
+.chip.adv { color: var(--adv); background: var(--adv-soft); box-shadow: inset 0 0 0 1px var(--adv-line); }
+.chip.warm { color: var(--warm); background: var(--warm-soft); box-shadow: inset 0 0 0 1px var(--warm-line); }
+.chip.cool { color: var(--cool); background: var(--cool-soft); box-shadow: inset 0 0 0 1px var(--cool-line); }
+.chip.acc { color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc-line); }
+.chip.ghost { background: transparent; }
+.chip.sm { height: 22px; padding: 0 9px; font-size: var(--t-xs); gap: 5px; }
+html[lang="zh-CN"] .chip.sm { font-size: 12px; }
+.chip b { color: var(--ink); font-weight: 600; }
+
+kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 6px; font-family: var(--f-mono); font-size: 11px; font-weight: 600; line-height: 1;
+  color: var(--ink-2); background: var(--glass-3); box-shadow: inset 0 0 0 1px var(--line-2), inset 0 -1.5px 0 var(--line-2); letter-spacing: 0; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; height: 40px; padding: 0 18px; border-radius: var(--r-pill); font-size: var(--t-b); font-weight: 600; white-space: nowrap;
+  transition: transform var(--d1) var(--ease), box-shadow var(--d2) var(--ease), background var(--d1), color var(--d1); }
+.btn:active { transform: translateY(1px) scale(.99); }
+.btn.primary { background: var(--acc); color: var(--acc-ink); box-shadow: inset 0 1px 0 oklch(100% 0 0 / .22), 0 1px 2px oklch(20% .1 268 / .2), 0 8px 22px -6px var(--acc-line); }
+.btn.primary:hover { background: var(--acc-hi); box-shadow: inset 0 1px 0 oklch(100% 0 0 / .22), 0 1px 2px oklch(20% .1 268 / .2), 0 12px 28px -6px var(--acc-line); }
+.btn.primary kbd { background: oklch(100% 0 0 / .18); color: inherit; box-shadow: inset 0 0 0 1px oklch(100% 0 0 / .28); }
+[data-theme="dark"] .btn.primary kbd { background: oklch(0% 0 0 / .1); box-shadow: inset 0 0 0 1px oklch(0% 0 0 / .2); }
+.btn.primary[disabled] { background: var(--acc-soft); color: var(--acc-dim); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--acc) 14%, transparent); }
+.btn.primary[disabled] kbd { background: transparent; box-shadow: inset 0 0 0 1px var(--acc-line); opacity: .6; }
+.btn.ghost { background: var(--glass-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-1); }
+.btn.ghost:hover { background: var(--glass-3); }
+.btn.quiet { color: var(--ink-2); padding: 0 12px; }
+.btn.quiet:hover { background: var(--well); color: var(--ink); }
+.btn.lg { height: 52px; padding: 0 26px; font-size: var(--t-m); }
+.btn.sm { height: 32px; padding: 0 13px; font-size: var(--t-s); gap: 7px; }
+.btn[disabled] { cursor: not-allowed; }
+.btn.ghost[disabled], .btn.quiet[disabled], .btn.adv[disabled] { opacity: .55; box-shadow: inset 0 0 0 1px var(--line); }
+.btn.adv { color: var(--adv); box-shadow: inset 0 0 0 1px var(--adv-line); background: var(--adv-soft); }
+.lnk { color: var(--acc); font-weight: 600; border-radius: 4px; }
+.lnk:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* motion primitives — only on arrival in a room (.enter), never on in-place updates */
+@keyframes rise { from { opacity: 0; transform: translateY(14px) scale(.985); } }
+@keyframes settle { from { opacity: 0; transform: translateY(8px) scale(.94); } }
+@keyframes unfold { from { opacity: .2; transform: perspective(1400px) rotateY(-12deg) scale(.96); } }
+@keyframes recede { from { transform: scale(1.03); opacity: .6; } }
+@keyframes fade { from { opacity: 0; } }
+.enter .rise { animation: rise var(--d3) var(--ease) both; animation-delay: calc(var(--i, 0) * 60ms); }
+.enter .settle { animation: settle var(--d3) var(--spring) both; animation-delay: calc(160ms + var(--i, 0) * 55ms); }
+
+/* ==========================================================================
+   ORBIT — one object, satellites in an arc (today, report, settings)
+   ========================================================================== */
+.orbit { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(520px, var(--obj-w, 600px)) minmax(0, 1fr); grid-template-rows: auto minmax(0, auto);
+  column-gap: 44px; align-content: center; max-width: 1360px; margin: 0 auto; }
+.orbit > .facts { grid-column: 1 / -1; grid-row: 1; margin-bottom: 30px; }
+.orbit > .obj, .orbit > .rail { grid-row: 2; }
+.orbit > .obj { grid-column: 2; align-self: center; min-height: 0; max-height: 100%; }
+.rail { display: flex; flex-direction: column; justify-content: center; gap: 64px; min-width: 0; align-self: center; }
+.rail.l { align-items: flex-end; grid-column: 1; } .rail.r { align-items: flex-start; grid-column: 3; }
+.rail.l .sat:nth-child(2) { --dx: -30px; } .rail.r .sat:nth-child(2) { --dx: 30px; }
+.rail.l .sat:nth-child(4) { --dx: 16px; } .rail.r .sat:nth-child(4) { --dx: -16px; }
+.orbit.solo { grid-template-columns: minmax(0, var(--obj-w, 980px)) minmax(0, 300px); justify-content: center; }
+.orbit.solo > .obj { grid-column: 1; }
+.orbit.solo > .rail.r { grid-column: 2; }
+
+.facts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.facts .chip { background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.facts .chip .k { color: var(--ink-3); font-weight: 500; }
+.facts .chip .lnk { margin-left: 2px; }
+
+/* satellite chip */
+.sat { position: relative; display: inline-flex; align-items: center; gap: 12px; min-height: 54px; padding: 8px 20px 8px 9px; border-radius: 30px; max-width: 100%; text-align: left;
+  translate: var(--dx, 0) 0; background: var(--glass); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-1); transition: transform var(--d2) var(--spring), background var(--d2), box-shadow var(--d2); }
+.sat:hover, .sat:focus-visible { transform: translateY(-2px); background: var(--glass-2); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line-2), var(--sh-2); }
+.sat::after { content: ""; position: absolute; top: 50%; width: 30px; height: 1px; pointer-events: none; }
+.rail.l .sat::after { left: calc(100% + 8px); background: linear-gradient(to right, var(--line-2), transparent); }
+.rail.r .sat::after { right: calc(100% + 8px); background: linear-gradient(to left, var(--line-2), transparent); }
+.sat .ico { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; color: var(--ink-2); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
+.sat .ico.cst svg { width: 36px; height: 36px; }
+.cst .ok { fill: var(--ok); } .cst .miss { fill: none; stroke: var(--bad); stroke-width: 1.4; } .cst .as { fill: var(--warm); opacity: .9; }
+.cst .ctr { fill: var(--ink-2); font: 600 10px/1 var(--f-ui); }
+.sat .tx { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.sat .lb { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
+.sat .vl { font-size: 15px; font-weight: 600; color: var(--ink); white-space: nowrap; display: flex; align-items: center; gap: 0; }
+.sat .vl small { font-size: 12.5px; font-weight: 500; color: var(--ink-2); margin-left: 6px; }
+.sat .flag { position: absolute; top: 6px; left: 37px; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--glass-3); }
+.sat .flag.bad { background: var(--bad); } .sat .flag.warm { background: var(--warm); } .sat .flag.ok { background: var(--ok); }
+
+/* ==========================================================================
+   TODAY
+   ========================================================================== */
+.hero { position: relative; padding: 34px 40px 30px; }
+.hero::before { content: ""; position: absolute; inset: -70px -90px; z-index: -1; pointer-events: none; border-radius: 50%;
+  background: radial-gradient(closest-side, var(--acc-soft), transparent); filter: blur(10px); }
+.obj-top { display: flex; align-items: center; gap: 10px; }
+.obj-top .r { margin-left: auto; font-size: var(--t-s); color: var(--ink-3); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.pol { display: inline-flex; align-items: baseline; gap: 8px; height: 26px; align-items: center; padding: 0 10px; border-radius: 8px; color: var(--acc); background: var(--acc-soft); font-size: 13px; font-weight: 600; }
+.pol .id { color: inherit; opacity: .7; }
+.hero-title { margin: 18px 0 6px; font-size: var(--t-4xl); }
+.hero-sub { font-size: var(--t-sm); color: var(--ink-2); display: flex; align-items: center; gap: 0; }
+.reason { margin: 20px 0 0; font-size: 19px; line-height: 1.6; color: var(--ink); max-width: 31em; }
+html[lang="zh-CN"] .reason { font-size: 19px; line-height: 1.78; letter-spacing: .01em; }
+.evid { margin-top: 22px; display: grid; grid-template-columns: 1.25fr 1fr 1fr; border-radius: var(--r-m); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
+.evid > div { padding: 13px 16px 12px; }
+.evid > div + div { border-left: 1px solid var(--line); }
+.evid .k { font-size: var(--t-s); color: var(--ink-3); display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.evid .k b { font-weight: 600; color: var(--ink-2); }
+.evid .dots { margin-top: 9px; display: flex; gap: 6px; align-items: center; min-height: 14px; }
+.evid .v { margin-top: 8px; font-size: var(--t-s); color: var(--ink-2); }
+.evid .v.cnt { color: var(--cool); font-weight: 600; }
+.evid .v.no { color: var(--ink-3); }
+.d { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.d.ok { background: var(--ok); }
+.d.miss { box-shadow: inset 0 0 0 1.8px var(--bad); }
+.d.as { box-shadow: inset 0 0 0 1.8px var(--warm); background: linear-gradient(90deg, var(--warm) 50%, transparent 50%); }
+.d.re { box-shadow: inset 0 0 0 1.5px var(--ink-3); background-image: radial-gradient(circle, var(--ink-3) 1.5px, transparent 2px); }
+.d.sm { width: 9px; height: 9px; }
+.diag { margin-top: 14px; display: flex; align-items: center; gap: 10px; font-size: var(--t-sm); color: var(--ink-2); }
+.diag .q { flex: none; font-size: 12px; font-weight: 600; height: 22px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 6px; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line-2); border: 0; }
+.obj-foot { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.promise { display: flex; align-items: center; gap: 12px; font-size: var(--t-sm); color: var(--ink-2); line-height: 1.4; }
+.promise .glow { width: 10px; height: 10px; border-radius: 50%; background: var(--cool); box-shadow: 0 0 0 4px var(--cool-soft), 0 0 14px var(--cool-line); flex: none; }
+.promise b { color: var(--cool); font-weight: 650; display: block; }
+
+.seg-bar { display: flex; gap: 3px; margin-top: 10px; }
+.seg-bar i { flex: 1; height: 5px; border-radius: 3px; background: var(--ink-2); opacity: .8; }
+.seg-bar i.off { background: var(--line-2); opacity: 1; }
+.meter { height: 5px; border-radius: 3px; background: var(--line-2); overflow: hidden; margin-top: 10px; }
+.meter i { display: block; height: 100%; border-radius: 3px; background: var(--acc); }
+.state-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+.state-dot.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.state-dot.bad { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+.state-dot.warm { background: var(--warm); box-shadow: 0 0 0 3px var(--warm-soft); }
+.state-dot.cool { background: var(--cool); box-shadow: 0 0 0 3px var(--cool-soft); }
+.state-dot.off { box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+
+/* ==========================================================================
+   READING (practice / feedback / assess)
+   ========================================================================== */
+.read { display: grid; grid-template-columns: minmax(0, 1fr) clamp(420px, 34vw, 500px); gap: 40px; max-width: 1300px; }
+.paper.pas { position: relative; min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; transition: transform var(--d3) var(--ease), box-shadow var(--d3); }
+.pas-head { padding: 24px 44px 0 68px; }
+.pas-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--t-s); color: var(--paper-ink-2); font-family: var(--f-ui); }
+.pas-meta .src { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; color: var(--paper-ink); }
+.pas-meta .src .i { color: var(--ok); }
+.pas-meta .ph { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 10px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--paper-line); white-space: nowrap; }
+.pas-title { margin: 16px 0 0; font-family: var(--f-read-h); font-weight: 700; font-size: 26px; line-height: 1.25; letter-spacing: -.005em; color: var(--paper-ink); text-wrap: balance; max-width: 64ch; }
+.pas-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 44px 24px 68px; scrollbar-width: thin; scrollbar-color: var(--paper-line) transparent;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 28px), transparent 100%); }
+.pas-body p { position: relative; margin: 0 0 .9em; max-width: 64ch; font-size: 18px; line-height: 1.62; color: var(--paper-ink); hanging-punctuation: first; }
+.pas-body p::before { content: attr(data-n); position: absolute; left: -36px; top: .4em; font-family: var(--f-ui); font-size: 11px; font-weight: 600; color: var(--paper-ink-2);
+  width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--paper-line); line-height: 1; font-variant-numeric: tabular-nums; }
+.pas-body .s { border-radius: 3px; transition: background var(--d2), color var(--d2), box-shadow var(--d2); }
+.pas-body mark.lm { background: var(--mark); color: inherit; border-radius: 2px; box-shadow: 0 1.5px 0 var(--warm-line); padding: 0 1px; }
+.pas-foot { padding: 11px 44px 13px 68px; border-top: 1px solid var(--paper-line); display: flex; align-items: center; gap: 10px; font-size: var(--t-s); color: var(--paper-ink-2); font-family: var(--f-ui); }
+.pas-foot .keyhint { color: var(--paper-ink-2); }
+
+/* feedback passage — recedes, only the evidence stays lit */
+.pas.receded { transform: scale(.97); transform-origin: left center; box-shadow: inset 0 0 0 1px var(--paper-line), var(--sh-1); }
+.pas.receded:hover, .pas.receded:focus-within { transform: none; box-shadow: inset 0 0 0 1px var(--paper-line), var(--sh-2); }
+.pas.receded .pas-head { padding: 22px 72px 0 50px; }
+.pas.receded .pas-title { font-size: 19px; margin-top: 12px; }
+.pas.receded .pas-meta .ph { margin-left: 0; }
+.pas.receded .pas-body { padding: 10px 72px 28px 50px; }
+.pas.receded .pas-body p { font-size: 15.5px; line-height: 1.66; }
+.pas.receded .pas-body p::before { left: -32px; top: .25em; }
+.pas.receded .pas-foot { padding: 10px 72px 13px 50px; }
+.pas.receded .s { color: var(--paper-ink-2); transition: color var(--d2); }
+.pas.receded:hover .s { color: var(--paper-ink); }
+.pas.receded .s.ev { color: var(--paper-ink); background: var(--ev-bg, var(--acc-soft)); box-shadow: 0 0 0 3px var(--ev-bg, var(--acc-soft)); }
+.pas.receded .s.ev.key { --ev-bg: var(--ok-soft); }
+.pas .s b.kw { font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; text-decoration-color: var(--ok); }
+
+/* question column */
+.qcol { min-height: 0; height: 100%; min-width: 0; display: flex; flex-direction: column; gap: 14px; justify-content: center; }
+.qsat { display: flex; align-items: stretch; gap: 10px; }
+.cond { flex: 1; display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-radius: var(--r-l); line-height: 1.35; min-width: 0; }
+.cond .glow { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.cond.cool { background: color-mix(in oklab, var(--glass-2) 80%, var(--cool-soft)); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--cool-line), var(--sh-1); }
+.cond.warm { background: color-mix(in oklab, var(--glass-2) 70%, var(--warm-soft)); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--warm-line), var(--sh-1); }
+.cond.cool .glow { background: var(--cool); box-shadow: 0 0 0 4px var(--cool-soft), 0 0 14px var(--cool-line); }
+.cond.warm .glow { background: var(--warm); box-shadow: 0 0 0 4px var(--warm-soft), 0 0 14px var(--warm-line); }
+.cond.still .glow { background: var(--ink-3); box-shadow: 0 0 0 4px var(--well); }
+.cond b { display: block; font-size: var(--t-sm); font-weight: 650; }
+.cond.cool b { color: var(--cool); } .cond.warm b { color: var(--warm); } .cond.still b { color: var(--ink); }
+.cond span { display: block; font-size: var(--t-s); color: var(--ink-2); }
+.clock { display: flex; flex-direction: column; justify-content: center; padding: 9px 16px; border-radius: var(--r-l); min-width: 112px; }
+.clock .t { font-family: var(--f-disp); font-size: 22px; font-weight: 500; line-height: 1.1; letter-spacing: .01em; }
+.clock .l { font-size: 12px; color: var(--ink-3); line-height: 1.3; margin-top: 2px; white-space: nowrap; }
+
+.qcard { position: relative; padding: 24px 26px 20px; min-height: 0; display: flex; flex-direction: column; }
+.q-head { display: flex; align-items: center; gap: 10px; }
+.q-head .r { margin-left: auto; font-size: var(--t-s); color: var(--ink-3); }
+.q-stem { margin: 14px 0 20px; font-size: 21px; line-height: 1.48; color: var(--ink); }
+.opts { display: flex; flex-direction: column; gap: 10px; }
+.opt { position: relative; display: grid; grid-template-columns: 36px 1fr; align-items: center; gap: 16px; width: 100%; min-height: 64px; text-align: left; padding: 12px 20px 12px 14px; border-radius: 18px;
+  background: var(--tile); box-shadow: inset 0 0 0 1px var(--line), var(--sh-tile);
+  transition: transform var(--d2) var(--spring), box-shadow var(--d2) var(--ease), background var(--d1); }
+.opt:hover { transform: translateY(-2px); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-tile-hi); }
+.opt:active { transform: translateY(1px); box-shadow: inset 0 0 0 1px var(--line-2); }
+.opt .key { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; font: 600 15px/1 var(--f-ui); font-variant-numeric: tabular-nums; color: var(--ink-2);
+  background: var(--well-2); box-shadow: inset 0 0 0 1px var(--line-2), inset 0 -2px 0 var(--line-2); transition: all var(--d2) var(--spring); }
+.opt .txt { font-size: 16.5px; line-height: 1.4; color: var(--ink); }
+.opt[aria-checked="true"] { background: color-mix(in oklab, var(--tile) 88%, var(--acc)); box-shadow: inset 0 0 0 2px var(--acc), 0 10px 26px -10px var(--acc-line); transform: translateY(-2px); }
+.opt[aria-checked="true"] .key { background: var(--acc); color: var(--acc-ink); box-shadow: inset 0 -2px 0 oklch(0% 0 0 / .22); transform: scale(1.04); }
+.q-foot { margin-top: 18px; display: flex; align-items: center; gap: 8px; }
+.q-foot .sp { flex: 1; }
+.hintbtn { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 10px 0 13px; border-radius: var(--r-pill); color: var(--ink-2); font-size: var(--t-sm); font-weight: 600; white-space: nowrap;
+  box-shadow: inset 0 0 0 1px var(--line-2); transition: background var(--d1), color var(--d1), box-shadow var(--d1); }
+.hintbtn:hover { background: var(--warm-soft); color: var(--warm); box-shadow: inset 0 0 0 1px var(--warm-line); }
+.q-note { margin-top: 10px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--warm); white-space: nowrap; }
+.hintbox { margin: -6px 0 18px; padding: 14px 16px; border-radius: var(--r-m); background: var(--warm-soft); box-shadow: inset 0 0 0 1px var(--warm-line); font-size: var(--t-sm); line-height: 1.65; color: var(--ink); }
+/* the hint costs vertical room; the tiles give a little back so the footer never crowds the card edge */
+.qcard.hinted .q-stem { margin-bottom: 14px; }
+.qcard.hinted .hintbox { margin: 0 0 14px; padding: 12px 16px; line-height: 1.55; }
+.qcard.hinted .opts { gap: 8px; }
+.qcard.hinted .opt { min-height: 56px; padding-block: 9px; }
+.qcard.hinted .q-foot { margin-top: 14px; }
+.enter-hint .hintbox { animation: rise var(--d3) var(--ease) both; }
+.hintbox .k { display: flex; align-items: center; gap: 8px; font-size: var(--t-s); color: var(--warm); font-weight: 650; margin-bottom: 4px; }
+.keyhint { font-size: var(--t-s); color: var(--ink-3); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* feedback: the question card expands in place; the passage recedes */
+.fb { display: grid; grid-template-columns: minmax(280px, 380px) minmax(500px, 660px); gap: 0; justify-content: center; max-width: 1060px; }
+.fb .pas.receded { z-index: 1; align-self: center; height: calc(100% - 56px); }
+.fb .fcard { position: relative; z-index: 2; margin-left: -46px; }
+.fb .pas.receded:hover, .fb .pas.receded:focus-within { z-index: 3; }
+.enter .fb .paper.pas { animation: recede var(--d3) var(--ease) both; }
+.fcard { min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; transform-origin: left center; }
+.enter .fcard { animation: unfold 760ms var(--spring) both; }
+.f-scroll { flex: 1; min-height: 0; overflow: auto; padding: 24px 28px 8px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.verdict { display: flex; align-items: center; gap: 16px; }
+.verdict .mk { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.verdict.no .mk { color: var(--bad); background: var(--bad-soft); box-shadow: inset 0 0 0 1.5px var(--bad-line); }
+.verdict.yes .mk { color: var(--ok); background: var(--ok-soft); box-shadow: inset 0 0 0 1.5px var(--ok-line); }
+.verdict .w { font-family: var(--f-disp); font-size: var(--t-2xl); font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
+.verdict.no .w { color: var(--bad); } .verdict.yes .w { color: var(--ok); }
+.verdict .m { font-size: var(--t-sm); color: var(--ink-2); margin-top: 3px; }
+.verdict .m b { color: var(--ink); font-weight: 650; }
+.verdict .q-r { margin-left: auto; align-self: flex-start; font-size: var(--t-s); color: var(--ink-3); text-align: right; line-height: 1.4; }
+.f-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 16px 0 0; }
+.f-stem { margin: 16px 0 10px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 16.5px; line-height: 1.5; color: var(--ink-2); }
+.fopts { display: flex; flex-direction: column; gap: 4px; }
+.fo { display: grid; grid-template-columns: 30px 1fr auto; gap: 14px; padding: 10px 12px 11px 10px; border-radius: var(--r-m); text-align: left; width: 100%; transition: background var(--d1), box-shadow var(--d1); }
+.fo:hover, .fo:focus-visible, .fo.on { background: var(--well); }
+.fo .key { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font: 600 13px/1 var(--f-ui); color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line-2), inset 0 -1.5px 0 var(--line-2); margin-top: 1px; }
+.fo.is-key .key { background: var(--ok); color: var(--bg); box-shadow: none; }
+[data-theme="light"] .fo.is-key .key { color: #fff; }
+.fo.is-mine .key { color: var(--bad); box-shadow: inset 0 0 0 1.5px var(--bad); }
+.fo.is-key { background: var(--ok-soft); box-shadow: inset 0 0 0 1px var(--ok-line); }
+.fo .ot { display: block; font-size: 16px; line-height: 1.4; color: var(--ink); padding-top: 4px; }
+.fo .tag { padding-top: 4px; }
+.fo .ex { display: block; margin-top: 4px; font-size: 13px; line-height: 1.6; color: var(--ink-2); text-wrap: pretty; }
+html[lang="zh-CN"] .fo .ex { line-height: 1.7; }
+.fo .ex b { font-weight: 650; color: var(--ink); }
+.fo.is-key .ex b { color: var(--ok); }
+.tactic { margin: 12px 0 6px; padding: 14px 16px; border-radius: var(--r-m); background: var(--well); display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+.tactic .ic { grid-row: span 2; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+.tactic .k { font-size: var(--t-s); font-weight: 650; color: var(--ink); display: flex; gap: 8px; align-items: center; }
+.tactic p { margin: 0; font-size: var(--t-sm); line-height: 1.6; color: var(--ink-2); }
+.f-acts { padding: 14px 28px 18px; border-top: 1px solid var(--line); display: flex; gap: 10px; align-items: center; }
+.f-acts .sp { flex: 1; }
+
+/* coach sheet content */
+.co-head { padding: 18px 20px 0; display: flex; align-items: center; gap: 10px; position: relative; }
+.co-head .o { width: 12px; height: 12px; border-radius: 50%; flex: none; background: radial-gradient(circle at 40% 35%, #fff, var(--orb-core) 65%); box-shadow: 0 0 0 4px var(--orb-halo), 0 0 14px var(--orb-halo); }
+.co-head .t { font-weight: 650; font-size: var(--t-b); }
+.co-head .chip { margin-left: auto; }
+.co-head .icon-btn { margin-right: -8px; }
+.modes { margin: 14px 20px 0; display: grid; grid-template-columns: repeat(3, 1fr); padding: 3px; border-radius: var(--r-pill); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); position: relative; }
+.modes button { height: 32px; border-radius: var(--r-pill); font-size: var(--t-s); font-weight: 600; color: var(--ink-3); display: flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap; transition: all var(--d2) var(--ease); }
+.modes button[aria-pressed="true"] { background: var(--glass-3); color: var(--ink); box-shadow: var(--sh-1), inset 0 0 0 1px var(--line); }
+.modes button kbd { height: 16px; min-width: 16px; font-size: 10px; padding: 0 3px; opacity: .55; background: transparent; }
+.co-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.co-scroll { flex: 1; min-height: 0; overflow: auto; padding: 14px 20px 18px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent); }
+.co-scroll.end { -webkit-mask-image: none; mask-image: none; }
+.more { position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%); height: 24px; padding: 0 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: var(--ink-2);
+  background: var(--glass-3); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-1); display: inline-flex; align-items: center; gap: 4px; }
+.more[hidden] { display: none; }
+.callstrip { border-radius: var(--r-m); box-shadow: inset 0 0 0 1px var(--line); padding: 10px 12px; font-size: 12.5px; line-height: 1.55; color: var(--ink); display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; }
+.callstrip .lk { color: var(--ink-3); white-space: nowrap; }
+.callstrip .muted { color: var(--ink-3); }
+.callstrip .ext { display: inline-flex; align-items: center; gap: 5px; color: var(--adv); font-weight: 650; }
+.callstrip .held { color: var(--bad); font-weight: 600; }
+.ledger { border-radius: var(--r-m); box-shadow: inset 0 0 0 1px var(--line); font-size: var(--t-s); }
+.ledger > div { display: grid; grid-template-columns: 64px 1fr; gap: 10px; padding: 8px 12px; align-items: start; line-height: 1.5; }
+html[lang="en"] .ledger > div { grid-template-columns: 68px 1fr; }
+.ledger > div + div { border-top: 1px solid var(--line); }
+.ledger .lk { color: var(--ink-3); }
+.ledger .lv { color: var(--ink); min-width: 0; }
+.ledger .lv .muted { color: var(--ink-3); }
+.ledger .ext { display: inline-flex; align-items: center; gap: 5px; color: var(--adv); font-weight: 650; }
+.ledger .held { color: var(--bad); font-weight: 600; }
+.reply { margin-top: 14px; position: relative; padding: 14px 16px 12px 18px; border-radius: 4px var(--r-m) var(--r-m) var(--r-m); background: var(--adv-soft); }
+.reply::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 0; border-left: 2px dashed var(--adv-line); }
+.reply p { margin: 0 0 8px; font-size: var(--t-sm); line-height: 1.68; color: var(--ink); }
+html[lang="zh-CN"] .reply p { font-size: 14px; line-height: 1.8; }
+.reply p:last-of-type { margin-bottom: 0; }
+.reply .q { font-weight: 600; }
+.reply .rmeta { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--adv-line); display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: var(--ink-3); flex-wrap: wrap; }
+.reply ol { margin: 4px 0 8px; padding-left: 1.3em; font-size: var(--t-sm); line-height: 1.7; }
+.composer { margin: 0 20px 16px; padding: 10px 10px 8px 14px; border-radius: var(--r-m); background: var(--glass-3); box-shadow: inset 0 0 0 1px var(--line-2); display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: end; }
+.composer textarea { border: 0; outline: 0; resize: none; background: transparent; font-size: var(--t-sm); line-height: 1.5; color: var(--ink); }
+.composer textarea::placeholder { color: var(--ink-3); }
+.composer:focus-within { box-shadow: inset 0 0 0 1.5px var(--adv-line), 0 0 0 4px var(--adv-soft); }
+.composer .cn { grid-column: 1 / -1; font-size: 11.5px; color: var(--ink-3); }
+.co-foot { padding: 11px 20px 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); display: flex; gap: 8px; align-items: flex-start; line-height: 1.5; }
+.co-foot .i { margin-top: 1px; color: var(--ok); }
+.pending { margin-top: 14px; padding: 16px; border-radius: var(--r-m); border: 1px dashed var(--adv-line); font-size: var(--t-sm); color: var(--ink-2); line-height: 1.6; }
+.pending .btn { margin-top: 12px; }
+.pending.held { border-color: var(--bad-line); }
+
+/* assess — the room goes still */
+body[data-room="still"] { --acc: var(--ink); --acc-hi: var(--ink-2); --acc-ink: var(--bg); --acc-soft: var(--well); --acc-tint: var(--well-2); --acc-line: var(--line-2); --acc-dim: var(--ink-2); }
+.read.assess .paper.pas { box-shadow: inset 0 0 0 1px var(--paper-line), var(--sh-1); }
+[data-theme="light"] body[data-room="still"] .paper { --paper: oklch(99.5% 0 0); }
+[data-theme="dark"] body[data-room="still"] .paper { --paper: oklch(22.5% 0.003 260); --paper-ink: oklch(91% 0.004 260); --paper-ink-2: oklch(75% 0.004 260); }
+[data-theme="dark"] body[data-room="still"] { --glass-2: oklch(25% 0.006 260 / .82); --glass-3: oklch(25% 0.006 260 / .95); --tile: oklch(28.5% 0.006 260 / .95); }
+.as-top { display: flex; align-items: center; gap: 16px; }
+.as-top .meta { font-size: var(--t-s); color: var(--ink-3); margin-top: 2px; }
+.runclock { display: flex; align-items: baseline; gap: 10px; line-height: 1; }
+.runclock .t { font-family: var(--f-disp); font-weight: 400; font-size: 32px; letter-spacing: .01em; line-height: 1; font-variant-numeric: tabular-nums; }
+.runclock .l { font-size: 13px; color: var(--ink-3); line-height: 1; }
+.ring { position: relative; width: 56px; height: 56px; flex: none; }
+.ring svg { position: absolute; inset: 0; width: 56px; height: 56px; transform: rotate(-90deg); }
+.ring .bg { stroke: var(--line-2); } .ring .fg { stroke: var(--ink); transition: stroke-dashoffset 1s linear; }
+.ring .ring-t { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+.nav40 { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 16px; padding: 10px 10px 10px 20px; border-radius: var(--r-pill);
+  background: var(--glass-2); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-2); }
+.cells { display: grid; grid-template-columns: repeat(20, 16px); grid-auto-rows: 16px; gap: 4px; }
+.cell { width: 16px; height: 16px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--line-2); position: relative; transition: transform var(--d1) var(--spring); }
+.cell:hover { transform: scale(1.18); }
+.cell.ans { background: var(--ink-2); box-shadow: none; }
+.cell.to { box-shadow: inset 0 0 0 1px var(--ink-3); background: linear-gradient(135deg, transparent 45%, var(--ink-2) 45%, var(--ink-2) 57%, transparent 57%); }
+.cell.cur { background: transparent; box-shadow: inset 0 0 0 2px var(--ink), 0 0 0 3px var(--well-2); }
+.legend { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-3); line-height: 1.3; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend b { color: var(--ink-2); font-weight: 600; }
+.legend .cell { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.legend .cell:hover { transform: none; }
+.leave { display: flex; align-items: center; gap: 10px; padding-left: 14px; border-left: 1px solid var(--line); }
+.leave .n { font-size: 12px; color: var(--ink-3); line-height: 1.4; white-space: nowrap; }
+
+/* report */
+.rcard { padding: 30px 36px 30px; position: relative; }
+.rcard::before { content: ""; position: absolute; inset: -40px -60px; z-index: -1; border-radius: 50%; background: radial-gradient(closest-side, var(--acc-soft), transparent); pointer-events: none; }
+.score { display: flex; align-items: flex-end; gap: 26px; margin-top: 12px; }
+.score .n { font-family: var(--f-disp); font-weight: 300; font-size: var(--t-hero); line-height: .9; letter-spacing: -.035em; }
+.score .n small { font-size: 40px; color: var(--ink-3); font-weight: 300; letter-spacing: -.01em; margin-left: 6px; }
+.score .side { padding-bottom: 8px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.score .side .t { font-size: var(--t-s); color: var(--ink-3); line-height: 1.55; }
+.cmp { margin-top: 24px; padding: 16px 18px; border-radius: var(--r-m); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
+.cmp-h { display: flex; align-items: center; gap: 10px; }
+.seg2 { margin-left: auto; display: flex; padding: 2px; border-radius: var(--r-pill); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
+.seg2 button { height: 24px; padding: 0 10px; border-radius: var(--r-pill); font-size: 12px; font-weight: 600; color: var(--ink-3); }
+.seg2 button[aria-pressed="true"] { background: var(--glass-3); color: var(--ink); box-shadow: var(--sh-1); }
+.ticks { display: grid; grid-template-columns: 52px 1fr 64px; align-items: center; gap: 12px; margin-top: 10px; font-size: var(--t-s); }
+.ticks .lab { color: var(--ink-2); font-weight: 600; }
+.ticks .lab small { display: block; font-weight: 400; color: var(--ink-3); font-size: 11.5px; }
+.ticks .bar { display: grid; grid-template-columns: repeat(40, 1fr); gap: 2px; height: 18px; }
+.ticks .bar i { border-radius: 2px; background: var(--line-2); }
+.ticks .bar i.on { background: var(--ink-3); }
+.ticks.now .bar i.on { background: var(--acc); }
+.ticks .bar i.plus { background: var(--acc); box-shadow: 0 0 0 1px var(--acc-line), 0 0 10px var(--acc-line); }
+[data-theme="dark"] .ticks .bar i.on { background: oklch(80% 0.04 265 / .38); }
+[data-theme="dark"] .ticks.now .bar i.on { background: var(--acc); }
+.ticks .v { text-align: right; font-weight: 650; color: var(--ink); }
+.delta { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: var(--t-s); color: var(--ink-2); flex-wrap: wrap; }
+.delta .d1 { font-family: var(--f-disp); font-size: 20px; font-weight: 600; color: var(--acc); }
+.delta .chk { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); white-space: nowrap; }
+.delta .chk .i { color: var(--ok); }
+.refuse { margin-top: 10px; padding: 12px 14px; border-radius: var(--r-s); border: 1px dashed var(--line-2); font-size: var(--t-sm); color: var(--ink-2); line-height: 1.6; }
+.refuse b { color: var(--ink); }
+.skills { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 32px; }
+.sk { display: grid; grid-template-columns: 1fr auto; gap: 7px 10px; align-items: baseline; }
+.sk .nm { font-size: var(--t-sm); color: var(--ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sk .nm .id { margin-left: 6px; }
+.sk .v { font-weight: 650; font-size: var(--t-sm); }
+.sk .v small { color: var(--ink-3); font-weight: 400; }
+.sk .pips { grid-column: 1 / -1; display: flex; gap: 3px; }
+.sk .pips i { flex: 1; max-width: 22px; height: 6px; border-radius: 3px; background: var(--line-2); }
+.sk .pips i.on { background: var(--ink-2); }
+.floor { position: relative; height: 8px; border-radius: 4px; background: var(--line-2); margin-top: 12px; }
+.floor i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--ink-2); }
+.floor b { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--warm); }
+.floor-l { position: relative; height: 16px; margin-top: 6px; font-size: 11.5px; color: var(--ink-3); }
+.floor-l span { position: absolute; top: 0; white-space: nowrap; }
+.floor-l span:nth-child(2) { transform: translateX(-50%); color: var(--warm); font-weight: 600; }
+.rcells { display: grid; grid-template-columns: repeat(10, 40px); gap: 6px; margin-top: 14px; }
+.rcell { height: 40px; border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font-size: 11px; font-weight: 600; line-height: 1; transition: transform var(--d1) var(--spring); }
+.rcell .i { width: 13px; height: 13px; stroke-width: 2.2; }
+.rcell:hover { transform: scale(1.08); }
+.rcell.c { background: var(--ok-soft); color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok-line); }
+.rcell.w { background: var(--bad-soft); color: var(--bad); box-shadow: inset 0 0 0 1px var(--bad-line); }
+.rcell.t { color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ink-3); background: repeating-linear-gradient(135deg, transparent 0 5px, var(--line) 5px 6px); }
+.rcell.sel { outline: 2px solid var(--acc); outline-offset: 2px; }
+.rleg { display: flex; gap: 18px; margin-top: 12px; font-size: 12px; color: var(--ink-3); }
+.rleg span { display: inline-flex; align-items: center; gap: 6px; }
+.rleg .rcell { width: 18px; height: 18px; border-radius: 5px; display: inline-grid; place-items: center; }
+.rleg .rcell .i { width: 10px; height: 10px; }
+
+/* bottom sheet */
+.sheet { position: fixed; left: 50%; bottom: 0; z-index: 40; width: min(760px, calc(100vw - 64px)); max-height: 64vh; transform: translateX(-50%); display: flex; flex-direction: column; border-radius: var(--r-xl) var(--r-xl) 0 0;
+  background: var(--glass-3); backdrop-filter: blur(30px) saturate(1.4); -webkit-backdrop-filter: blur(30px) saturate(1.4); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
+.sheet.in { animation: sheetin var(--d3) var(--ease) both; }
+@keyframes sheetin { from { transform: translate(-50%, 100%); } }
+.sheet .grab { width: 40px; height: 4px; border-radius: 2px; background: var(--line-2); margin: 10px auto 0; flex: none; }
+.sh-h { display: flex; align-items: center; gap: 12px; padding: 14px 28px 0 30px; flex: none; }
+.sh-h .ico { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--well); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); flex: none; }
+.sh-h h2 { margin: 0; font-size: 19px; }
+.sh-h .sub { font-size: var(--t-s); color: var(--ink-3); }
+.sh-h .icon-btn { margin-left: auto; }
+.sh-b { flex: 1; min-height: 0; overflow: auto; padding: 16px 30px 30px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.scrim { position: fixed; inset: 0; z-index: 35; background: oklch(20% 0.03 262 / .2); }
+.enter-layer .scrim { animation: fade var(--d2) both; }
+[data-theme="dark"] .scrim { background: oklch(5% 0.02 262 / .5); }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 10px 0; font-size: var(--t-sm); color: var(--ink-2); align-items: baseline; }
+.kv + .kv { border-top: 1px solid var(--line); }
+.kv b { color: var(--ink); font-weight: 600; }
+.kv .big { font-family: var(--f-disp); font-size: 22px; font-weight: 600; color: var(--ink); }
+.cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 28px; }
+.blk { padding: 14px 16px; border-radius: var(--r-m); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
+.blk + .blk { margin-top: 10px; }
+.blk h3 { margin: 0 0 4px; font-size: var(--t-sm); font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.blk p { margin: 4px 0 0; font-size: var(--t-s); color: var(--ink-2); line-height: 1.6; }
+.sh-acts { display: flex; gap: 10px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
+.fine { margin-top: 8px; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
+.fine b { color: var(--ink-2); font-weight: 600; }
+
+/* dialog */
+.dlg { position: fixed; left: 50%; top: 50%; z-index: 50; width: 460px; transform: translate(-50%, -50%); padding: 28px 30px 24px; border-radius: var(--r-xl);
+  background: var(--glass-3); backdrop-filter: blur(30px) saturate(1.4); -webkit-backdrop-filter: blur(30px) saturate(1.4); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
+.enter-layer .dlg { animation: dlgin var(--d3) var(--spring) both; }
+@keyframes dlgin { from { opacity: 0; transform: translate(-50%, -46%) scale(.96); } }
+.dlg h2 { margin: 14px 0 8px; font-size: var(--t-xl); }
+.dlg p { margin: 0 0 10px; color: var(--ink-2); line-height: 1.65; }
+.dlg .acts { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.dlg .ico { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; }
+.dlg.warm .ico { color: var(--warm); background: var(--warm-soft); box-shadow: inset 0 0 0 1px var(--warm-line); }
+.dlg.adv .ico { color: var(--adv); background: var(--adv-soft); box-shadow: inset 0 0 0 1px var(--adv-line); }
+.dlg.neutral .ico { color: var(--ink-2); background: var(--well); box-shadow: inset 0 0 0 1px var(--line-2); }
+.cmpare { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; margin: 14px 0 4px; font-size: var(--t-s); }
+.cmpare > div { padding: 10px 12px; border-radius: var(--r-s); box-shadow: inset 0 0 0 1px var(--line-2); }
+.cmpare .on { box-shadow: inset 0 0 0 1.5px var(--warm-line); background: var(--warm-soft); }
+.cmpare b { display: block; font-weight: 650; color: var(--ink); }
+
+/* shortcuts */
+.keys { width: 740px; }
+.keys .hd { display: flex; align-items: center; gap: 12px; }
+.keys .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px 28px; margin-top: 18px; }
+.keys h3 { margin: 0 0 8px; font-size: 13px; color: var(--ink-3); font-weight: 600; }
+.keys .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 5px 0; font-size: var(--t-sm); color: var(--ink-2); }
+.keys .row span:last-child { display: inline-flex; gap: 4px; flex: none; }
+
+/* toast + mark pop */
+.toast { position: fixed; left: 50%; bottom: 96px; z-index: 60; transform: translateX(-50%); padding: 10px 16px; border-radius: var(--r-pill); background: var(--ink); color: var(--bg); font-size: var(--t-sm); font-weight: 550;
+  box-shadow: var(--sh-2); display: flex; align-items: center; gap: 8px; animation: toastin var(--d3) var(--spring) both; white-space: nowrap; }
+@keyframes toastin { from { opacity: 0; transform: translate(-50%, 10px) scale(.96); } }
+.markpop { position: fixed; z-index: 45; display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border-radius: var(--r-pill); background: var(--ink); color: var(--bg); font-size: var(--t-s); box-shadow: var(--sh-2); animation: settle var(--d2) var(--spring) both; }
+.markpop button { height: 26px; padding: 0 10px; border-radius: var(--r-pill); background: oklch(100% 0 0 / .14); font-weight: 650; display: inline-flex; gap: 6px; align-items: center; }
+[data-theme="dark"] .markpop button { background: oklch(0% 0 0 / .08); }
+.markpop kbd { background: transparent; color: inherit; box-shadow: inset 0 0 0 1px currentColor; opacity: .7; }
+
+/* ==========================================================================
+   ANKI — the card is the object
+   ========================================================================== */
+.anki { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 18px; max-width: 1180px; }
+.an-top { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.an-top .src { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.an-top .src .t { font-weight: 650; font-size: var(--t-b); white-space: nowrap; }
+.an-top .src .muted { font-size: var(--t-s); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.syncs { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: none; }
+.sy { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px 0 11px; border-radius: var(--r-pill); font-size: var(--t-s); color: var(--ink-2); font-weight: 550; white-space: nowrap;
+  background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-1); transition: transform var(--d2) var(--spring), background var(--d2); }
+.sy:hover { transform: translateY(-1px); background: var(--glass-2); }
+.sy b { font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+.sy.warm b, .sy.warm .i { color: var(--warm); } .sy.bad b, .sy.bad .i { color: var(--bad); } .sy.ok .i { color: var(--ok); }
+.sy.bad { box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--bad-line), var(--sh-1); }
+.an-table { position: relative; min-height: 0; display: flex; align-items: center; justify-content: center; transition: transform var(--d3) var(--ease); }
+.pv-row { position: relative; display: flex; align-items: flex-start; justify-content: center; gap: 28px; width: 100%; }
+.pv-row::after { content: ""; position: absolute; left: 14%; right: 14%; bottom: -46px; height: 50px; border-radius: 50%; background: radial-gradient(closest-side, oklch(20% .04 262 / .15), transparent); pointer-events: none; z-index: -1; }
+[data-theme="dark"] .pv-row::after { background: radial-gradient(closest-side, oklch(2% .02 262 / .55), transparent); }
+.pv-side { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 500px; transition: max-width var(--d3) var(--ease); min-height: 0; }
+.an-table.phone .pv-side { max-width: 300px; }
+.pv-lab { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-3); padding: 0 6px; }
+.pv-lab b { color: var(--ink-2); font-weight: 600; }
+.an-tools { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.tgl { display: flex; padding: 3px; border-radius: var(--r-pill); background: var(--glass); box-shadow: inset 0 0 0 1px var(--line); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+.tgl button { height: 28px; padding: 0 12px; border-radius: var(--r-pill); font-size: var(--t-s); font-weight: 600; color: var(--ink-3); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tgl button[aria-pressed="true"] { background: var(--glass-3); color: var(--ink); box-shadow: var(--sh-1), inset 0 0 0 1px var(--line); }
+.an-acts { justify-self: center; display: flex; align-items: center; gap: 8px; padding: 7px; border-radius: var(--r-pill); background: var(--glass-2); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-2); }
+.an-acts .div { width: 1px; height: 24px; background: var(--line-2); margin: 0 4px; }
+.an-acts .cap { font-size: 12px; color: var(--ink-3); padding: 0 10px 0 2px; white-space: nowrap; }
+.anki.editing .an-table { transform: translateY(-2%) scale(.84); transform-origin: center top; }
+.anki.editing .an-tools, .anki.editing .an-acts { visibility: hidden; }
+/* the edit sheet owns the bottom edge while it is open; the dock steps aside (Esc / Done brings it back) */
+body.editing .dock { opacity: 0; visibility: hidden; transform: translate(-50%, 24px); transition: opacity var(--d2), transform var(--d2) var(--ease), visibility 0s var(--d2); }
+
+/* the Anki card itself — self-contained offline style */
+.ac { --c-bg: #fbfaf7; --c-ink: #1d2230; --c-ink2: #4a5163; --c-ink3: #646a7c; --c-line: rgba(29,34,48,.1); --c-acc: #3a43c4; --c-hl: rgba(240,200,80,.38);
+  position: relative; border-radius: 22px; background: var(--c-bg); color: var(--c-ink); padding: 28px 32px 24px; box-shadow: 0 1px 2px rgba(20,24,40,.06), 0 18px 40px -12px rgba(20,24,40,.22), inset 0 0 0 1px var(--c-line); overflow: hidden; }
+.ac.dark { --c-bg: #161b2b; --c-ink: #eceef5; --c-ink2: #c2c7d6; --c-ink3: #9aa1b5; --c-line: rgba(236,238,245,.1); --c-acc: #a9b0ff; --c-hl: rgba(240,200,80,.22);
+  box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 18px 40px -12px rgba(0,0,0,.6), inset 0 0 0 1px var(--c-line); }
+.ac .ac-t { display: flex; justify-content: space-between; align-items: center; font: 600 11px/1 var(--f-ui); letter-spacing: .08em; color: var(--c-ink3); }
+.ac .ac-t .sd { letter-spacing: .04em; }
+.ac .pol { display: inline-flex; align-items: center; gap: 7px; letter-spacing: .1em; text-transform: uppercase; height: auto; padding: 0; background: none; color: var(--c-ink3); font-size: 10.5px; }
+.ac .pol i { width: 13px; height: 13px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--c-acc); position: relative; }
+.ac .pol i::after { content: ""; position: absolute; left: 1px; right: 1px; top: 5.5px; height: 1.5px; background: var(--c-acc); transform: rotate(-45deg); }
+.ac .phr { margin: 20px 0 8px; font-family: var(--f-read); font-size: 30px; line-height: 1.28; letter-spacing: -.005em; text-wrap: balance; }
+.ac .phr .x { color: var(--c-acc); font-weight: 700; letter-spacing: .04em; border-bottom: 2px solid var(--c-acc); }
+.ac .ask { font: 500 13px/1.5 var(--f-ui); color: var(--c-ink3); }
+.ac.back .phr { font-size: 20px; margin: 14px 0 12px; padding-bottom: 12px; border-bottom: 1px solid var(--c-line); }
+.ac .exp { font: 400 15px/1.62 var(--f-ui); color: var(--c-ink); margin: 0 0 12px; letter-spacing: 0; white-space: pre-line; }
+.ac .eg { margin: 0; font-family: var(--f-read); font-style: italic; font-size: 15px; line-height: 1.6; color: var(--c-ink2); padding-left: 14px; border-left: 2px solid var(--c-line); }
+.ac .eg em { font-style: italic; background: linear-gradient(transparent 55%, var(--c-hl) 55%); color: var(--c-ink); font-weight: 600; }
+.ac .ac-f { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; font: 500 11px/1 var(--f-mono); color: var(--c-ink3); letter-spacing: 0; }
+.ac .ac-f .tac { font-family: var(--f-ui); font-weight: 600; font-size: 11px; padding: 4px 8px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--c-line); color: var(--c-ink2); }
+.an-table.phone .ac { padding: 22px 20px 18px; }
+.an-table.phone .ac .phr { font-size: 22px; }
+.an-table.phone .ac.back .phr { font-size: 16.5px; }
+.an-table.phone .ac .exp { font-size: 13.5px; }
+.an-table.phone .ac .eg { font-size: 14px; }
+
+/* edit sheet — non-modal: the card stays visible above and updates live */
+.esheet { position: fixed; left: 50%; bottom: 0; z-index: 40; width: min(1000px, calc(100vw - 64px)); transform: translateX(-50%); border-radius: var(--r-xl) var(--r-xl) 0 0; display: flex; flex-direction: column; max-height: 50vh;
+  background: var(--glass-3); backdrop-filter: blur(30px) saturate(1.4); -webkit-backdrop-filter: blur(30px) saturate(1.4); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
+.enter-edit .esheet { animation: sheetin var(--d3) var(--ease) both; }
+.esheet .grab { width: 40px; height: 4px; border-radius: 2px; background: var(--line-2); margin: 10px auto 0; }
+.es-b { flex: 1; min-height: 0; overflow: auto; padding: 4px 30px 10px; display: grid; grid-template-columns: 1fr 1.25fr; gap: 0 28px; align-content: start; scrollbar-width: thin; }
+.es-f { padding: 12px 30px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+.es-f .sp { flex: 1; }
+.field { display: block; margin-top: 12px; }
+.field .fl { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--ink-2); font-weight: 600; margin-bottom: 6px; }
+.field .fl .id { margin-left: auto; }
+.field textarea { width: 100%; border: 0; outline: 0; resize: none; padding: 9px 12px; border-radius: var(--r-s); background: var(--tile); box-shadow: inset 0 0 0 1px var(--line-2); font-size: var(--t-sm); line-height: 1.55; color: var(--ink); transition: box-shadow var(--d1);
+  field-sizing: content; min-height: 2lh; max-height: calc(6lh + 18px); display: block; }
+.field textarea.one { min-height: calc(1lh + 18px); }
+.field textarea:focus { box-shadow: inset 0 0 0 1.5px var(--acc), 0 0 0 4px var(--acc-soft); }
+.field textarea.serif { font-family: var(--f-read); font-size: 15px; }
+.field .ro { padding: 8px 12px; border-radius: var(--r-s); background: var(--well); font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.field .ro span { font-family: var(--f-ui); font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+
+/* sync sheet + conflict */
+.note { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; padding: 11px 2px; font-size: var(--t-s); border-top: 1px solid var(--line); }
+.note:first-child { border-top: 0; }
+.note .f { font-family: var(--f-read); font-size: 15px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note .st { font-size: 12px; color: var(--ink-3); white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; }
+.note .i { color: var(--ink-3); }
+.note.q .i, .note.q .st { color: var(--warm); }
+.note.c .i, .note.c .st { color: var(--bad); }
+.note.p .i { color: var(--ok); }
+.diff { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0; }
+.diff > div { padding: 14px 16px; border-radius: var(--r-m); background: var(--tile); box-shadow: inset 0 0 0 1px var(--line-2); }
+.diff b { display: block; font-size: 12px; color: var(--ink-3); font-weight: 600; margin-bottom: 6px; }
+.diff p { margin: 0; font-family: var(--f-read); font-size: 15.5px; line-height: 1.6; color: var(--ink); hyphens: manual; word-break: normal; overflow-wrap: normal; }
+.diff ins { text-decoration: none; background: var(--warm-soft); box-shadow: 0 1.5px 0 var(--warm-line); border-radius: 2px; white-space: nowrap; padding: 0 1px; }
+
+/* ==========================================================================
+   SETTINGS
+   ========================================================================== */
+.reg { min-height: 0; max-height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.reg-h { padding: 24px 28px 4px; }
+.reg-h h1 { margin: 0; font-size: var(--t-2xl); }
+.reg-h p { margin: 6px 0 0; font-size: var(--t-sm); color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
+.reg-cols, .rrow { display: grid; grid-template-columns: minmax(118px, 136px) minmax(196px, 1.15fr) minmax(178px, 1fr) minmax(98px, 116px) 104px 32px; gap: 12px; align-items: center; }
+.reg-cols { margin: 16px 28px 0; padding: 0 12px 9px; font-size: 12px; color: var(--ink-3); border-bottom: 1px solid var(--line); }
+.reg-cols span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.reg-cols i { font-style: normal; width: 16px; height: 16px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 10px; font-weight: 700; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); }
+.reg-cols .id { color: var(--ink-3); }
+.reg-b { flex: 1; min-height: 0; overflow: auto; padding: 6px 28px 10px; scrollbar-width: thin; }
+.rrow { min-height: 58px; padding: 8px 12px; border-radius: var(--r-m); font-size: var(--t-s); transition: background var(--d1); }
+.rrow + .rrow { box-shadow: 0 -1px 0 var(--line); }
+.rrow:hover { background: var(--well); }
+.rrow.open { background: var(--tile); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-1); }
+.rrow.open + .rrow { box-shadow: none; }
+.pv-name { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: var(--t-sm); color: var(--ink); white-space: nowrap; }
+.mono-mk { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font: 700 10.5px/1 var(--f-mono); letter-spacing: .02em; color: var(--ink-2); background: var(--well); box-shadow: inset 0 0 0 1px var(--line-2); flex: none; }
+.rrow .model { font-family: var(--f-mono); font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+.rrow .model .muted { font-family: var(--f-ui); font-size: 12px; }
+.rrow .model.none { font-family: var(--f-ui); color: var(--ink-3); }
+.cap { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; min-width: 0; white-space: nowrap; }
+.cap .t { color: var(--ink-3); font-weight: 400; }
+.cap.v { color: var(--ok); font-weight: 600; } .cap.u { color: var(--ink-2); } .cap.f { color: var(--bad); font-weight: 600; } .cap.n { color: var(--ink-3); }
+.auth { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+.auth.ok { color: var(--ink); } .auth.ok .i { color: var(--ok); }
+.auth.no { color: var(--ink-3); }
+.rrow .act { justify-self: end; }
+.rrow .act .btn { height: 32px; min-width: 88px; }
+.inuse { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 650; color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc-line); white-space: nowrap; }
+.disc { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-3); transition: background var(--d1), transform var(--d2) var(--ease); }
+.disc:hover { background: var(--well); color: var(--ink); }
+.disc[aria-expanded="true"] svg { transform: rotate(180deg); }
+.disc[hidden] { visibility: hidden; display: grid; }
+.capgrid { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 0 4px 38px; }
+.capgrid .cg { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 11px; border-radius: 8px; font-size: 12px; box-shadow: inset 0 0 0 1px var(--line); background: var(--well); white-space: nowrap; }
+.capgrid .cg code { font-size: 11.5px; color: var(--ink); }
+.capgrid .cg span { color: var(--ink-3); }
+.capgrid .cg.v { box-shadow: inset 0 0 0 1px var(--ok-line); background: var(--ok-soft); }
+.capgrid .cg.v span { color: var(--ok); font-weight: 600; }
+.capgrid .cg.f { box-shadow: inset 0 0 0 1px var(--bad-line); background: var(--bad-soft); }
+.capgrid .cg.f span { color: var(--bad); font-weight: 600; }
+.reg-f { padding: 12px 28px 16px; border-top: 1px solid var(--line); display: flex; gap: 18px; font-size: 12px; color: var(--ink-3); flex-wrap: wrap; }
+.reg-f span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.route-row { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 9px 0; font-size: var(--t-sm); color: var(--ink-2); }
+.route-row + .route-row { border-top: 1px solid var(--line); }
+.route-row i { height: 1px; background: repeating-linear-gradient(90deg, var(--line-2) 0 3px, transparent 3px 7px); }
+.route-row code { color: var(--ink); font-size: 12.5px; }
+.bud { display: grid; grid-template-columns: 76px 1fr minmax(64px, auto); gap: 12px; align-items: center; font-size: var(--t-s); padding: 7px 0; color: var(--ink-2); }
+.bud .m { height: 5px; border-radius: 3px; background: var(--line-2); overflow: hidden; }
+.bud .m i { display: block; height: 100%; background: var(--acc); border-radius: 3px; }
+.bud .v { text-align: right; color: var(--ink); font-weight: 600; }
+.bud.dim { color: var(--ink-3); }
+.bud.dim .v { color: var(--ink-3); font-weight: 500; }
+.bsum { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: baseline; font-size: var(--t-s); color: var(--ink-2); }
+.bsum b { font-family: var(--f-disp); font-size: 20px; font-weight: 600; color: var(--ink); }
+.evts { margin-top: 6px; position: relative; padding-left: 18px; }
+.evts::before { content: ""; position: absolute; left: 4px; top: 8px; bottom: 8px; width: 1px; background: var(--line-2); }
+.evt { position: relative; font-size: var(--t-s); line-height: 1.5; color: var(--ink-2); padding: 5px 0; }
+.evt::before { content: ""; position: absolute; left: -17px; top: 11px; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--glass-3); }
+.evt.rv::before { background: var(--bad); }
+.evt b { color: var(--ink); font-weight: 600; }
+.evt .t { color: var(--ink-3); margin-right: 8px; }
+.confirm { margin-top: 14px; padding: 16px; border-radius: var(--r-m); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc-line); }
+.confirm h3 { margin: 0 0 8px; font-size: var(--t-sm); }
+.svc { display: grid; grid-template-columns: 14px 1fr auto; gap: 12px; align-items: center; padding: 11px 0; font-size: var(--t-sm); }
+.svc + .svc { border-top: 1px solid var(--line); }
+.svc .st { font-size: var(--t-s); color: var(--ink-3); }
+.svc .st.ok { color: var(--ok); } .svc .st.bad { color: var(--bad); }
+
+/* ---------- reduced motion + shot ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
+}
+html.shot *, html.shot *::before, html.shot *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }
+
+/* compact heights */
+@media (max-height: 820px) {
+  .app { grid-template-rows: 58px minmax(0, 1fr); }
+  .stage { padding-bottom: 92px; }
+  .orbit > .facts { margin-bottom: 20px; }
+  .rail { gap: 44px; }
+  .hero { padding: 26px 34px 24px; }
+  .hero-title { margin-top: 14px; font-size: 38px; }
+  .reason { margin-top: 14px; font-size: 17.5px; }
+  html[lang="zh-CN"] .reason { font-size: 17.5px; line-height: 1.7; }
+  .evid { margin-top: 16px; }
+  .evid > div { padding: 10px 14px 10px; }
+  .diag { margin-top: 10px; }
+  .obj-foot { margin-top: 16px; padding-top: 16px; }
+  .pas-head { padding-top: 20px; }
+  .pas-body p { font-size: 17px; }
+  .pas-title { font-size: 24px; margin-top: 12px; }
+  .q-stem { font-size: 19px; margin: 10px 0 14px; }
+  .opt { min-height: 56px; padding-top: 9px; padding-bottom: 9px; }
+  .opt .txt { font-size: 15.5px; }
+  .opts { gap: 8px; }
+  .qcard { padding: 20px 22px 16px; }
+  .q-foot { margin-top: 14px; }
+  .rcard { padding: 24px 30px 24px; }
+  .score .n { font-size: 72px; }
+  .cmp { margin-top: 16px; padding: 12px 16px; }
+  .skills { margin-top: 16px; gap: 10px 28px; }
+  .composer textarea { height: 24px; }
+  .ledger > div { padding: 6px 12px; }
+  .f-scroll { padding-top: 20px; }
+  .fo { padding-top: 7px; padding-bottom: 8px; }
+  .rrow { min-height: 52px; }
+  .reg-h { padding-top: 18px; }
+  .sat { min-height: 50px; }
+  .qcard.hinted .q-stem { margin: 8px 0 10px; }
+  .qcard.hinted .hintbox { margin-bottom: 10px; padding: 9px 14px; font-size: 13px; line-height: 1.5; }
+  .qcard.hinted .opt { min-height: 48px; padding-block: 7px; }
+  .qcard.hinted .q-foot { margin-top: 10px; }
+}
+@media (max-width: 1340px) {
+  :root { --gut: 24px; --coach-w: 356px; }
+  .stage.with-coach { padding-right: calc(var(--coach-w) + 24px + 24px); }
+  .orbit { column-gap: 32px; }
+  .read { gap: 28px; }
+  .fb { grid-template-columns: minmax(270px, 330px) minmax(480px, 1fr); }
+  .fb .fcard { margin-left: -40px; }
+  .pas.receded .pas-head { padding: 20px 60px 0 44px; }
+  .pas.receded .pas-body { padding: 8px 60px 24px 44px; }
+  .pas.receded .pas-body p { font-size: 15px; line-height: 1.64; }
+  .pas.receded .pas-body p::before { left: -30px; }
+  .pas.receded .pas-meta { font-size: 12px; gap: 6px; }
+  .pas.receded .pas-foot { padding: 10px 60px 12px 44px; }
+  .pas-head { padding-left: 60px; padding-right: 36px; }
+  .pas-body { padding-left: 60px; padding-right: 36px; }
+  .pas-foot { padding-left: 60px; padding-right: 36px; }
+  .f-scroll { padding-left: 24px; padding-right: 24px; }
+  .f-acts { padding-left: 24px; padding-right: 24px; }
+  .orbit.solo { grid-template-columns: minmax(0, 1fr) minmax(0, 250px); }
+  .reg-cols, .rrow { grid-template-columns: minmax(112px, 124px) minmax(186px, 1.15fr) minmax(170px, 1fr) minmax(92px, 104px) 96px 32px; gap: 10px; }
+  .reg-h, .reg-b, .reg-f { padding-left: 22px; padding-right: 22px; }
+  .reg-cols { margin-left: 22px; margin-right: 22px; }
+  .pv-row { gap: 22px; }
+  .pv-side { max-width: 480px; }
+}
+</style>
+</head>
+<body data-room="calm">
+<div class="atmos" aria-hidden="true"></div>
+<div class="app">
+  <header class="top" id="top"></header>
+  <main class="stage" id="stage"></main>
+</div>
+<nav id="dock"></nav>
+<div id="orb"></div>
+<div id="layer"></div>
+
+<script>
+'use strict';
+/* ==========================================================================
+   state
+   ========================================================================== */
+const qs = new URLSearchParams(location.search);
+const store = (k, v) => { try { if (v === undefined) return localStorage.getItem('pq-stage-' + k); localStorage.setItem('pq-stage-' + k, v); } catch (e) { return null; } };
+const S = {
+  theme: qs.get('theme') || store('theme') || 'light',
+  lang: qs.get('lang') || store('lang') || 'zh',
+  shot: qs.get('shot') === '1',
+  route: 'today',
+  layer: null,          // 'keys' | 'hint' | 'leave' | 'refine' | 'pop' | 'sheet:<key>'
+  ret: null,            // selector of the element to refocus when a layer closes
+  sessionAt: -1,        // last visited step of today's session
+  annItem: null,
+  coachOpen: true,
+  budget: { deepseek: 4 },
+  practice: { sel: null, assisted: false, elapsed: 41, marks: [] },
+  fb: { choice: 'A', mode: 'probe', ev: 'C', elapsed: 108, assisted: false, done: { probe: true }, draft: '' },
+  assess: { cur: 17, left: 34 * 60 + 12, item: 52, answers: {} },
+  report: { cmp: 2 },
+  anki: { side: 'both', card: null, width: 'desk', rev: 0, accepted: false, skipped: false, dirty: false, editing: false, conflict: null,
+          f: { front: 'all of the following are true EXCEPT',
+               exp: 'Three options match the passage; the answer is the one that does not. Check each option against the text — do not pick the one that repeats the most words.',
+               eg: 'Engineers will replace two of the four main pumps…',
+               tac: 'NOT/EXCEPT polarity' } },
+  set: { open: 'deepseek', consent: true, confirming: false, ledger: [{ t: '11-12 14:03', a: 'grant' }] },
+  brief: 'paused',
+};
+if (!['light', 'dark'].includes(S.theme)) S.theme = 'light';
+if (!['zh', 'en'].includes(S.lang)) S.lang = 'zh';
+// assessment: items 1–18 answered except 9 (timed out) and 17 (current)
+for (let n = 1; n <= 18; n++) if (n !== 9 && n !== 17) S.assess.answers[n] = 'ABCD'[(n * 7) % 4];
+S.assess.timedOut = { 9: true };
+
+const T = (zh, en) => (S.lang === 'zh' ? zh : en);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const mmss = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+const reduced = () => S.shot || matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ==========================================================================
+   icons (hand-made)
+   ========================================================================== */
+const P = {
+  today: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/>',
+  practice: '<path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4"/><path d="M9 12h6M9 15.5h6"/>',
+  assess: '<circle cx="12" cy="13.5" r="7"/><path d="M12 13.5V10M10 3.5h4M18.3 6.7l1.2-1.2"/>',
+  report: '<path d="M4 19.5h16"/><path d="M7 16v-4M11 16V7.5M15 16v-6M19 16V9"/>',
+  anki: '<rect x="4" y="7.5" width="12" height="12.5" rx="2"/><path d="M8 7.5V5.6A1.6 1.6 0 0 1 9.6 4h8.8A1.6 1.6 0 0 1 20 5.6v9.8a1.6 1.6 0 0 1-1.6 1.6H16"/>',
+  settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  sun: '<circle cx="12" cy="12" r="3.8"/><path d="M12 3v1.8M12 19.2V21M3 12h1.8M19.2 12H21M5.6 5.6l1.3 1.3M17.1 17.1l1.3 1.3M5.6 18.4l1.3-1.3M17.1 6.9l1.3-1.3"/>',
+  moon: '<path d="M19.5 14.6A7.8 7.8 0 0 1 9.4 4.5a7.9 7.9 0 1 0 10.1 10.1z"/>',
+  help: '<circle cx="12" cy="12" r="8.5"/><path d="M9.7 9.6a2.4 2.4 0 1 1 3.2 2.3c-.6.2-.9.7-.9 1.3v.5"/><path d="M12 16.4v.2"/>',
+  check: '<path d="M5 12.5l4.2 4.2L19 7"/>',
+  x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+  seal: '<circle cx="12" cy="12" r="8.5"/><path d="M8.4 12.2l2.5 2.5 4.8-5.1"/>',
+  adv: '<circle cx="12" cy="12" r="8.5" stroke-dasharray="2.4 2.6"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/>',
+  ext: '<path d="M14 4h6v6M20 4l-8 8M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
+  local: '<rect x="3.5" y="5" width="17" height="11" rx="1.8"/><path d="M8.5 19.5h7M12 16v3.5"/>',
+  lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  pause: '<path d="M9.5 6.5v11M14.5 6.5v11"/>',
+  play: '<path d="M8.5 6v12l9.5-6z"/>',
+  arrow: '<path d="M5 12h14M13.5 6.5 19 12l-5.5 5.5"/>',
+  chev: '<path d="M7 10l5 5 5-5"/>',
+  down: '<path d="M12 5v14M6.5 13.5 12 19l5.5-5.5"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
+  mark: '<path d="M4 20.5h8"/><path d="M14.6 4.6l4.8 4.8-9.2 9.2-5.4.9.9-5.4z"/>',
+  conflict: '<path d="M7 4v11M4 12l3 3 3-3M17 20V9M14 12l3-3 3 3"/>',
+  present: '<rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>',
+  door: '<path d="M14 4h4.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H14"/><path d="M10 8l-4 4 4 4M6 12h10"/>',
+  edit: '<path d="M4 20l1-5L15.5 4.5l4 4L9 19z"/>',
+  phone: '<rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18h2"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+  shield: '<path d="M12 3.5l7 2.8v5.3c0 4.3-3 7.6-7 8.9-4-1.3-7-4.6-7-8.9V6.3z"/>',
+  server: '<rect x="4" y="4.5" width="16" height="6" rx="1.6"/><rect x="4" y="13.5" width="16" height="6" rx="1.6"/><path d="M7.5 7.5h.01M7.5 16.5h.01"/>',
+  key: '<circle cx="8" cy="15" r="3.6"/><path d="M10.6 12.4 19 4M16 7l2.5 2.5M13.8 9.2l2 2"/>',
+  route: '<circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="18" r="2.2"/><path d="M8.2 6H15a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h6.8"/>',
+  book: '<path d="M4 5.5C6.5 4.5 9.5 4.5 12 6c2.5-1.5 5.5-1.5 8-.5v13c-2.5-1-5.5-1-8 .5-2.5-1.5-5.5-1.5-8-.5z"/><path d="M12 6v13.5"/>',
+  stop: '<circle cx="12" cy="12" r="8.5"/><path d="M6 18L18 6"/>',
+  minus: '<path d="M6 12h12"/>',
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8v.2"/>',
+  pulse: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
+  tout: '<path d="M7 3.5h10M7 20.5h10"/><path d="M8 3.5c0 4.6 8 4 8 8.5s-8 3.9-8 8.5M16 3.5c0 4.6-8 4-8 8.5s8 3.9 8 8.5"/>',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ''}</svg>`;
+
+/* ==========================================================================
+   shared content
+   ========================================================================== */
+const SK = { 'not-except-polarity': ['NOT/EXCEPT 极性', 'NOT/EXCEPT polarity'], 'vocabulary-in-context': ['语境词汇', 'Vocabulary in context'],
+  'sentence-structure': ['句子结构', 'Sentence structure'], unclassified: ['未分类推断', 'Unclassified inference'] };
+const skillName = id => T(...SK[id]);
+const ACTN = { practice_new: ['新练习', 'New practice'], review: ['复习', 'Review'] };
+const actName = id => T(...ACTN[id]);
+
+// practice + feedback: the shared item (self-authored placeholder)
+const PASS = {
+  title: 'Notice: Temporary Closure of the North Pump Station',
+  src: ['本地导入 · S1 · 第 24 页 · 已审核', 'Local import · S1 · p.24 · reviewed'],
+  sents: [
+    ['From Monday, 4 March, the North Pump Station will be closed for maintenance for about three weeks.',
+     'During this period, water for the eastern district will be supplied by the South Station.',
+     'Residents may notice lower water pressure between 6 a.m. and 9 a.m., when demand is highest.',
+     'The lower pressure will not affect drinking-water quality, which is tested twice a day.'],
+    ['Engineers will replace @two of the four@ main pumps and install a new control system.',
+     'The old pumps have been in service since 1998 and use nearly 30 percent more electricity than modern models.',
+     'Once the work is finished, the station is expected to run more quietly and to need fewer repairs.'],
+    ['Visitors are not allowed on site while the work is under way.',
+     'Delivery vehicles must use the west gate, and all workers must wear helmets and reflective vests.',
+     'Questions about the project should be sent to the district office rather than to the station itself, because the station’s phone line will be disconnected until the work is complete.'],
+  ],
+};
+const QS = [
+  { skill: 'not-except-polarity', stem: 'According to the notice, all of the following are true EXCEPT that ____.',
+    opts: ['the South Station will supply water to the eastern district', 'drinking-water quality is tested twice a day', 'all four main pumps will be replaced', 'delivery vehicles must enter through the west gate'], key: 2 },
+];
+const EVMAP = { A: '0-1', B: '0-3', C: '1-0', D: '2-1' };
+
+// assessment: a different, unseen passage (self-authored placeholder) — independent ≠ re-exposure
+const APASS = {
+  title: 'Notice: New Opening Hours at Hillside Public Library',
+  src: ['测评池 · 未见单元 U-31 · 已审核', 'Assessment pool · unseen unit U-31 · reviewed'],
+  sents: [
+    ['From 1 April, Hillside Public Library will open at 10 a.m. instead of 9 a.m. on weekdays.',
+     'On Tuesdays and Thursdays it will stay open until 8 p.m., two hours later than before.',
+     'Weekend hours will not change.'],
+    ['The change follows a survey of 600 library users that was carried out over the winter.',
+     'Most of them said they found it hard to visit before work but would come in the evening if the building were open.',
+     'Morning visits have fallen by almost a quarter in the past two years.'],
+    ['The children’s reading hour will move from Saturday morning to Wednesday afternoon.',
+     'Books may still be returned at any time through the drop box beside the main entrance.',
+     'Questions can be asked at the front desk or by email, as the library’s old phone number is no longer in use.'],
+  ],
+};
+const AQS = [
+  { skill: 'sentence-structure', stem: 'How can readers contact the library staff now?', ev: '2-2',
+    opts: ['By calling the old phone number.', 'At the front desk or by email.', 'Only on Wednesday afternoons.', 'Through the drop box at the entrance.'], key: 1 },
+  { skill: 'vocabulary-in-context', stem: 'The phrase “carried out” in Paragraph 2 most probably means ____.', ev: '1-0',
+    opts: ['done', 'taken away', 'cancelled', 'planned for later'], key: 0 },
+  { skill: 'not-except-polarity', stem: 'According to the notice, all of the following are true EXCEPT that ____.', ev: '0-2',
+    opts: ['the library will open later on weekday mornings', 'books can be returned through a drop box', 'the library will close earlier at weekends', 'the children’s reading hour will move to Wednesday'], key: 2 },
+  { skill: 'unclassified', stem: 'Why is the library changing its opening hours?', ev: '1-1',
+    opts: ['Staff asked for shorter working days.', 'Users said evening hours would suit them better.', 'The building needs repairs in the morning.', 'The old phone line no longer works.'], key: 1 },
+];
+const sentOf = (pass, id) => { const [p, s] = id.split('-').map(Number); return pass.sents[p][s].replace(/@/g, ''); };
+
+function markedText(raw, marks) {
+  // raw sentence text + [{a,b}] character ranges → escaped HTML with <mark>
+  let out = '', at = 0;
+  marks.slice().sort((x, y) => x.a - y.a).forEach(m => {
+    if (m.a < at) return;
+    out += esc(raw.slice(at, m.a)) + `<mark class="lm">${esc(raw.slice(m.a, m.b))}</mark>`; at = m.b;
+  });
+  return out + esc(raw.slice(at));
+}
+function passageHTML(mode) {
+  const pass = mode === 'assess' ? APASS : PASS;
+  const evId = mode === 'feedback' ? EVMAP[S.fb.ev] : null;
+  const body = pass.sents.map((ss, pi) => `<p data-n="${pi + 1}">${ss.map((s, si) => {
+    const id = pi + '-' + si;
+    let txt;
+    if (mode === 'practice') txt = markedText(s.replace(/@/g, ''), S.practice.marks.filter(m => m.s === id));
+    else txt = esc(s).replace(/@(.+?)@/, mode === 'feedback' ? '<b class="kw">$1</b>' : '$1');
+    const cls = 's' + (id === evId ? ' ev' + (S.fb.ev === 'C' ? ' key' : '') : '');
+    return `<span class="${cls}" data-s="${id}">${txt}</span>`;
+  }).join(' ')}</p>`).join('');
+  const n = S.practice.marks.length;
+  const foot = mode === 'practice'
+    ? `${ic('mark', 's')}<span id="markcount">${n ? T(`已标记 ${n} 处 · 稍后可生成 Anki 笔记`, `${n} marked · available for an Anki note later`) : T('选中文字即可标记，留作 Anki 笔记', 'Select text to mark it for a later Anki note')}</span><span style="margin-left:auto" class="keyhint"><kbd>M</kbd> ${T('标记', 'mark')}</span>`
+    : mode === 'feedback'
+      ? `${ic('eye', 's')}<span>${T('悬停任一选项，原文中对应的依据句会亮起', 'Hover an option to light its supporting sentence')}</span>`
+      : `${ic('book', 's')}<span>${T('本篇含第 16–19 题', 'This passage carries items 16–19')}</span>`;
+  return `<section class="paper pas ${mode === 'feedback' ? 'receded' : ''} ${mode === 'practice' ? 'rise' : ''}" style="--i:0" aria-label="${T('文章', 'Passage')}">
+    <div class="pas-head">
+      <div class="pas-meta">
+        <span class="src">${ic('seal', 's')}${T(...pass.src)}</span>
+        <span class="ph">${ic('info', 'xs')}${T('原型文本为原创占位，非真实考试材料', 'Prototype text is an original placeholder')}</span>
+      </div>
+      <h2 class="pas-title exam" lang="en">${pass.title}</h2>
+    </div>
+    <div class="pas-body exam" lang="en" id="passage" data-mode="${mode}">${body}</div>
+    <div class="pas-foot">${foot}</div>
+  </section>`;
+}
+
+/* ==========================================================================
+   chrome: top, dock, orb
+   ========================================================================== */
+const ROUTES = ['today', 'practice', 'feedback', 'assess', 'report', 'anki', 'settings'];
+const DOCK = [['today', '今日', 'Today'], ['practice', '练习', 'Practice'], ['assess', '测评', 'Assess'], ['report', '报告', 'Report'], ['anki', 'Anki 笔记', 'Anki'], ['settings', '设置', 'Settings']];
+const SESSION = [['今日', 'Today', 'today'], ['练习 Q1', 'Practice Q1', 'practice'], ['反馈', 'Feedback', 'feedback'], ['笔记', 'Note', 'anki'], ['下一篇', 'Next passage', 'practice']];
+const SESSION_IDX = { today: 0, practice: 1, feedback: 2, anki: 3 };
+
+function topHTML() {
+  const r = S.route;
+  const brand = `<div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">Pass Quest</span>
+      <span class="brand-day">${T('备考第 <b class="num">23</b> 天 · 始于 2026-10-22', 'Prep day <b class="num">23</b> · since 2026-10-22')}</span>
+    </div>`;
+  let mid = '<span></span>';
+  if (r === 'assess') {
+    mid = `<div class="runclock" role="timer" aria-label="${T('测评剩余时间', 'Run time left')}">
+      <span class="l">${T('剩余', 'Left')}</span><span class="t" id="runclock">${mmss(S.assess.left)}</span><span class="l">/ 60:00</span></div>`;
+  } else if (r in SESSION_IDX) {
+    const now = SESSION_IDX[r];
+    mid = `<div class="tl" role="group" aria-label="${T(`今日会话 · 第 ${now + 1} / 5 步：${SESSION[now][0]}`, `Today's session · step ${now + 1} of 5: ${SESSION[now][1]}`)}">
+      <div class="tl-dots" aria-hidden="true">${SESSION.map((s, i) => `<span class="tl-dot ${i < now ? 'done' : ''} ${i === now ? 'now' : ''}"><span class="tip">${i + 1} · ${T(s[0], s[1])}</span></span>`).join('')}</div>
+      <span class="tl-label">${T(SESSION[now][0], SESSION[now][1])}<span class="n num">${now + 1} / ${SESSION.length}</span></span>
+    </div>`;
+  } else if (S.sessionAt > 0) {
+    const s = SESSION[S.sessionAt];
+    mid = `<a class="resume" href="#/${s[2]}"><span class="d"></span>${T(`回到今日会话 · ${s[0]} ${S.sessionAt + 1}/5`, `Resume session · ${s[1]} ${S.sessionAt + 1}/5`)}${ic('arrow', 'xs')}</a>`;
+  }
+  const util = `<div class="util">
+      <div class="seg" role="group" aria-label="${T('界面语言', 'Interface language')}">
+        <button data-act="lang" data-v="zh" aria-pressed="${S.lang === 'zh'}" lang="zh-CN">中</button>
+        <button data-act="lang" data-v="en" aria-pressed="${S.lang === 'en'}" lang="en">EN</button>
+      </div>
+      <button class="icon-btn" data-act="theme" id="themebtn" aria-label="${S.theme === 'light' ? T('切换到深色主题', 'Switch to dark theme') : T('切换到浅色主题', 'Switch to light theme')}" title="${T('主题', 'Theme')} · Shift+T">${ic(S.theme === 'light' ? 'moon' : 'sun')}</button>
+      <button class="icon-btn" data-act="keys" aria-label="${T('快捷键', 'Keyboard shortcuts')}" title="${T('快捷键', 'Shortcuts')} · ?">${ic('help')}</button>
+    </div>`;
+  return brand + mid + util;
+}
+
+function dockHTML() {
+  if (S.route === 'assess') return navigatorHTML();
+  const cur = S.route === 'feedback' ? 'practice' : S.route;
+  return `<div class="dock" role="navigation" aria-label="${T('主导航', 'Main')}">${DOCK.map(([r, zh, en]) =>
+    `<a href="#/${r}" ${r === cur ? 'aria-current="page"' : ''} aria-label="${T(zh, en)}${r === 'anki' ? T(' · 1 个冲突', ' · 1 conflict') : ''}">${ic(r)}<span class="lbl">${T(zh, en)}</span><span class="tip" aria-hidden="true">${T(zh, en)}</span>${r === 'anki' && !S.anki.conflict ? '<span class="badge" aria-hidden="true"></span>' : ''}</a>`).join('')}</div>`;
+}
+
+function orbHTML() {
+  const r = S.route;
+  if (r === 'assess') return '';           // help is withheld: the coach leaves the room
+  const coachSheet = r === 'feedback' && S.coachOpen;
+  const st = r === 'today' || r === 'report' ? '' : coachSheet ? 'open' : 'quiet';
+  const say = r === 'today'
+    ? `<span class="orb-say"><span class="state-dot ok"></span>deepseek-chat<span class="sep"></span>${T('今日', 'today')} <b class="num">${S.budget.deepseek} / 20</b></span>`
+    : r === 'report' ? `<span class="orb-say">${T('有 1 句说明', '1 thing to say')}</span>` : '';
+  const label = coachSheet ? T('收起导师', 'Collapse coach') : T('导师', 'Coach');
+  return `${coachSheet ? coachHTML() : ''}<div class="orb-wrap">${say}<button class="orb ${st}" data-act="coach" aria-label="${label}" aria-expanded="${coachSheet || S.layer === 'pop'}"><span class="core"></span></button></div>`;
+}
+
+/* ==========================================================================
+   satellites
+   ========================================================================== */
+// evidence constellation: one dot per attempt (filled = correct, ring = miss, amber = assisted)
+function cstIco(ok, miss, as) {
+  const kinds = [...Array(ok).fill('ok'), ...Array(miss).fill('miss'), ...Array(as).fill('as')], n = kinds.length;
+  const dots = kinds.map((k, i) => { const t = -Math.PI / 2 + i * 2 * Math.PI / n; return `<circle class="${k}" cx="${(18 + 11 * Math.cos(t)).toFixed(2)}" cy="${(18 + 11 * Math.sin(t)).toFixed(2)}" r="2.6"/>`; }).join('');
+  return `<span class="ico cst"><svg viewBox="0 0 36 36" aria-hidden="true">${dots}</svg></span>`;
+}
+const sat = (key, ico, lb, vl, flag = '', i = 0) =>
+  `<button class="sat settle" style="--i:${i}" data-act="sheet" data-v="${key}" aria-haspopup="dialog">${ico.startsWith('<') ? ico : `<span class="ico">${ic(ico, 's')}</span>`}${flag ? `<span class="flag ${flag}"></span>` : ''}<span class="tx"><span class="lb">${lb}</span><span class="vl">${vl}</span></span></button>`;
+
+/* ==========================================================================
+   TODAY
+   ========================================================================== */
+function evDots(ind, ok, as, re) {
+  let h = '';
+  for (let i = 0; i < ind; i++) h += `<span class="d ${i < ok ? 'ok' : 'miss'} sm"></span>`;
+  for (let i = 0; i < as; i++) h += `<span class="d as sm"></span>`;
+  for (let i = 0; i < re; i++) h += `<span class="d re sm"></span>`;
+  return h;
+}
+function vToday() {
+  const brief = S.brief === 'paused' ? T('暂停于 3 / 6', 'Paused at 3 / 6') : S.brief === 'run' ? T('运行中 · 3 / 6', 'Running · 3 / 6') : T('已取消', 'Cancelled');
+  return `<div class="scene orbit">
+    <div class="facts settle" style="--i:0">
+      <span class="chip">${ic('clock', 'xs')}<span class="k">${T('考试日期', 'Exam date')}</span>${T('未设置', 'not set')}<button class="lnk" data-act="toast" data-v="${T('设置考试日期：原型中不可用', 'Set exam date: not available in the prototype')}">${T('设置', 'Set')}</button></span>
+      <span class="chip"><span class="k">${T('每日学习时长', 'Daily study time')}</span>${T('未设置', 'not set')}</span>
+      <span class="chip"><span class="k">${T('及格线', 'Pass threshold')}</span>${T('未知', 'unknown')}</span>
+      <span class="chip">${ic('search', 'xs')}<span class="k">${T('找练习', 'Find practice')}</span>${T('未配置搜索 · 0 次网络调用', 'no search provider · 0 network calls')}</span>
+    </div>
+    <div class="rail l">
+      ${sat('skill-vocab', cstIco(5, 2, 1), skillName('vocabulary-in-context'), `<span class="num">5 / 7</span><small>${T('→ 复习', '→ review')}</small>`, '', 1)}
+      ${sat('skill-sent', cstIco(3, 1, 0), skillName('sentence-structure'), `<span class="num">3 / 4</span><small>${T('→ 新练习', '→ new practice')}</small>`, '', 2)}
+      ${sat('run2', 'report', T('上次测评 · 11-11', 'Last run · 11-11'), `#2 <span class="num" style="margin-left:6px">22 / 40</span>`, '', 3)}
+    </div>
+    <article class="obj hero card rise" style="--i:1" aria-labelledby="hero-t">
+      <div class="obj-top">
+        <span class="eyebrow">${T('下一步', 'Next')}</span><span class="pol" title="practice_new">${actName('practice_new')}<span class="id">practice_new</span></span>
+        <span class="r">${ic('local', 'xs')}${T('透明策略 · 本地计算', 'Transparent policy · local')}</span>
+      </div>
+      <h1 class="hero-title h-disp" id="hero-t">${skillName('not-except-polarity')}</h1>
+      <div class="hero-sub">${T('得分技能', 'Scoring skill')}<span class="sep"></span><span class="id">not-except-polarity</span></div>
+      <p class="reason">${T('独立迁移 3 次，答对 1 次；最近一次错误选了与原文重复词最多的选项。', '3 independent transfers, 1 correct; the last miss picked the option that reuses the most passage words.')}</p>
+      <div class="evid" role="group" aria-label="${T('证据', 'Evidence')}">
+        <div><div class="k"><b>${T('独立迁移', 'Independent')}</b><span class="num">1 / 3</span></div>
+          <div class="dots"><span class="d ok"></span><span class="d miss"></span><span class="d miss"></span></div>
+          <div class="v cnt">${T('计入', 'Counts')}</div></div>
+        <div><div class="k"><b>${T('有辅助', 'Assisted')}</b><span class="num">2</span></div>
+          <div class="dots"><span class="d as"></span><span class="d as"></span></div>
+          <div class="v no">${T('不计入', 'Never counts')}</div></div>
+        <div><div class="k"><b>${T('重复接触', 'Re-exposure')}</b><span class="num">1</span></div>
+          <div class="dots"><span class="d re"></span></div>
+          <div class="v no">${T('不计入', 'Never counts')}</div></div>
+      </div>
+      <div class="diag"><span class="q" title="unresolved">${T('错因 · 未定', 'Cause · unresolved')}</span>${T('3 次独立作答还不足以判断错因。', 'Three independent attempts are not enough to tell why.')}</div>
+      <div class="obj-foot">
+        <div class="promise"><span class="glow"></span><span><b>${T('新文章 · 本次可计入', 'Fresh passage · this can count')}</b>${T('作为一次独立迁移记录', 'Recorded as an independent transfer')}</span></div>
+        <a class="btn primary lg" href="#/practice" id="start">${T('开始练习', 'Start practice')}<kbd>Enter</kbd></a>
+      </div>
+    </article>
+    <div class="rail r">
+      ${sat('pool', 'lock', T('未见测评池', 'Unseen pool'), `<span class="num">63</span><small>${T('题 · 17 单元', 'items · 17 units')}</small>`, '', 4)}
+      ${sat('anki', 'anki', 'Anki', `<span class="num">6</span><small>${T('已接受 · 1 排队 · 1 冲突', 'accepted · 1 queued · 1 conflict')}</small>`, 'bad', 5)}
+      ${sat('brief', S.brief === 'run' ? 'pulse' : 'pause', T('学习简报', 'Study brief'), `${brief}`, S.brief === 'paused' ? 'warm' : '', 6)}
+    </div>
+  </div>`;
+}
+
+/* ==========================================================================
+   PRACTICE
+   ========================================================================== */
+function optsHTML(q, sel, name) {
+  return `<div class="opts" role="radiogroup" aria-label="${T('选项', 'Options')}">${q.opts.map((o, i) => {
+    const L = 'ABCD'[i];
+    return `<button class="opt" role="radio" aria-checked="${sel === L}" data-act="${name}" data-v="${L}"><span class="key" aria-hidden="true">${L}</span><span class="txt exam" lang="en"><span class="sr">${L}. </span>${esc(o)}</span></button>`;
+  }).join('')}</div>`;
+}
+function qcolHTML() {
+  const p = S.practice, q = QS[0];
+  const cond = p.assisted
+    ? `<div class="cond warm"><span class="glow"></span><div><b>${T('有辅助 · 已看提示', 'Assisted · hint visible')}</b><span>${T('本次不计入独立迁移', 'This attempt will not count')}</span></div></div>`
+    : `<div class="cond cool"><span class="glow"></span><div><b>${T('独立 · 新文章', 'Independent · fresh passage')}</b><span>${T('本次可计入独立迁移', 'This attempt can count')}</span></div></div>`;
+  const hint = p.assisted ? `<div class="hintbox"><div class="k">${ic('eye', 's')}${T('提示 · 已核验战术', 'Hint · verified tactic')}</div>${T('EXCEPT 题：逐一回原文核对选项。三个能找到依据，剩下那个才是答案。不要因为重复词多就选它。', 'EXCEPT item: check each option against the text. Three are supported; the remaining one is the answer. Do not pick an option just because it repeats many words.')}</div>` : '';
+  return `<div class="qsat settle" style="--i:1">
+      ${cond}
+      <div class="clock glass" role="timer" aria-label="${T('你的用时', 'Your time')}"><span class="t num" id="itemclock">${mmss(p.elapsed)}</span><span class="l">${T('你的用时 · 不限时', 'Your time · no limit')}</span></div>
+    </div>
+    <article class="qcard card rise${p.assisted ? ' hinted' : ''}" style="--i:2" aria-label="${T('题目', 'Question')}">
+      <div class="q-head"><span class="eyebrow">${T('第 1 题 · 共 4 题', 'Question 1 of 4')}</span><span class="r">${skillName(q.skill)}</span></div>
+      <p class="q-stem exam" lang="en">${esc(q.stem)}</p>
+      ${hint}
+      ${optsHTML(q, p.sel, 'pick')}
+      <div class="q-foot">
+        ${p.assisted ? `<span class="chip warm sm">${ic('eye', 'xs')}${T('提示已打开', 'Hint open')}</span>` : `<button class="hintbtn" data-act="hint" aria-describedby="hintnote">${ic('eye', 's')}${T('提示', 'Hint')}<kbd>H</kbd></button>`}
+        <span class="sp"></span>
+        <button class="btn quiet" data-act="skip">${T('跳过', 'Skip')}<kbd>S</kbd></button>
+        <button class="btn primary" data-act="submit" id="submit" ${p.sel ? '' : 'disabled'}>${T('提交', 'Submit')}<kbd>Enter</kbd></button>
+      </div>
+      ${p.assisted ? '' : `<div class="q-note" id="hintnote">${ic('arrow', 'xs')}${T('打开提示后，本题记为有辅助，不计入', 'Opening the hint makes this attempt assisted — it will not count')}</div>`}
+    </article>
+    <div class="keyhint settle" style="--i:3;justify-content:center"><kbd>A</kbd>–<kbd>D</kbd> ${T('或', 'or')} <kbd>1</kbd>–<kbd>4</kbd> ${T('选择', 'choose')}<span class="sep"></span><kbd>?</kbd> ${T('全部快捷键', 'all shortcuts')}</div>`;
+}
+function vPractice() {
+  return `<div class="scene read">${passageHTML('practice')}<div class="qcol" id="qcol">${qcolHTML()}</div></div>`;
+}
+
+/* ==========================================================================
+   FEEDBACK
+   ========================================================================== */
+const EXPL = {
+  A: ['符合原文', 'True', '第 1 段说南站为东区供水。它重复的原文词最多——这正是 EXCEPT 题里<b>词语重合会误导</b>的原因。', 'Paragraph 1 says the South Station supplies the eastern district. It repeats the most passage words, which is exactly why <b>keyword overlap misleads</b> in an EXCEPT item.'],
+  B: ['符合原文', 'True', '原文：“tested twice a day”。', '“tested twice a day”.'],
+  C: ['不符合原文', 'False', '只更换四台主泵中的<b>两台</b>。这是唯一不符的陈述 → 答案。', 'Only <b>two of the four</b> pumps are replaced. This is the odd statement → the key.'],
+  D: ['符合原文', 'True', '原文：“Delivery vehicles must use the west gate”。', '“Delivery vehicles must use the west gate”.'],
+};
+// canned advisory replies — written for the learner's actual choice (A)
+const COACH = {
+  probe: {
+    zh: ['<span class="q">先别急着看答案：选项 C 里，你会拿哪个词回原文核对？</span>（提示：一个数量词。）',
+         'EXCEPT 题里，三个选项都能在原文找到依据。A 让人觉得对，是因为它重复了很多原文词语——但重合只说明这些词眼熟，不说明它就是那个“不符”的选项。'],
+    en: ['<span class="q">Before you look at the key: which word in option C would you check against the passage?</span> (Hint: a quantity.)',
+         'In an EXCEPT item three options are supported by the text. A felt right because it reuses many passage words — but overlap only shows the words are familiar, not that the statement is the odd one.'],
+    t: '10:24' },
+  explain: {
+    zh: ['C 说“四台主泵全部更换”，而第 2 段写的是 <i lang="en">two of the four</i>——只换两台。', '其余三项都能在原文找到对应句子，所以 C 是唯一与原文不符的选项。'],
+    en: ['C says all four main pumps will be replaced, but paragraph 2 says <i>two of the four</i> — only two.', 'The other three each match a sentence in the text, so C is the only statement that does not.'],
+    t: '10:27' },
+  micro: {
+    zh: ['三步处理 NOT / EXCEPT 题：', '<ol><li>先圈出题干里的 EXCEPT 或 NOT。</li><li>每个选项回原文找一句依据，找到就划掉。</li><li>剩下找不到依据、或与原文矛盾的那一个，就是答案。</li></ol>', '下一篇新文章里试一次，计时看看。'],
+    en: ['Three steps for NOT / EXCEPT items:', '<ol><li>Circle EXCEPT or NOT in the stem.</li><li>For each option, find one supporting sentence; cross it out when found.</li><li>The one left without support, or contradicted, is the key.</li></ol>', 'Try it on the next fresh passage, timed.'],
+    t: '10:29' },
+};
+function coachHTML() {
+  const f = S.fb, m = f.mode, c = COACH[m], ok = S.set.consent, b = S.budget.deepseek;
+  const consent = ok
+    ? `${T('S1 已授权 DeepSeek', 'S1 granted to DeepSeek')} <span class="muted">· ${T('你于 <span class="nw">11-12</span> 授予 · 可撤回', 'by you on <span class="nw">11-12</span> · revocable')}</span>`
+    : `<span class="held">${T('S1 授权已撤回', 'S1 consent revoked')}</span> <span class="muted">· ${T('撤回记录 <span class="nw">11-13</span>', 'revocation logged <span class="nw">11-13</span>')}</span>`;
+  const payload = ok
+    ? `${T('题干、4 个选项、你的选择、已核验答案、证据句', 'Stem, 4 options, your choice, verified key, evidence sentence')} <span class="muted">— ${T('来源 S1 p.24', 'source S1 p.24')}</span>`
+    : `<span class="held">${T('S1 原文扣留：未授权', 'S1 text withheld — no consent')}</span> <span class="muted">· ${T('题干、选项与证据句均来自 S1', 'stem, options and evidence all come from S1')}</span>`;
+  let body;
+  if (f.done[m]) body = `<div class="reply" lang="${S.lang === 'zh' ? 'zh-CN' : 'en'}">${c[S.lang].map(x => x.startsWith('<ol') ? x : `<p>${x}</p>`).join('')}
+        <div class="rmeta">${ic('adv', 'xs')}${T('建议性', 'Advisory')}<span class="sep"></span>deepseek-chat<span class="sep"></span><span class="num nw">11-13 ${c.t}</span></div></div>`;
+  else if (!ok) body = `<div class="pending held">${T('这一模式还没有回复。S1 授权已撤回，题目原文不能发送给 DeepSeek。', 'No reply in this mode yet. S1 consent is revoked, so the item text cannot go to DeepSeek.')}
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn adv sm" disabled>${ic('ext', 'xs')}${T('发送到 DeepSeek', 'Send to DeepSeek')}</button><a class="btn quiet sm" href="#/settings/consent">${T('去设置里授权', 'Grant in Settings')}${ic('arrow', 'xs')}</a></div></div>`;
+  else body = `<div class="pending">${T('这一模式还没有回复。发送将再进行一次外部调用，消耗 1 次预算', 'No reply in this mode yet. Sending makes one more external call and spends 1 budget slot')} <span class="num nw">(${b} → ${b + 1} / 20)</span>${T('。', '.')}
+        <div><button class="btn adv sm" data-act="coach-send">${ic('ext', 'xs')}${T('发送到 DeepSeek', 'Send to DeepSeek')}</button></div></div>`;
+  return `<aside class="csheet" id="coach" aria-label="${T('导师 · 建议性', 'Coach · advisory')}">
+    <div class="co-head"><span class="o"></span><span class="t">${T('导师', 'Coach')}</span><span class="chip adv sm">${ic('adv', 'xs')}${T('建议性 · 不改变评分', 'Advisory · never grades')}</span><button class="icon-btn" data-act="coach" aria-label="${T('收起导师', 'Collapse coach')}">${ic('chev', 's')}</button></div>
+    <div class="modes" role="group" aria-label="${T('模式', 'Mode')}">
+      ${[['explain', '解释', 'Explain', 1], ['probe', '追问', 'Probe', 2], ['micro', '微课', 'Micro-lesson', 3]].map(([k, z, e, n]) => `<button data-act="mode" data-v="${k}" aria-pressed="${m === k}" aria-keyshortcuts="${n}">${T(z, e)}<kbd aria-hidden="true">${n}</kbd></button>`).join('')}
+    </div>
+    <div class="co-body">
+      <div class="co-scroll" id="coscroll">
+        <div class="callstrip" role="group" aria-label="${T('这次调用', 'This call')}">
+          <span class="lk">${T('调用', 'Call')}</span><span><span class="ext">${ic('ext', 'xs')}${T('外部', 'External')}</span> · DeepSeek · <code class="nw">deepseek-chat</code> · <span class="nw" style="color:var(--ok)">${T('已验证', 'verified')}</span></span>
+          <span class="lk">${T('发送', 'Sends')}</span><span>${payload}</span>
+          <span class="lk">${T('授权', 'Consent')}</span><span>${consent}</span>
+          <span class="lk">${T('预算', 'Budget')}</span><span><b class="num" style="font-weight:600">${b} / 20</b> <span class="muted">${T('今日 · DeepSeek', 'today · DeepSeek')}</span></span>
+        </div>
+        ${body}
+      </div>
+      <button class="more" id="more" data-act="more" hidden>${T('更多', 'More')}${ic('down', 'xs')}</button>
+    </div>
+    <div class="composer"><textarea rows="1" id="cdraft" aria-label="${T('回答导师', 'Answer the coach')}" placeholder="${m === 'probe' ? T('回答导师的追问……', 'Answer the probe…') : T('继续问导师……', 'Ask a follow-up…')}" ${ok ? '' : 'disabled'}>${esc(f.draft)}</textarea><button class="btn adv sm" data-act="toast" data-v="${T('原型：发送将进行 1 次外部调用', 'Prototype: sending makes 1 external call')}" ${ok ? '' : 'disabled'}>${ic('ext', 'xs')}${T('发送', 'Send')}</button><span class="cn">${ok ? T('发送 = 1 次外部调用 · 同样的发送内容与授权', 'Send = 1 external call · same payload and consent') : T('S1 授权已撤回 · 不能发送', 'S1 consent revoked · sending is off')}</span></div>
+  </aside>`;
+}
+function vFeedback() {
+  const f = S.fb, q = QS[0], right = f.choice === 'C';
+  const condChip = f.assisted
+    ? `<span class="chip warm sm"><span class="state-dot warm"></span>${T('有辅助 · 不计入', 'Assisted · does not count')}</span>`
+    : `<span class="chip cool sm"><span class="state-dot cool"></span>${T('独立迁移 · 计入', 'Independent transfer · counts')}</span>`;
+  return `<div class="scene fb">
+    ${passageHTML('feedback')}
+    <article class="card fcard" aria-label="${T('评分结果', 'Graded result')}">
+      <div class="f-scroll">
+        <div class="verdict ${right ? 'yes' : 'no'}">
+          <span class="mk">${ic(right ? 'check' : 'x', 'l')}</span>
+          <div><div class="w">${right ? T('正确', 'Correct') : T('不正确', 'Incorrect')}</div>
+          <div class="m">${T('你选了', 'You chose')} <b>${f.choice}</b><span class="sep"></span>${T('已核验答案', 'Verified key')} <b>C</b></div></div>
+          <div class="q-r">${T('第 1 题', 'Question 1')}<br>${skillName(q.skill)}</div>
+        </div>
+        <div class="f-chips">${condChip}<span class="chip sm">${ic('clock', 'xs')}<span class="num">${mmss(f.elapsed)}</span></span><span class="chip ok sm">${ic('seal', 'xs')}${T('确定性评分', 'Deterministic grade')}</span></div>
+        <p class="f-stem exam" lang="en">${esc(q.stem)}</p>
+        <div class="fopts">${q.opts.map((o, i) => {
+          const L = 'ABCD'[i], e = EXPL[L], isKey = i === q.key, mine = L === f.choice && !isKey;
+          const tag = isKey ? `<span class="chip ok sm">${ic('seal', 'xs')}${L === f.choice ? T('你的选择 · 答案', 'Yours · key') : T('答案 · 已核验', 'Key · verified')}</span>` : mine ? `<span class="chip bad sm">${T('你的选择', 'Your choice')}</span>` : '';
+          return `<button class="fo ${isKey ? 'is-key' : ''} ${mine ? 'is-mine' : ''} ${f.ev === L ? 'on' : ''}" data-ev="${L}">
+            <span class="key" aria-hidden="true">${L}</span>
+            <span><span class="ot exam" lang="en"><span class="sr">${L}. </span>${esc(o)}</span><span class="ex"><b>${T(e[0], e[1])}</b> — ${T(e[2], e[3])}</span></span>
+            <span class="tag">${tag}</span>
+          </button>`;
+        }).join('')}</div>
+        <div class="tactic"><span class="ic">${ic('book', 's')}</span>
+          <div class="k">${T('战术 · NOT/EXCEPT 极性', 'Tactic · NOT/EXCEPT polarity')}</div>
+          <p>${T('三个选项有原文支持，答案是不符的那一个；词语重合衡量的是词汇复用，不是真假。', 'Three options are supported, the key is the odd one; word overlap measures vocabulary reuse, not truth.')}</p>
+        </div>
+      </div>
+      <div class="f-acts">
+        <a class="btn ghost" href="#/anki">${ic('anki', 's')}${T('从这次错误生成笔记', 'Propose an Anki note')}<kbd>K</kbd></a>
+        <span class="sp"></span>
+        <button class="btn primary" data-act="next">${T('下一题 · 新文章', 'Next · fresh passage')}<kbd>N</kbd></button>
+      </div>
+    </article>
+  </div>`;
+}
+
+/* ==========================================================================
+   ASSESS
+   ========================================================================== */
+const pendingLeft = () => { const a = S.assess; for (let n = 1; n <= 40; n++) if (!a.answers[n] && !a.timedOut[n]) return true; return false; };
+function navigatorHTML() {
+  const a = S.assess;
+  let cells = '';
+  for (let n = 1; n <= 40; n++) {
+    const cls = n === a.cur ? 'cur' : a.timedOut[n] ? 'to' : a.answers[n] ? 'ans' : '';
+    const st = n === a.cur ? T('当前', 'current') : a.timedOut[n] ? T('超时', 'timed out') : a.answers[n] ? T('已作答', 'answered') : T('未作答', 'pending');
+    cells += `<button class="cell ${cls}" data-act="goto" data-v="${n}" aria-label="${T(`第 ${n} 题`, `Item ${n}`)} · ${st}" title="${n} · ${st}" ${a.timedOut[n] ? 'disabled' : ''} ${n === a.cur ? 'aria-current="step"' : ''}></button>`;
+  }
+  const answered = Object.keys(a.answers).length, to = Object.keys(a.timedOut).length;
+  return `<div class="nav40" role="navigation" aria-label="${T('题目导航', 'Item navigator')}">
+    <div class="legend">
+      <span><i class="cell ans"></i>${T('已答', 'Answered')} <b class="num">${answered}</b></span>
+      <span><i class="cell to"></i>${T('超时', 'Timed out')} <b class="num">${to}</b></span>
+      <span><i class="cell"></i>${T('未答', 'Pending')} <b class="num">${40 - answered - to}</b></span>
+    </div>
+    <div class="cells">${cells}</div>
+    <div class="leave"><span class="n">${T('离开后可恢复，<br>计时不暂停', 'You can resume later;<br>the clock keeps running')}</span><button class="btn ghost sm" data-act="leave">${ic('door', 'xs')}${T('离开', 'Leave')}</button></div>
+  </div>`;
+}
+function vAssess() {
+  const a = S.assess, q = AQS[a.cur % 4], sel = a.answers[a.cur] || null;
+  const pct = a.item / 90, C = 2 * Math.PI * 25;
+  const finish = !pendingLeft();
+  return `<div class="scene read assess">
+    ${passageHTML('assess')}
+    <div class="qcol">
+      <div class="qsat">
+        <div class="cond still glass"><span class="glow"></span><div><b>${T('测评 · 第 3 轮 · 限时、无辅助', 'Assessment · run #3 · timed, no help')}</b><span>${T('40 题 / 60 分钟 · 作答后不显示对错', '40 items / 60 min · no feedback after answering')}</span></div></div>
+      </div>
+      <article class="qcard card" aria-label="${T('题目', 'Question')}">
+        <div class="as-top">
+          <div class="ring" role="timer" aria-label="${T('本题用时', 'Item clock')}"><svg viewBox="0 0 56 56" aria-hidden="true"><circle class="bg" cx="28" cy="28" r="25" fill="none" stroke-width="3"/><circle class="fg" id="ringfg" cx="28" cy="28" r="25" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - pct)).toFixed(1)}"/></svg><span class="ring-t" id="itemt">${mmss(a.item)}</span></div>
+          <div><div class="h-disp" style="font-size:20px">${T(`第 <span class="num">${a.cur}</span> / 40 题`, `Item <span class="num">${a.cur}</span> / 40`)}</div>
+          <div class="meta">${T('本题', 'This item')} <span class="num" id="itemt2">${mmss(a.item)}</span> / <span class="num">1:30</span><span class="sep"></span>${T('每题 = 60 分钟 ÷ 40', 'per item = 60 min ÷ 40')}</div></div>
+        </div>
+        <p class="q-stem exam" lang="en">${esc(q.stem)}</p>
+        ${optsHTML(q, sel, 'apick')}
+        <div class="q-foot">
+          <span class="keyhint"><kbd>←</kbd><kbd>→</kbd> ${T('换题', 'move')}</span>
+          <span class="sp"></span>
+          ${finish ? `<a class="btn primary" href="#/report">${T('完成测评，看报告', 'Finish run · see report')}${ic('arrow', 'xs')}</a>`
+            : `<button class="btn primary" data-act="anext" id="anext" ${sel ? '' : 'disabled'}>${T('确认并下一题', 'Confirm & next')}<kbd>Enter</kbd></button>`}
+        </div>
+      </article>
+    </div>
+  </div>`;
+}
+
+/* ==========================================================================
+   REPORT
+   ========================================================================== */
+const RUN = (() => { // deterministic 27 correct, 10 wrong, 3 timed out
+  const out = []; const wrong = [3, 7, 12, 15, 19, 22, 26, 31, 34, 38], to = [9, 24, 37];
+  for (let n = 1; n <= 40; n++) out.push(to.includes(n) ? 't' : wrong.includes(n) ? 'w' : 'c');
+  return out;
+})();
+const RSTATE = { c: ['正确', 'correct', 'check'], w: ['不正确', 'incorrect', 'x'], t: ['超时', 'timed out', 'tout'] };
+function vReport() {
+  const r = S.report;
+  const ticks = (n, on, cls, lab, sub, plusFrom) => `<div class="ticks ${cls}"><span class="lab">${lab}<small>${sub}</small></span><span class="bar" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i class="${i < on ? (plusFrom !== undefined && i >= plusFrom ? 'plus' : 'on') : ''}"></i>`).join('')}</span><span class="v num">${on} / ${n}</span></div>`;
+  const cmp = r.cmp === 2
+    ? `${ticks(40, 22, '', '#2', '11-11')}${ticks(40, 27, 'now', '#3', '11-13', 22)}
+       <div class="delta"><span class="d1 num">+5</span><span>${T('题', 'items')}</span>
+         <span class="chk">${ic('check', 'xs')}${T('同为 40 题', 'same size, 40')}</span><span class="chk">${ic('check', 'xs')}${T('同为 60 分钟', 'same 60-min window')}</span><span class="chk">${ic('check', 'xs')}${T('同一题池族', 'same pool family')}</span></div>`
+    : `<div class="refuse">${ic('stop', 's')} <b>${T('不比较。', 'Comparison refused.')}</b> ${T('第 1 轮是 20 题 / 30 分钟，来自另一题池族；与第 3 轮口径不同，任何差值都会误导。', 'Run #1 was 20 items / 30 min from a different pool family. It is not like-for-like with run #3, so any difference would mislead.')}</div>`;
+  const sk = [['not-except-polarity', 7, 10], ['vocabulary-in-context', 9, 14], ['sentence-structure', 8, 12], ['unclassified', 3, 4]];
+  const sec = T('秒', 's');
+  return `<div class="scene orbit" style="--obj-w:640px">
+    <div class="rail l">
+      ${sat('time', 'clock', T('中位用时', 'Median time'), `<span class="num">64</span><small>${sec} · p90 <span class="num">112</span> ${sec}</small>`, '', 1)}
+      ${sat('time', 'tout', T('超时', 'Timed out'), `<span class="num">3</span><small>${T('题 · 不计分', 'items · not scored')}</small>`, '', 2)}
+      ${sat('contam', 'shield', T('污染检查', 'Contamination'), `<span class="num">0</span><small>${T('题被排除', 'items excluded')}</small>`, '', 3)}
+    </div>
+    <article class="obj card rcard rise" style="--i:1" aria-labelledby="rep-t">
+      <div class="obj-top"><span class="eyebrow" id="rep-t">${T('测评第 3 轮 · 已完成', 'Assessment run #3 · complete')}</span><span class="r"><span class="nw">11-13</span><span class="sep"></span>${T('40 题 · 60 分钟', '40 items · 60 min')}</span></div>
+      <div class="score">
+        <div class="n num" aria-label="${T('答对 27 / 40', '27 of 40 correct')}">27<small>/ 40</small></div>
+        <div class="side"><span class="chip">${T('及格线：未知', 'Pass threshold: unknown')}</span><span class="t">${T('只报告观察到的结果，<br>不给概率，也不下结论。', 'Observed result only —<br>no probability, no verdict.')}</span></div>
+      </div>
+      <div class="cmp">
+        <div class="cmp-h"><span class="eyebrow">${T('同口径比较', 'Like-for-like')}</span>
+          <div class="seg2" role="group" aria-label="${T('比较对象', 'Compare with')}"><button data-act="cmp" data-v="2" aria-pressed="${r.cmp === 2}">${T('对比 #2', 'vs #2')}</button><button data-act="cmp" data-v="1" aria-pressed="${r.cmp === 1}">${T('对比 #1', 'vs #1')}</button></div></div>
+        ${cmp}
+      </div>
+      <div class="skills">${sk.map(([n, a, b]) => `<div class="sk"><span class="nm" title="${n}">${skillName(n)}</span><span class="v num">${a}<small> / ${b}</small></span><span class="pips" aria-hidden="true">${Array.from({ length: b }, (_, i) => `<i class="${i < a ? 'on' : ''}"></i>`).join('')}</span></div>`).join('')}</div>
+    </article>
+    <div class="rail r">
+      ${sat('ann', 'eye', T('逐题注释 · 已解锁', 'Annotations · unlocked'), `<span class="num">40</span><small>${T('题 · 证据与解析', 'items · evidence & reasoning')}</small>`, 'ok', 4)}
+      ${sat('pool2', 'lock', T('测评池剩余', 'Pool after run'), `<span class="num">23</span><small>${T('题 · 7 单元 · 下限 20', 'items · 7 units · floor 20')}</small>`, 'warm', 5)}
+    </div>
+  </div>`;
+}
+
+/* ==========================================================================
+   ANKI
+   ========================================================================== */
+function cardHTML(side) {
+  const f = S.anki.f, dark = (S.anki.card || S.theme) === 'dark';
+  const front = esc(f.front).replace(/\b(EXCEPT|NOT)\b/, '<span class="x">$1</span>');
+  const eg = esc(f.eg).replace(/two of the four/, '<em>two of the four</em>');
+  const top = `<div class="ac-t"><span class="pol"><i></i>${esc(f.tac)}</span><span class="sd">${side === 'front' ? T('阅读', 'Reading') : T('答案', 'Answer')}</span></div>`;
+  if (side === 'front') return `<div class="ac ${dark ? 'dark' : ''}">${top}<div class="phr" lang="en">${front}</div><div class="ask">${T('哪个选项与原文不符？', 'Which option is the odd one out?')}</div></div>`;
+  return `<div class="ac back ${dark ? 'dark' : ''}">${top}<div class="phr" lang="en">${front}</div><p class="exp" lang="en">${esc(f.exp)}</p><p class="eg" lang="en">${eg}</p><div class="ac-f"><span class="tac">Pass Quest</span><span>S1 · p024 · q1</span></div></div>`;
+}
+function previewHTML() {
+  const a = S.anki;
+  const sides = a.side === 'both' ? ['front', 'back'] : [a.side];
+  return '<div class="pv-row">' + sides.map(s => `<div class="pv-side"><div class="pv-lab"><b>${s === 'front' ? T('正面', 'Front') : T('背面', 'Back')}</b><span>${a.width === 'phone' ? T('手机宽度 · 300 px', 'Phone · 300 px') : T('桌面宽度 · 500 px', 'Desktop · 500 px')}</span></div>${cardHTML(s)}</div>`).join('') + '</div>';
+}
+function ankiStatus() {
+  const a = S.anki;
+  if (a.skipped) return `<span class="chip sm">${T('已跳过 · 不生成笔记', 'Skipped · no note')}</span>`;
+  if (a.accepted && !a.dirty) return `<span class="chip ok sm">${ic('check', 'xs')}${T(`已接受 · 修订 ${a.rev} · 已排队`, `Accepted · revision ${a.rev} · queued`)}</span>`;
+  return `<span class="chip cool sm">${T(`草稿 · 修订 ${a.rev}`, `Draft · revision ${a.rev}`)}${a.dirty ? T(' · 已修改', ' · edited') : ''}</span>`;
+}
+const nextRev = () => S.anki.accepted ? S.anki.rev + 1 : 1;
+function vAnki() {
+  const a = S.anki, canAccept = !a.accepted || a.dirty;
+  return `<div class="scene anki ${a.editing ? 'editing' : ''}" id="ankiscene">
+    <div class="an-top settle" style="--i:0">
+      <div class="src"><span class="t">${T('笔记草稿', 'Note draft')}</span><span id="astatus">${ankiStatus()}</span><span class="muted">${T('来自 Q1 的错误 · 由 Pass Quest 提议，你来决定', 'From the Q1 miss · proposed by Pass Quest, your call')}</span></div>
+      <div class="syncs" role="group" aria-label="${T('同步状态', 'Sync state')}">
+        <button class="sy" data-act="sheet" data-v="sync">${ic('check', 'xs')}<b class="num">6</b>${T('已推送', 'pushed')}</button>
+        <button class="sy warm" data-act="sheet" data-v="sync">${ic('clock', 'xs')}<b class="num">${a.accepted ? 2 : 1}</b>${T('排队', 'queued')}</button>
+        ${a.conflict ? `<button class="sy ok" data-act="sheet" data-v="sync">${ic('check', 'xs')}${T('冲突已解决', 'conflict resolved')}</button>` : `<button class="sy bad" data-act="sheet" data-v="conflict">${ic('conflict', 'xs')}<b class="num">1</b>${T('冲突', 'conflict')}</button>`}
+        <button class="sy" data-act="sheet" data-v="sync">${ic('present', 'xs')}<b class="num">1</b>${T('已存在', 'present')}</button>
+      </div>
+    </div>
+    <div class="an-table ${a.width === 'phone' ? 'phone' : ''} rise" style="--i:1" id="preview">${previewHTML()}</div>
+    <div class="an-tools settle" style="--i:2">
+      <div class="tgl" role="group" aria-label="${T('面', 'Side')}">${[['both', '两面', 'Both'], ['front', '正面', 'Front'], ['back', '背面', 'Back']].map(([k, z, e]) => `<button data-act="side" data-v="${k}" aria-pressed="${a.side === k}">${T(z, e)}</button>`).join('')}</div>
+      <div class="tgl" role="group" aria-label="${T('卡片主题', 'Card theme')}">${[['light', 'sun', '浅色', 'Light'], ['dark', 'moon', '深色', 'Dark']].map(([k, i, z, e]) => `<button data-act="ctheme" data-v="${k}" aria-pressed="${(a.card || S.theme) === k}">${ic(i, 'xs')}${T(z, e)}</button>`).join('')}</div>
+      <div class="tgl" role="group" aria-label="${T('宽度', 'Width')}">${[['desk', 'local', '桌面', 'Desktop'], ['phone', 'phone', '手机', 'Phone']].map(([k, i, z, e]) => `<button data-act="cwidth" data-v="${k}" aria-pressed="${a.width === k}">${ic(i, 'xs')}${T(z, e)}</button>`).join('')}</div>
+    </div>
+    <div class="an-acts settle" style="--i:3">
+      <button class="btn primary" data-act="accept" id="acceptbtn" ${canAccept ? '' : 'disabled'}>${ic('check', 'xs')}${T(`接受 · 修订 ${nextRev()}`, `Accept · revision ${nextRev()}`)}</button>
+      <button class="btn ghost" data-act="edit">${ic('edit', 'xs')}${T('编辑字段', 'Edit fields')}<kbd>E</kbd></button>
+      <button class="btn quiet" data-act="askip">${T('跳过', 'Skip')}</button>
+      <span class="div"></span>
+      <button class="btn adv sm" data-act="refine">${ic('ext', 'xs')}${T('AI 润色', 'Refine with AI')}</button><span class="cap">${T('建议性 · 外部 · 先确认', 'Advisory · external · asks first')}</span>
+    </div>
+    ${a.editing ? editSheetHTML() : ''}
+  </div>`;
+}
+function editSheetHTML() {
+  const a = S.anki, f = a.f, canAccept = !a.accepted || a.dirty;
+  const fl = (zh, en, id) => `<span class="fl">${T(zh, en)}<span class="id">${id}</span></span>`;
+  return `<section class="esheet" role="region" aria-label="${T('编辑笔记字段', 'Edit note fields')}">
+    <div class="grab"></div>
+    <div class="es-b">
+      <div>
+        <label class="field">${fl('正面', 'Front', 'Front')}<textarea class="serif one" data-field="front" lang="en" rows="1">${esc(f.front)}</textarea></label>
+        <label class="field">${fl('战术', 'Tactic', 'Tactic')}<textarea class="one" data-field="tac" lang="en" rows="1">${esc(f.tac)}</textarea></label>
+        <div class="field">${fl('来源', 'Source', 'Source')}<div class="ro">S1 · p024 · q1<span>${T('只存编号，不存来源标题', 'id only, never the title')}</span></div></div>
+      </div>
+      <div>
+        <label class="field">${fl('背面 · 解释', 'Back · explanation', 'Back ¶1')}<textarea data-field="exp" lang="en" rows="3">${esc(f.exp)}</textarea></label>
+        <label class="field">${fl('背面 · 例句', 'Back · example', 'Back ¶2')}<textarea class="serif" data-field="eg" lang="en" rows="1">${esc(f.eg)}</textarea></label>
+      </div>
+    </div>
+    <div class="es-f">
+      <span id="estatus">${ankiStatus()}</span><span class="muted" style="font-size:12px">${T('改动实时显示在上方卡片', 'Changes show live on the card above')}</span>
+      <span class="sp"></span>
+      <button class="btn quiet sm" data-act="askip">${T('跳过', 'Skip')}</button>
+      <button class="btn primary sm" data-act="accept" id="acceptbtn2" ${canAccept ? '' : 'disabled'}>${ic('check', 'xs')}${T(`接受 · 修订 ${nextRev()}`, `Accept · revision ${nextRev()}`)}</button>
+      <button class="btn ghost sm" data-act="edit">${T('完成', 'Done')}<kbd>Esc</kbd></button>
+    </div>
+  </section>`;
+}
+
+/* ==========================================================================
+   SETTINGS
+   ========================================================================== */
+const PROV = [
+  { id: 'deepseek', mk: 'DS', name: 'DeepSeek', model: 'deepseek/deepseek-chat', cap: 'v', capRaw: 'verified@11-13 09:12', auth: 'present', act: 'inuse' },
+  { id: 'openai', mk: 'OA', name: 'OpenAI', model: 'openai/gpt-4o-mini', cap: 'u', capRaw: 'declared,unverified', auth: 'missing', act: 'addkey' },
+  { id: 'qwen', mk: 'QW', name: 'Qwen', model: 'qwen/qwen-plus', cap: 'u', capRaw: 'declared,unverified', auth: 'present', act: 'test' },
+  { id: 'gemini', mk: 'GM', name: 'Gemini', model: 'gemini/gemini-2.0-flash', cap: 'f', capRaw: 'failed:auth@11-12 21:40', auth: 'present', act: 'check' },
+  { id: 'doubao', mk: 'DB', name: 'Doubao', model: 'doubao/', cap: 'u', capRaw: 'declared,unverified', auth: 'missing', act: 'addkey' },
+  { id: 'custom', mk: '··', name: null, model: null, cap: 'n', capRaw: null, auth: 'none', act: 'config' },
+];
+function capsFor(id) {
+  const base = [['tool.calls', 'u'], ['vision', 'n'], ['search', 'n'], ['speech.synthesis', 'n']];
+  const tc = id === 'deepseek' ? ['text.chat', 'v'] : id === 'gemini' ? ['text.chat', 'f'] : ['text.chat', 'u'];
+  return [tc, ...base];
+}
+const capLabel = s => ({ v: T('已验证', 'Verified'), u: T('已声明 · 未验证', 'Declared, not tested'), f: T('认证失败', 'Auth failed'), n: T('不支持', 'Unsupported') }[s]);
+function vSettings() {
+  const st = S.set;
+  const rows = PROV.map(p => {
+    const open = st.open === p.id && p.name;
+    const capIc = { v: 'seal', u: 'adv', f: 'x', n: 'minus' }[p.cap];
+    const when = p.cap === 'v' ? '11-13 09:12' : p.cap === 'f' ? '11-12 21:40' : '';
+    const auth = p.auth === 'present' ? `<span class="auth ok">${ic('key', 'xs')}${T('有密钥', 'Key present')}</span>`
+      : p.auth === 'missing' ? `<span class="auth no" title="no_credential">${ic('key', 'xs')}${T('无密钥', 'No key')}</span>` : `<span class="auth no">—</span>`;
+    const btn = (label, msg) => `<button class="btn ghost sm" data-act="toast" data-v="${msg}">${label}</button>`;
+    const act = { inuse: `<span class="inuse">${ic('check', 'xs')}${T('使用中', 'In use')}</span>`,
+      addkey: btn(T('添加密钥', 'Add key'), T('密钥写入系统密钥库（原型中不可用）', 'Keys go to the OS secret store (not in prototype)')),
+      test: btn(T('测试', 'Test'), T('测试调用：1 次外部调用，消耗 Qwen 预算 1 次（原型）', 'Test call: 1 external call, 1 Qwen budget slot (prototype)')),
+      check: btn(T('检查密钥', 'Check key'), T('请在系统密钥库中检查 Gemini 密钥', 'Check the Gemini key in the OS secret store')),
+      config: btn(T('配置', 'Configure'), T('自定义端点：原型中不可用', 'Custom endpoint: not in prototype')) }[p.act];
+    const model = p.model ? (p.id === 'doubao' ? `doubao/<span class="muted">${T('未选模型', 'no model chosen')}</span>` : p.model) : T('未配置', 'not configured');
+    return `<div class="rrow ${open ? 'open' : ''}">
+      <span class="pv-name"><span class="mono-mk" aria-hidden="true">${p.mk}</span>${p.name || T('自定义端点', 'Custom')}</span>
+      <span class="model ${p.model ? '' : 'none'}">${model}</span>
+      <span class="cap ${p.cap}" ${p.capRaw ? `title="text.chat ${p.capRaw}"` : ''}>${p.capRaw ? `${ic(capIc, 's')}${capLabel(p.cap)}${when ? `<span class="t num">${when}</span>` : ''}` : '<span class="muted">—</span>'}</span>
+      ${auth}
+      <span class="act">${act}</span>
+      <button class="disc" data-act="row" data-v="${p.id}" aria-expanded="${!!open}" aria-label="${T(`${p.name || '自定义端点'} 的全部能力`, `All capabilities of ${p.name || 'Custom'}`)}" ${p.name ? '' : 'hidden'}>${ic('chev', 's')}</button>
+      ${open ? `<div class="capgrid">${capsFor(p.id).map(([c, s]) => `<span class="cg ${s}"><code>${c}</code><span>${capLabel(s)}</span></span>`).join('')}</div>` : ''}
+    </div>`;
+  }).join('');
+  const b = S.budget.deepseek;
+  return `<div class="scene orbit solo" style="--obj-w:1000px">
+    <section class="obj card reg rise" style="--i:0" aria-labelledby="reg-t">
+      <div class="reg-h">
+        <h1 class="h-disp" id="reg-t">${T('模型与提供方', 'Models & providers')}</h1>
+        <p>${ic('lock', 's')}${T('凭据保存在系统密钥库，这里只显示有 / 无，从不显示密钥本身。', 'Credentials live in the OS secret store — shown only as present / missing, never displayed.')}</p>
+      </div>
+      <div class="reg-cols" aria-hidden="true"><span><i>1</i>${T('提供方', 'Provider')}</span><span><i>2</i>${T('模型', 'Model')}</span><span><i>3</i>${T('能力', 'Capability')}<span class="id">text.chat</span></span><span><i>4</i>${T('授权', 'Authorization')}</span><span style="justify-self:end">${T('状态', 'State')}</span><span></span></div>
+      <div class="reg-b">${rows}</div>
+      <div class="reg-f">
+        <span>${ic('seal', 'xs')}${T('只有 text.chat 能被验证', 'Only text.chat is ever verified')}</span>
+        <span>${ic('adv', 'xs')}${T('已声明 · 未验证：提供方声称支持，未经测试', 'Declared, not tested: claimed by the provider')}</span>
+        <span>${ic('minus', 'xs')}${T('不支持', 'Unsupported')}</span>
+      </div>
+    </section>
+    <div class="rail r">
+      ${sat('budget', 'pulse', T('每日调用预算', 'Daily call budget'), `<span class="num">${b} / 100</span><small>${T('今日 · 5 × 20', 'today · 5 × 20')}</small>`, '', 1)}
+      ${sat('consent', 'shield', T('私有来源 S1 的授权', 'Consent · private source S1'), st.consent ? `DeepSeek<small>${T('已授予 · 11-12', 'granted · 11-12')}</small>` : `DeepSeek<small>${T('已撤回', 'revoked')}</small>`, st.consent ? 'ok' : 'bad', 2)}
+      ${sat('services', 'server', T('本地服务', 'Local services'), `AnkiConnect<small>${T('无法连接', 'unreachable')}</small>`, 'bad', 3)}
+      ${sat('routes', 'route', T('用途分配', 'Which model does what'), `deepseek-chat<small>${T('· 无故障转移', '· no failover')}</small>`, '', 4)}
+    </div>
+  </div>`;
+}
+
+/* ==========================================================================
+   sheets (bottom), dialogs, coach popover
+   ========================================================================== */
+function sheetWrap(ico, title, sub, body, wide) {
+  return `<div class="scrim" data-act="close"></div><section class="sheet in" role="dialog" aria-modal="true" aria-labelledby="sh-t" ${wide ? 'style="width:min(880px, calc(100vw - 64px))"' : ''}>
+    <div class="grab"></div>
+    <header class="sh-h"><span class="ico">${ic(ico, 's')}</span><div><h2 class="h-disp" id="sh-t">${title}</h2>${sub ? `<div class="sub">${sub}</div>` : ''}</div><button class="icon-btn" data-act="close" aria-label="${T('关闭', 'Close')}">${ic('x')}</button></header>
+    <div class="sh-b">${body}</div></section>`;
+}
+function skillSheet(id, ind, ok, as, re, act) {
+  return sheetWrap('pulse', skillName(id), `<span class="id">${id}</span><span class="sep"></span>${T('语言技能', 'language skill')}`, `
+    <div class="cols2">
+      <div class="blk"><h3>${T('证据', 'Evidence')}</h3><div style="display:flex;gap:6px;margin:10px 0 8px">${evDots(ind, ok, as, re)}</div>
+        <p>${T(`独立迁移 ${ind} 次，答对 ${ok} 次 · 有辅助 ${as} 次（不计入）`, `${ind} independent transfers, ${ok} correct · assisted ${as} (never counts)`)}</p></div>
+      <div class="blk"><h3>${T('策略建议', 'Policy action')}</h3><p style="font-size:var(--t-sm);color:var(--ink)">${actName(act)} <span class="id">${act}</span></p>
+        <p>${T('错因诊断：未定。证据不足时不猜原因。', 'Causal diagnosis: unresolved. No cause is guessed without evidence.')}</p></div>
+    </div>
+    <p class="fine">${T('今天的下一步仍是 NOT/EXCEPT：它是得分技能，且独立正确率最低。', 'Today’s next step stays NOT/EXCEPT: it is the scoring skill with the lowest independent accuracy.')}</p>`);
+}
+function sheetHTML(key) {
+  const b = S.budget.deepseek;
+  switch (key) {
+    case 'skill-vocab': return skillSheet('vocabulary-in-context', 7, 5, 1, 0, 'review');
+    case 'skill-sent': return skillSheet('sentence-structure', 4, 3, 0, 0, 'practice_new');
+    case 'run2': return sheetWrap('report', T('上次测评 · 第 2 轮', 'Last assessment · run #2'), '11-11', `
+      <div class="kv"><span>${T('答对', 'Correct')}</span><b class="big num">22 / 40</b></div>
+      <div class="kv"><span>${T('规模', 'Size')}</span><b>${T('40 题 · 60 分钟 · 无注释', '40 items · 60 min · no annotations')}</b></div>
+      <div class="kv"><span>${T('及格线', 'Pass threshold')}</span><b>${T('未知 · 不作预测', 'unknown · no prediction')}</b></div>
+      <div class="sh-acts"><a class="btn ghost sm" href="#/report">${T('查看第 3 轮报告', 'See the run #3 report')}${ic('arrow', 'xs')}</a></div>`);
+    case 'pool': return sheetWrap('lock', T('未见测评池', 'Unseen assessment pool'), T('只有没见过的题才能用于测评', 'Only unseen items can be used to assess'), `
+      <div class="kv"><span>${T('剩余', 'Remaining')}</span><b class="big num">63 <small style="font-size:14px;color:var(--ink-3)">${T('题 / 17 单元', 'items / 17 units')}</small></b></div>
+      <div class="seg-bar" aria-hidden="true">${Array.from({ length: 21 }, (_, i) => `<i class="${i >= 17 ? 'off' : ''}"></i>`).join('')}</div>
+      <div class="kv" style="margin-top:8px"><span>${T('已用', 'Spent')}</span><b class="num">${T('4 单元', '4 units')}</b></div>
+      <div class="kv"><span>${T('下限', 'Floor')}</span><b class="num">${T('20 题', '20 items')}</b></div>
+      <p class="fine">${T('练习过的文章永远不会回到测评池：独立 ≠ 重复接触。', 'A passage you practised never returns to the pool: independent ≠ re-exposure.')}</p>`);
+    case 'anki': return sheetWrap('anki', 'Anki', T('Pass Quest 只提议，你决定', 'Pass Quest proposes; you decide'), `
+      <div class="kv"><span>${T('已接受', 'Accepted')}</span><b class="num">6</b></div>
+      <div class="kv"><span>${T('排队 · Anki 未运行，可连接时推送一次', 'Queued · Anki not running, pushes once when reachable')}</span><b class="num" style="color:var(--warm)">1</b></div>
+      <div class="kv"><span>${T('冲突 · 你在 Anki 里改过，不会被静默覆盖', 'Conflict · edited in Anki, never overwritten silently')}</span><b class="num" style="color:var(--bad)">1</b></div>
+      <div class="sh-acts"><a class="btn ghost sm" href="#/anki">${T('打开 Anki 笔记', 'Open Anki notes')}${ic('arrow', 'xs')}</a></div>`);
+    case 'brief': return sheetWrap('pause', T('学习简报', 'Study brief'), `<span class="id">brief-7</span><span class="sep"></span>${T('耐久任务 · 可恢复', 'durable run · resumable')}`, `
+      <div class="kv"><span>${T('状态', 'State')}</span><b>${S.brief === 'paused' ? T('暂停于第 3 / 6 步', 'Paused at step 3 / 6') : S.brief === 'run' ? T('从第 3 / 6 步继续中', 'Resuming from step 3 / 6') : T('已取消 · 记录保留', 'Cancelled · record kept')}</b></div>
+      <div class="seg-bar" style="margin-bottom:14px"><i></i><i></i><i></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
+      <div class="ledger">
+        <div><span class="lk">${T('执行', 'Runs on')}</span><span class="lv">${ic('local', 'xs')} ${T('本地 Agent 宿主（Node）', 'Local agent host (Node)')}</span></div>
+        <div><span class="lk">${T('调用', 'Calls')}</span><span class="lv"><span class="ext">${ic('ext', 'xs')}${T('外部', 'External')}</span> · DeepSeek · <code>deepseek-chat</code> · ${T('剩余 3 步约 1–3 次', 'about 1–3 calls for 3 steps')}</span></div>
+        <div><span class="lk">${T('发送内容', 'Payload')}</span><span class="lv">${T('技能统计与战术说明（第一方）', 'Skill counts and tactic text (first-party)')} <span class="muted">· ${T('不含 S1 原文', 'no S1 text')}</span></span></div>
+        <div><span class="lk">${T('预算', 'Budget')}</span><span class="lv num">${b} → ≤ ${b + 3} / 20</span></div>
+      </div>
+      <div class="sh-acts">${S.brief === 'paused'
+        ? `<button class="btn primary sm" data-act="brief" data-v="run">${ic('play', 'xs')}${T('继续', 'Resume')}</button><button class="btn quiet sm" data-act="brief" data-v="cancel">${T('取消任务', 'Cancel run')}</button>`
+        : `<button class="btn quiet sm" data-act="brief" data-v="paused">${T('撤销', 'Undo')}</button>`}</div>`);
+    case 'time': return sheetWrap('clock', T('时间', 'Time'), T('第 3 轮 · 每题上限 1:30', 'Run #3 · 1:30 per item'), `
+      <div class="kv"><span>${T('中位用时', 'Median')}</span><b class="big num">64 <small style="font-size:14px">${T('秒', 's')}</small></b></div>
+      <div class="kv"><span>p90</span><b class="big num">112 <small style="font-size:14px">${T('秒', 's')}</small></b></div>
+      <div class="kv"><span>${T('超时', 'Timed out')}</span><b class="num">${T('3 题 · 第 9、24、37 题', '3 items · 9, 24, 37')}</b></div>
+      <p class="fine">${T('p90 超过每题上限：后段文章读得偏慢，这是观察，不是诊断。', 'p90 is above the per-item limit: later passages ran slow. An observation, not a diagnosis.')}</p>`);
+    case 'contam': return sheetWrap('shield', T('污染检查', 'Contamination check'), T('运行前见过的题会被列出并排除计分', 'Items seen before the run are listed and excluded'), `
+      <div class="kv"><span>${T('本轮被排除', 'Excluded this run')}</span><b class="big num">0</b></div>
+      <p class="fine">${T('第 3 轮的 10 个单元在运行前都未出现在练习、提示或导师内容里。', 'None of run #3’s 10 units appeared in practice, hints or coach text before the run.')}</p>`);
+    case 'pool2': return sheetWrap('lock', T('测评池剩余', 'Pool after run'), T('下限 20 题', 'Floor 20 items'), `
+      <div class="kv"><span>${T('剩余', 'Remaining')}</span><b class="big num">23 <small style="font-size:14px;color:var(--ink-3)">${T('题 / 7 单元', 'items / 7 units')}</small></b></div>
+      <div class="floor" aria-hidden="true"><i style="width:${23 / 63 * 100}%"></i><b style="left:${20 / 63 * 100}%"></b></div>
+      <div class="floor-l"><span>0</span><span style="left:${20 / 63 * 100}%">${T('下限 20', 'floor 20')}</span><span style="right:0">${T('运行前 63', '63 before')}</span></div>
+      <p class="fine">${T('本轮用掉 40 题；再测一轮会低于下限，需先补充未见题。', 'This run used 40; another full run would go below the floor, so add unseen items first.')}</p>`);
+    case 'ann': return annSheet();
+    case 'budget': return sheetWrap('pulse', T('每日调用预算', 'Daily call budget'), T('每个提供方每天 20 次', '20 per provider per day'), `
+      ${[['DeepSeek', b, true], ['Qwen', 0, true], ['Gemini', 0, false, T('认证失败', 'auth failed')], ['OpenAI', 0, false, T('无密钥', 'no key')], ['Doubao', 0, false, T('无密钥', 'no key')]].map(([n, u, ok, why]) => `<div class="bud ${ok ? '' : 'dim'}"><span>${n}</span><span class="m"><i style="width:${u * 5}%"></i></span><span class="v num">${ok ? `${u} / 20` : why}</span></div>`).join('')}
+      <div class="bsum"><span>${T('今日合计', 'Today, total')}</span><b class="num">${b} / 100</b></div>
+      <p class="fine">${T('真实上限 = 提供方数 × 单个限额（5 × 20），而不是 20。', 'The real ceiling is providers × limit (5 × 20), not 20.')}<br>${T('故障转移只去：<b>已验证 + 有余额 + 授权范围完全一致</b> 的提供方。当前没有 → 失败即停止。', 'Failover only to a provider that is <b>verified, has budget and an exactly equal consent scope</b>. None now → a failure stops.')}</p>`);
+    case 'consent': {
+      const ev = S.set.ledger.map(e => e.a === 'grant'
+        ? `<div class="evt"><span class="t num">${e.t}</span><b>Han</b> ${T('授予', 'granted')} <b>DeepSeek</b> · S1</div>`
+        : `<div class="evt rv"><span class="t num">${e.t}</span><b>Han</b> ${T('撤回', 'revoked')} <b>DeepSeek</b> · ${T('S1 文本此后扣留', 'S1 text withheld from now')}</div>`).join('');
+      const conf = S.set.confirming ? `<div class="confirm"><h3>${T('授予前确认范围', 'Confirm the scope before granting')}</h3>
+          <div class="ledger" style="background:var(--glass-3)">
+            <div><span class="lk">${T('来源', 'Source')}</span><span class="lv">S1 · ${T('本地导入的私有资料', 'private local import')}</span></div>
+            <div><span class="lk">${T('提供方', 'Provider')}</span><span class="lv">DeepSeek · <code>deepseek-chat</code></span></div>
+            <div><span class="lk">${T('可发送', 'May send')}</span><span class="lv">${T('题干、选项、证据句、笔记例句', 'Stems, options, evidence sentences, note examples')}</span></div>
+          </div>
+          <div class="sh-acts" style="margin-top:12px"><button class="btn primary sm" data-act="consent-yes">${T('确认授予', 'Grant')}</button><button class="btn quiet sm" data-act="consent-ask" data-v="0">${T('取消', 'Cancel')}</button></div></div>` : '';
+      return sheetWrap('shield', T('私有来源 S1 的授权', 'Consent · private source S1'), S.set.consent ? T('已授予 DeepSeek', 'Granted to DeepSeek') : T('已撤回', 'Revoked'), `
+        <div class="evts">${ev}</div>
+        <div class="sh-acts">${S.set.consent
+          ? `<button class="btn ghost sm" data-act="consent-revoke">${T('撤回 DeepSeek 的授权', 'Revoke for DeepSeek')}</button>`
+          : S.set.confirming ? '' : `<button class="btn ghost sm" data-act="consent-ask" data-v="1">${T('重新授予 DeepSeek…', 'Grant to DeepSeek…')}</button>`}<span class="fine" style="margin:0">${T('只追加事件，不改历史', 'Appends an event; history stays')}</span></div>
+        ${conf}
+        <p class="fine">${T('第一方自有内容（技能统计、已审核战术）不需要授权。', 'First-party content (skill counts, reviewed tactics) needs no consent.')}</p>`);
+    }
+    case 'services': return sheetWrap('server', T('本地服务', 'Local services'), T('全部在本机运行', 'All on this machine'), `
+      <div class="svc"><span class="state-dot ok"></span><span>${T('Agent 宿主', 'Agent host')} <span class="muted">(Node)</span></span><span class="st ok">${T('运行中', 'running')}</span></div>
+      <div class="svc"><span class="state-dot bad"></span><span>AnkiConnect <code class="muted">127.0.0.1:8765</code></span><span class="st bad">${T('无法连接', 'unreachable')}</span></div>
+      <div class="svc"><span class="state-dot off"></span><span>${T('搜索提供方', 'Search provider')}</span><span class="st">${T('未配置 · 0 次调用', 'not configured · 0 calls')}</span></div>`);
+    case 'routes': return sheetWrap('route', T('用途分配', 'Which model does what'), T('每项用途只走一个模型', 'Each use goes to exactly one model'), `
+      <div class="route-row"><span>${T('导师 · 解释 / 追问 / 微课', 'Coach · explain / probe / micro-lesson')}</span><i></i><code>deepseek/deepseek-chat</code></div>
+      <div class="route-row"><span>${T('Anki 笔记润色', 'Anki note refine')}</span><i></i><code>deepseek/deepseek-chat</code></div>
+      <div class="route-row"><span>${T('找练习', 'Find practice')} <span class="id">search</span></span><i></i><span class="muted">${T('未配置 · 0 次网络调用', 'not configured · 0 network calls')}</span></div>
+      <div class="route-row"><span>${T('故障转移', 'Failover')}</span><i></i><span class="muted">${T('无 · 没有其他已验证的提供方', 'none · no other verified provider')}</span></div>`);
+    case 'sync': return sheetWrap('anki', T('笔记与同步', 'Notes & sync'), `${T('本地', 'local')} · <code>127.0.0.1:8765</code> · <span style="color:var(--bad)">${T('无法连接', 'unreachable')}</span>`, `
+      ${S.anki.accepted ? `<div class="note q">${ic('clock', 's')}<span class="f" lang="en">${esc(S.anki.f.front)}</span><span class="st">${T(`排队 · 修订 ${S.anki.rev}`, `queued · rev ${S.anki.rev}`)}</span></div>` : ''}
+      <div class="note q">${ic('clock', 's')}<span class="f" lang="en">rather than</span><span class="st">${T('排队 · 可连接时推送一次', 'queued · pushes once when reachable')}</span></div>
+      <div class="note c">${ic('conflict', 's')}<span class="f" lang="en">which, after a noun</span><span class="st">${S.anki.conflict ? T('已解决', 'resolved') : `${T('冲突', 'conflict')}<button class="btn ghost sm" data-act="sheet" data-v="conflict">${T('处理', 'Resolve')}</button>`}</span></div>
+      <div class="note">${ic('present', 's')}<span class="f" lang="en">be supplied by</span><span class="st">${T('已存在 · 未重复添加', 'already present · not added')}</span></div>
+      ${['under way = in progress', 'in service since', 'be expected to', 'not allowed on site', 'use … more electricity than', 'until the work is complete'].map(x => `<div class="note p">${ic('check', 's')}<span class="f" lang="en">${esc(x)}</span><span class="st">${T('已推送', 'pushed')}</span></div>`).join('')}
+      <p class="fine" style="display:flex;gap:8px;align-items:center;margin-top:14px">${ic('phone', 'xs')}${T('手机同步通过 AnkiWeb，由你自己操作。', 'Phone sync via AnkiWeb is your own action.')}</p>`);
+    case 'conflict': return sheetWrap('conflict', T('冲突 · which, after a noun', 'Conflict · which, after a noun'), T('你在 Anki 中改过这条笔记，不会被静默覆盖', 'You edited this note in Anki. Nothing is overwritten silently'), `
+      ${S.anki.conflict ? `<p style="margin:0">${S.anki.conflict === 'mine' ? T('已保留你的版本，下次可连接时写回 Anki。', 'Kept your version; it will be written to Anki when reachable.') : T('已采用 Anki 中的版本，Pass Quest 记录已更新。', 'Kept Anki’s version; the Pass Quest record is updated.')}</p><div class="sh-acts"><button class="btn quiet sm" data-act="conflict" data-v="">${T('撤销', 'Undo')}</button></div>`
+      : `<div class="diff"><div><b>${T('Pass Quest 版本', 'Pass Quest version')}</b><p lang="en">which = adds extra information about the noun before it</p></div>
+        <div><b>${T('Anki 中的版本 · 你的修改已高亮', 'Anki version · your edits highlighted')}</b><p lang="en">which = adds <ins>non‑essential</ins> information about the noun before it, <ins>after a comma</ins></p></div></div>
+      <div class="sh-acts"><button class="btn ghost sm" data-act="conflict" data-v="mine">${T('保留 Pass Quest 版本', 'Keep Pass Quest’s')}</button><button class="btn primary sm" data-act="conflict" data-v="anki">${T('保留 Anki 的', 'Keep Anki’s')}</button></div>`}`, true);
+  }
+  return '';
+}
+function annSheet() {
+  const n = S.annItem;
+  const grid = `<div class="rcells" role="group" aria-label="${T('第 3 轮逐题', 'Run #3 items')}">${RUN.map((s, i) => `<button class="rcell ${s} ${n === i + 1 ? 'sel' : ''}" data-act="ann" data-v="${i + 1}" aria-label="${T(`第 ${i + 1} 题 · ${RSTATE[s][0]}`, `Item ${i + 1} · ${RSTATE[s][1]}`)}" aria-pressed="${n === i + 1}">${ic(RSTATE[s][2])}<span class="num">${i + 1}</span></button>`).join('')}</div>
+    <div class="rleg">${['c', 'w', 't'].map(s => `<span><span class="rcell ${s}">${ic(RSTATE[s][2])}</span>${T(RSTATE[s][0], RSTATE[s][1])} <b class="num">${RUN.filter(x => x === s).length}</b></span>`).join('')}</div>`;
+  let det = `<p class="fine" style="margin-top:16px">${T('选一题查看证据与解析（测评中扣留，现在开放）。', 'Pick an item to see its evidence and reasoning (withheld during the run, open now).')}</p>`;
+  if (n) {
+    const s = RUN[n - 1], q = AQS[n % 4];
+    const mine = s === 'c' ? 'ABCD'[q.key] : s === 't' ? null : 'ABCD'[(q.key + 1) % 4];
+    det = `<div class="blk" style="margin-top:16px">
+      <h3>${T(`第 ${n} 题`, `Item ${n}`)}<span class="muted" style="font-weight:500">${skillName(q.skill)}</span><span class="chip ${s === 'c' ? 'ok' : s === 'w' ? 'bad' : ''} sm" style="margin-left:auto">${T(RSTATE[s][0], RSTATE[s][1])}</span></h3>
+      <p class="exam" lang="en" style="font-size:17px;line-height:1.5;color:var(--ink);margin:8px 0 10px">${esc(q.stem)}</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;font-size:var(--t-sm)">${q.opts.map((o, i) => `<div style="display:flex;gap:8px;align-items:baseline;${i === q.key ? 'color:var(--ok);font-weight:600' : 'color:var(--ink-2)'}"><b>${'ABCD'[i]}</b><span class="exam" lang="en">${esc(o)}</span>${'ABCD'[i] === mine && i !== q.key ? `<span class="chip bad sm">${T('你的选择', 'yours')}</span>` : ''}</div>`).join('')}</div>
+      <div class="tactic" style="margin:12px 0 0;background:var(--glass-3)"><span class="ic">${ic('seal', 's')}</span><div class="k">${T('证据', 'Evidence')}</div><p class="exam" lang="en" style="font-size:15px;color:var(--ink)">“${esc(sentOf(APASS, q.ev))}”</p></div>
+    </div>`;
+  }
+  return sheetWrap('eye', T('逐题注释 · 第 3 轮', 'Annotations · run #3'), T('证据与解析在测评中被扣留，现在可逐题查看', 'Evidence and reasoning were withheld during the run'), grid + det, true);
+}
+
+function layerHTML() {
+  const L = S.layer;
+  if (!L) return '';
+  if (L.startsWith('sheet:')) return sheetHTML(L.slice(6));
+  if (L === 'keys') {
+    const g = (h, rows) => `<div><h3>${h}</h3>${rows.map(([a, k]) => `<div class="row"><span>${a}</span><span>${k.map(x => `<kbd>${x}</kbd>`).join('')}</span></div>`).join('')}</div>`;
+    return `<div class="scrim" data-act="close"></div><div class="dlg keys" role="dialog" aria-modal="true" aria-labelledby="dk">
+      <div class="hd"><span class="ico" style="width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--well);box-shadow:inset 0 0 0 1px var(--line-2)">${ic('help')}</span><h2 class="h-disp" id="dk" style="margin:0">${T('快捷键', 'Keyboard shortcuts')}</h2><button class="icon-btn" style="margin-left:auto" data-act="close" aria-label="${T('关闭', 'Close')}">${ic('x')}</button></div>
+      <div class="grid">
+        ${g(T('全局', 'Anywhere'), [[T('快捷键面板', 'This sheet'), ['?']], [T('切换主题', 'Theme'), ['Shift', 'T']], [T('切换语言', 'Language'), ['Shift', 'L']], [T('今日', 'Today'), ['G', 'T']], [T('练习', 'Practice'), ['G', 'P']], [T('测评', 'Assess'), ['G', 'A']], [T('报告', 'Report'), ['G', 'R']], [T('Anki 笔记', 'Anki'), ['G', 'K']], [T('设置', 'Settings'), ['G', 'S']], [T('关闭', 'Close'), ['Esc']]])}
+        ${g(T('练习', 'Practice'), [[T('选择选项', 'Choose'), ['A', '–', 'D']], [T('或用数字', 'or digits'), ['1', '–', '4']], [T('提交', 'Submit'), ['Enter']], [T('提示（转为有辅助）', 'Hint (assisted)'), ['H']], [T('跳过', 'Skip'), ['S']], [T('标记选中文字', 'Mark selection'), ['M']], [T('今日：开始练习', 'Today: start'), ['Enter']]])}
+        ${g(T('反馈 · 测评 · 笔记', 'Feedback · Assess · Anki'), [[T('导师模式', 'Coach modes'), ['1', '2', '3']], [T('看选项依据', 'Option evidence'), ['↑', '↓']], [T('生成笔记', 'Propose note'), ['K']], [T('下一题', 'Next item'), ['N']], [T('测评：上 / 下一题', 'Assess: prev / next'), ['←', '→']], [T('测评：确认', 'Assess: confirm'), ['Enter']], [T('笔记：翻面', 'Anki: flip'), ['F']], [T('笔记：编辑字段', 'Anki: edit fields'), ['E']]])}
+      </div></div>`;
+  }
+  if (L === 'hint') return `<div class="scrim" data-act="close"></div><div class="dlg warm" role="dialog" aria-modal="true" aria-labelledby="dh">
+      <span class="ico">${ic('eye', 'l')}</span>
+      <h2 class="h-disp" id="dh">${T('打开提示？', 'Open the hint?')}</h2>
+      <p>${T('提示可见后，本次作答记为「有辅助」，<b>不计入</b>独立迁移。这一步不能撤销。', 'Once the hint is visible this attempt is recorded as <b>assisted</b> and will not count as an independent transfer. This cannot be undone.')}</p>
+      <div class="cmpare"><div><b>${T('现在', 'Now')}</b>${T('独立 · 可计入', 'Independent · can count')}</div><span class="muted">${ic('arrow', 's')}</span><div class="on"><b>${T('打开后', 'After')}</b>${T('有辅助 · 不计入', 'Assisted · never counts')}</div></div>
+      <div class="acts"><button class="btn quiet" data-act="hint-yes">${T('打开提示', 'Open hint')}</button><button class="btn primary" data-act="close" autofocus>${T('继续独立作答', 'Stay independent')}<kbd>Esc</kbd></button></div></div>`;
+  if (L === 'leave') return `<div class="scrim" data-act="close"></div><div class="dlg neutral" role="dialog" aria-modal="true" aria-labelledby="dl">
+      <span class="ico">${ic('door', 'l')}</span>
+      <h2 class="h-disp" id="dl">${T('离开测评？', 'Leave the assessment?')}</h2>
+      <p>${T(`离开后可从第 ${S.assess.cur} 题恢复，<b>计时不暂停</b>：剩余时间会继续减少。`, `You can resume at item ${S.assess.cur} later. <b>The clock keeps running</b> while you are away.`)}</p>
+      <div class="acts"><button class="btn quiet" data-act="leave-yes">${T('离开', 'Leave')}</button><button class="btn primary" data-act="close" autofocus>${T('继续测评', 'Keep going')}</button></div></div>`;
+  if (L === 'refine') {
+    const ok = S.set.consent, b = S.budget.deepseek;
+    return `<div class="scrim" data-act="close"></div><div class="dlg adv" role="dialog" aria-modal="true" aria-labelledby="dr">
+      <span class="ico">${ic('adv', 'l')}</span>
+      <h2 class="h-disp" id="dr">${T('用 AI 润色这条笔记？', 'Refine this note with AI?')}</h2>
+      <p>${T('建议性：结果只是一份修改建议，由你逐项接受。', 'Advisory: the result is only a suggestion you accept field by field.')}</p>
+      <div class="ledger" style="margin-top:12px">
+        <div><span class="lk">${T('调用', 'Call')}</span><span class="lv"><span class="ext">${ic('ext', 'xs')}${T('外部调用', 'External call')}</span> · DeepSeek · <code>deepseek-chat</code></span></div>
+        <div><span class="lk">${T('发送内容', 'Payload')}</span><span class="lv">${ok ? `${T('正面、背面两段、战术', 'Front, both back paragraphs, tactic')} <span class="muted">— ${T('正面与例句来自 S1', 'front and example derive from S1')}</span>` : `<span class="held">${T('正面与例句来自 S1，已扣留', 'Front and example derive from S1 — withheld')}</span>`}</span></div>
+        <div><span class="lk">${T('授权', 'Consent')}</span><span class="lv">${ok ? T('S1 已授权 DeepSeek', 'S1 granted to DeepSeek') : `<span class="held">${T('S1 授权已撤回', 'S1 consent revoked')}</span>`}</span></div>
+        <div><span class="lk">${T('预算', 'Budget')}</span><span class="lv num">${b} → ${b + 1} / 20</span></div>
+      </div>
+      <div class="acts">${ok ? '' : `<a class="btn quiet" href="#/settings/consent">${T('去设置里授权', 'Grant in Settings')}</a>`}<button class="btn quiet" data-act="close">${T('取消', 'Cancel')}</button><button class="btn adv" data-act="refine-yes" ${ok ? '' : 'disabled'}>${ic('ext', 'xs')}${T('发送', 'Send')}</button></div></div>`;
+  }
+  if (L === 'pop') {
+    const lines = S.route === 'report'
+      ? [T('这次和第 2 轮同口径：+5 题。', 'Like-for-like with run #2: +5 items.'),
+         T('本轮最弱的是语境词汇 9 / 14（64%）。', 'Weakest in this run: vocabulary in context, 9 / 14 (64%).'),
+         T('下一步仍是 NOT/EXCEPT 新练习：测评之外，它的独立迁移只答对 1 / 3。', 'Next step stays NOT/EXCEPT new practice: outside assessments its independent transfer is still 1 / 3.'),
+         T('测评池再用一轮会低于下限，下次测评前先补充。', 'One more run drops the pool below its floor; top it up first.')]
+      : [T('今天先练 NOT/EXCEPT：一篇新文章，独立作答。', 'Today: NOT/EXCEPT on one fresh passage, independently.'),
+         T('你上次的错误是选了重复词最多的选项。', 'Your last miss picked the option with the most repeated words.'),
+         T('作答时我不说话；需要时按 H 看提示，但那一题就不计入。', 'I stay quiet while you answer; H opens a hint, but then that item will not count.')];
+    return `<div class="csheet small" role="dialog" aria-labelledby="pop-t">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span class="co-head" style="padding:0"><span class="o"></span></span><b id="pop-t">${T('导师', 'Coach')}</b><span class="chip sm" style="margin-left:auto">${ic('local', 'xs')}${T('本地策略 · 非模型生成', 'Local policy · not model text')}</span></div>
+      ${lines.map(l => `<p style="margin:0 0 8px;font-size:var(--t-b);line-height:1.65">${l}</p>`).join('')}
+      ${S.route === 'today' ? `<p class="fine" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">${T('模型 deepseek-chat · 于 11-13 09:12 验证 · 今日已用', 'Model deepseek-chat · verified 11-13 09:12 · used today')} <span class="num">${S.budget.deepseek} / 20</span></p>` : ''}
+      <div style="display:flex;justify-content:flex-end;margin-top:6px"><button class="btn quiet sm" data-act="close">${T('好', 'OK')}<kbd>Esc</kbd></button></div></div>`;
+  }
+  return '';
+}
+const MODAL = L => !!L && L !== 'pop';
+
+/* ==========================================================================
+   render + router
+   ========================================================================== */
+const VIEWS = { today: vToday, practice: vPractice, feedback: vFeedback, assess: vAssess, report: vReport, anki: vAnki, settings: vSettings };
+const ROOM = () => ({ practice: S.practice.assisted ? 'warm' : 'cool', feedback: S.fb.assisted ? 'warm' : 'cool', assess: 'still' }[S.route] || 'calm');
+const TITLES = { today: ['今日', 'Today'], practice: ['练习', 'Practice'], feedback: ['反馈', 'Feedback'], assess: ['测评', 'Assessment'], report: ['报告', 'Report'], anki: ['Anki 笔记', 'Anki'], settings: ['设置', 'Settings'] };
+const $ = s => document.querySelector(s);
+function focusKey(el) {
+  if (!el || el === document.body) return null;
+  if (el.dataset && el.dataset.act) return `[data-act="${el.dataset.act}"]` + (el.dataset.v !== undefined ? `[data-v="${CSS.escape(el.dataset.v)}"]` : '');
+  if (el.dataset && el.dataset.field) return `[data-field="${el.dataset.field}"]`;
+  if (el.id) return '#' + el.id;
+  return null;
+}
+
+function render(full = true, anim = false) {
+  const html = document.documentElement, stage = $('#stage');
+  const fk = focusKey(document.activeElement);
+  const keepScroll = !anim && $('#passage') ? $('#passage').scrollTop : null;
+  html.dataset.theme = S.theme;
+  html.lang = S.lang === 'zh' ? 'zh-CN' : 'en';
+  html.classList.toggle('shot', S.shot);
+  document.body.dataset.room = ROOM();
+  document.body.classList.toggle('editing', S.route === 'anki' && S.anki.editing);
+  document.title = 'Pass Quest — ' + T(...TITLES[S.route]);
+  $('#top').innerHTML = topHTML();
+  stage.classList.toggle('enter', anim);
+  stage.classList.toggle('with-coach', S.route === 'feedback' && S.coachOpen);
+  if (full) stage.innerHTML = VIEWS[S.route]();
+  $('#dock').innerHTML = dockHTML();
+  $('#orb').innerHTML = orbHTML();
+  renderLayer(false);
+  if (full && S.route === 'feedback' && (anim || keepScroll === null)) centerEvidence();
+  else if (keepScroll !== null && $('#passage')) $('#passage').scrollTop = keepScroll;
+  moreCue();
+  if (fk && !S.layer) { const el = $(fk); if (el) el.focus({ preventScroll: true }); }
+}
+function renderLayer(anim) {
+  const layer = $('#layer');
+  layer.classList.toggle('enter-layer', !!anim);
+  layer.innerHTML = layerHTML();
+  const modal = MODAL(S.layer);
+  ['.app', '#dock', '#orb'].forEach(s => { const el = $(s); if (el) el.inert = modal; });
+  if (S.layer) {
+    const af = layer.querySelector('[autofocus]') || layer.querySelector('.sheet .icon-btn, .dlg button, .csheet button');
+    if (af && anim) af.focus({ preventScroll: true });
+  }
+}
+function openLayer(name) {
+  if (!S.layer) S.ret = focusKey(document.activeElement);
+  S.layer = name; renderLayer(true);
+  if (name === 'pop') $('#orb').innerHTML = orbHTML();
+}
+function closeLayer() {
+  const was = S.layer; S.layer = null; renderLayer(false);
+  if (was === 'pop') $('#orb').innerHTML = orbHTML();
+  if (S.ret) { const el = $(S.ret); if (el) el.focus({ preventScroll: true }); S.ret = null; }
+}
+function centerEvidence() {
+  const el = $('.pas-body .s.ev'), box = $('#passage');
+  if (el && box) box.scrollTop = Math.max(0, el.offsetTop - box.clientHeight * 0.35);
+}
+function moreCue() {
+  const sc = $('#coscroll'), more = $('#more');
+  if (!sc || !more) return;
+  const atEnd = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 4;
+  more.hidden = atEnd; sc.classList.toggle('end', atEnd);
+}
+function route() {
+  const parts = (location.hash.match(/^#\/(\w+)(?:\/([\w-]+))?/) || []);
+  const r = parts[1], sub = parts[2];
+  S.route = ROUTES.includes(r) ? r : 'today';
+  if (S.route in SESSION_IDX) S.sessionAt = SESSION_IDX[S.route];
+  S.layer = null; hideMarkPop();
+  if (S.route === 'practice' && sub === 'assisted') S.practice.assisted = true;
+  if (S.route === 'anki') S.anki.editing = sub === 'edit';
+  if (S.route === 'feedback' && sub === 'nocoach') S.coachOpen = false;
+  render(true, !S.shot);
+  if (sub && sub !== 'assisted' && sub !== 'edit' && sub !== 'nocoach') { if (sub.startsWith('ann')) S.annItem = +sub.slice(3) || null; S.layer = 'sheet:' + (sub.startsWith('ann') ? 'ann' : sub); renderLayer(!S.shot); }
+  $('#stage').scrollTop = 0;
+}
+function setParam(k, v) {
+  store(k, v);
+  const u = new URL(location.href); u.searchParams.set(k, v);
+  history.replaceState(null, '', u.pathname + u.search + u.hash);
+}
+let toastT;
+function toast(msg) {
+  let t = $('.toast'); if (t) t.remove();
+  t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.innerHTML = msg;
+  document.body.appendChild(t); clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 2600);
+}
+
+/* ---------- targeted updates (no re-entry animation, focus kept) ---------- */
+function setChecked(v) {
+  document.querySelectorAll('.opt').forEach(o => o.setAttribute('aria-checked', o.dataset.v === v));
+}
+function refreshAnkiChrome() {
+  const a = S.anki, can = !a.accepted || a.dirty;
+  ['#astatus', '#estatus'].forEach(s => { const el = $(s); if (el) el.innerHTML = ankiStatus(); });
+  ['#acceptbtn', '#acceptbtn2'].forEach(s => { const el = $(s); if (el) { el.disabled = !can; el.lastChild.textContent = T(`接受 · 修订 ${nextRev()}`, `Accept · revision ${nextRev()}`); } });
+}
+
+/* ---------- actions ---------- */
+const ACT = {
+  theme() {
+    S.theme = S.theme === 'light' ? 'dark' : 'light'; setParam('theme', S.theme);
+    document.documentElement.dataset.theme = S.theme;
+    $('#top').innerHTML = topHTML(); $('#themebtn').focus({ preventScroll: true });
+    if (S.route === 'anki') { $('#preview').innerHTML = previewHTML(); syncPressed('ctheme', S.anki.card || S.theme); }
+  },
+  lang(v) { S.lang = v || (S.lang === 'zh' ? 'en' : 'zh'); setParam('lang', S.lang); render(); },
+  keys() { S.layer === 'keys' ? closeLayer() : openLayer('keys'); },
+  close() { closeLayer(); },
+  sheet(v) { openLayer('sheet:' + v); },
+  coach() {
+    if (S.route === 'assess') return;
+    if (S.route === 'feedback') { S.coachOpen = !S.coachOpen; $('#stage').classList.toggle('with-coach', S.coachOpen); $('#orb').innerHTML = orbHTML(); moreCue(); $('.orb').focus({ preventScroll: true }); return; }
+    S.layer === 'pop' ? closeLayer() : openLayer('pop');
+  },
+  more() { const sc = $('#coscroll'); if (sc) sc.scrollBy({ top: sc.clientHeight * .7, behavior: reduced() ? 'auto' : 'smooth' }); },
+  toast(v) { toast(v); },
+  brief(v) { S.brief = v; render(); renderLayer(false); if (v === 'run') toast(T('brief-7 从第 3 步继续 · 本地执行，最多 3 次 DeepSeek 调用', 'brief-7 resuming from step 3 · local, up to 3 DeepSeek calls')); },
+  pick(v) { S.practice.sel = v; setChecked(v); const s = $('#submit'); if (s) s.disabled = false; },
+  hint() { if (!S.practice.assisted) openLayer('hint'); },
+  'hint-yes'() {
+    S.practice.assisted = true; S.layer = null; renderLayer(false);
+    document.body.dataset.room = ROOM();
+    const q = $('#qcol'); q.classList.add('enter-hint'); q.innerHTML = qcolHTML();
+    const first = $('.opt[aria-checked="true"]') || $('.opt'); if (first) first.focus({ preventScroll: true });
+  },
+  skip() { toast(T('已跳过 · 记为未作答，不计入', 'Skipped · recorded as unanswered, does not count')); },
+  submit() {
+    if (!S.practice.sel) return;
+    S.fb.choice = S.practice.sel; S.fb.elapsed = S.practice.elapsed; S.fb.assisted = S.practice.assisted; S.fb.ev = 'C';
+    // the canned advisory reply is about choosing A; any other choice starts with nothing sent
+    S.fb.done = S.fb.choice === 'A' ? { probe: true } : {}; S.fb.mode = 'probe'; S.coachOpen = true;
+    location.hash = '#/feedback';
+  },
+  mode(v) { S.fb.mode = v; $('#orb').innerHTML = orbHTML(); moreCue(); const b = $(`[data-act="mode"][data-v="${v}"]`); if (b) b.focus({ preventScroll: true }); },
+  'coach-send'() { S.fb.done[S.fb.mode] = true; S.budget.deepseek++; $('#orb').innerHTML = orbHTML(); moreCue(); },
+  next() { S.practice = { sel: null, assisted: false, elapsed: 0, marks: [] }; toast(T('下一篇新文章 · 独立 · 可计入（原型中沿用同一篇）', 'Next fresh passage · independent · can count (prototype reuses one)')); location.hash = '#/practice'; },
+  apick(v) { S.assess.answers[S.assess.cur] = v; if (!pendingLeft()) { render(); return; } setChecked(v); const n = $('#anext'); if (n) n.disabled = false; },
+  anext() {
+    const a = S.assess; if (!a.answers[a.cur]) return;
+    let n = a.cur + 1; while (n <= 40 && (a.answers[n] || a.timedOut[n])) n++;
+    if (n > 40) { n = 1; while (n <= 40 && (a.answers[n] || a.timedOut[n])) n++; }
+    if (n <= 40) { a.cur = n; a.item = 0; }
+    render();
+  },
+  goto(v) { S.assess.cur = +v; S.assess.item = 0; render(); },
+  leave() { openLayer('leave'); },
+  'leave-yes'() { const n = S.assess.cur; S.layer = null; location.hash = '#/today'; toast(T(`测评第 3 轮停在第 ${n} 题 · 计时继续`, `Run #3 left at item ${n} · clock still running`)); },
+  cmp(v) { S.report.cmp = +v; render(); },
+  ann(v) { S.annItem = +v; S.layer = 'sheet:ann'; renderLayer(false); const b = $(`#layer [data-act="ann"][data-v="${v}"]`); if (b) b.focus({ preventScroll: true }); },
+  side(v) { S.anki.side = v; $('#preview').innerHTML = previewHTML(); syncPressed('side', v); },
+  ctheme(v) { S.anki.card = v; $('#preview').innerHTML = previewHTML(); syncPressed('ctheme', v); },
+  cwidth(v) { S.anki.width = v; const p = $('#preview'); p.classList.toggle('phone', v === 'phone'); p.innerHTML = previewHTML(); syncPressed('cwidth', v); },
+  edit() { S.anki.editing = !S.anki.editing; render(); if (S.anki.editing) { const f = $('[data-field="front"]'); if (f) f.focus(); } else { const e = $('[data-act="edit"]'); if (e) e.focus(); } },
+  accept() {
+    const a = S.anki; if (a.accepted && !a.dirty) return;
+    a.rev = nextRev(); a.accepted = true; a.dirty = false; a.skipped = false; render();
+    toast(T(`已接受修订 ${a.rev} · Anki 未运行，已排队`, `Accepted revision ${a.rev} · Anki not running, queued`));
+  },
+  askip() { S.anki.skipped = true; S.anki.accepted = false; S.anki.dirty = false; render(); },
+  refine() { openLayer('refine'); },
+  'refine-yes'() { if (!S.set.consent) return; S.budget.deepseek++; closeLayer(); toast(T('建议已返回（建议性）· 逐项接受', 'Suggestion returned (advisory) · accept per field')); },
+  conflict(v) { S.anki.conflict = v || null; render(); renderLayer(false); },
+  row(v) { S.set.open = S.set.open === v ? null : v; render(); },
+  'consent-revoke'() { S.set.consent = false; S.set.ledger.push({ t: S.shot ? '11-13 10:40' : '11-13 ' + new Date().toTimeString().slice(0, 5), a: 'revoke' }); render(); renderLayer(false); },
+  'consent-ask'(v) { S.set.confirming = v === '1'; renderLayer(false); const b = $(v === '1' ? '#layer [data-act="consent-yes"]' : '#layer [data-act="consent-ask"]'); if (b) b.focus(); },
+  'consent-yes'() { S.set.consent = true; S.set.confirming = false; S.set.ledger.push({ t: S.shot ? '11-13 10:42' : '11-13 ' + new Date().toTimeString().slice(0, 5), a: 'grant' }); render(); renderLayer(false); },
+};
+function syncPressed(act, v) { document.querySelectorAll(`[data-act="${act}"]`).forEach(b => b.setAttribute('aria-pressed', b.dataset.v === v)); }
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]');
+  if (!el || el.disabled) return;
+  const fn = ACT[el.dataset.act];
+  if (fn) { e.preventDefault(); fn(el.dataset.v); }
+});
+document.addEventListener('input', e => {
+  const k = e.target.dataset && e.target.dataset.field;
+  if (k) {
+    S.anki.f[k] = e.target.value; $('#preview').innerHTML = previewHTML();
+    if (S.anki.accepted && !S.anki.dirty) { S.anki.dirty = true; }
+    refreshAnkiChrome();
+  }
+  if (e.target.id === 'cdraft') S.fb.draft = e.target.value;
+});
+document.addEventListener('scroll', e => { if (e.target.id === 'coscroll') moreCue(); }, true);
+// feedback: hover an option → its evidence sentence lights
+document.addEventListener('pointerover', e => { const fo = e.target.closest('.fo[data-ev]'); if (fo) setEv(fo.dataset.ev); });
+document.addEventListener('focusin', e => { const fo = e.target.closest('.fo[data-ev]'); if (fo) setEv(fo.dataset.ev); });
+function setEv(L) {
+  if (S.fb.ev === L) return; S.fb.ev = L;
+  document.querySelectorAll('.fo').forEach(f => f.classList.toggle('on', f.dataset.ev === L));
+  document.querySelectorAll('.pas-body .s').forEach(s => s.classList.remove('ev', 'key'));
+  const s = $(`.pas-body .s[data-s="${EVMAP[L]}"]`);
+  if (s) { s.classList.add('ev'); if (L === 'C') s.classList.add('key'); const box = $('#passage'); box.scrollTo({ top: Math.max(0, s.offsetTop - box.clientHeight * 0.35), behavior: reduced() ? 'auto' : 'smooth' }); }
+}
+
+/* ---------- selection → mark (mouse or keyboard) ---------- */
+let pendingRange = null, pointerDown = false;
+function hideMarkPop() { $('.markpop')?.remove(); pendingRange = null; }
+function checkSelection() {
+  const sel = window.getSelection(), box = $('#passage');
+  if (!box || box.dataset.mode !== 'practice' || !sel || sel.rangeCount === 0 || sel.isCollapsed || !box.contains(sel.anchorNode) || !box.contains(sel.focusNode)) { hideMarkPop(); return; }
+  pendingRange = sel.getRangeAt(0).cloneRange();
+  const r = pendingRange.getBoundingClientRect();
+  $('.markpop')?.remove();
+  const p = document.createElement('div'); p.className = 'markpop';
+  p.innerHTML = `<span>${T('标记为笔记素材', 'Mark for a note')}</span><button data-mark>${ic('mark', 'xs')}${T('标记', 'Mark')}<kbd>M</kbd></button>`;
+  p.style.left = Math.max(12, r.left + r.width / 2 - 110) + 'px'; p.style.top = Math.max(12, r.top - 50) + 'px';
+  document.body.appendChild(p);
+  p.addEventListener('mousedown', ev => ev.preventDefault());
+  p.querySelector('[data-mark]').addEventListener('click', doMark);
+}
+document.addEventListener('pointerdown', e => { if (!e.target.closest('.markpop')) pointerDown = true; });
+document.addEventListener('pointerup', () => { if (pointerDown) { pointerDown = false; setTimeout(checkSelection, 0); } });
+document.addEventListener('selectionchange', () => { if (!pointerDown) checkSelection(); });
+function doMark() {
+  if (!pendingRange) return;
+  const sa = pendingRange.startContainer.parentElement?.closest('.s'), sb = pendingRange.endContainer.parentElement?.closest('.s');
+  if (!sa || sa !== sb) { toast(T('请在一句之内选择', 'Select within one sentence')); hideMarkPop(); return; }
+  const pre = document.createRange(); pre.selectNodeContents(sa); pre.setEnd(pendingRange.startContainer, pendingRange.startOffset);
+  const a = pre.toString().length, b = a + pendingRange.toString().length;
+  const id = sa.dataset.s;
+  if (!S.practice.marks.some(m => m.s === id && m.a < b && a < m.b)) S.practice.marks.push({ s: id, a, b });
+  window.getSelection().removeAllRanges(); hideMarkPop();
+  const box = $('#passage'), top = box.scrollTop;
+  const fresh = document.createElement('div'); fresh.innerHTML = passageHTML('practice');
+  box.innerHTML = fresh.querySelector('#passage').innerHTML; box.scrollTop = top;
+  $('#markcount').textContent = T(`已标记 ${S.practice.marks.length} 处 · 稍后可生成 Anki 笔记`, `${S.practice.marks.length} marked · available for an Anki note later`);
+}
+
+/* ---------- keyboard ---------- */
+let gChord = 0;
+document.addEventListener('keydown', e => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (e.key === 'Escape') {
+    if (S.layer) { closeLayer(); e.preventDefault(); }
+    else if (S.route === 'anki' && S.anki.editing) { ACT.edit(); e.preventDefault(); }
+    hideMarkPop(); return;
+  }
+  if (tag === 'input' || tag === 'textarea' || e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key, up = k.toUpperCase();
+  if (k === '?') { ACT.keys(); e.preventDefault(); return; }
+  if (e.shiftKey && up === 'T') { ACT.theme(); return; }
+  if (e.shiftKey && up === 'L') { ACT.lang(); return; }
+  if (S.layer) return;
+  if (gChord && Date.now() - gChord < 1200) {
+    gChord = 0;
+    const m = { T: 'today', P: 'practice', A: 'assess', R: 'report', K: 'anki', S: 'settings', F: 'feedback' }[up];
+    if (m) { location.hash = '#/' + m; e.preventDefault(); }
+    return;
+  }
+  if (up === 'G' && !e.shiftKey) { gChord = Date.now(); return; }
+  const r = S.route;
+  const letter = 'ABCD'.includes(up) && k.length === 1 ? up : '1234'.includes(k) && k.length === 1 ? 'ABCD'['1234'.indexOf(k)] : null;
+  if (r === 'today' && k === 'Enter' && tag !== 'a' && tag !== 'button') { location.hash = '#/practice'; }
+  else if (r === 'practice') {
+    if (up === 'M' && pendingRange) doMark();
+    else if (letter) ACT.pick(letter);
+    else if (k === 'Enter' && tag !== 'button') ACT.submit();
+    else if (up === 'H') ACT.hint();
+    else if (up === 'S') ACT.skip();
+  } else if (r === 'feedback') {
+    if ('123'.includes(k) && k.length === 1) ACT.mode(['explain', 'probe', 'micro'][+k - 1]);
+    else if (up === 'N') ACT.next();
+    else if (up === 'K') location.hash = '#/anki';
+    else if (k === 'ArrowDown' || k === 'ArrowUp') { const o = 'ABCD', i = o.indexOf(S.fb.ev); setEv(o[(i + (k === 'ArrowDown' ? 1 : 3)) % 4]); e.preventDefault(); }
+  } else if (r === 'assess') {
+    if (letter) ACT.apick(letter);
+    else if (k === 'Enter' && tag !== 'button' && tag !== 'a') ACT.anext();
+    else if (k === 'ArrowRight' && S.assess.cur < 40) { let n = S.assess.cur + 1; if (S.assess.timedOut[n]) n++; if (n <= 40) ACT.goto(n); }
+    else if (k === 'ArrowLeft' && S.assess.cur > 1) { let n = S.assess.cur - 1; if (S.assess.timedOut[n]) n--; if (n >= 1) ACT.goto(n); }
+  } else if (r === 'anki') {
+    if (up === 'F') ACT.side(S.anki.side === 'back' ? 'front' : 'back');
+    else if (up === 'E') ACT.edit();
+  }
+});
+
+/* ---------- clocks (live only) ---------- */
+if (!S.shot) setInterval(() => {
+  if (S.route === 'practice' && !S.layer) { S.practice.elapsed++; const el = $('#itemclock'); if (el) el.textContent = mmss(S.practice.elapsed); }
+  if (S.assess.left > 0) S.assess.left--;              // the run clock never pauses
+  if (S.route === 'assess') {
+    const a = S.assess;
+    a.item = Math.min(90, a.item + 1);
+    if (a.item >= 90 && !a.answers[a.cur]) {             // per-item limit reached: timed out, move on
+      a.timedOut[a.cur] = true; toast(T(`第 ${a.cur} 题已超时`, `Item ${a.cur} timed out`));
+      let n = a.cur + 1; while (n <= 40 && (a.answers[n] || a.timedOut[n])) n++;
+      if (n <= 40) { a.cur = n; a.item = 0; }
+      render(); return;
+    }
+    const rc = $('#runclock'); if (rc) rc.textContent = mmss(a.left);
+    const it = $('#itemt'); if (it) it.textContent = mmss(a.item);
+    const it2 = $('#itemt2'); if (it2) it2.textContent = mmss(a.item);
+    const fg = $('#ringfg'); if (fg) { const C = 2 * Math.PI * 25; fg.setAttribute('stroke-dashoffset', (C * (1 - a.item / 90)).toFixed(1)); }
+  }
+}, 1000);
+
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>

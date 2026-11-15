@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Local-only window: no remote origin, no inline script. Inline styles are needed by the
+     prototype's style attributes (e.g. style="--i:0"); data: images carry the CSS noise texture.
+     The Anki preview is an <iframe sandbox srcdoc>, which inherits this policy. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Pass Quest</title>
+<link rel="stylesheet" href="dist/main.css">
+<script type="module" src="dist/main.js"></script>
+</head>
+<body data-room="calm">
+<div class="atmos" aria-hidden="true"></div>
+<div class="app">
+  <header class="top" id="top"></header>
+  <main class="stage" id="stage"></main>
+</div>
+<nav id="dock"></nav>
+<div id="orb"></div>
+<div id="layer"></div>
+</body>
+</html>

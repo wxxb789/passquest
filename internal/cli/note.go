@@ -840,19 +840,28 @@ func noteRefineFailure(st *store.Store, draft store.NoteDraft, record store.Note
 }
 
 func noteCommandError(opt Options, jsonMode bool, err error) int {
+	if code, message, ok := noteErrorCode(err); ok {
+		return usageError(opt, jsonMode, code, message)
+	}
+	return internalError(opt, jsonMode, err)
+}
+
+// noteErrorCode maps a refusal or a note derivation error to its usage code;
+// ok is false for an internal error.
+func noteErrorCode(err error) (code, message string, ok bool) {
 	var refusal tacticRefusal
 	if errors.As(err, &refusal) {
-		return usageError(opt, jsonMode, refusal.code, refusal.message)
+		return refusal.code, refusal.message, true
 	}
 	switch {
 	case errors.Is(err, note.ErrLowValue):
-		return usageError(opt, jsonMode, "low_value", err.Error())
+		return "low_value", err.Error(), true
 	case errors.Is(err, note.ErrUnansweredTarget):
-		return usageError(opt, jsonMode, "invalid_input", err.Error())
+		return "invalid_input", err.Error(), true
 	case errors.Is(err, note.ErrQuestionUnavailable):
-		return usageError(opt, jsonMode, "content_unavailable", err.Error())
+		return "content_unavailable", err.Error(), true
 	}
-	return internalError(opt, jsonMode, err)
+	return "", "", false
 }
 
 // noteAnkiEndpoint is shared by push and the human documentation.

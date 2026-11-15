@@ -126,45 +126,9 @@ func runSkillPractice(args []string, opt Options) int {
 		return internalError(opt, *jsonFlag, err)
 	}
 	defer st.Close()
-	records, err := st.List()
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	if err := requireGuidedTactic(lesson, records); err != nil {
-		return tacticError(opt, *jsonFlag, err)
-	}
-	exposures, err := st.ListExposures()
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	candidates, err := skillCandidates(st, lesson, *sourceFlag)
+	selection, err := selectSkillPractice(st, lesson, *sourceFlag, *questionFlag)
 	if err != nil {
 		return tacticError(opt, *jsonFlag, err)
-	}
-	candidate, err := pickSkillCandidate(lesson, *questionFlag, candidates, records, exposures)
-	if err != nil {
-		return tacticError(opt, *jsonFlag, err)
-	}
-
-	exposed, err := st.Exposed(candidate.key())
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	assistance := attempt.AssistanceIndependent
-	if exposed {
-		assistance = attempt.AssistanceAssisted
-	}
-	selection := practiceSelection{
-		Content:  candidate.Content,
-		Question: candidate.Question,
-		Number:   candidate.Number,
-		Page:     candidate.Page,
-		Review:   candidate.Review,
-		Skill: &skillRun{
-			Skill:           lesson,
-			Assistance:      assistance,
-			PassageExposure: skillPassageExposure(candidate.Content.ID, records),
-		},
 	}
 
 	if *jsonFlag {
@@ -180,6 +144,51 @@ func runSkillPractice(args []string, opt Options) int {
 		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true)
 	}
 	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
+}
+
+// selectSkillPractice applies the guided-first rule for scoring skills and
+// picks the question a `skill practice` invocation would show, with its
+// assistance and passage exposure.
+func selectSkillPractice(st *store.Store, lesson skill.Skill, sourceID, questionID string) (practiceSelection, error) {
+	records, err := st.List()
+	if err != nil {
+		return practiceSelection{}, err
+	}
+	if err := requireGuidedTactic(lesson, records); err != nil {
+		return practiceSelection{}, err
+	}
+	exposures, err := st.ListExposures()
+	if err != nil {
+		return practiceSelection{}, err
+	}
+	candidates, err := skillCandidates(st, lesson, sourceID)
+	if err != nil {
+		return practiceSelection{}, err
+	}
+	candidate, err := pickSkillCandidate(lesson, questionID, candidates, records, exposures)
+	if err != nil {
+		return practiceSelection{}, err
+	}
+	exposed, err := st.Exposed(candidate.key())
+	if err != nil {
+		return practiceSelection{}, err
+	}
+	assistance := attempt.AssistanceIndependent
+	if exposed {
+		assistance = attempt.AssistanceAssisted
+	}
+	return practiceSelection{
+		Content:  candidate.Content,
+		Question: candidate.Question,
+		Number:   candidate.Number,
+		Page:     candidate.Page,
+		Review:   candidate.Review,
+		Skill: &skillRun{
+			Skill:           lesson,
+			Assistance:      assistance,
+			PassageExposure: skillPassageExposure(candidate.Content.ID, records),
+		},
+	}, nil
 }
 
 func skillCandidates(st *store.Store, lesson skill.Skill, sourceID string) ([]practiceCandidate, error) {

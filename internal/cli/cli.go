@@ -337,25 +337,9 @@ func runPractice(args []string, opt Options) int {
 			return sourceError(opt, *jsonFlag, err)
 		}
 	} else {
-		sample, err := exam.Sample()
+		selection, err = selectSamplePractice(*questionFlag, records)
 		if err != nil {
-			return internalError(opt, *jsonFlag, err)
-		}
-		selection.Content = sample
-		perQuestion := make(map[attempt.QuestionKey]int, len(records))
-		for _, rec := range records {
-			perQuestion[rec.Key()]++
-		}
-		if *questionFlag != "" {
-			question, number, ok := sample.Question(*questionFlag)
-			if !ok {
-				return usageError(opt, *jsonFlag, "unknown_question", fmt.Sprintf("question %q is not in content %s", *questionFlag, sample.ID))
-			}
-			selection.Question, selection.Number = question, number
-		} else if index := firstUnattempted(sample.ID, sample.Questions, perQuestion); index >= 0 {
-			selection.Question, selection.Number = sample.Questions[index], index
-		} else {
-			selection.Question, selection.Number = sample.Questions[0], 0
+			return tacticError(opt, *jsonFlag, err)
 		}
 	}
 
@@ -374,7 +358,34 @@ func runPractice(args []string, opt Options) int {
 	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
 }
 
-func answerQuestion(opt Options, selection practiceSelection, st *store.Store, answerFlag *string, answerSet, skip, jsonMode bool) int {
+// selectSamplePractice picks a question of the embedded sample: the requested
+// one, else the first unattempted one, else the first.
+func selectSamplePractice(questionID string, records []attempt.Attempt) (practiceSelection, error) {
+	sample, err := exam.Sample()
+	if err != nil {
+		return practiceSelection{}, err
+	}
+	selection := practiceSelection{Content: sample}
+	perQuestion := make(map[attempt.QuestionKey]int, len(records))
+	for _, rec := range records {
+		perQuestion[rec.Key()]++
+	}
+	if questionID != "" {
+		question, number, ok := sample.Question(questionID)
+		if !ok {
+			return practiceSelection{}, refuse("unknown_question", "question %q is not in content %s", questionID, sample.ID)
+		}
+		selection.Question, selection.Number = question, number
+	} else if index := firstUnattempted(sample.ID, sample.Questions, perQuestion); index >= 0 {
+		selection.Question, selection.Number = sample.Questions[index], index
+	} else {
+		selection.Question, selection.Number = sample.Questions[0], 0
+	}
+	return selection, nil
+}
+
+// practiceSurface is the holdout-ledger surface of a practice selection.
+func practiceSurface(selection practiceSelection) string {
 	surface := assess.SurfacePractice
 	if selection.Tactic != nil {
 		surface = assess.SurfaceTactic
@@ -382,6 +393,21 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 	if selection.Skill != nil {
 		surface = assess.SurfaceSkill
 	}
+	return surface
+}
+
+// buildPracticeAttempt grades a selection and records the condition it was
+// made under, without storing it.
+func buildPracticeAttempt(st *store.Store, selection practiceSelection, chosen attempt.Selection, sessionID string, started, answered time.Time) (attempt.Attempt, error) {
+	record, err := attempt.BuildRecord(selection.Content.ID, selection.Content.Version, selection.Question, chosen, sessionID, started, answered)
+	if err != nil {
+		return attempt.Attempt{}, err
+	}
+	return annotateAssistance(st, selection, record)
+}
+
+func answerQuestion(opt Options, selection practiceSelection, st *store.Store, answerFlag *string, answerSet, skip, jsonMode bool) int {
+	surface := practiceSurface(selection)
 	started := opt.Now()
 	recordPresentation := func() int {
 		if err := st.RecordPresentation(selection.Content.ID, selection.Question.ID, surface, started); err != nil {
@@ -433,11 +459,7 @@ func answerQuestion(opt Options, selection practiceSelection, st *store.Store, a
 	}
 
 	answered := opt.Now()
-	record, err := attempt.BuildRecord(selection.Content.ID, selection.Content.Version, selection.Question, chosen, opt.NewSession(), started, answered)
-	if err != nil {
-		return internalError(opt, jsonMode, err)
-	}
-	record, err = annotateAssistance(st, selection, record)
+	record, err := buildPracticeAttempt(st, selection, chosen, opt.NewSession(), started, answered)
 	if err != nil {
 		return internalError(opt, jsonMode, err)
 	}
