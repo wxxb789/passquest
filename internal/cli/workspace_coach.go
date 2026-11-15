@@ -49,17 +49,66 @@ func (w *Workspace) CoachPreview(attemptID int64, mode string) (studio.CoachPrev
 	if err != nil {
 		return studio.CoachPreview{}, err
 	}
-	slot := doc.Provider.Provider
+	preview.Budget = budgetSlot(budget, doc.Provider.Provider)
+	return preview, nil
+}
+
+// budgetSlot is the budget row a call to providerID draws on; the
+// hand-configured legacy endpoint has its own row.
+func budgetSlot(budget studio.Budget, providerID string) studio.BudgetProvider {
+	slot := providerID
 	if slot == "" {
 		slot = "legacy"
 	}
 	for _, item := range budget.Providers {
 		if item.Provider == slot || (item.Active && item.Provider == "") {
-			preview.Budget = item
-			break
+			return item
 		}
 	}
-	return preview, nil
+	return studio.BudgetProvider{}
+}
+
+// CoachHistory lists the advisory calls recorded for one attempt, oldest
+// first, through `tutor history`, with each advisory reply's text from
+// `tutor show`. A recorded failure carries its typed code and stored message;
+// neither document carries a credential or a request body.
+func (w *Workspace) CoachHistory(attemptID int64) (studio.CoachHistory, error) {
+	if attemptID <= 0 {
+		return studio.CoachHistory{}, &studio.Error{Code: "invalid_input", Message: "an attempt id is required"}
+	}
+	var doc tutorHistoryDoc
+	if err := w.run("tutor", "history", "--attempt", strconv.FormatInt(attemptID, 10)).decode(&doc); err != nil {
+		return studio.CoachHistory{}, err
+	}
+	history := studio.CoachHistory{AttemptID: attemptID, Calls: []studio.CoachCall{}, Limits: doc.Limits}
+	for _, call := range doc.Calls {
+		item := studio.CoachCall{
+			CallID:           call.ID,
+			CreatedAt:        call.CreatedAt,
+			Mode:             call.Mode,
+			Provider:         call.Provider,
+			Model:            call.Model,
+			FailoverFrom:     call.FailoverFrom,
+			State:            "advisory",
+			Advisory:         true,
+			SourceTextShared: call.SourceTextShared,
+			LatencyMS:        call.LatencyMS,
+		}
+		if call.Status == "ok" {
+			var shown tutorShowDoc
+			if err := w.run("tutor", "show", strconv.FormatInt(call.ID, 10)).decode(&shown); err != nil {
+				return studio.CoachHistory{}, err
+			}
+			if shown.Suggestion != nil {
+				item.Text = shown.Suggestion.Text
+			}
+		} else {
+			item.State = "failed"
+			item.Failure = &studio.CoachFailure{Code: call.ErrorCode, Message: call.ErrorMessage, Action: codeActions[call.ErrorCode]}
+		}
+		history.Calls = append(history.Calls, item)
+	}
+	return history, nil
 }
 
 // CoachAsk sends the advisory request through `tutor ask`: verification,

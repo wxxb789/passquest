@@ -13,6 +13,7 @@ import { agentSmoke } from "./agent-smoke.ts";
 import { assessSmoke } from "./assess-smoke.ts";
 import { baseline } from "./baseline.ts";
 import { desktopSmoke } from "./desktop-smoke.ts";
+import { desktopUx } from "./desktop-ux.ts";
 import { docsLinks } from "./docs-links.ts";
 import { findSmoke } from "./find-smoke.ts";
 import { goBuild } from "./go-build.ts";
@@ -108,6 +109,8 @@ async function workingTreeDiscoveryProblem(): Promise<string | null> {
 
 /** Product sources a smoke gate builds and drives from the repository root. */
 const NOTE_SMOKE_SOURCES = ["go.mod", "go.sum", "cmd", "internal", "agent"];
+/** desktop-ux also bundles the frontend and reads its allowlist. */
+const DESKTOP_UX_SOURCES = [...NOTE_SMOKE_SOURCES, "desktop", "harness/ux-allow.json"];
 
 function copyTree(from: string, to: string): number {
   let copied = 0;
@@ -126,26 +129,65 @@ function copyTree(from: string, to: string): number {
   return copied;
 }
 
+/** Copies working-tree product paths into the fixture root; returns the number of files. */
+function copyProduct(root: string, relatives: string[]): number {
+  const repo = path.resolve(import.meta.dir, "..", "..");
+  let copied = 0;
+  for (const relative of relatives) {
+    const source = resolve(repo, relative);
+    const target = resolve(root, relative);
+    if (statSync(source).isDirectory()) {
+      mkdirSync(target, { recursive: true });
+      copied += copyTree(source, target);
+      continue;
+    }
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, readFileSync(source));
+    copied++;
+  }
+  return copied;
+}
+
+/** Replaces the one occurrence of `anchor` in a copied product file. */
+function patchCopy(root: string, relative: string, anchor: string, replacement: string): string | null {
+  const file = resolve(root, relative);
+  const source = readFileSync(file, "utf8");
+  const count = source.split(anchor).length - 1;
+  if (count !== 1) return `the anchor appears ${count} time(s) in ${relative}`;
+  writeFileSync(file, source.replace(anchor, () => replacement));
+  return null;
+}
+
+/**
+ * The product with a stylesheet appended that removes every focus outline and
+ * paints Today's title in its own background colour: desktop-ux must name both.
+ */
+async function hideFocusAndTitle(root: string): Promise<string | null> {
+  if (copyProduct(root, DESKTOP_UX_SOURCES) === 0) return "no product source was copied into the fixture root";
+  const file = resolve(root, "desktop/web/styles/index.css");
+  const broken = [":focus-visible{outline:none!important;box-shadow:none!important}", ".hero-title{color:var(--bg)!important}"];
+  writeFileSync(file, [readFileSync(file, "utf8"), ...broken, ""].join("\n"));
+  return null;
+}
+
+/** The product with a content-size switch that sizes the page 16 px short: the viewport precondition must fail. */
+async function shrinkTheViewport(root: string): Promise<string | null> {
+  if (copyProduct(root, DESKTOP_UX_SOURCES) === 0) return "no product source was copied into the fixture root";
+  return patchCopy(
+    root,
+    "internal/desktop/smoke.go",
+    "o.Width, o.Height, o.UseContentSize, o.StateKey = h.contentW, h.contentH, true, \"\"",
+    "o.Width, o.Height, o.UseContentSize, o.StateKey = h.contentW-16, h.contentH-16, true, \"\"",
+  );
+}
+
 /**
  * Copies the sources note-smoke builds into the fixture root and removes the
  * deck comparison from the push. A gate that keeps passing without the
  * comparison is not checking the deck claim, so it must fail here.
  */
 async function removeTheDeckComparison(root: string): Promise<string | null> {
-  const repo = path.resolve(import.meta.dir, "..", "..");
-  let copied = 0;
-  for (const relative of NOTE_SMOKE_SOURCES) {
-    const source = path.join(repo, relative);
-    const target = path.join(root, relative);
-    if (statSync(source).isDirectory()) {
-      mkdirSync(target, { recursive: true });
-      copied += copyTree(source, target);
-      continue;
-    }
-    writeFileSync(target, readFileSync(source));
-    copied++;
-  }
-  if (copied === 0) return "no product source was copied into the fixture root";
+  if (copyProduct(root, NOTE_SMOKE_SOURCES) === 0) return "no product source was copied into the fixture root";
   const file = path.join(root, "internal", "cli", "note_anki.go");
   const source = readFileSync(file, "utf8");
   const anchor = "if deck != expected && !containsString(unexpected, deck) {";
@@ -823,6 +865,31 @@ func main() {
         failures.some((line) => line.startsWith("practice: report --json has no attempt 1 "))
           ? null
           : `desktop-smoke: did not report the missing attempt: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      gate: desktopUx,
+      label: "a stylesheet that removes focus outlines and paints Today's title in its background colour",
+      files: {},
+      prepare: hideFocusAndTitle,
+      postFail: (failures) => {
+        const earlier = failures.find((line) => /go build|bun build|viewport precondition|probes:|script failed|seed:/.test(line));
+        if (earlier) return `desktop-ux: the mutated stylesheet broke an earlier stage: ${earlier}`;
+        if (!failures.some((line) => line.startsWith("no-focus-indicator "))) return "desktop-ux: did not report no-focus-indicator";
+        if (!failures.some((line) => line.startsWith("contrast-fail ") && line.includes("hero-title"))) {
+          return "desktop-ux: did not report contrast-fail on the hero title";
+        }
+        return null;
+      },
+    },
+    {
+      gate: desktopUx,
+      label: "a window whose page area is not the size asked for",
+      files: {},
+      prepare: shrinkTheViewport,
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("viewport precondition: ") && line.includes("1280x800") && line.includes("1264x784"))
+          ? null
+          : `desktop-ux: did not report the viewport precondition: ${failures.slice(0, 3).join("; ")}`,
     },
   ];
 }

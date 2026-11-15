@@ -43,19 +43,79 @@ type NoteDraft struct {
 	Limits         []string   `json:"limits"`
 }
 
-// NotePreview is the card rendered with the real note model: HTML is the
-// rendered card, CSS the model stylesheet. The window shows it in a sandboxed
-// frame.
+// NotePreview is the card rendered with the real note model. Question and
+// Answer are the complete documents Anki would show, light and night: the
+// same templates, the same stylesheet and the same body classes, so the
+// window only places them in a sandboxed frame. HTML and CSS are the answer
+// side's body and the model stylesheet on their own.
 type NotePreview struct {
-	DraftID    int64      `json:"draft_id"`
-	Fields     NoteFields `json:"fields"`
-	Source     string     `json:"source"`
-	HTML       string     `json:"html"`
-	CSS        string     `json:"css"`
-	HTMLSHA256 string     `json:"html_sha256"`
-	Deck       string     `json:"deck"`
-	Model      string     `json:"model"`
-	Edited     bool       `json:"edited"`
+	DraftID  int64        `json:"draft_id"`
+	Fields   NoteFields   `json:"fields"`
+	Source   string       `json:"source"`
+	Question NoteCardSide `json:"question"`
+	Answer   NoteCardSide `json:"answer"`
+	HTML     string       `json:"html"`
+	CSS      string       `json:"css"`
+	// FieldsSHA256 identifies the exact field payload a push would send.
+	FieldsSHA256 string `json:"fields_sha256"`
+	// HTMLSHA256 is FieldsSHA256 under its earlier name, kept until the window
+	// reads fields_sha256; it never was a hash of the rendered HTML.
+	HTMLSHA256 string `json:"html_sha256"`
+	// CSSSHA256 identifies the model stylesheet, ModelVersion its design.
+	CSSSHA256    string `json:"css_sha256"`
+	ModelVersion int    `json:"model_version"`
+	Deck         string `json:"deck"`
+	Model        string `json:"model"`
+	Edited       bool   `json:"edited"`
+}
+
+// NoteCardSide is one side of the card as complete documents for an
+// <iframe srcdoc>: Light without and Night with Anki's night-mode classes.
+type NoteCardSide struct {
+	Light string `json:"light"`
+	Night string `json:"night"`
+}
+
+// NoteRefinePreview shows what an AI refinement of a draft would send before
+// anything leaves the machine: who receives it, whether the endpoint is
+// external, the verification and credential state, the consent covering this
+// provider, the exact messages with their hash and size, and the budget slot.
+// Messages are empty while consent withholds the source text.
+type NoteRefinePreview struct {
+	DraftID       int64          `json:"draft_id"`
+	Provider      string         `json:"provider"`
+	Model         string         `json:"model"`
+	Endpoint      string         `json:"endpoint"`
+	External      bool           `json:"external"`
+	Verified      bool           `json:"verified"`
+	TextChatState string         `json:"text_chat_state,omitempty"`
+	Action        string         `json:"action,omitempty"`
+	Credential    Credential     `json:"credential"`
+	Consent       CoachConsent   `json:"consent"`
+	Unanswered    bool           `json:"unanswered"`
+	Messages      []CoachMessage `json:"messages"`
+	MaxTokens     int            `json:"max_tokens"`
+	RequestSHA256 string         `json:"request_sha256"`
+	RequestBytes  int            `json:"request_bytes"`
+	Budget        BudgetProvider `json:"budget"`
+	Limits        []string       `json:"limits"`
+}
+
+// NoteRefinement is an advisory suggestion for a draft's front and back. It
+// is never applied by itself: the learner copies what they keep into the
+// fields and accepts them with AcceptNote. Tactic is the draft's own.
+type NoteRefinement struct {
+	State         string     `json:"state"`
+	DraftID       int64      `json:"draft_id"`
+	RefinementID  int64      `json:"refinement_id"`
+	Suggestion    NoteFields `json:"suggestion"`
+	Provider      string     `json:"provider"`
+	Model         string     `json:"model"`
+	Advisory      bool       `json:"advisory"`
+	RequestSHA256 string     `json:"request_sha256"`
+	RequestBytes  int        `json:"request_bytes"`
+	LatencyMS     int64      `json:"latency_ms"`
+	Limits        []string   `json:"limits"`
 }
 
 // Note is one accepted local note with its Anki state (local, queued,
@@ -128,4 +188,9 @@ type NotePush struct {
 	Notes    []NotePushItem `json:"notes"`
 	Error    *Error         `json:"error"`
 	Limits   []string       `json:"limits"`
+	// ModelUpdated: an earlier Pass Quest card design in Anki was replaced in
+	// place. ModelCustomized: the note type was changed in Anki and left as
+	// it is; the notes were still pushed.
+	ModelUpdated    bool `json:"model_updated"`
+	ModelCustomized bool `json:"model_customized"`
 }

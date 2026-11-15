@@ -36,8 +36,8 @@ passquest note push --endpoint http://127.0.0.1:8765 --force
 
 Commands that open the database (`propose`, `preview`, `accept`, `skip`, `show`, `export` and `push`)
 accept `--db PATH`; the default is `$PASSQUEST_DB` or `./.passquest/passquest.sqlite`.
-`note model` does not open a database and takes no `--db`; it prints the deck, model, CSS, card
-template and a rendered sample.
+`note model` does not open a database and takes no `--db`; it prints the deck, model and its
+version, CSS, card template and a rendered sample.
 
 ## What earns a note
 
@@ -165,7 +165,8 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
   text and AnkiConnect is a local bridge.
 - The host accepts one versioned document with at most 50 allow-listed actions: `version`,
   `createDeck`, `modelNames`, `createModel`, `addNote`, `updateNoteFields`, `notesInfo`,
-  `cardsInfo`. It refuses redirects and has no database or filesystem access. A push with more than
+  `cardsInfo`, `modelStyling`, `modelTemplates`, `updateModelStyling`, `updateModelTemplates`. The Go
+  allowlist and the host's are the same set (a Go test compares them). It refuses redirects and has no database or filesystem access. A push with more than
   50 pending notes splits its writes into consecutive documents of at most 50 actions, preserving
   queue order; a chunk whose endpoint does not answer stays queued. Each completed chunk is recorded
   before the next call, so a later failure cannot discard an acknowledged note id.
@@ -175,6 +176,25 @@ which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and 
   push of a larger collection fail before any update.
 - `version` must be at least 6. The deck `Pass Quest` is created when missing; the model
   `PassQuest Note` is created when `modelNames` does not contain it.
+- **An existing model's design is read, and upgraded only when it is Pass Quest's own**
+  (Q-0012-02). When the model exists, the push reads `modelStyling` and `modelTemplates` once:
+  - the stylesheet and the single `PassQuest` template equal this build's → nothing more is sent;
+  - each part equals a known earlier version (line endings and surrounding whitespace are ignored; a
+    deck left half-updated by an interrupted update also qualifies) → one `updateModelTemplates` and
+    one `updateModelStyling` replace them in place, and the push document reports
+    `model_updated: true` (human: `Card design: the earlier Pass Quest design in Anki was updated in
+    place.`);
+  - anything else — an edited stylesheet or template, a renamed template, a second card type — is the
+    learner's design: it is never overwritten, the document reports `model_customized: true` (human:
+    `Card design: the note type was changed in Anki, so Pass Quest left its design as it is.`) and the
+    notes are pushed as usual.
+  Both fields are omitted when false. The model name, field names and order, template name and field
+  HTML never change, so an upgrade cannot turn a pushed note into a `fields_changed` or
+  `model_mismatch` conflict, and the deck read-back is unaffected. A read or update that fails is
+  `anki_error`/`anki_unavailable` (exit 3) before any note is written; an endpoint that stops answering
+  leaves the notes queued. The model is touched only by a push that has pending work.
+- A pushed note that Anki reports under another note type is a `model_mismatch` **conflict**
+  (exit 3): nothing is written and the note stays queued until the note type matches again.
 - **The deck is read back, not assumed.** After the writes of one push are recorded, every note that
   write touched is verified: `notesInfo` for the cards of notes whose cards are not already known,
   then `cardsInfo` for those cards (chunked at 50 like every other action). `addNote` carrying
@@ -240,13 +260,46 @@ cannot name a deck records none — a `deck_mismatch` from an unreadable card is
 
 ## Model and template
 
-Deck `Pass Quest`, model `PassQuest Note`, fields in order `Front`, `Back`, `Tactic`, `Source`.
+Deck `Pass Quest`, model `PassQuest Note`, fields in order `Front`, `Back`, `Tactic`, `Source`, one card
+template named `PassQuest`. The design is versioned (`model_version` in `note model --json`); this build
+ships version 2, the "C · Stage" card of goal 0012. Every released version's stylesheet and templates
+are frozen and their SHA-256 pinned (`KnownModelHashes` in `internal/note/model.go`, and again in
+`note-smoke`), which is what makes an in-place upgrade recognisable.
 
-The CSS uses a system font stack (`-apple-system`, `BlinkMacSystemFont`, `Segoe UI`, `Roboto`,
-`Helvetica Neue`, `Arial`, `sans-serif`), comfortable line height, `max-width: 42rem`, and
-`overflow-wrap: anywhere`; it has no fixed height and no `overflow: hidden`, so a long imported
-sentence wraps at phone width. A small `.nightMode` contrast pair is included. There is no external
-font, stylesheet, script, image or URL. `note model` prints the whole template and a rendered sample.
+- **Front:** the recognition prompt alone, in a reading serif on a paper sheet. The tactic name is on
+  the back only, so the prompt does not name the category of its answer (Q-0012-04).
+- **Back:** the prompt again (`{{FrontSide}}`), `<hr id="answer">`, the meaning and the example (the
+  `pq-meaning`/`pq-example` field HTML is unchanged), and a footer with the tactic and the source label.
+- **Stylesheet:** system fonts only — UI `-apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+  "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`; reading `"Sitka Text", "Iowan Old Style",
+  Charter, Georgia, "Noto Serif", serif`; source `"Cascadia Mono", "SF Mono", Consolas, Menlo, "Roboto
+  Mono", monospace`. Colours are tokens on `.card`; Anki's night mode is matched by the compound
+  selectors `.card.nightMode`/`.card.night_mode` (the classes sit on the card's own `<body>`) with the
+  descendant form kept as a fallback, never by `prefers-color-scheme`. Every text colour reaches 4.5:1 on
+  both surfaces in both modes and no text is below 12 px (Go tests). Below 480 px the sheet loses its
+  border and padding shrinks; there is no fixed width, fixed height, `overflow: hidden` or
+  `min-height`, so a long imported sentence wraps at 320 px.
+- No external font, stylesheet, script, image, URL or event handler (Go tests and `note-smoke`).
+  `note model` prints the whole template and a rendered sample.
+
+The desktop preview renders the same bytes: `note.RenderSides` substitutes the field HTML into the two
+templates in one pass (a value is never expanded again, as in Anki), and `note.CardDocument` wraps a
+side as Anki does — the model stylesheet and `<body class="card card1">` (plus `nightMode night_mode`
+at night) around `<div id="qa">`. The window's `PreviewNote` returns those documents for the question
+and the answer, light and night, with `css_sha256` and `model_version`.
+
+## AI refinement in the window
+
+The desktop window offers the refinement of `note propose --refine` for an open draft in two steps.
+`RefineNotePreview` builds the exact request the refinement would send — provider and model, whether
+the endpoint is external, the `text.chat` verification, whether the credential is present, the
+consent that covers this provider, the messages with their SHA-256 and size, and the provider's budget
+row — and sends nothing; while consent withholds the source text the messages are left out rather than
+shown. `RefineNote` then runs the same code as `note propose --refine` on that draft (verification,
+credential, provider-scoped consent, budget reservation, recorded failure with the same codes) and
+returns the suggested front and back as an advisory suggestion. The window never applies it: the
+learner copies what they keep into the fields and accepts them with the usual accept, which records a
+`refined` note when the suggestion is kept as it is and an `edited` one otherwise.
 
 ## Exit codes
 
@@ -259,6 +312,12 @@ font, stylesheet, script, image or URL. `note model` prints the whole template a
 
 ## Limits
 
+- The card design (version 2) is checked by Go tests and the loopback stub only. How Anki Desktop,
+  AnkiDroid and AnkiMobile render it in light and night mode at phone width, which element carries the
+  night-mode classes on each client, and whether `updateModelStyling`/`updateModelTemplates` cause a
+  full sync are owner evidence: no Anki installation exists on the development machine.
+- An exported file carries no stylesheet: a learner who only imports the TSV keeps whatever design the
+  note type in their collection has.
 - A real Anki Desktop write and AnkiWeb/mobile synchronization are **owner-supplied evidence**. This
   machine has no Anki binary or endpoint; the adapter is proven against a loopback AnkiConnect stub.
   CI cannot reach a learner's desktop on any OS.

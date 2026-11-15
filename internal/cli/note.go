@@ -642,6 +642,7 @@ func runNoteModel(args []string, opt Options) int {
 		State:         "model",
 		Deck:          model.Deck,
 		Model:         model.Name,
+		ModelVersion:  model.Version,
 		Fields:        model.Fields,
 		CSS:           model.CSS,
 		FrontTemplate: model.FrontTemplate,
@@ -717,21 +718,7 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 		}
 	}()
 
-	material := note.RefineMaterial{}
-	if input.Question != nil {
-		material.QuestionStem = input.Question.Stem
-	}
-	if deterministic.Unanswered {
-		// The raw passage can contain the keyed option; send only the example
-		// the deterministic draft already deemed pre-answer-visible.
-		material.PassageText = deterministic.Example
-	} else {
-		material.PassageText = input.PassageText
-		if input.Question != nil {
-			material.Evidence = input.Question.Evidence
-		}
-	}
-	request, err := note.BuildRefineRequest(cfg, deterministic, material)
+	request, err := note.BuildRefineRequest(cfg, deterministic, noteRefineMaterial(input, deterministic))
 	if err != nil {
 		return draft, nil, usageError(opt, jsonMode, "invalid_config", err.Error())
 	}
@@ -812,6 +799,27 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 	}
 	view := noteRefinementViewOf(saved)
 	return updated, &view, 0
+}
+
+// noteRefineMaterial is the context a refinement request carries. The window's
+// refinement preview builds the same request from it, so what it shows is what
+// would be sent.
+func noteRefineMaterial(input note.Input, deterministic note.Draft) note.RefineMaterial {
+	material := note.RefineMaterial{}
+	if input.Question != nil {
+		material.QuestionStem = input.Question.Stem
+	}
+	if deterministic.Unanswered {
+		// The raw passage can contain the keyed option; send only the example
+		// the deterministic draft already deemed pre-answer-visible.
+		material.PassageText = deterministic.Example
+	} else {
+		material.PassageText = input.PassageText
+		if input.Question != nil {
+			material.Evidence = input.Question.Evidence
+		}
+	}
+	return material
 }
 
 func noteRefineFailure(st *store.Store, draft store.NoteDraft, record store.NoteRefinement, reservation int64, opt Options, jsonMode bool) (store.NoteDraft, *noteRefinementView, int) {

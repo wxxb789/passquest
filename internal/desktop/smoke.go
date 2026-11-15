@@ -6,10 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/egoist/mygo"
 )
 
 // The smoke hook drives one launch from a file, never from a socket: with
@@ -18,6 +22,12 @@ import (
 // written to EnvResult as {"ok":true,"value":…} or {"ok":false,"error":"…"};
 // then the app quits with exit code 0. Only a result that cannot be written
 // makes the exit code non-zero.
+
+// EnvContentSize=WxH (smoke launches only) makes the page area W by H DIPs
+// and bypasses the remembered window state, so a layout audit measures the
+// viewport it asked for rather than whatever size the last window had
+// (Q-0012-05). It is read only when EnvScript is set.
+const EnvContentSize = "PASSQUEST_DESKTOP_CONTENT_SIZE"
 
 // smokeTimeout bounds the script; smokeLoadGrace is the extra time the page
 // gets to finish loading before the hook gives up on it.
@@ -40,6 +50,8 @@ type smokeHook struct {
 	once        sync.Once
 	writeFailed atomic.Bool
 	quit        func()
+	// contentW and contentH are EnvContentSize; zero leaves the window as it is.
+	contentW, contentH int
 }
 
 // Smoke phases. The hook waits for the page; exactly one of the first load
@@ -98,12 +110,44 @@ func smokeFromEnv(getenv func(string) string, quit func()) (*smokeHook, error) {
 		return nil, fmt.Errorf("%s is set but %s is not", EnvScript, EnvResult)
 	}
 	h := &smokeHook{resultPath: resultPath, timeout: smokeTimeout, loadTimeout: smokeTimeout + smokeLoadGrace, quit: quit}
+	if size := strings.TrimSpace(getenv(EnvContentSize)); size != "" {
+		w, ht, err := parseContentSize(size)
+		if err != nil {
+			return nil, err
+		}
+		h.contentW, h.contentH = w, ht
+	}
 	script, err := os.ReadFile(scriptPath)
 	if err != nil {
 		h.readErr = fmt.Errorf("read script: %w", err)
 	}
 	h.script = string(script)
 	return h, nil
+}
+
+var contentSizePattern = regexp.MustCompile(`^([0-9]{1,5})x([0-9]{1,5})$`)
+
+// parseContentSize reads EnvContentSize: two positive integers joined by x.
+func parseContentSize(value string) (int, int, error) {
+	m := contentSizePattern.FindStringSubmatch(value)
+	if m == nil {
+		return 0, 0, fmt.Errorf("%s=%q: want WIDTHxHEIGHT, for example 1280x800", EnvContentSize, value)
+	}
+	w, _ := strconv.Atoi(m[1])
+	h, _ := strconv.Atoi(m[2])
+	if w == 0 || h == 0 {
+		return 0, 0, fmt.Errorf("%s=%q: width and height must be positive", EnvContentSize, value)
+	}
+	return w, h, nil
+}
+
+// sizeWindow applies EnvContentSize to the main window's options: the size is
+// the page area's and no window state is restored or saved.
+func (h *smokeHook) sizeWindow(o *mygo.WindowOptions) {
+	if h == nil || h.contentW == 0 {
+		return
+	}
+	o.Width, o.Height, o.UseContentSize, o.StateKey = h.contentW, h.contentH, true, ""
 }
 
 // run evaluates the script with eval under the hook's timeout and finishes.

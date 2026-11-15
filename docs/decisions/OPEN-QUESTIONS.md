@@ -1273,3 +1273,75 @@ Entry format:
 - Options considered: (A) route the CLI through the same workspace reconciler; (B) leave as is.
 - Default taken: (B) for this goal.
 - Revisit when: a follow-up fix confirms or refutes the CLI behaviour with a test.
+
+### Q-0011-16 — May a goal merge when the local gate fails only for a missing npm package?
+- Status: resolved
+- Resolution: (owner, 2026-11-15) yes. The development machine can reach only a corporate npm feed proxy that
+  publishes packages about seven days after the public registry, so the locked Pi Durable packages
+  (`@earendil-works/*@1.5.1`, 24 packages in all) are not yet installable there and `agent smoke` and
+  `provider smoke` fail locally with lines byte-identical to unmodified `main`. A goal may merge when every
+  other gate passes locally on the merged tree and CI passes all gates on ubuntu, macOS and Windows at the
+  same head, with the exception named in the merge commit. PR #24 (goal 0011) merged under this rule.
+- Context: the merge rule of Q-0000-01 / Q-0011-00 requires a local gate re-run; the registry is not
+  switchable on this network and the lock file must not be downgraded to make a local run pass.
+- Options considered: (A) merge on local-minus-environment plus CI; (B) wait for the feed; (C) obtain the
+  packages another way.
+- Default taken: none — the owner chose (A).
+- Revisit when: the feed carries the locked versions; then the local gate must be fully green again.
+
+### Q-0012-00 — Which design direction does goal 0012 refine?
+- Status: resolved
+- Resolution: (owner, 2026-11-14) "C · Stage" (`design/prototypes/c-stage.html`), chosen over "A · Folio" and
+  "B · Instrument" when the owner asked for the remaining goals to be completed in that design language.
+- Context: goal 0012 asked for the visual language to be refined with Opus and learner feedback rather than
+  frozen early; three self-contained prototypes were produced for the choice.
+- Options considered: (A) Folio; (B) Instrument; (C) Stage.
+- Default taken: none — the owner chose (C).
+- Revisit when: representative learner feedback contradicts the direction.
+
+### Q-0012-01 — How is visual and interaction quality gated?
+- Status: decided(default taken)
+- Context: the goal requires review "based on actual user flows and rendered screens, not aesthetic assertions
+  alone"; screenshots alone are not evidence under the harness rules.
+- Options considered: (A) a `desktop-ux` gate auditing the real window per route × theme × language × size,
+  with an allowlist that may only shrink; (B) screenshots reviewed by hand; (C) extend `desktop-smoke`.
+- Default taken: (A). Overflow, coverage, primary-action visibility, composited contrast, font-size floor,
+  focus and motion are measured in the page; every run first proves its probes on planted defects. At close the
+  allowlist holds only entries whose reason is exam content or a learner-entered value.
+- Revisit when: a check proves flaky across CI platforms, or the owner wants pixel-level screenshot diffs.
+
+### Q-0012-02 — How does an existing deck get the new card design?
+- Status: decided(default taken)
+- Context: the note model is created once and never updated (goal 0007); a new model name would turn every
+  pushed note into `model_mismatch` and need a schema change in Anki.
+- Options considered: (A) update styling and templates in place under the same model name, only when the deck
+  holds a byte-identical earlier version; (B) a new model name and a note-type migration; (C) leave old decks.
+- Default taken: (A). A model the learner customised in Anki is reported and never overwritten; fields, field
+  order, model name and template name do not change, so conflict detection and the deck claim of goal 0014 are
+  unaffected.
+- Revisit when: real Anki evidence shows a template update forces a full sync.
+
+### Q-0012-03 — Is there a free-text coach composer?
+- Status: decided(default taken)
+- Context: the prototype shows a reply box under the coach; the tutor domain accepts only a mode
+  (`explain`/`probe`/`micro_lesson`) per attempt.
+- Options considered: (A) no composer; (B) a composer mapped to a new tutor request kind.
+- Default taken: (A). A new request kind needs its own prompt, budget and consent contract.
+- Revisit when: a goal defines follow-up questions as a tutor capability.
+
+### Q-0012-04 — Does the card front show the tactic name?
+- Status: decided(default taken)
+- Context: the prototype card shows the tactic as an eyebrow on the front; on a recall card that names the
+  category of the answer before the learner tries.
+- Options considered: (A) tactic on the back only; (B) on the front.
+- Default taken: (A).
+- Revisit when: the owner prefers the cue on the front.
+
+### Q-0012-05 — Which window sizes are measured?
+- Status: decided(default taken)
+- Context: the brief targets 1440×900 and 1280×800; the development display (1536×864 DIP) caps a 1440-wide
+  content area at 844 px high, and the window size is otherwise restored from MyGo's window state.
+- Options considered: (A) 1280×800 and 1440×844 with a smoke-only content-size switch; (B) 1280×800 only.
+- Default taken: (A). The audit asserts the real viewport before measuring and fails rather than measuring a
+  different size.
+- Revisit when: CI or the owner's display can host 1440×900.

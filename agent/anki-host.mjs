@@ -20,6 +20,12 @@ const ALLOWED_ACTIONS = new Set([
   "updateNoteFields",
   "notesInfo",
   "cardsInfo",
+  // The note model's stylesheet and templates: read on every push, replaced
+  // only when they are a known earlier Pass Quest version (docs/notes.md).
+  "modelStyling",
+  "modelTemplates",
+  "updateModelStyling",
+  "updateModelTemplates",
 ]);
 
 function failure(message) {

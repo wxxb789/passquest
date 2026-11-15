@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,6 +20,42 @@ const FORBIDDEN_PHONE_CLAIMS = [
   "synchronized to ankiweb",
   "phone is up to date",
 ];
+
+/**
+ * The pinned SHA-256 of each part of every released note model, the same values
+ * as `KnownModelHashes` in internal/note/model.go. Changing the card design
+ * means a new version, not a new value here.
+ */
+const MODEL_HASHES = {
+  1: {
+    css: "28ec8543f2441a8fdd19b252342ba390cfe56416d508b1cc58d09f05d8186d33",
+    front: "ca10ec17b38342837005f213fc2c1b6ac9ac30b08bd688fae8b8b8a328bb1602",
+    back: "839a9ebad5d4170f068652cf09cbca583e59d3348f50591775532901d314e386",
+  },
+  2: {
+    css: "2d9b3b204806e56f74dfe25603f809a09b8a1fcd16524c8956a5325ee00fc942",
+    front: "dabec57625188e89e048dab33b395300b97fda2af31204c45cdba12b895f1f0d",
+    back: "29be13351ae0b754015550124a411dca256eb5feca9c8237ec40201e3f4803cc",
+  },
+} as const;
+const CURRENT_MODEL_VERSION = 2;
+const MODEL_NAME = "PassQuest Note";
+const TEMPLATE_NAME = "PassQuest";
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+/**
+ * The frozen version 1 design, read from the Go constants that keep it so the
+ * stub can hold a deck created by an earlier build. The pinned hashes prove the
+ * bytes are the released ones.
+ */
+function versionOneDesign(root: string): { css: string; front: string; back: string } {
+  const source = readFileSync(path.join(root, "internal", "note", "model.go"), "utf8").replace(/\r\n/g, "\n");
+  const literal = (name: string) => new RegExp(`\\b${name}\\s*=\\s*\`([^\`]*)\``).exec(source)?.[1] ?? "";
+  return { css: literal("modelCSSV1"), front: literal("frontTemplateV1"), back: literal("backTemplateV1") };
+}
 
 function parse(raw: string): unknown {
   try {
@@ -221,6 +258,28 @@ export const noteSmoke: Gate = {
       }
       check(!/<\/?(link|script|img|iframe)/i.test(`${css}${stringField(model.doc, "front_template")}${stringField(model.doc, "back_template")}`), "model references an external element");
       check((stringField(model.doc, "rendered_sample") ?? "").includes("pq-front"), "model rendered sample is empty");
+      // The design is pinned: this build ships version 2, byte for byte.
+      const frontTemplate = stringField(model.doc, "front_template") ?? "";
+      const backTemplate = stringField(model.doc, "back_template") ?? "";
+      check(numberField(model.doc, "model_version") === CURRENT_MODEL_VERSION, `model version = ${String(field(model.doc, "model_version"))}`);
+      check(sha256(css) === MODEL_HASHES[2].css, `model CSS sha256 = ${sha256(css)}`);
+      check(sha256(frontTemplate) === MODEL_HASHES[2].front, `front template sha256 = ${sha256(frontTemplate)}`);
+      check(sha256(backTemplate) === MODEL_HASHES[2].back, `back template sha256 = ${sha256(backTemplate)}`);
+      const modelText = `${css}\n${frontTemplate}\n${backTemplate}`.toLowerCase();
+      for (const forbidden of ["@font-face", "javascript:", "//", "position: fixed"]) {
+        check(!modelText.includes(forbidden), `model contains ${forbidden}`);
+      }
+      check(!/\bon\w+\s*=/.test(modelText), "model carries an event handler attribute");
+      check(!/<\s*\/?\s*(object|embed|svg|style|base|meta)\b/.test(modelText), "model embeds an active element");
+      check(css.includes(".card.nightMode") && css.includes(".card.night_mode"), "model CSS has no compound night-mode selectors");
+      check(!frontTemplate.includes("{{Tactic}}"), "the card front names the tactic (Q-0012-04)");
+      const v1 = versionOneDesign(ctx.root);
+      check(
+        sha256(v1.css) === MODEL_HASHES[1].css &&
+          sha256(v1.front) === MODEL_HASHES[1].front &&
+          sha256(v1.back) === MODEL_HASHES[1].back,
+        "the frozen version 1 design in internal/note/model.go is not the released bytes",
+      );
 
       // First push creates the deck and model, then adds the note.
       const beforePush = actions.length;
@@ -246,7 +305,11 @@ export const noteSmoke: Gate = {
         "createModel field order",
       );
       check(stringField(createModel!.params, "css") === css, "createModel CSS differs from note model");
+      check(arrayField(createModel!.params, "cardTemplates").length === 1, "createModel sends more than one card template");
       const template = asRecord(arrayField(createModel!.params, "cardTemplates")[0]);
+      check(stringField(template, "Name") === TEMPLATE_NAME, `createModel template name = ${String(stringField(template, "Name"))}`);
+      check(stringField(template, "Front") === frontTemplate, "createModel front template differs from note model");
+      check(stringField(template, "Back") === backTemplate, "createModel back template differs from note model");
       check(
         (stringField(template, "Front") ?? "").includes("{{Front}}") &&
           (stringField(template, "Back") ?? "").includes("{{FrontSide}}") &&
@@ -279,7 +342,8 @@ export const noteSmoke: Gate = {
       const update = await callJSON(["note", "push", "--endpoint", endpoint]);
       check(update.code === 0, `update push exit = ${update.code}: ${update.stderr}`);
       check(
-        actionNames(beforeUpdate).join(",") === "version,createDeck,modelNames,notesInfo,updateNoteFields,cardsInfo",
+        actionNames(beforeUpdate).join(",") ===
+          "version,createDeck,modelNames,modelStyling,modelTemplates,notesInfo,updateNoteFields,cardsInfo",
         `update push actions = ${actionNames(beforeUpdate).join(",")}`,
       );
       check((notes.get(101)?.Front ?? "") === "closes on Sunday", "update did not reach the same Anki note");
@@ -322,6 +386,105 @@ export const noteSmoke: Gate = {
       );
       const afterDrain = await callJSON(["note", "push", "--endpoint", endpoint]);
       check(field(afterDrain.doc, "state") === "idle", "a drained note was sent twice");
+
+      // A deck whose note type still has the version 1 design is upgraded in
+      // place once. Note 101 was pushed with the same field bytes a version 1
+      // build writes (the field HTML did not change), so it must not become a
+      // fields_changed conflict.
+      const design = anki.modelDesigns.get(MODEL_NAME);
+      check(
+        design?.css === css &&
+          design.templates[TEMPLATE_NAME]?.Front === frontTemplate &&
+          design.templates[TEMPLATE_NAME]?.Back === backTemplate,
+        "the stub does not hold the created model's design",
+      );
+      anki.modelDesigns.set(MODEL_NAME, { css: v1.css, templates: { [TEMPLATE_NAME]: { Front: v1.front, Back: v1.back } } });
+      await callJSON(["note", "accept", "--front", "design upgrade one"]);
+      const beforeUpgrade = actions.length;
+      const upgraded = await callJSON(["note", "push", "--endpoint", endpoint]);
+      check(upgraded.code === 0, `upgrade push exit = ${upgraded.code}: ${upgraded.stderr}`);
+      check(field(upgraded.doc, "state") === "pushed", `upgrade push state = ${String(field(upgraded.doc, "state"))}`);
+      check(field(upgraded.doc, "model_updated") === true, "the version 1 design was not reported as updated");
+      check(field(upgraded.doc, "model_created") === false, "the upgrade created a second model");
+      check(
+        actionNames(beforeUpgrade).join(",") ===
+          "version,createDeck,modelNames,modelStyling,modelTemplates,updateModelTemplates,updateModelStyling,notesInfo,updateNoteFields,cardsInfo",
+        `upgrade push actions = ${actionNames(beforeUpgrade).join(",")}`,
+      );
+      const upgradeStyling = actions.slice(beforeUpgrade).find((item) => item.action === "updateModelStyling");
+      const upgradeTemplates = actions.slice(beforeUpgrade).find((item) => item.action === "updateModelTemplates");
+      check(stringField(asRecord(upgradeStyling?.params.model), "name") === MODEL_NAME, "updateModelStyling names another model");
+      check(stringField(asRecord(upgradeStyling?.params.model), "css") === css, "updateModelStyling does not send note model CSS");
+      const sentTemplates = asRecord(asRecord(upgradeTemplates?.params.model).templates);
+      check(
+        Object.keys(sentTemplates).join(",") === TEMPLATE_NAME &&
+          stringField(asRecord(sentTemplates[TEMPLATE_NAME]), "Front") === frontTemplate &&
+          stringField(asRecord(sentTemplates[TEMPLATE_NAME]), "Back") === backTemplate,
+        "updateModelTemplates does not send exactly the note model template",
+      );
+      const upgradedDesign = anki.modelDesigns.get(MODEL_NAME);
+      check(
+        upgradedDesign?.css === css && upgradedDesign.templates[TEMPLATE_NAME]?.Front === frontTemplate,
+        "the deck does not hold the current design after the upgrade",
+      );
+      check(numberField(arrayField(upgraded.doc, "notes")[0], "anki_note_id") === 101, "the upgrade push wrote another note");
+      check((notes.get(101)?.Front ?? "") === "design upgrade one", "the upgrade push did not update the note");
+      check(anki.models.filter((name) => name === MODEL_NAME).length === 1, "the upgrade created a second note type");
+
+      await callJSON(["note", "accept", "--front", "design upgrade two"]);
+      const beforeSecondUpgrade = actions.length;
+      const secondUpgrade = await callJSON(["note", "push", "--endpoint", endpoint]);
+      check(field(secondUpgrade.doc, "state") === "pushed", "the push after the upgrade did not push");
+      check(field(secondUpgrade.doc, "model_updated") === undefined, "the current design was reported as updated again");
+      check(
+        !actionNames(beforeSecondUpgrade).some((name) => name.startsWith("updateModel")),
+        `the current design was updated again: ${actionNames(beforeSecondUpgrade).join(",")}`,
+      );
+
+      // A design the learner customised in Anki is reported, never
+      // overwritten, and the note still lands.
+      const customCSS = `${css}\n.card { font-size: 30px; }`;
+      upgradedDesign!.css = customCSS;
+      await callJSON(["note", "accept", "--front", "customised design"]);
+      const beforeCustom = actions.length;
+      const customised = await callJSON(["note", "push", "--endpoint", endpoint]);
+      check(customised.code === 0, `customised push exit = ${customised.code}: ${customised.stderr}`);
+      check(field(customised.doc, "state") === "pushed", "a customised design stopped the push");
+      check(field(customised.doc, "model_customized") === true, "a customised design was not reported");
+      check(field(customised.doc, "model_updated") === undefined, "a customised design was reported as updated");
+      check(
+        !actionNames(beforeCustom).some((name) => name.startsWith("updateModel")),
+        `a customised design was overwritten: ${actionNames(beforeCustom).join(",")}`,
+      );
+      check(anki.modelDesigns.get(MODEL_NAME)?.css === customCSS, "the customised stylesheet changed");
+      check((notes.get(101)?.Front ?? "") === "customised design", "the note did not land under a customised design");
+      await callJSON(["note", "accept", "--front", "customised design again"]);
+      const humanCustom = await call(["note", "push", "--endpoint", endpoint]);
+      check(humanCustom.code === 0, `human customised push exit = ${humanCustom.code}`);
+      check(
+        humanCustom.stdout.includes("Card design: the note type was changed in Anki"),
+        "the human push does not state that the design was left alone",
+      );
+      upgradedDesign!.css = css;
+
+      // A note Anki reports under another note type is a model_mismatch
+      // conflict: nothing is written until the type matches again.
+      anki.noteModelName = "Basic";
+      await callJSON(["note", "accept", "--front", "mismatched model"]);
+      const beforeModelMismatch = actions.length;
+      const modelMismatch = await callJSON(["note", "push", "--endpoint", endpoint]);
+      check(modelMismatch.code === 3, `model mismatch exit = ${modelMismatch.code}`);
+      check(field(modelMismatch.failure, "state") === "conflict", "model mismatch is not a conflict");
+      const modelMismatchItem = arrayField(modelMismatch.failure, "notes")[0];
+      check(stringField(modelMismatchItem, "code") === "model_mismatch", `model mismatch code = ${String(stringField(modelMismatchItem, "code"))}`);
+      check((stringField(modelMismatchItem, "detail") ?? "").includes("Basic"), "model mismatch detail does not name the note type");
+      check(numberField(field(modelMismatch.failure, "counts"), "pending") === 1, "model mismatch did not keep the note queued");
+      check(!actionNames(beforeModelMismatch).includes("updateNoteFields"), "model mismatch wrote the note");
+      check((notes.get(101)?.Front ?? "") !== "mismatched model", "model mismatch changed the Anki note");
+      anki.noteModelName = null;
+      const modelMatched = await callJSON(["note", "push", "--endpoint", endpoint]);
+      check(field(modelMatched.doc, "state") === "pushed", "the note did not push once the note type matched");
+      check((notes.get(101)?.Front ?? "") === "mismatched model", "the matched push did not update the note");
 
       // An endpoint that accepts the write and files the card in another deck.
       const reportBeforeMismatch = (await callJSON(["report", "--json"])).stdout;

@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/note"
+	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
 )
@@ -84,7 +88,9 @@ func studioNoteDraft(view noteDraftView, plain notePlainView, advisory bool, lim
 
 // PreviewNote renders the draft with the real note model. Non-empty fields
 // are the learner's edits, sanitised exactly as `note accept` sanitises them;
-// empty fields keep the draft's values.
+// empty fields keep the draft's values. The card documents come from
+// note.RenderSides and note.CardDocument: the same templates and stylesheet a
+// push sends to Anki.
 func (w *Workspace) PreviewNote(draftID int64, fields studio.NoteFields) (studio.NotePreview, error) {
 	var preview studio.NotePreview
 	err := w.withStore(func(st *store.Store) error {
@@ -93,20 +99,220 @@ func (w *Workspace) PreviewNote(draftID int64, fields studio.NoteFields) (studio
 			return err
 		}
 		rendered := note.HTML(edited.Front, edited.Back, edited.Tactic, effective.Built.SourceLabel)
+		question, answer := note.RenderSides(rendered)
+		model := note.TemplateModel()
 		preview = studio.NotePreview{
-			DraftID:    effective.Draft.ID,
-			Fields:     edited,
-			Source:     effective.Built.SourceLabel,
-			HTML:       note.RenderCard(rendered),
-			CSS:        note.ModelCSS,
-			HTMLSHA256: rendered.Hash(),
-			Deck:       note.Deck,
-			Model:      note.ModelName,
-			Edited:     edited != studio.NoteFields{Front: effective.Front, Back: effective.Back, Tactic: effective.Tactic},
+			DraftID: effective.Draft.ID,
+			Fields:  edited,
+			Source:  effective.Built.SourceLabel,
+			Question: studio.NoteCardSide{
+				Light: note.CardDocument(question, model.CSS, false),
+				Night: note.CardDocument(question, model.CSS, true),
+			},
+			Answer: studio.NoteCardSide{
+				Light: note.CardDocument(answer, model.CSS, false),
+				Night: note.CardDocument(answer, model.CSS, true),
+			},
+			HTML:         answer,
+			CSS:          model.CSS,
+			FieldsSHA256: rendered.Hash(),
+			HTMLSHA256:   rendered.Hash(),
+			CSSSHA256:    note.CSSSHA256(),
+			ModelVersion: model.Version,
+			Deck:         note.Deck,
+			Model:        note.ModelName,
+			Edited:       edited != studio.NoteFields{Front: effective.Front, Back: effective.Back, Tactic: effective.Tactic},
 		}
 		return nil
 	})
 	return preview, err
+}
+
+// RefineNotePreview is what `note propose --refine` would send for this draft,
+// built by the same request builder, before anything leaves the machine:
+// provider and model, whether the endpoint is external, the text.chat
+// verification, the credential's presence, the consent that covers this
+// provider, the exact messages with their hash and size and the budget slot.
+// Nothing is sent or reserved. Messages stay empty while consent withholds the
+// source text, because that text must not be shown as if it would be sent.
+func (w *Workspace) RefineNotePreview(draftID int64) (studio.NoteRefinePreview, error) {
+	var preview studio.NoteRefinePreview
+	err := w.invoke(func(st *store.Store, opt Options) int {
+		draft, err := noteDraftFor(st, draftID)
+		if err != nil {
+			return noteCommandError(opt, true, err)
+		}
+		input, err := noteInputFromDraft(st, draft)
+		if err != nil {
+			return noteCommandError(opt, true, err)
+		}
+		built, err := note.Build(input)
+		if err != nil {
+			return noteCommandError(opt, true, err)
+		}
+		cfg, configured, err := st.TutorConfig()
+		if err != nil {
+			return internalError(opt, true, err)
+		}
+		if !configured {
+			return usageError(opt, true, "not_configured",
+				"no tutor provider is configured; run passquest tutor config --endpoint URL --model NAME, or omit --refine")
+		}
+		cfg, _, _, code := resolveActive(cfg, opt, true)
+		if code != 0 {
+			return code
+		}
+		request, err := note.BuildRefineRequest(cfg, built, noteRefineMaterial(input, built))
+		if err != nil {
+			return usageError(opt, true, "invalid_config", err.Error())
+		}
+		providerID := strings.TrimSpace(cfg.Provider)
+		view := tutorProviderViewOf(cfg, opt)
+		preview = studio.NoteRefinePreview{
+			DraftID:    draft.ID,
+			Provider:   providerID,
+			Model:      cfg.Model,
+			Endpoint:   cfg.Endpoint,
+			External:   !loopbackEndpoint(cfg.Endpoint),
+			Verified:   true,
+			Credential: studio.Credential{Env: view.CredentialEnv, Present: view.CredentialPresent},
+			Unanswered: built.Unanswered,
+			Messages:   []studio.CoachMessage{},
+			MaxTokens:  request.Chat.MaxTokens,
+			Limits:     noteLimits,
+		}
+		if providerID != "" {
+			index, err := loadVerificationIndex(st)
+			if err != nil {
+				return internalError(opt, true, err)
+			}
+			state := capabilityView(provider.CapTextChat, true, index.forModel(providerID, cfg.Model))
+			preview.TextChatState = renderCapability(state)
+			preview.Verified = state.Verified
+			if !state.Verified {
+				preview.Action = fmt.Sprintf("passquest model test %s/%s", providerID, cfg.Model)
+			}
+		}
+		// The note's own text needs the global decision (built.Withheld); the
+		// provider needs the consent that covers it, exactly as noteRefine checks.
+		consent := studio.CoachConsent{
+			PrivateSource: input.Target.Restricted,
+			SourceID:      input.Target.SourceID,
+			Required:      input.Target.Restricted && input.Target.SourceID != "",
+			Withheld:      append([]string{}, built.Withheld...),
+		}
+		consent.Granted = !consent.Required
+		if consent.Required && len(built.Withheld) == 0 {
+			event, ok, err := st.TutorConsent(input.Target.SourceID, providerID)
+			if err != nil {
+				return internalError(opt, true, err)
+			}
+			consent.Granted = ok && event.Granted
+		}
+		if consent.Granted {
+			consent.SourceTextShared = consent.PrivateSource
+			for _, message := range request.Chat.Messages {
+				preview.Messages = append(preview.Messages, studio.CoachMessage{Role: message.Role, Content: message.Content})
+			}
+			preview.RequestSHA256, preview.RequestBytes = note.RequestIdentity(request.Body)
+		} else {
+			for _, field := range []string{"front", "back", "passage", "question_stem", "evidence"} {
+				if !slices.Contains(consent.Withheld, field) {
+					consent.Withheld = append(consent.Withheld, field)
+				}
+			}
+		}
+		preview.Consent = consent
+		return 0
+	})
+	if err != nil {
+		return studio.NoteRefinePreview{}, err
+	}
+	budget, err := w.Budget()
+	if err != nil {
+		return studio.NoteRefinePreview{}, err
+	}
+	preview.Budget = budgetSlot(budget, preview.Provider)
+	return preview, nil
+}
+
+// RefineNote asks the active provider once for a better front and back,
+// through the same path as `note propose --refine` (noteRefine): the active
+// pair must be verified, the credential present and the consent must cover
+// the provider; a budget slot is reserved, and a provider failure is recorded
+// and returned with its typed code. The suggestion is advisory and is never
+// applied by the window: the learner copies what they keep into the fields and
+// accepts them with AcceptNote, which records an edited note when the fields
+// differ from the suggestion.
+func (w *Workspace) RefineNote(draftID int64) (studio.NoteRefinement, error) {
+	if err := w.requireNode(w.hostTutor); err != nil {
+		return studio.NoteRefinement{}, err
+	}
+	var refinement studio.NoteRefinement
+	err := w.invoke(func(st *store.Store, opt Options) int {
+		draft, err := noteDraftFor(st, draftID)
+		if err != nil {
+			return noteCommandError(opt, true, err)
+		}
+		input, err := noteInputFromDraft(st, draft)
+		if err != nil {
+			return noteCommandError(opt, true, err)
+		}
+		built, err := note.Build(input)
+		if err != nil {
+			return noteCommandError(opt, true, err)
+		}
+		if len(built.Withheld) > 0 {
+			return usageError(opt, true, "consent_required", noteConsentMessage(draft))
+		}
+		refined, view, code := noteRefine(st, draft, input, built, opt, true)
+		if code != 0 {
+			return code
+		}
+		records, err := st.NoteRefinements()
+		if err != nil {
+			return internalError(opt, true, err)
+		}
+		refinement = studio.NoteRefinement{
+			State:         "advisory",
+			DraftID:       refined.ID,
+			RefinementID:  view.ID,
+			Suggestion:    studio.NoteFields{Front: refined.RefinedFront, Back: refined.RefinedBack, Tactic: built.Tactic},
+			Model:         view.Model,
+			Advisory:      true,
+			RequestSHA256: view.RequestSHA256,
+			RequestBytes:  view.RequestBytes,
+			LatencyMS:     view.LatencyMS,
+			Limits:        noteLimits,
+		}
+		for _, record := range records {
+			if record.ID == view.ID {
+				refinement.Provider = record.Provider
+			}
+		}
+		return 0
+	})
+	return refinement, err
+}
+
+// invoke runs fn as one in-process command on a store opened for the call:
+// fn reports refusals exactly as the CLI does with --json, and a non-zero exit
+// becomes the studio error with the same code. It does not hold the write
+// lock, so fn may wait on a host process, as `tutor ask` does.
+func (w *Workspace) invoke(fn func(st *store.Store, opt Options) int) error {
+	st, err := w.open()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	var stdout, stderr bytes.Buffer
+	opt := w.opt
+	opt.Stdout = &stdout
+	opt.Stderr = &stderr
+	if code := fn(st, opt); code != 0 {
+		return commandResult{code: code, stdout: stdout.Bytes(), stderr: stderr.Bytes()}.err()
+	}
+	return nil
 }
 
 // noteEdit loads a draft's effective fields and applies sanitised edits.
@@ -246,12 +452,14 @@ func (w *Workspace) PushNotes(force bool) (studio.NotePush, error) {
 		return studio.NotePush{}, result.err()
 	}
 	push := studio.NotePush{
-		State:    doc.State,
-		Endpoint: doc.Endpoint,
-		Deck:     doc.Deck,
-		Model:    doc.Model,
-		Notes:    []studio.NotePushItem{},
-		Limits:   doc.Limits,
+		State:           doc.State,
+		Endpoint:        doc.Endpoint,
+		Deck:            doc.Deck,
+		Model:           doc.Model,
+		Notes:           []studio.NotePushItem{},
+		Limits:          doc.Limits,
+		ModelUpdated:    doc.ModelUpdated,
+		ModelCustomized: doc.ModelCustomized,
 	}
 	if err := convertJSON(doc.Counts, &push.Counts); err != nil {
 		return studio.NotePush{}, workspaceError(err)

@@ -346,6 +346,8 @@ func runNotePush(args []string, opt Options) int {
 			return noteAnkiFailure(opt, *jsonFlag, "anki_error", err.Error())
 		}
 		doc.ModelCreated = true
+	} else if code, stop := noteUpgradeModel(call, &doc, unreachable, opt, *jsonFlag); stop {
+		return code
 	}
 
 	// Read back the cards we already pushed so a learner edit is a conflict,
@@ -651,6 +653,71 @@ func runNotePush(args []string, opt Options) int {
 		return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
 	}
 	return report(0, nil)
+}
+
+// noteUpgradeModel reads the existing model's stylesheet and card template and
+// brings a known earlier Pass Quest version up to this build's design in
+// place (Q-0012-02). A model the learner changed in Anki is reported and never
+// overwritten; its notes are still pushed, because fields, field order, model
+// name and template name are unchanged. stop is true when the push ends here,
+// with that exit code.
+func noteUpgradeModel(call func([]anki.Action) (anki.HostResponse, error), doc *notePushDoc,
+	unreachable func(int, *errorBody, string) int, opt Options, jsonMode bool) (code int, stop bool) {
+	read, err := call([]anki.Action{
+		{Action: "modelStyling", Params: anki.ModelNameParams(note.ModelName)},
+		{Action: "modelTemplates", Params: anki.ModelNameParams(note.ModelName)},
+	})
+	if err != nil {
+		return noteAnkiFailure(opt, jsonMode, "anki_unavailable", err.Error()), true
+	}
+	if anki.IsUnreachable(read) {
+		return unreachable(0, nil, "endpoint did not answer while reading the model"), true
+	}
+	if err := noteResultOK(read, 0, "modelStyling"); err != nil {
+		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+	}
+	if err := noteResultOK(read, 1, "modelTemplates"); err != nil {
+		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+	}
+	css, err := anki.DecodeModelStyling(read.Results[0].Result)
+	if err != nil {
+		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+	}
+	templates, err := anki.DecodeModelTemplates(read.Results[1].Result)
+	if err != nil {
+		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+	}
+	// A second card type or a renamed template is the learner's design too.
+	state := note.ModelCustomized
+	if template, ok := templates[anki.TemplateName]; ok && len(templates) == 1 {
+		state = note.ClassifyModel(css, template.Front, template.Back)
+	}
+	switch state {
+	case note.ModelCurrent:
+		return 0, false
+	case note.ModelCustomized:
+		doc.ModelCustomized = true
+		return 0, false
+	}
+	model := note.TemplateModel()
+	updated, err := call([]anki.Action{
+		{Action: "updateModelTemplates", Params: anki.UpdateModelTemplatesParams(model.Name, model.FrontTemplate, model.BackTemplate)},
+		{Action: "updateModelStyling", Params: anki.UpdateModelStylingParams(model.Name, model.CSS)},
+	})
+	if err != nil {
+		return noteAnkiFailure(opt, jsonMode, "anki_unavailable", err.Error()), true
+	}
+	if anki.IsUnreachable(updated) {
+		return unreachable(0, nil, "endpoint did not answer while updating the model"), true
+	}
+	if err := noteResultOK(updated, 0, "updateModelTemplates"); err != nil {
+		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+	}
+	if err := noteResultOK(updated, 1, "updateModelStyling"); err != nil {
+		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+	}
+	doc.ModelUpdated = true
+	return 0, false
 }
 
 // noteDeckRead is the deck verdict for one written note: Matched is true only

@@ -197,6 +197,11 @@ func (s *Study) CoachAsk(attemptID int64, mode string) (studio.CoachReply, error
 	return call(s, func(ws *cli.Workspace) (studio.CoachReply, error) { return ws.CoachAsk(attemptID, mode) })
 }
 
+// CoachHistory lists the coach calls recorded for an attempt, with each advisory reply's text.
+func (s *Study) CoachHistory(attemptID int64) (studio.CoachHistory, error) {
+	return call(s, func(ws *cli.Workspace) (studio.CoachHistory, error) { return ws.CoachHistory(attemptID) })
+}
+
 // GrantConsent records consent to send a source to a provider ("" = every provider).
 func (s *Study) GrantConsent(sourceID, providerID string) (studio.Consent, error) {
 	return call(s, func(ws *cli.Workspace) (studio.Consent, error) { return ws.GrantConsent(sourceID, providerID) })
@@ -277,6 +282,16 @@ func (s *Study) OpenNoteDraft() (*studio.NoteDraft, error) {
 // PreviewNote renders the draft as the card Anki will show; empty fields keep the draft's values.
 func (s *Study) PreviewNote(draftID int64, fields studio.NoteFields) (studio.NotePreview, error) {
 	return call(s, func(ws *cli.Workspace) (studio.NotePreview, error) { return ws.PreviewNote(draftID, fields) })
+}
+
+// RefineNotePreview shows what an AI refinement of the draft would send; nothing is sent.
+func (s *Study) RefineNotePreview(draftID int64) (studio.NoteRefinePreview, error) {
+	return call(s, func(ws *cli.Workspace) (studio.NoteRefinePreview, error) { return ws.RefineNotePreview(draftID) })
+}
+
+// RefineNote asks the active provider once for an advisory suggestion; it is never applied by itself.
+func (s *Study) RefineNote(draftID int64) (studio.NoteRefinement, error) {
+	return call(s, func(ws *cli.Workspace) (studio.NoteRefinement, error) { return ws.RefineNote(draftID) })
 }
 
 // AcceptNote accepts the draft with the edited fields.

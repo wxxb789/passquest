@@ -1,59 +1,47 @@
 import { Database } from "bun:sqlite";
-import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { startAnkiStub } from "../lib/anki-stub.ts";
+import { buildDesktop, launchDesktop, removeTree } from "../lib/desktop.ts";
 import {
-  buildDesktop,
-  childProcesses,
-  launchDesktop,
-  listeningSockets,
-  removeTree,
-  startDesktop,
-  stillRunning,
-} from "../lib/desktop.ts";
-import type { LaunchResult, ProcessInfo } from "../lib/desktop.ts";
-import { hasGoMod, runGo } from "../lib/go.ts";
+  chatReply,
+  cleanEnv,
+  cliJson,
+  desktopSurface,
+  launchPage,
+  pageScript,
+  SKILL,
+  startProviderStub,
+  STUB_CREDENTIAL_ENV,
+  STUB_MODEL,
+  STUB_PROVIDER,
+  tail,
+  writeStubRegistry,
+} from "../lib/desktop-page.ts";
+import type { Check, Launched, ProviderStub } from "../lib/desktop-page.ts";
+import { runGo } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
 import type { RunResult } from "../lib/process.ts";
 import { resolve } from "../lib/repo.ts";
 import { seedReviewedSource } from "../lib/reviewed-source.ts";
-import { fail, pass, skip } from "../lib/types.ts";
+import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
 /**
- * The app contract this gate drives (implemented by cmd/passquest-desktop):
- * PASSQUEST_DESKTOP_SCRIPT is a .js file whose content is the body of an async
- * function evaluated in the page after load; the app writes
- * {"ok":bool,"value":...,"error":string} to PASSQUEST_DESKTOP_RESULT and quits.
- * PASSQUEST_DESKTOP_HIDDEN=1 hides the window, PASSQUEST_DESKTOP_DATA is the
- * user-data directory (database at <dir>/passquest.sqlite), and
- * PASSQUEST_DESKTOP_SECRET_SERVICE names the credential-store service so a run
- * never touches the learner's real one. With MYGO_GENERATE set the binary only
- * writes its TypeScript client to that path.
- *
- * Each scenario gets a fresh data directory; a scenario about persistence
- * launches the window more than once on its own directory. A second process
+ * Drives the app contract described in harness/lib/desktop-page.ts. Each
+ * scenario gets a fresh data directory; a scenario about persistence launches
+ * the window more than once on its own directory. A second process
  * (`passquest ... --db`) cross-checks what the window recorded.
  */
-const DESKTOP_SURFACES = ["cmd/passquest-desktop", "desktop/web", "internal/desktop"];
 const CLIENT_PATH = "desktop/web/src/api/mygo.ts";
-const LAUNCH_TIMEOUT_MS = 60_000;
 const GENERATE_TIMEOUT_MS = 30_000;
-/** WebView2 and WebKit helpers exit shortly after the host; longer is an orphan. */
-const ORPHAN_GRACE_MS = 10_000;
 const MIN_TODAY_TEXT = 200;
 /** Nothing listens on port 1: the "Anki is not running" endpoint. */
 const UNREACHABLE_ENDPOINT = "http://127.0.0.1:1";
-const STUB_PROVIDER = "stub";
-const STUB_MODEL = `${STUB_PROVIDER}/stub-model`;
-/** The registry requires PASSQUEST_<PROVIDER>_API_KEY. */
-const STUB_CREDENTIAL_ENV = "PASSQUEST_STUB_API_KEY";
-/** The scoring skill a fresh database recommends; its tactic has a guided and an independent stage. */
-const SKILL = "not-except-polarity";
 const IMPORT_FIXTURE = "internal/cli/testdata/import";
 const IMPORTED_SENTENCE = "The Westbridge Community Library closes at 4 p.m. on Saturdays.";
 /** Markup a model could return; it must reach the learner as text, never as elements. */
@@ -61,53 +49,6 @@ const HOSTILE_MARKUP = '<b>x</b><img src=x onerror="document.title=\'pwned\'">';
 const NAVIGATOR_STATES = ["pending", "presented", "answered", "timed_out", "unavailable"];
 const NAVIGATOR_CLASSES = ["cell", "cur", "ans", "to"];
 const NAVIGATOR_ATTRIBUTES = ["class", "role", "data-state", "data-position", "aria-label", "title", "aria-current"];
-
-type Check = (condition: boolean, message: string) => boolean;
-
-interface ProviderRequest {
-  authorization: string;
-  path: string;
-  raw: string;
-  sha256: string;
-}
-
-/** A loopback OpenAI-compatible endpoint; `respond` is set per scenario. */
-interface ProviderStub {
-  endpoint: string;
-  received: ProviderRequest[];
-  respond: (request: ProviderRequest) => Response | Promise<Response>;
-  stop: () => void;
-}
-
-function chatReply(text: string): Response {
-  return Response.json({ choices: [{ message: { content: text } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
-}
-
-function startProviderStub(): ProviderStub {
-  const stub: ProviderStub = {
-    endpoint: "",
-    received: [],
-    respond: () => chatReply("OK"),
-    stop: () => server.stop(true),
-  };
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    async fetch(request) {
-      const raw = await request.text();
-      const entry: ProviderRequest = {
-        authorization: request.headers.get("authorization") ?? "",
-        path: new URL(request.url).pathname,
-        raw,
-        sha256: createHash("sha256").update(raw).digest("hex"),
-      };
-      stub.received.push(entry);
-      return stub.respond(entry);
-    },
-  });
-  stub.endpoint = `http://127.0.0.1:${server.port}/v1/chat/completions`;
-  return stub;
-}
 
 interface Shared {
   ctx: GateContext;
@@ -145,76 +86,6 @@ interface LaunchSpec {
   killWhen?: () => Promise<boolean>;
 }
 
-interface Launched {
-  value: unknown;
-  killed: boolean;
-  /** The app's stdout and stderr. */
-  output: string;
-  resultPath: string;
-}
-
-/**
- * Helpers every scenario script starts with. Steps wait on the DOM hooks the
- * views expose; a step that never happens throws with the route, error bar and
- * toast, so the failed result says where the window stopped.
- */
-const PRELUDE = `
-const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
-const q = (selector) => document.querySelector(selector);
-const all = (selector) => Array.from(document.querySelectorAll(selector));
-const data = (selector) => Object.assign({}, q(selector)?.dataset);
-const situation = () => {
-  const bar = q("#errbar, .error-bar");
-  const toast = q(".toast");
-  return " [route " + (location.hash || "#/today") + (bar ? "; error bar: " + bar.textContent : "") + (toast ? "; toast: " + toast.textContent : "") + "]";
-};
-const until = async (what, probe, ms = 15000) => {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    const value = probe();
-    if (value) return value;
-    if (Date.now() > deadline) throw new Error("timed out waiting for " + what + situation());
-    await sleep(50);
-  }
-};
-const click = async (selector) => {
-  const element = await until(selector + " (enabled)", () => {
-    const found = q(selector);
-    return found && !found.disabled ? found : null;
-  }, 10000);
-  element.click();
-};
-const press = (key) => document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
-const today = async () => {
-  if (location.hash !== "" && location.hash !== "#/today") location.hash = "#/today";
-  await until("Today", () => q('[data-testid="hero"]'));
-  await sleep(150);
-};
-const startFromSheet = async (act, value) => {
-  await today();
-  await click('[data-act="sheet"][data-v="pick"]');
-  const target = '#layer [data-act="' + act + '"][data-v="' + value + '"]';
-  await until("the practice sheet entry " + value, () => q(target));
-  await click(target);
-  await until("a practice item", () => q('[data-testid="practice-item"]'));
-};
-const answer = async (key) => {
-  await until("a practice item", () => q('[data-testid="practice-item"]'));
-  await sleep(250);
-  const shown = { item: data('[data-testid="practice-item"]'), condition: data('[data-testid="condition"]') };
-  press(key);
-  const chosen = await until("option " + key + " to be selected", () => q('.opt[aria-checked="true"]'));
-  press("Enter");
-  await until("the feedback card", () => q('[data-testid="feedback"]'));
-  return { ...shown, chosen: chosen.dataset.v, feedback: data('[data-testid="feedback"]'), counted: data('[data-testid="feedback-condition"]') };
-};
-await until("window.__pq.ready", () => window.__pq && window.__pq.ready === true, 20000);
-`;
-
-function pageScript(body: string): string {
-  return `${PRELUDE}\n${body}`;
-}
-
 const BOOT_SCRIPT = `
 const stage = () => document.querySelector("#stage");
 const ready = () => window.__pq === undefined || window.__pq.ready === true;
@@ -227,166 +98,46 @@ return {
   textLength: document.body.innerText.length,
   stageChildren: node ? node.children.length : -1,
   stageTextLength: node ? node.innerText.trim().length : 0,
-  stageText: node ? node.innerText.replace(/\\s+/g, " ").trim().slice(0, 240) : "",
+  stageText: node ? node.innerText.replace(/\s+/g, " ").trim().slice(0, 240) : "",
   errorBars: errors.length,
   errorText: Array.from(errors, (element) => element.textContent ?? "").join(" | ").slice(0, 300),
   ready: window.__pq === undefined ? null : window.__pq.ready === true,
 };
 `;
 
-function tail(text: string, lines = 12): string {
-  return text.replace(/\r\n/g, "\n").trim().split("\n").slice(-lines).join("\n");
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((done) => setTimeout(done, ms));
-}
-
-function describe(processes: ProcessInfo[]): string {
-  return processes.map((entry) => `${entry.pid} ${entry.command}`).join(", ");
-}
-
-function parse(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
 /** Milliseconds since the epoch; the window and the CLI print different sub-millisecond digits. */
 function instant(text: string | undefined): number {
   return text === undefined ? Number.NaN : Date.parse(text.replace(/(\.\d{3})\d+/, "$1"));
 }
 
-/** This process's environment without any PASSQUEST_* variable a developer shell may carry. */
-function cleanEnv(): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = {};
-  for (const [name, value] of Object.entries(process.env)) {
-    if (!name.startsWith("PASSQUEST_")) env[name] = value;
-  }
-  return env;
-}
-
 /** Launches the window once with a script and returns the script's value, or null after a failed check. */
-async function launch(s: ScenarioRun, spec: LaunchSpec): Promise<Launched | null> {
-  const { check } = s;
-  const where = spec.label === s.id ? s.id : `${s.id} (${spec.label})`;
-  const scriptPath = path.join(s.dir, `${spec.label}.js`);
-  const resultPath = path.join(s.dir, `${spec.label}.result.json`);
-  writeFileSync(scriptPath, `// desktop-smoke: ${s.id}/${spec.label}\n${spec.script}`);
-
-  const env: Record<string, string | undefined> = {
-    ...cleanEnv(),
-    PASSQUEST_DESKTOP_SCRIPT: scriptPath,
-    PASSQUEST_DESKTOP_RESULT: resultPath,
-    PASSQUEST_DESKTOP_HIDDEN: "1",
-    PASSQUEST_DESKTOP_DATA: s.dataDir,
-    PASSQUEST_DESKTOP_SECRET_SERVICE: s.service,
-    PASSQUEST_PROVIDER_REGISTRY: s.shared.registry,
-    PASSQUEST_ANKI_ENDPOINT: UNREACHABLE_ENDPOINT,
-    // A fresh profile per launch, removed with the gate's temporary tree once
-    // the orphan check has seen every WebView2 helper exit.
-    WEBVIEW2_USER_DATA_FOLDER: path.join(s.dir, `${spec.label}.webview2`),
-    ...spec.env,
-  };
-  // The repository root is the working directory, so the app finds
-  // agent/*.mjs and runs them under Node the way the CLI smokes do.
-  const handle = startDesktop({ binary: s.shared.binary, env, timeoutMs: LAUNCH_TIMEOUT_MS, cwd: s.shared.ctx.root });
-  let exited = false;
-  let outcome: LaunchResult | undefined;
-  const finished = handle.result.then((result) => {
-    exited = true;
-    outcome = result;
+function launch(s: ScenarioRun, spec: LaunchSpec): Promise<Launched | null> {
+  return launchPage({
+    binary: s.shared.binary,
+    // The repository root is the working directory, so the app finds
+    // agent/*.mjs and runs them under Node the way the CLI smokes do.
+    cwd: s.shared.ctx.root,
+    dir: s.dir,
+    label: spec.label,
+    header: `desktop-smoke: ${s.id}/${spec.label}`,
+    where: spec.label === s.id ? s.id : `${s.id} (${spec.label})`,
+    script: spec.script,
+    env: {
+      PASSQUEST_DESKTOP_DATA: s.dataDir,
+      PASSQUEST_DESKTOP_SECRET_SERVICE: s.service,
+      PASSQUEST_PROVIDER_REGISTRY: s.shared.registry,
+      PASSQUEST_ANKI_ENDPOINT: UNREACHABLE_ENDPOINT,
+      ...spec.env,
+    },
+    check: s.check,
+    probeListeners: spec.probeListeners,
+    killWhen: spec.killWhen,
   });
-
-  // While the app runs: remember its children (POSIX reparents orphans, so the
-  // after-exit check compares against this snapshot) and probe listeners.
-  let appPid: number | null = null;
-  const seen = new Map<number, ProcessInfo>();
-  let listenerProbes = 0;
-  let killed = false;
-  while (!exited) {
-    appPid ??= await handle.appPid();
-    if (appPid !== null && !exited) {
-      const children = await childProcesses(appPid);
-      if ("items" in children) for (const child of children.items) seen.set(child.pid, child);
-      if (spec.probeListeners && !exited) {
-        const owners = [appPid, ...("items" in children ? children.items.map((child) => child.pid) : [])];
-        const sockets = await listeningSockets(owners);
-        if ("error" in sockets) {
-          check(false, `${where}: cannot list listening sockets: ${sockets.error}`);
-        } else {
-          listenerProbes++;
-          for (const socket of sockets.items) {
-            check(false, `${where}: process ${socket.pid} listens on TCP ${socket.address}:${socket.port}`);
-          }
-        }
-      }
-    }
-    if (spec.killWhen && !killed && !exited && (await spec.killWhen())) {
-      killed = true;
-      await handle.kill();
-    }
-    await Promise.race([finished, sleep(250)]);
-  }
-  await finished;
-  const result = outcome as LaunchResult;
-  if (spec.probeListeners) {
-    check(listenerProbes > 0, `${where}: no listening-socket probe completed while the app ran`);
-  }
-
-  const output = `${result.stdout}\n${result.stderr}`;
-  const shortOutput = tail(output);
-  if (result.error) {
-    check(false, `${where}: could not launch: ${result.error}`);
-    return null;
-  }
-  if (!check(!result.timedOut, `${where}: timeout after ${LAUNCH_TIMEOUT_MS} ms; killed\n${shortOutput}`)) return null;
-
-  // After exit: nothing the app started may outlive it.
-  let survivors: ProcessInfo[] = [];
-  const deadline = Date.now() + ORPHAN_GRACE_MS;
-  for (;;) {
-    const remembered = await stillRunning([...seen.values()]);
-    const orphans = process.platform === "win32" && appPid !== null ? await childProcesses(appPid) : { items: [] };
-    if ("error" in remembered || "error" in orphans) {
-      const error = "error" in remembered ? remembered.error : "error" in orphans ? orphans.error : "";
-      check(false, `${where}: cannot list child processes: ${error}`);
-      break;
-    }
-    survivors = [...remembered.items, ...orphans.items.filter((entry) => !seen.has(entry.pid))];
-    if (survivors.length === 0 || Date.now() > deadline) break;
-    await sleep(500);
-  }
-  check(survivors.length === 0, `${where}: child process(es) outlived the app: ${describe(survivors)}`);
-  if (killed) return { value: undefined, killed, output, resultPath };
-
-  if (!existsSync(resultPath)) {
-    check(false, `${where}: app exited ${result.code} without writing a result\n${shortOutput}`);
-    return null;
-  }
-  let document: unknown;
-  try {
-    document = JSON.parse(readFileSync(resultPath, "utf8"));
-  } catch (error) {
-    check(false, `${where}: result is not JSON: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
-  }
-  if (!check(field(document, "ok") === true, `${where}: script failed: ${String(field(document, "error") ?? "no error text")}`)) {
-    return null;
-  }
-  if (!check(result.code === 0, `${where}: app exit = ${result.code}\n${shortOutput}`)) return null;
-  return { value: field(document, "value"), killed, output, resultPath };
 }
 
 /** `passquest <args> --db <scenario db> --json` from the repository root. */
-async function cli(s: ScenarioRun, args: string[], env: Record<string, string> = {}): Promise<RunResult & { doc: unknown }> {
-  const result = await run(s.shared.cli, [...args, "--db", s.database, "--json"], {
-    cwd: s.shared.ctx.root,
-    env: { PASSQUEST_PROVIDER_REGISTRY: s.shared.registry, ...env },
-  });
-  return { ...result, doc: parse(result.stdout) };
+function cli(s: ScenarioRun, args: string[], env: Record<string, string> = {}): Promise<RunResult & { doc: unknown }> {
+  return cliJson(s.shared.cli, s.database, s.shared.ctx.root, args, { PASSQUEST_PROVIDER_REGISTRY: s.shared.registry, ...env });
 }
 
 /** Runs CLI setup steps in order; false after the first one that fails. */
@@ -1146,12 +897,8 @@ export const desktopSmoke: Gate = {
   id: "desktop-smoke",
   title: "desktop smoke",
   async run(ctx) {
-    const present = DESKTOP_SURFACES.filter((surface) => existsSync(resolve(ctx.root, surface)));
-    if (present.length === 0) return skip("no desktop surface yet");
-    if (!present.includes("cmd/passquest-desktop")) {
-      return fail([`desktop surface exists (${present.join(", ")}) but cmd/passquest-desktop is missing`]);
-    }
-    if (!hasGoMod(ctx)) return fail(["cmd/passquest-desktop exists but go.mod is missing"]);
+    const surface = desktopSurface(ctx);
+    if (surface) return surface;
 
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-desktop-smoke-"));
     const checks: string[] = [];
@@ -1167,22 +914,7 @@ export const desktopSmoke: Gate = {
       const build = await buildDesktop(ctx, binary);
       if (!build.ok) return fail(build.failures);
       const registry = path.join(temp, "registry.json");
-      writeFileSync(
-        registry,
-        JSON.stringify({
-          version: 1,
-          providers: [
-            {
-              id: STUB_PROVIDER,
-              name: "Smoke stub",
-              endpoint: provider.endpoint,
-              endpoint_shape: "openai-chat-completions",
-              credential_env: STUB_CREDENTIAL_ENV,
-              models: [{ id: STUB_MODEL.split("/")[1], default: true, capabilities: ["text.chat"] }],
-            },
-          ],
-        }),
-      );
+      writeStubRegistry(registry, provider.endpoint);
       const shared: Shared = { ctx, binary, cli: path.join(temp, executable("passquest")), registry, provider };
       let ran = 0;
       for (const scenario of SCENARIOS) {

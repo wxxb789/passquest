@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/wxxb789/passquest/internal/assess"
+	"github.com/wxxb789/passquest/internal/note"
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
@@ -923,5 +925,290 @@ func TestLoopbackEndpointParsesTheHost(t *testing.T) {
 		if got := loopbackEndpoint(endpoint); got != want {
 			t.Errorf("loopbackEndpoint(%q) = %v, want %v", endpoint, got, want)
 		}
+	}
+}
+
+// TestWorkspaceNotePreviewIsTheDeckCard: the window's card documents are the
+// note package's rendering of the same fields with the model stylesheet, in
+// Anki's DOM, for both sides and both themes.
+func TestWorkspaceNotePreviewIsTheDeckCard(t *testing.T) {
+	f := newWSFixture(t, nil)
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, "A")
+	mustNoErr(t, err)
+	draft, err := f.w.ProposeNote(studio.NoteRequest{AttemptID: feedback.AttemptID})
+	mustNoErr(t, err)
+	preview, err := f.w.PreviewNote(draft.ID, studio.NoteFields{Front: "{{Back}} stays literal"})
+	mustNoErr(t, err)
+	fields := note.HTML(preview.Fields.Front, preview.Fields.Back, preview.Fields.Tactic, preview.Source)
+	question, answer := note.RenderSides(fields)
+	want := studio.NoteCardSide{Light: note.CardDocument(question, note.ModelCSS, false), Night: note.CardDocument(question, note.ModelCSS, true)}
+	if preview.Question != want {
+		t.Fatalf("question documents = %+v", preview.Question)
+	}
+	want = studio.NoteCardSide{Light: note.CardDocument(answer, note.ModelCSS, false), Night: note.CardDocument(answer, note.ModelCSS, true)}
+	if preview.Answer != want || preview.HTML != answer || preview.CSS != note.ModelCSS {
+		t.Fatalf("answer documents = %+v", preview.Answer)
+	}
+	if !strings.Contains(preview.Answer.Night, `<body class="card card1 nightMode night_mode">`) ||
+		!strings.Contains(preview.Question.Light, `<body class="card card1">`) {
+		t.Fatal("the documents do not carry Anki's body classes")
+	}
+	_, questionBody, _ := strings.Cut(preview.Question.Light, "<body")
+	if !strings.Contains(questionBody, "{{Back}} stays literal") || strings.Contains(questionBody, "pq-tactic") {
+		t.Fatalf("question side = %s", questionBody)
+	}
+	if preview.FieldsSHA256 != fields.Hash() || preview.HTMLSHA256 != preview.FieldsSHA256 {
+		t.Fatalf("field hashes = %s / %s", preview.FieldsSHA256, preview.HTMLSHA256)
+	}
+	if preview.CSSSHA256 != note.CSSSHA256() || preview.ModelVersion != note.ModelVersion || !preview.Edited {
+		t.Fatalf("preview model = %s / %d / %t", preview.CSSSHA256, preview.ModelVersion, preview.Edited)
+	}
+	keys := jsonKeys(t, preview)
+	for _, key := range []string{"question", "answer", "html", "css", "html_sha256", "fields_sha256", "css_sha256", "model_version"} {
+		if _, ok := keys[key]; !ok {
+			t.Fatalf("preview JSON lacks %s: %v", key, keys)
+		}
+	}
+}
+
+// TestWorkspaceRefineNote: the refinement preview is the request the
+// refinement sends; the refusals, the budget and the recorded failure are
+// note propose --refine's; the suggestion is advisory and only accept applies
+// it.
+func TestWorkspaceRefineNote(t *testing.T) {
+	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
+	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
+	f.reopen(t)
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, "A")
+	mustNoErr(t, err)
+	draft, err := f.w.ProposeNote(studio.NoteRequest{AttemptID: feedback.AttemptID})
+	mustNoErr(t, err)
+
+	if _, err := f.w.RefineNotePreview(draft.ID); studioCode(err) != "not_configured" {
+		t.Fatalf("preview without a model = %v", err)
+	}
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "not_configured" {
+		t.Fatalf("refine without a model = %v", err)
+	}
+	_, err = f.w.UseModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	unverified, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if unverified.Verified || unverified.Action == "" || unverified.TextChatState == "" {
+		t.Fatalf("unverified preview = %+v", unverified)
+	}
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "capability_unverified" {
+		t.Fatalf("refine before the model test = %v", err)
+	}
+	_, err = f.w.TestModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+
+	preview, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if preview.DraftID != draft.ID || preview.Provider != "alpha" || preview.Model != "alpha-text" || preview.External ||
+		!preview.Verified || preview.Action != "" || !preview.Credential.Present || preview.Unanswered {
+		t.Fatalf("preview = %+v", preview)
+	}
+	if preview.Consent.Required || !preview.Consent.Granted || len(preview.Consent.Withheld) != 0 {
+		t.Fatalf("preview consent = %+v", preview.Consent)
+	}
+	if len(preview.Messages) != 2 || preview.Messages[0].Role != "system" || preview.RequestSHA256 == "" || preview.RequestBytes == 0 {
+		t.Fatalf("preview messages = %+v", preview)
+	}
+	if preview.Budget.Provider != "alpha" || preview.Budget.Limit == 0 {
+		t.Fatalf("preview budget = %+v", preview.Budget)
+	}
+	callsBefore := preview.Budget.Calls
+	sent := len(transport.requests)
+
+	transport.response = fixedTutorResponse(`{"front": "closes at 4 p.m.", "back": "To shut at a stated time.\n\nExample: The library closes at 4 p.m."}`)
+	refined, err := f.w.RefineNote(draft.ID)
+	mustNoErr(t, err)
+	if len(transport.requests) != sent+1 {
+		t.Fatalf("provider calls = %d, want %d", len(transport.requests), sent+1)
+	}
+	body := transport.requests[len(transport.requests)-1].Body
+	if sha, size := note.RequestIdentity(body); sha != preview.RequestSHA256 || size != preview.RequestBytes {
+		t.Fatalf("the refinement sent %s/%d, the preview showed %s/%d", sha, size, preview.RequestSHA256, preview.RequestBytes)
+	}
+	if refined.State != "advisory" || !refined.Advisory || refined.DraftID != draft.ID || refined.RefinementID == 0 ||
+		refined.Provider != "alpha" || refined.Model != "alpha-text" || refined.RequestSHA256 != preview.RequestSHA256 {
+		t.Fatalf("refinement = %+v", refined)
+	}
+	if refined.Suggestion.Front != "closes at 4 p.m." || !strings.Contains(refined.Suggestion.Back, "Example: The library") ||
+		refined.Suggestion.Tactic != draft.Fields.Tactic {
+		t.Fatalf("suggestion = %+v", refined.Suggestion)
+	}
+	after, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if after.Budget.Calls != callsBefore+1 {
+		t.Fatalf("budget calls %d -> %d", callsBefore, after.Budget.Calls)
+	}
+	// The window's own fields stay the learner's: previewing them is not the
+	// suggestion.
+	kept, err := f.w.PreviewNote(draft.ID, draft.Fields)
+	mustNoErr(t, err)
+	if kept.Fields.Front != draft.Fields.Front || strings.Contains(kept.HTML, "closes at 4 p.m.</div>") {
+		t.Fatalf("the suggestion replaced the learner's fields: %+v", kept.Fields)
+	}
+
+	// Typed failures are the CLI's: a provider error is recorded and spends
+	// the slot; a malformed reply is invalid_response; no key refuses first.
+	transport.response = fixedTutorError("rate_limited", "slow down")
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "rate_limited" {
+		t.Fatalf("provider failure = %v", err)
+	}
+	transport.response = fixedTutorResponse("no JSON here")
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "invalid_response" {
+		t.Fatalf("malformed reply = %v", err)
+	}
+	failed, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if failed.Budget.Calls != callsBefore+3 {
+		t.Fatalf("recorded failures did not spend the budget: %d -> %d", callsBefore, failed.Budget.Calls)
+	}
+	delete(f.env, provider.CredentialEnvFor("alpha"))
+	sent = len(transport.requests)
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "no_credential" || len(transport.requests) != sent {
+		t.Fatalf("refine without a key = %v (calls %d -> %d)", err, sent, len(transport.requests))
+	}
+	if _, err := f.w.RefineNote(draft.ID + 99); studioCode(err) != "unknown_draft" {
+		t.Fatalf("unknown draft = %v", err)
+	}
+
+	// The learner applies the suggestion explicitly.
+	accepted, err := f.w.AcceptNote(draft.ID, refined.Suggestion)
+	mustNoErr(t, err)
+	if accepted.Note.Origin != "refined" || accepted.Note.Fields.Front != "closes at 4 p.m." {
+		t.Fatalf("accept of the suggestion = %+v", accepted)
+	}
+	if listAttempts(t, f.db) != 1 {
+		t.Fatal("a refinement changed attempts")
+	}
+	for _, value := range []any{preview, refined} {
+		raw, _ := json.Marshal(value)
+		if strings.Contains(string(raw), fakeTutorKey) {
+			t.Fatalf("a document carries the key: %s", raw)
+		}
+	}
+}
+
+// TestWorkspaceRefineNoteRespectsConsent: a private source's draft shows no
+// source text before the grant and the refinement refuses before any call.
+func TestWorkspaceRefineNoteRespectsConsent(t *testing.T) {
+	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
+	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
+	f.reopen(t)
+	clock := &stepClock{base: goldenBase}
+	sourceID := noteSourceFixture(t, f.db, clock)
+	mustRun(t, f.db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
+	draft, err := f.w.ProposeNote(studio.NoteRequest{AttemptID: 1})
+	mustNoErr(t, err)
+	_, err = f.w.UseModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	_, err = f.w.TestModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	sent := len(transport.requests)
+
+	preview, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if !preview.Consent.Required || preview.Consent.Granted || preview.Consent.SourceID != sourceID ||
+		len(preview.Messages) != 0 || preview.RequestSHA256 != "" || !slices.Contains(preview.Consent.Withheld, "passage") {
+		t.Fatalf("withheld preview = %+v", preview)
+	}
+	raw, _ := json.Marshal(preview)
+	if strings.Contains(string(raw), "Westbridge") {
+		t.Fatalf("the withheld preview shows source text: %s", raw)
+	}
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "consent_required" || len(transport.requests) != sent {
+		t.Fatalf("refine before consent = %v", err)
+	}
+	// A grant for another provider covers the note text, not this provider.
+	_, err = f.w.GrantConsent(sourceID, "")
+	mustNoErr(t, err)
+	_, err = f.w.RevokeConsent(sourceID, "alpha")
+	mustNoErr(t, err)
+	scoped, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if scoped.Consent.Granted || len(scoped.Messages) != 0 {
+		t.Fatalf("provider-scoped denial = %+v", scoped.Consent)
+	}
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "consent_required" || len(transport.requests) != sent {
+		t.Fatalf("refine under a provider denial = %v", err)
+	}
+	_, err = f.w.GrantConsent(sourceID, "alpha")
+	mustNoErr(t, err)
+	granted, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if !granted.Consent.Granted || !granted.Consent.SourceTextShared || len(granted.Messages) != 2 || granted.RequestSHA256 == "" {
+		t.Fatalf("granted preview = %+v", granted)
+	}
+}
+
+// TestWorkspaceCoachHistory lists an attempt's calls with each advisory
+// reply's text and each failure's code, and nothing that was sent.
+func TestWorkspaceCoachHistory(t *testing.T) {
+	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
+	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
+	f.reopen(t)
+	if _, err := f.w.CoachHistory(0); studioCode(err) != "invalid_input" {
+		t.Fatalf("history without an attempt = %v", err)
+	}
+	if _, err := f.w.CoachHistory(7); studioCode(err) != "no_attempts" {
+		t.Fatalf("history on an empty database = %v", err)
+	}
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, "A")
+	mustNoErr(t, err)
+	empty, err := f.w.CoachHistory(feedback.AttemptID)
+	mustNoErr(t, err)
+	if empty.AttemptID != feedback.AttemptID || empty.Calls == nil || len(empty.Calls) != 0 || len(empty.Limits) == 0 {
+		t.Fatalf("empty history = %+v", empty)
+	}
+	_, err = f.w.UseModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	_, err = f.w.TestModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	transport.response = fixedTutorResponse("Read the <b>second</b> sentence again.")
+	reply, err := f.w.CoachAsk(feedback.AttemptID, studio.CoachExplain)
+	mustNoErr(t, err)
+	transport.response = fixedTutorError("rate_limited", "slow down")
+	failed, err := f.w.CoachAsk(feedback.AttemptID, studio.CoachProbe)
+	mustNoErr(t, err)
+
+	history, err := f.w.CoachHistory(feedback.AttemptID)
+	mustNoErr(t, err)
+	if len(history.Calls) != 2 {
+		t.Fatalf("history = %+v", history)
+	}
+	first, second := history.Calls[0], history.Calls[1]
+	if first.CallID != reply.CallID || first.State != "advisory" || first.Text != "Read the <b>second</b> sentence again." ||
+		first.Mode != studio.CoachExplain || first.Provider != "alpha" || first.Model != "alpha-text" ||
+		!first.Advisory || first.VerifiedAnswer || first.Failure != nil || first.CreatedAt == "" {
+		t.Fatalf("advisory call = %+v", first)
+	}
+	if second.CallID != failed.CallID || second.State != "failed" || second.Text != "" || second.Mode != studio.CoachProbe ||
+		second.Failure == nil || second.Failure.Code != failed.Failure.Code {
+		t.Fatalf("failed call = %+v", second)
+	}
+	raw, _ := json.Marshal(history)
+	for _, leak := range []string{fakeTutorKey, `"messages"`, `"body"`, "request_sha256", "\"system\""} {
+		if strings.Contains(string(raw), leak) {
+			t.Fatalf("history carries %s: %s", leak, raw)
+		}
+	}
+	if _, err := f.w.CoachHistory(feedback.AttemptID + 5); studioCode(err) != "unknown_attempt" {
+		t.Fatalf("unknown attempt = %v", err)
 	}
 }

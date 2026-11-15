@@ -95,7 +95,7 @@ func Run() int {
 
 	mygo.App.WhenReady(func() {
 		openStudy(study, getenv)
-		win = mygo.NewWindow(mygo.WindowOptions{
+		options := mygo.WindowOptions{
 			URL:       startURL(frontend),
 			Title:     AppName,
 			Width:     1280,
@@ -104,7 +104,9 @@ func Run() int {
 			MinHeight: 600,
 			Hidden:    strings.TrimSpace(getenv(EnvHidden)) == "1",
 			StateKey:  "main",
-		})
+		}
+		smoke.sizeWindow(&options)
+		win = mygo.NewWindow(options)
 		if smoke != nil {
 			smoke.attach(win.Page())
 		}

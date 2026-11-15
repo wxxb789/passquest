@@ -131,7 +131,7 @@ function failedLaunch(error: string): DesktopRun {
  * WEBVIEW2_USER_DATA_FOLDER unless `env` names one: WebView2 helpers can still
  * write to the profile shortly after the host exits, so a caller that waits for
  * them passes a folder it removes itself. On Linux without a display the launch
- * is wrapped in `xvfb-run -a`. Output goes to files, not pipes, so a webview child that
+ * is wrapped in `xvfb-run -a` on a 1920x1080 screen. Output goes to files, not pipes, so a webview child that
  * inherits the handles cannot keep the result pending after the app exits.
  */
 export function startDesktop(options: LaunchOptions): DesktopRun {
@@ -148,7 +148,9 @@ export function startDesktop(options: LaunchOptions): DesktopRun {
       rmSync(scratch, { recursive: true, force: true });
       return failedLaunch("no DISPLAY or WAYLAND_DISPLAY and xvfb-run is not installed (apt-get install xvfb)");
     }
-    cmd = [xvfb, "-a", ...cmd];
+    // xvfb-run's default screen (640x480x8) is smaller than the 1440x844
+    // viewport desktop-ux measures; a larger screen changes nothing else.
+    cmd = [xvfb, "-a", "-s", "-screen 0 1920x1080x24", ...cmd];
     wrapped = true;
   }
   const stdoutPath = path.join(scratch, "stdout.txt");
