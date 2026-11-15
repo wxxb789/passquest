@@ -12,6 +12,7 @@ import { ic } from '../icons';
 export interface CoachData {
   preview: Loadable<CoachPreview>;
   replies: Partial<Record<CoachMode, CoachReply>>;
+  failed: CoachReply | null;
   failure: StudioError | null;
   sending: boolean;
   busy: boolean;
@@ -49,11 +50,15 @@ function settingsLink(code: string): Html {
   return html``;
 }
 
-function held(code: string, title: Html | string, message: string, action: string | null | undefined): Html {
+/** Retry clears a send's failure and reloads the preview; it never sends by itself. */
+const retryButton = (busy: boolean): Html =>
+  html`<button class="btn quiet sm" data-act="coach-retry" ${busy ? 'disabled' : ''}>${T('重试', 'Retry')}</button>`;
+
+function held(code: string, title: Html | string, message: string, action: string | null | undefined, retry: Html | '' = ''): Html {
   return html`<div class="pending held" data-testid="coach-failure" data-code="${code}"><b>${title}</b> <span class="muted" lang="en">${message}</span>${
     action ? html`<div class="muted">${T('下一步：', 'Next: ')}${action}</div>` : ''
   }
-        <div style="display:flex;gap:8px;flex-wrap:wrap">${settingsLink(code)}</div></div>`;
+        <div style="display:flex;gap:8px;flex-wrap:wrap">${retry}${settingsLink(code)}</div></div>`;
 }
 
 function body(d: CoachData, mode: CoachMode, lang: string, unusable: string | null): Html {
@@ -63,9 +68,10 @@ function body(d: CoachData, mode: CoachMode, lang: string, unusable: string | nu
         <div class="rmeta">${ic('adv', 'xs')}${T('建议性 · 不改变评分', 'Advisory · never grades')}<span class="sep"></span>${reply.provider} · ${reply.model}${
           reply.failover?.applied ? html`<span class="sep"></span>${T(`由 ${reply.failover.from_provider} 转移`, `failover from ${reply.failover.from_provider}`)}` : ''
         }<span class="sep"></span><span class="num nw">${(reply.latency_ms / 1000).toFixed(1)} s</span></div></div>`;
-  if (reply?.state === 'failed' && reply.failure)
-    return held(reply.failure.code, T('这次调用没有成功，评分不变。', 'The call did not succeed; the grade is unchanged.'), reply.failure.message, reply.failure.action);
-  if (d.failure) return held(d.failure.code, errorLabel(d.failure.code), d.failure.message, d.failure.action);
+  const failed = d.failed?.failure;
+  if (failed)
+    return held(failed.code, T('这次调用没有成功，评分不变。', 'The call did not succeed; the grade is unchanged.'), failed.message, failed.action, retryButton(d.busy));
+  if (d.failure) return held(d.failure.code, errorLabel(d.failure.code), d.failure.message, d.failure.action, retryButton(d.busy));
   const p = d.preview;
   if (p.status === 'error') {
     // With no usable provider the aggregated line above already says what to do.

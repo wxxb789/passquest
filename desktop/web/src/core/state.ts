@@ -110,7 +110,10 @@ export const data = {
   feedback: null as Feedback | null,
   coach: {
     preview: idle<CoachPreview>(),
+    /** Advisory replies only: a failed call is never cached, so the mode can be retried. */
     replies: {} as Partial<Record<CoachMode, CoachReply>>,
+    /** The current mode's failed call (a provider failure the core recorded); cleared by Retry. */
+    failed: null as CoachReply | null,
     failure: null as StudioError | null,
     sending: false,
   },

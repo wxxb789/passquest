@@ -756,10 +756,18 @@ const coach: Scenario = {
 
     provider.received.length = 0;
     let reportAtFailure: string | null = null;
+    let reportAfterFailure: string | null = null;
+    let retryArrivedAt = 0;
+    // A reply, then a 401, then (after Retry and a second send in the same mode) a reply again.
     provider.respond = async () => {
       if (provider.received.length === 1) return chatReply(`Check the closing time. ${HOSTILE_MARKUP}`);
-      reportAtFailure ??= (await cli(s, ["report"])).stdout;
-      return Response.json({ error: { message: "invalid token" } }, { status: 401 });
+      if (provider.received.length === 2) {
+        reportAtFailure ??= (await cli(s, ["report"])).stdout;
+        return Response.json({ error: { message: "invalid token" } }, { status: 401 });
+      }
+      retryArrivedAt ||= Date.now();
+      reportAfterFailure ??= (await cli(s, ["report"])).stdout;
+      return chatReply("Retried: read the closing time again.");
     };
     const launched = await launch(s, {
       label: "coach",
@@ -787,7 +795,16 @@ await until("a preview with consent", () => strip() && strip().dataset.sha !== w
 const granted = preview();
 await click('[data-act="coach-send"]');
 const failure = await until("the typed failure", () => q('[data-testid="coach-failure"]'), 30000);
-return { answered, withheld, reply: shown, granted, failure: { code: failure.dataset.code, text: failure.textContent } };
+const failed = { code: failure.dataset.code, text: failure.textContent };
+// Retry only clears the failure and shows the preview again; the learner sends from it.
+await click('[data-testid="coach-failure"] [data-act="coach-retry"]');
+await until("the preview after Retry", () => !q('[data-testid="coach-failure"]') && strip() && q('[data-act="coach-send"]'), 20000);
+const retried = preview();
+await sleep(300);
+const retrySentAt = Date.now();
+await click('[data-act="coach-send"]');
+const after = await until("the retried reply", () => q('[data-testid="coach-reply"]') || q('[data-testid="coach-failure"]'), 30000);
+return { answered, withheld, reply: shown, granted, failure: failed, retried, retrySentAt, retry: { failed: after.dataset.testid !== "coach-reply", code: after.dataset.code ?? null, text: after.textContent } };
 `),
     });
     provider.respond = () => chatReply("OK");
@@ -799,8 +816,8 @@ return { answered, withheld, reply: shown, granted, failure: { code: failure.dat
     const granted = field(value, "granted");
     s.check(stringField(withheld, "consent") === "withheld", `coach: consent before a grant = ${String(stringField(withheld, "consent"))}`);
     s.check(!(stringField(withheld, "payload") ?? "").includes(IMPORTED_SENTENCE), "coach: the preview shows imported text before consent");
-    if (!s.check(provider.received.length === 2, `coach: the provider received ${provider.received.length} request(s), want 2`)) return;
-    const [first, second] = provider.received;
+    if (!s.check(provider.received.length === 3, `coach: the provider received ${provider.received.length} request(s), want 3`)) return;
+    const [first, second, third] = provider.received;
     s.check(first.sha256 === stringField(withheld, "sha"), "coach: the preview sha256 is not the sha256 of the body the provider received");
     s.check(String(Buffer.byteLength(first.raw)) === stringField(withheld, "bytes"), "coach: the preview size is not the size of the body sent");
     s.check(!first.raw.includes(IMPORTED_SENTENCE), "coach: imported text was sent before consent");
@@ -817,8 +834,17 @@ return { answered, withheld, reply: shown, granted, failure: { code: failure.dat
     s.check(second.raw.includes(IMPORTED_SENTENCE), "coach: imported text was not sent after consent");
     const failure = field(value, "failure");
     s.check(stringField(failure, "code") === "auth_failed", `coach: a 401 shows failure code ${String(stringField(failure, "code"))}`);
-    const reportAfter = (await cli(s, ["report"])).stdout;
-    s.check(reportAtFailure !== null && reportAfter === reportAtFailure, "coach: the failed call changed report --json");
+    s.check(reportAtFailure !== null && reportAfterFailure === reportAtFailure, "coach: the failed call changed report --json");
+    const retry = field(value, "retry");
+    s.check(
+      field(retry, "failed") === false && (stringField(retry, "text") ?? "").includes("Retried"),
+      `coach: Retry after the 401 did not lead to a reply (shown ${String(stringField(retry, "code"))})`,
+    );
+    s.check(
+      retryArrivedAt >= (numberField(value, "retrySentAt") ?? Number.POSITIVE_INFINITY),
+      "coach: Retry called the provider before the learner sent from the preview",
+    );
+    s.check(third.sha256 === stringField(field(value, "retried"), "sha"), "coach: the preview shown after Retry is not the body the provider received");
   },
 };
 
@@ -930,8 +956,9 @@ const anki: Scenario = {
       if (action === "cardsInfo" && stub.actions.some((entry) => entry.action === "addNote")) setTimeout(() => stub.stop(), 100);
     };
     try {
-      const launched = await launch(s, {
-        label: "anki",
+      // A proposed draft that is neither accepted nor skipped survives a restart.
+      const pending = await launch(s, {
+        label: "propose",
         env: { PASSQUEST_ANKI_ENDPOINT: stub.endpoint },
         script: pageScript(`
 await today();
@@ -939,7 +966,19 @@ press("Enter");
 await answer("1");
 press("k");
 await until("the card preview", () => q('[data-testid="card-preview"]'), 20000);
-const proposed = data('[data-testid="card-preview"]');
+return { draft: data('[data-testid="anki"]').draft, preview: data('[data-testid="card-preview"]') };
+`),
+      });
+      if (!pending) return;
+      const launched = await launch(s, {
+        label: "anki",
+        env: { PASSQUEST_ANKI_ENDPOINT: stub.endpoint },
+        script: pageScript(`
+location.hash = "#/anki";
+await until("the restored draft", () => q('[data-testid="anki"][data-draft]') && q('[data-testid="card-preview"]'), 20000);
+const restored = { draft: data('[data-testid="anki"]').draft, preview: data('[data-testid="card-preview"]') };
+// The restored draft is the one edited, accepted and pushed below.
+const proposed = restored.preview;
 press("e");
 const front = await until("the front field", () => q('[data-field="front"]'));
 front.value = front.value + " smoke-edit";
@@ -962,11 +1001,21 @@ await until("the second accepted note", () => q('[data-testid="note"][data-state
 await sleep(300);
 await click('[data-act="push"]');
 await until("a queued note", () => q('[data-testid="sync-counts"]')?.dataset.queued === "1", 30000);
-return { proposed, edited, pushed, queued: data('[data-testid="sync-counts"]'), notes: all('[data-testid="note"]').map((note) => note.dataset.state) };
+return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-counts"]'), notes: all('[data-testid="note"]').map((note) => note.dataset.state) };
 `),
       });
       if (!launched) return;
       const value = launched.value;
+      const proposedDraft = stringField(pending.value, "draft");
+      const restored = field(value, "restored");
+      s.check(
+        proposedDraft !== undefined && stringField(restored, "draft") === proposedDraft,
+        `anki: after a restart the window shows draft ${String(stringField(restored, "draft"))}, the open draft was ${String(proposedDraft)}`,
+      );
+      s.check(
+        stringField(field(restored, "preview"), "sha") === stringField(field(pending.value, "preview"), "sha"),
+        "anki: the restored draft's card is not the card proposed before the restart",
+      );
       s.check(
         stringField(field(value, "edited"), "sha") !== stringField(field(value, "proposed"), "sha") &&
           stringField(field(value, "edited"), "edited") === "true",

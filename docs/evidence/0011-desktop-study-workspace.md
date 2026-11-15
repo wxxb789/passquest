@@ -19,7 +19,7 @@ gnome-keyring inside `dbus-run-session`). macOS was not run locally; CI is its o
 | `go test` gate | 22 packages, 831 tests, 0 skipped (786 before this goal) |
 | `typecheck` | 0 errors in `tsconfig.json` and `desktop/web/tsconfig.json` |
 | `local-only` | 21 first-party packages (incl. `cmd/passquest-desktop`), 0 network imports, 0 confidential markers; `go list -deps ./cmd/passquest` contains no `net/http` |
-| `desktop smoke` | 239 assertions over 11 scenarios (four full local runs: 78–94 s each) |
+| `desktop smoke` | 248 assertions over 11 scenarios (final tree; earlier runs of the same scenarios: 78–94 s each) |
 | `desktop smoke` in WSL Ubuntu 24.04 (dbus + gnome-keyring + xvfb) | pass twice, before the fresh-item scenario rewrite (223 assertions, 46–64 s) |
 | `harness self-test` | 44 cases (2 must pass) over 22/22 gates |
 

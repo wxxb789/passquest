@@ -1046,6 +1046,10 @@ export const Study = {
   openHint(token: string): Promise<PracticeItem> {
     return call("Study.OpenHint", token);
   },
+  /** OpenNoteDraft returns the latest proposed draft that was neither accepted nor skipped, or null. */
+  openNoteDraft(): Promise<NoteDraft | null> {
+    return call("Study.OpenNoteDraft");
+  },
   /** PresentAssessmentItem presents the run's current item. */
   presentAssessmentItem(runID: number): Promise<AssessmentState> {
     return call("Study.PresentAssessmentItem", runID);

@@ -95,6 +95,7 @@ function coachSheet(): Html | null {
     {
       preview: data.coach.preview,
       replies: data.coach.replies,
+      failed: data.coach.failed,
       failure: data.coach.failure,
       sending: data.coach.sending,
       busy: ui.busy,

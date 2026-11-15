@@ -269,6 +269,11 @@ func (s *Study) ProposeNote(request studio.NoteRequest) (studio.NoteDraft, error
 	return call(s, func(ws *cli.Workspace) (studio.NoteDraft, error) { return ws.ProposeNote(request) })
 }
 
+// OpenNoteDraft returns the latest proposed draft that was neither accepted nor skipped, or null.
+func (s *Study) OpenNoteDraft() (*studio.NoteDraft, error) {
+	return call(s, (*cli.Workspace).OpenNoteDraft)
+}
+
 // PreviewNote renders the draft as the card Anki will show; empty fields keep the draft's values.
 func (s *Study) PreviewNote(draftID int64, fields studio.NoteFields) (studio.NotePreview, error) {
 	return call(s, func(ws *cli.Workspace) (studio.NotePreview, error) { return ws.PreviewNote(draftID, fields) })

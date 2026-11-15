@@ -30,20 +30,53 @@ func (w *Workspace) ProposeNote(request studio.NoteRequest) (studio.NoteDraft, e
 	if err := result.decode(&doc); err != nil {
 		return studio.NoteDraft{}, err
 	}
+	return studioNoteDraft(doc.Draft, doc.Plain, doc.Advisory, doc.Limits)
+}
+
+// OpenNoteDraft is the draft `note preview` resolves without --draft (the
+// latest open draft) while it is still pending: proposed and neither accepted
+// nor skipped. It is nil otherwise. An accepted draft stays open in the store
+// for a repeated accept, but the window has already closed it. It lets the
+// window restore a pending draft after a restart.
+func (w *Workspace) OpenNoteDraft() (*studio.NoteDraft, error) {
+	var open *studio.NoteDraft
+	err := w.withStore(func(st *store.Store) error {
+		draft, err := noteDraftFor(st, 0)
+		if code, _, ok := noteErrorCode(err); ok && code == "no_draft" {
+			return nil
+		}
+		if err != nil {
+			return noteStudioError(err)
+		}
+		if draft.AcceptedFront != "" {
+			return nil
+		}
+		effective, err := noteEffectiveFor(st, draft)
+		if err != nil {
+			return noteStudioError(err)
+		}
+		restored, err := studioNoteDraft(noteDraftViewOf(effective), notePlainViewOf(effective), effective.Advisory, noteLimits)
+		open = &restored
+		return err
+	})
+	return open, err
+}
+
+func studioNoteDraft(view noteDraftView, plain notePlainView, advisory bool, limits []string) (studio.NoteDraft, error) {
 	draft := studio.NoteDraft{
-		ID:             doc.Draft.ID,
-		Origin:         doc.Draft.Origin,
-		Restricted:     doc.Draft.Restricted,
-		ConsentGranted: doc.Draft.ConsentGranted,
-		Withheld:       append([]string{}, doc.Draft.Withheld...),
-		Unanswered:     doc.Draft.Unanswered,
-		TacticID:       doc.Draft.TacticID,
-		Fields:         studio.NoteFields{Front: doc.Plain.Front, Back: doc.Plain.Back, Tactic: doc.Plain.Tactic},
-		Source:         doc.Plain.Source,
-		Advisory:       doc.Advisory,
-		Limits:         doc.Limits,
+		ID:             view.ID,
+		Origin:         view.Origin,
+		Restricted:     view.Restricted,
+		ConsentGranted: view.ConsentGranted,
+		Withheld:       append([]string{}, view.Withheld...),
+		Unanswered:     view.Unanswered,
+		TacticID:       view.TacticID,
+		Fields:         studio.NoteFields{Front: plain.Front, Back: plain.Back, Tactic: plain.Tactic},
+		Source:         plain.Source,
+		Advisory:       advisory,
+		Limits:         limits,
 	}
-	if err := convertJSON(doc.Draft.Target, &draft.Target); err != nil {
+	if err := convertJSON(view.Target, &draft.Target); err != nil {
 		return studio.NoteDraft{}, workspaceError(err)
 	}
 	return draft, nil

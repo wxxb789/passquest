@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -747,10 +748,20 @@ func TestWorkspaceNotesFlow(t *testing.T) {
 	mustNoErr(t, err)
 	feedback, err := f.w.Answer(item.Token, "A")
 	mustNoErr(t, err)
+	if open, err := f.w.OpenNoteDraft(); err != nil || open != nil {
+		t.Fatalf("open draft before any proposal = %+v, %v", open, err)
+	}
 	draft, err := f.w.ProposeNote(studio.NoteRequest{AttemptID: feedback.AttemptID})
 	mustNoErr(t, err)
 	if draft.ID == 0 || draft.Fields.Front == "" || draft.Target.AttemptID != feedback.AttemptID {
 		t.Fatalf("draft = %+v", draft)
+	}
+	// A restart finds the proposed draft unchanged.
+	f.reopen(t)
+	open, err := f.w.OpenNoteDraft()
+	mustNoErr(t, err)
+	if open == nil || !reflect.DeepEqual(*open, draft) {
+		t.Fatalf("open draft after reopening = %+v, proposed %+v", open, draft)
 	}
 	preview, err := f.w.PreviewNote(draft.ID, studio.NoteFields{Front: "My own front"})
 	mustNoErr(t, err)
@@ -761,6 +772,9 @@ func TestWorkspaceNotesFlow(t *testing.T) {
 	mustNoErr(t, err)
 	if !accepted.Created || accepted.Note.Origin != "edited" || accepted.Note.Fields.Front != "My own front" {
 		t.Fatalf("accept = %+v", accepted)
+	}
+	if open, err := f.w.OpenNoteDraft(); err != nil || open != nil {
+		t.Fatalf("open draft after accept = %+v, %v", open, err)
 	}
 	list, err := f.w.Notes()
 	mustNoErr(t, err)
@@ -788,7 +802,13 @@ func TestWorkspaceNotesFlow(t *testing.T) {
 	if second.Target.Mark != "a passage phrase" || second.Target.AttemptID != 0 {
 		t.Fatalf("mark draft = %+v", second)
 	}
+	if open, err := f.w.OpenNoteDraft(); err != nil || open == nil || open.ID != second.ID {
+		t.Fatalf("open draft after the mark proposal = %+v, %v", open, err)
+	}
 	mustNoErr(t, f.w.SkipNote(second.ID))
+	if open, err := f.w.OpenNoteDraft(); err != nil || open != nil {
+		t.Fatalf("open draft after skip = %+v, %v", open, err)
+	}
 	if _, err := f.w.PreviewNote(second.ID, studio.NoteFields{}); studioCode(err) != "draft_closed" {
 		t.Fatalf("preview of skipped draft = %v", err)
 	}

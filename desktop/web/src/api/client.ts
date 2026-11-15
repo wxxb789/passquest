@@ -34,6 +34,7 @@ const METHODS = [
   'models',
   'notes',
   'openHint',
+  'openNoteDraft',
   'presentAssessmentItem',
   'previewNote',
   'proposeNote',

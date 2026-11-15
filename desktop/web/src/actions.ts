@@ -186,8 +186,23 @@ async function loadPreview(): Promise<void> {
   refreshPreview();
 }
 
+/**
+ * A draft proposed before a restart and never accepted or skipped lives only in the store: bring it
+ * back. A failed lookup leaves the room as it is; the note list below surfaces a broken connection.
+ */
+async function restoreDraft(): Promise<void> {
+  const r = await call((a) => a.openNoteDraft());
+  // A draft proposed while the lookup ran is the newer one.
+  if (!r.ok || !r.value || data.anki.draft) return;
+  data.anki.draft = r.value;
+  data.anki.preview = idle();
+  ui.anki.fields = null;
+  ui.anki.dirty = false;
+}
+
 async function loadAnki(): Promise<void> {
   if (data.services.status === 'idle') void loadServices();
+  if (!data.anki.draft) await restoreDraft();
   await load((a) => a.notes(), (l) => (data.anki.notes = l), valueOf(data.anki.notes));
   if (data.anki.draft && data.anki.preview.status !== 'ready') await loadPreview();
 }
@@ -405,7 +420,7 @@ async function startPractice(req: PracticeRequest): Promise<void> {
 }
 
 function resetCoach(): void {
-  data.coach = { preview: idle(), replies: {}, failure: null, sending: false };
+  data.coach = { preview: idle(), replies: {}, failed: null, failure: null, sending: false };
 }
 
 async function answered(fbPromise: (a: StudyApi, token: string) => Promise<Feedback>): Promise<void> {
@@ -616,6 +631,7 @@ export const ACT: Record<string, Act> = {
     const m = COACH_MODES.find(([k]) => k === v)?.[0];
     if (!m) return;
     ui.coachMode = m as CoachMode;
+    data.coach.failed = null;
     data.coach.failure = null;
     data.coach.preview = idle();
     renderOrb();
@@ -627,16 +643,29 @@ export const ACT: Record<string, Act> = {
     const mode = ui.coachMode;
     if (!fb || data.coach.sending) return;
     data.coach.sending = true;
+    data.coach.failed = null;
     data.coach.failure = null;
     renderOrb();
     void call((a) => a.coachAsk(fb.attempt_id, mode)).then((r) => {
       data.coach.sending = false;
       if (data.feedback !== fb) return;
-      if (r.ok) data.coach.replies[mode] = r.value;
-      else data.coach.failure = r.error;
+      // Only an advisory reply is kept for the mode; a failure stays retryable (coach-retry).
+      if (r.ok && r.value.state === 'advisory') data.coach.replies[mode] = r.value;
+      else if (ui.coachMode === mode) {
+        if (r.ok) data.coach.failed = r.value;
+        else data.coach.failure = r.error;
+      }
       renderOrb();
       void loadToday();
     });
+  },
+  'coach-retry'() {
+    if (data.coach.sending) return;
+    data.coach.failed = null;
+    data.coach.failure = null;
+    data.coach.preview = idle();
+    renderOrb();
+    void loadCoachPreview();
   },
   'consent-grant'(v) {
     const k = consentArgs(v);
