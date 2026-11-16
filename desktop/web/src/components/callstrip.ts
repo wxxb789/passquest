@@ -3,6 +3,8 @@
 // state of the source with grant/revoke in place, the credential presence and the budget slot.
 // The coach preview and the Anki refinement preview share it. The request's sha256 stays on the
 // strip as data (and in the request disclosure's tooltip); it is not a sentence for the learner.
+// The consent and budget rows are marked data-must-see: they are shown before the send, never
+// scrolled away inside the strip or its panel (desktop-ux checks it).
 import type { CoachConsent, CoachPreview, ModelList } from '../api/types';
 import { html, type Html } from '../core/html';
 import { T } from '../core/i18n';
@@ -72,7 +74,7 @@ export function callStrip(p: CallPreview, busy: boolean, models: ModelList | nul
   return html`<div class="callstrip" role="group" aria-label="${T('这次调用', 'This call')}" data-testid="${testid}" data-external="${p.external}" data-sha="${p.request_sha256}" data-bytes="${p.request_bytes}">
     <span class="lk">${T('调用', 'Call')}</span><span>${where} · <span translate="no">${name}</span> · <code class="nw" translate="no">${p.model}</code> · ${verified} · ${cred}</span>
     <span class="lk">${T('发送', 'Sends')}</span>${payload(p)}
-    <span class="lk">${T('授权', 'Consent')}</span>${consent ?? consentLine(p.consent, name, p.provider, busy)}
-    <span class="lk">${T('预算', 'Budget')}</span><span><b class="num" style="font-weight:600">${p.budget.calls} / ${p.budget.limit}</b> <span class="muted">${T('今日 · ', 'today · ')}<span translate="no">${p.budget.label || name}</span></span></span>
+    <span class="lk" data-must-see>${T('授权', 'Consent')}</span><span data-must-see>${consent ?? consentLine(p.consent, name, p.provider, busy)}</span>
+    <span class="lk" data-must-see>${T('预算', 'Budget')}</span><span data-must-see><b class="num" style="font-weight:600">${p.budget.calls} / ${p.budget.limit}</b> <span class="muted">${T('今日 · ', 'today · ')}<span translate="no">${p.budget.label || name}</span></span></span>
   </div>`;
 }

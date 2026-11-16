@@ -56,9 +56,11 @@ export const UX_STATES = [
   "hint-gate",
   "feedback-coach",
   "anki-edit",
+  "anki-refine",
   "practice-guided",
   "report",
   "report-annotations",
+  "anki-notes",
   "settings-row",
   "run-form",
   "assess-running",
@@ -210,7 +212,7 @@ let back = null;
 await setMode("light", "zh");
 `;
 
-/** Today, its two sheets, an independent item (and its hint gate), feedback with the coach, the Anki editor. */
+/** Today, its two sheets, an independent item (and its hint gate), feedback with the coach, the Anki editor and its refine panel. */
 const PART_ONE = `
 await today();
 await each("today", true);
@@ -252,10 +254,14 @@ press("e");
 await until("the note editor", () => q('[data-field="front"]'));
 await sleep(200);
 await each("anki-edit", true);
+await click('.esheet [data-act="refine"]');
+await steady("the refine preview", () => q('.es-refine [data-act="refine-send"]:not([disabled])'));
+after("open the refine panel");
+await each("anki-refine", true);
 return { results, focus, checked };
 `;
 
-/** The recommended item and the next one, a guided item, the report and its annotations, Settings, the dock, the run form, a running assessment. */
+/** The recommended item and the next one, a guided item, the report and its annotations, the Anki notes list, Settings, the dock, the run form, a running assessment. */
 const PART_TWO = `
 await today();
 press("Enter");
@@ -283,6 +289,10 @@ await click('#layer [data-act="ann"]');
 await sleep(250);
 await each("report-annotations", true);
 await closeDialog("annotation sheet", back);
+location.hash = "#/anki";
+// The prepared data holds one accepted, not yet pushed note and no open draft.
+await steady("the notes list", () => q('[data-testid="note"]') && !q('[data-testid="anki"][data-draft]') && q('[data-act="push"]'));
+await each("anki-notes", true);
 location.hash = "#/settings";
 // Settings first draws the cached registry, then its reloads may swap in the loading card:
 // use the row only once it has held, and in the same tick it was found.
@@ -321,7 +331,8 @@ return { results, focus, checked };
 /**
  * The planted-defect probes, then motion: with motion allowed, leaving an
  * independent item for the assessment room must run the room transition; with
- * reduced motion emulated, no animation may run longer than 1 ms or loop.
+ * reduced motion emulated, no animation may run longer than 1 ms or loop, and a
+ * style change (theme, sheet, answer, route) may start no CSS transition at all.
  */
 const MOTION = `
 await today();
@@ -342,9 +353,12 @@ const room = { before, after: document.body.dataset.room, transitions: UX.roomTr
 for (const a of document.getAnimations()) if (a.transitionProperty && a.playState === "running") a.finish();
 UX.emulateReducedMotion();
 const motion = [];
+// A style change under reduced motion applies at once: no transition may start, read in the same task
+// as the change (before any frame could end a short one), and none may be left after it.
 const snap = async (label) => {
+  motion.push(...UX.transitionReport(label));
   await sleep(60);
-  motion.push(...UX.motionReport(label));
+  motion.push(...UX.motionReport(label), ...UX.transitionReport(label + " later"));
 };
 await today();
 await snap("today");

@@ -8,8 +8,13 @@
  * Findings are `{ check, el, ...detail }`, where `el` is a short element path.
  * Checks:
  * - layout: page-h-overflow, text-clipped-x, text-clipped-y, text-cut-by-ancestor,
- *   outside-viewport-x, interactive-covered, interactive-not-hit, interactive-offscreen
+ *   outside-viewport-x, interactive-covered, interactive-not-hit, interactive-offscreen,
+ *   scroll-without-content (a scroll container that scrolls although its content and end padding
+ *   fit: decoration such as a pseudo-element makes a scrollbar that reveals nothing)
  * - primary action: primary-missing, primary-ambiguous, primary-hidden, primary-covered
+ * - must-see: must-see-hidden (an element the app marks [data-must-see], such as the consent and
+ *   budget rows of a call strip, is not wholly inside the viewport and every clipping ancestor:
+ *   the learner would have to scroll a container to find it)
  * - contrast (WCAG AA, 4.5 or 3 for large text) over the composited layers:
  *   contrast-fail when even the best background candidate fails,
  *   contrast-position when only some candidates fail (the text's position decides);
@@ -18,7 +23,9 @@
  * - type: font-under-12px (text and generated ::before/::after text)
  * - keyboard: not-tabbable, focus-refused, no-focus-indicator, modal-not-trapping
  * - language: zh-ascii-words, en-cjk-text, raw-code
- * - motion (see motionReport/roomTransitions)
+ * - motion (see motionReport/transitionReport/roomTransitions): motion-under-reduce, and
+ *   transition-under-reduce (a CSS transition exists at all under reduced motion: a style change must
+ *   apply at once, not through a short transition that a window WebKit does not show never advances)
  *
  * A hidden window never has system focus, so :focus, :focus-visible and
  * :focus-within never match; the focus check mirrors those rules onto the
@@ -395,6 +402,13 @@ const UX = (() => {
     const de = document.documentElement;
     if (de.scrollWidth > de.clientWidth + 1) add("page-h-overflow", de, { sw: de.scrollWidth, cw: de.clientWidth });
 
+    // What the state must show as it opens (the consent and budget a call strip names before a send):
+    // measured before the pass scrolls anything into view.
+    for (const el of vis.filter((e) => e.matches("[data-must-see]"))) {
+      const hidden = hiddenPart(el);
+      if (hidden) add("must-see-hidden", el, hidden);
+    }
+
     // Text the viewport does not show yet: measured after the pass, scrolled into view.
     const unseen = [];
     for (const el of vis) {
@@ -446,6 +460,44 @@ const UX = (() => {
       if (RAW_PATTERNS.some((p) => p.test(text)) && !el.closest(RAW_EXEMPT)) add("raw-code", el, { text: text.slice(0, 60) });
     }
     const folded = belowTheFold(add, unseen, vh);
+
+    // Scroll containers that scroll although their content fits: the content's boxes (with their
+    // end margins) and text, plus the container's own end padding, measured from the scroll origin,
+    // fit in the client box, so the overflow is decoration (such as a positioned pseudo-element)
+    // and the scrollbar reveals nothing. A form control scrolls its own text; it is skipped.
+    for (const el of vis) {
+      if (el.matches("textarea,input,select")) continue;
+      const cs = getComputedStyle(el);
+      const sy = /auto|scroll/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 1;
+      const sx = /auto|scroll/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 1;
+      if (!sy && !sx) continue;
+      const b = el.getBoundingClientRect();
+      const top = b.top + el.clientTop - el.scrollTop;
+      const left = b.left + el.clientLeft - el.scrollLeft;
+      let needY = 0;
+      let needX = 0;
+      const reach = (r, mb, mr) => {
+        if (r.width + r.height === 0) return;
+        needY = Math.max(needY, r.bottom + mb - top);
+        needX = Math.max(needX, r.right + mr - left);
+      };
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (n.nodeType === 3) {
+          if (!n.textContent.trim()) continue;
+          range.selectNodeContents(n);
+          reach(range.getBoundingClientRect(), 0, 0);
+        } else if (!SKIP_TAGS.has(n.tagName) && visible(n)) {
+          const ns = getComputedStyle(n);
+          reach(n.getBoundingClientRect(), Math.max(0, parseFloat(ns.marginBottom) || 0), Math.max(0, parseFloat(ns.marginRight) || 0));
+        }
+      }
+      needY += parseFloat(cs.paddingBottom);
+      needX += parseFloat(cs.paddingRight);
+      if (sy && needY <= el.clientHeight + 1) add("scroll-without-content", el, { axis: "y", sh: el.scrollHeight, ch: el.clientHeight, content: Math.round(needY) });
+      else if (sx && needX <= el.clientWidth + 1) add("scroll-without-content", el, { axis: "x", sw: el.scrollWidth, cw: el.clientWidth, content: Math.round(needX) });
+    }
 
     // Controls: the centre of the visible part must hit the control itself.
     for (const el of vis.filter((e) => e.matches(INTERACTIVE))) {
@@ -501,6 +553,17 @@ const UX = (() => {
     return { label: label, issues: issues, folded: folded, ms: Math.round(performance.now() - t0) };
   }
 
+  // Null when el is wholly inside the viewport and every clipping ancestor (so no scroll container
+  // hides any of it); otherwise where it is and how much of it shows.
+  function hiddenPart(el) {
+    const r = el.getBoundingClientRect();
+    const c = clipRect(el);
+    const vp = viewport();
+    const inside = c.w >= r.width - 1 && c.h >= r.height - 1 && r.left >= -1 && r.top >= -1 && r.right <= vp.vw + 1 && r.bottom <= vp.vh + 1;
+    if (inside) return null;
+    return { box: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)], shown: [Math.round(Math.max(c.w, 0)), Math.round(Math.max(c.h, 0))], by: c.clippedBy ? desc(c.clippedBy.el) : "viewport" };
+  }
+
   // The state's primary action: exactly one visible [data-primary] in the audited root, wholly
   // inside the viewport and every scroll container, and hit by a click at its centre.
   function primary(scopeEl) {
@@ -511,12 +574,8 @@ const UX = (() => {
     if (marked.length > 1) return [{ check: "primary-ambiguous", el: where, marked: marked.map(desc).join(" ") }];
     const el = marked[0];
     const r = el.getBoundingClientRect();
-    const c = clipRect(el);
-    const vp = viewport();
-    const inside = c.w >= r.width - 1 && c.h >= r.height - 1 && r.left >= -1 && r.top >= -1 && r.right <= vp.vw + 1 && r.bottom <= vp.vh + 1;
-    if (!inside) {
-      return [{ check: "primary-hidden", el: path(el), box: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)], shown: [Math.round(Math.max(c.w, 0)), Math.round(Math.max(c.h, 0))], by: c.clippedBy ? desc(c.clippedBy.el) : "viewport" }];
-    }
+    const hidden = hiddenPart(el);
+    if (hidden) return [Object.assign({ check: "primary-hidden", el: path(el) }, hidden)];
     const hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
     if (hit && hit !== el && !el.contains(hit)) return [{ check: "primary-covered", el: path(el), by: path(hit) }];
     return [];
@@ -587,6 +646,14 @@ const UX = (() => {
     }
     return out;
   }
+  // Every CSS transition that exists now (pending or running), however short. Called in the same
+  // task as a style change: reading the animations flushes style, which is when transitions start.
+  function transitionReport(label) {
+    return document
+      .getAnimations()
+      .filter((a) => a instanceof CSSTransition)
+      .map((a) => ({ check: "transition-under-reduce", el: path(a.effect && a.effect.target), at: label, name: a.transitionProperty, ms: a.effect.getComputedTiming().duration }));
+  }
   // Running transitions of the room colours (the .atmos custom properties or the page background),
   // leaving out the animations in except (those that were running before a condition change).
   function roomTransitions(except = new Set()) {
@@ -608,15 +675,18 @@ const UX = (() => {
       '<button id="qa-nofocus" class="qa-nofocus">QA no ring</button>' +
       '<button id="qa-under" style="position:relative">QA covered</button><div style="position:relative;margin-top:-30px;height:40px;background:#fff">QA cover</div>' +
       '<p id="qa-raw">错误 provider_auth_failed 发生</p>' +
+      '<div id="qa-stray" style="position:relative;height:40px;overflow:auto">QA stray scrollbar</div>' +
       '<div id="qa-scroll" style="height:40px;overflow:auto"><div style="height:200px"></div><button id="qa-primary" data-primary>QA primary</button></div>' +
-      '<i id="qa-spin" style="display:inline-block;animation:qa-spin 2s linear infinite !important">QA spin</i>';
+      '<div style="height:40px;overflow:auto"><div style="height:200px"></div><p id="qa-must-see" data-must-see>QA consent row</p></div>' +
+      '<i id="qa-spin" style="display:inline-block;animation:qa-spin 2s linear infinite !important">QA spin</i>' +
+      '<b id="qa-fade" style="transition:color 2s !important">QA fade</b>';
     const wide = document.createElement("div");
     wide.id = "qa-wide";
     wide.style.cssText = "position:fixed;top:300px;left:" + (innerWidth - 40) + "px;width:200px";
     wide.textContent = "QA off-screen text";
     const st = document.createElement("style");
     st.id = "qa-probe-style";
-    st.textContent = "@keyframes qa-spin{to{transform:rotate(360deg)}} .qa-nofocus:focus-visible,.qa-nofocus:focus{outline:none!important;box-shadow:none!important}";
+    st.textContent = "@keyframes qa-spin{to{transform:rotate(360deg)}} .qa-nofocus:focus-visible,.qa-nofocus:focus{outline:none!important;box-shadow:none!important} #qa-stray::after{content:'';position:absolute;left:0;top:100%;width:10px;height:30px}";
     document.head.append(st);
     host.append(box);
     document.body.append(wide);
@@ -626,6 +696,8 @@ const UX = (() => {
     await new Promise((done) => setTimeout(done, 100));
     const found = audit("probes").issues.concat(primary(box));
     const motion = motionReport("probes");
+    document.getElementById("qa-fade").style.color = "rgb(200, 0, 0)";
+    const transitions = transitionReport("probes");
     // The id itself, not a longer id it starts (#qa-low is not #qa-low-fold).
     const fired = (check, id) => found.some((i) => i.check === check && i.el.split("#" + id).slice(1).some((rest) => !/^[-_a-zA-Z0-9]/.test(rest)));
     const result = {
@@ -641,7 +713,10 @@ const UX = (() => {
       "zh-ascii-words": fired("zh-ascii-words", "qa-raw"),
       "raw-code": fired("raw-code", "qa-raw"),
       "primary-hidden": fired("primary-hidden", "qa-primary"),
+      "must-see-hidden": fired("must-see-hidden", "qa-must-see"),
+      "scroll-without-content": fired("scroll-without-content", "qa-stray"),
       "motion-under-reduce": motion.some((m) => m.el.includes("#qa-spin")),
+      "transition-under-reduce": transitions.some((m) => m.el.includes("#qa-fade")),
     };
     box.remove();
     wide.remove();
@@ -652,6 +727,6 @@ const UX = (() => {
     return result;
   }
 
-  return { audit: audit, primary: primary, path: path, desc: desc, visible: visible, emulateReducedMotion: emulateReducedMotion, emulateNoPreference: emulateNoPreference, restoreMotion: restoreMotion, motionReport: motionReport, roomTransitions: roomTransitions, probes: probes };
+  return { audit: audit, primary: primary, path: path, desc: desc, visible: visible, emulateReducedMotion: emulateReducedMotion, emulateNoPreference: emulateNoPreference, restoreMotion: restoreMotion, motionReport: motionReport, transitionReport: transitionReport, roomTransitions: roomTransitions, probes: probes };
 })();
 `;

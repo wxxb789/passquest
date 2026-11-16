@@ -804,9 +804,7 @@ const frameState = (f) => {
     styled: f.style.height || "unset",
     // How the frame's box reads by other routes, and whether the page is shown: diagnostics only.
     layout: "offset " + f.offsetHeight + ", rect " + Math.round(f.getBoundingClientRect().height) + ", computed " + getComputedStyle(f).height + ", page " + document.visibilityState +
-      ", anims [" + (f.getAnimations ? f.getAnimations().map((a) => a.transitionProperty || a.animationName || a.constructor.name).join("/") : "n/a") + "]" +
-      ", css {" + f.style.cssText + "}" +
-      ", div " + (() => { const d = document.createElement("div"); d.style.height = "67px"; f.parentElement.appendChild(d); const h = d.offsetHeight; d.remove(); return h; })(),
+      ", anims [" + (f.getAnimations ? f.getAnimations().map((a) => a.transitionProperty || a.animationName || a.constructor.name).join("/") : "n/a") + "]",
     width: f.clientWidth,
     scripts: doc ? doc.scripts.length : -1,
   };

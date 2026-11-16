@@ -17,7 +17,7 @@ macOS was not run locally; CI is its only evidence.
 | `bun run gate` (final tree, Windows, landscape display) | 22 passed, 2 failed, 0 skipped. Failed: `agent smoke`, `provider smoke` — see below |
 | `go test` gate | 22 packages, 862 tests, 0 skipped (831 at goal 0011) |
 | `desktop smoke` | 328 assertions over 11 scenarios (Windows); 327 in WSL Ubuntu 24.04 under `xvfb-run`, where the Windows-only Credential Manager check does not run |
-| `desktop ux` | 104 audits over 13 states × 4 modes × 2 sizes, 13 probes, 52 focus checks, 0 allowed — on Windows and in WSL Ubuntu 24.04 under `xvfb-run` |
+| `desktop ux` | 120 audits over 15 states × 4 modes × 2 sizes, 16 probes, 54 focus checks, 0 allowed (Windows); the 13-state version also passed in WSL Ubuntu 24.04 under `xvfb-run` |
 | `harness self-test` | 46 cases (2 must pass) over 23/23 gates |
 | `note smoke` / `assess smoke` | 1367 / 275 assertions |
 | `golden contract` | no golden changed against `cf66996` |
@@ -32,20 +32,25 @@ not changed; CI installs from the public registry and is their evidence.
 
 | # | Acceptance | Evidence |
 |---|---|---|
-| 1 | Primary actions visible without scrolling | `desktop ux`: 13 declared states (Today, practice sheet, shortcut sheet, independent practice, hint gate, feedback with a coach reply, Anki draft editor, guided practice, report, report annotations, Settings row, run form, running assessment) × light/dark × zh/en at 1280×800 and 1440×844; each state's one visible `[data-primary]` lies inside the viewport and its scroll containers; a missing or duplicated state is a harness failure |
+| 1 | Primary actions visible without scrolling | `desktop ux`: 15 declared states (Today, practice sheet, shortcut sheet, independent practice, hint gate, feedback with a coach reply, Anki draft editor, the editor with the refine panel open, guided practice, the notes list, report, report annotations, Settings row, run form, running assessment) × light/dark × zh/en at 1280×800 and 1440×844; each state's one visible `[data-primary]` lies inside the viewport and its scroll containers, and so does every `[data-must-see]` element (the consent and budget rows of a provider call strip); a missing or duplicated state is a harness failure |
 | 2 | No overflow, clipping or covered controls | `desktop ux`: page and text-container overflow, out-of-viewport elements, `elementFromPoint` coverage of every control, in every audit above |
 | 3 | AA contrast and ≥ 12 px text | `desktop ux`: composited contrast per text element over the translucent layers, including text below the fold and form-control values/placeholders; font-size floor including generated text. The goal-0011 window had 124 distinct findings; the final allowlist `harness/ux-allow.json` is empty |
 | 4 | Keyboard and focus | `desktop ux`: every `[data-act]` focusable with a visible change under `.qa-fv`; modal trap; dialogs take and return focus; focus never on `<body>` after the scripted navigations. `desktop smoke` refine/coach flows keep focus inside the panel after open, send, retry and close |
 | 5 | Nothing internal leaks | `desktop ux`: zh screens contain no raw code, id, hash, CLI text or ASCII word outside exam content and the marked exceptions (`[lang=en]`, `kbd`, `code`, `.mono`, `[data-raw]`, `[translate=no]`); allowlist empty. Review fixes removed a source id from the consent dialog title, a CLI command from the refine panel, the attempt's database id from the draft line and an English core instruction from the local-services sheet |
-| 6 | Motion is purposeful and optional | `desktop ux`: with no preference, leaving an independent item for the assessment room runs the room-colour transition; with reduced motion emulated, no animation runs > 1 ms and none loops |
+| 6 | Motion is purposeful and optional | `desktop ux`: with no preference, leaving an independent item for the assessment room runs the room-colour transition; with reduced motion emulated, no animation runs > 1 ms, none loops, and no scripted change starts any transition (`transition-under-reduce`; the prototype's 1 ms rule fails it with 676 findings) |
 | 7 | The card is one source | `note smoke` (1367 assertions): v2 model CSS/template hashes pinned, `createModel` sends exactly `note model`, an upgrade from v1 sends styling + templates once, a customised model is reported (`model_customized`) and not overwritten, a half-updated deck is matched part by part (Q-0012-02), no remote URL or script. `desktop smoke`: every card side's `srcdoc` equals the Go-rendered `CardDocument` byte for byte (question/answer × light/night), sized with nothing clipped at desktop and phone width, `css_sha256` equals `note model --json`. Go tests: night-mode selectors and contrast ≥ 4.5 for every text token |
 | 8 | Refinement and history work in the window | `desktop smoke` against the loopback provider stub and the real Node tutor host: the refine preview's sha256 and size equal the raw body received; consent and budget shown before sending; a non-JSON reply is a typed `invalid_response` whose Retry only reloads the preview; the suggestion renders as text and fills the fields only when used; an edited suggestion is recorded `edited`. `TestWorkspaceRefinementStaysAdvisory`: after a relaunch the draft keeps its own fields and returns the suggestion beside them, and an emptied field falls back to the draft's own value. History lists exactly the attempt's recorded calls in order |
-| 9 | The gate catches what it claims | `harness self-test`: a stylesheet that removes focus outlines and drops the hero title to background colour fails `desktop ux` with `no-focus-indicator` and `contrast-fail`; a page area 16 px short fails the viewport precondition. Every `desktop ux` run first plants 13 defects into Today and fails unless all 13 are reported. Unit checks: the process-tree matcher ignores stale-ppid and reused-pid processes and rejects an unreadable `ps` table, the coverage check rejects a missing state, no page script loses an escape |
+| 9 | The gate catches what it claims | `harness self-test`: a stylesheet that removes focus outlines and drops the hero title to background colour fails `desktop ux` with `no-focus-indicator` and `contrast-fail`; a page area 16 px short fails the viewport precondition. Every `desktop ux` run first plants 16 defects into Today and fails unless all 16 are reported. Unit checks: the process-tree matcher ignores stale-ppid and reused-pid processes and rejects an unreadable `ps` table, the coverage check rejects a missing state, no page script loses an escape |
 | 10 | Nothing regresses | all earlier gates pass with their documented counts (or fail for the environment reasons above); `golden contract`: no golden changed against `cf66996`; `go test`: 862 tests (831 at goal 0011) |
 
 ## Rendered screens
 
-SCREENS
+Contact sheets of 17 states (light/dark × zh/en at a 1280×800 page area) are in [`0012/`](0012/README.md),
+shot from the e2e build of the final tree with seeded local data and loopback stubs. They show the state the
+gates checked; they are not a substitute for them. Shooting them found two defects the gate did not yet audit —
+a stray scrollbar in the notes list and a refine panel whose Send, and after a first fix whose consent and budget
+rows, were out of view — which led to the `anki-notes`/`anki-refine` states, `scroll-without-content` and
+`must-see-hidden`.
 
 ## Review
 
@@ -75,5 +80,8 @@ evidence or reasoning of an unavailable item (CLI and window alike; no golden co
 - Contrast on translucent layers is computed, not measured by eye; reachability is approximated by
   focusability because a hidden window cannot receive a real Tab key.
 - macOS and Linux are covered as far as CI runs the audit.
+- The gate's stub model is verified, so its refine panel is shorter than one for an unverified model; the
+  unverified layout was checked with the same audit library on the screenshot build, not by the gate.
+- While the refine panel is open it covers the lower part of the card preview.
 - A refinement whose request is still running when the learner closes the refine panel is kept in the store
   and shown again after a relaunch, not immediately.

@@ -154,7 +154,7 @@ function sourceLine(d: NoteDraft): string {
 
 /** A refinement failure: the localized failure line and Retry (which only re-previews). */
 function refineFailure(e: StudioError, busy: boolean): Html {
-  return failureNote(e, { testid: 'refine-failure', retry: html`<button class="btn quiet sm" data-act="refine-retry" ${busy ? 'disabled' : ''}>${T('重试', 'Retry')}</button>` });
+  return failureNote(e, { testid: 'refine-failure', retry: html`<button class="btn quiet sm" data-act="refine-retry" data-primary ${busy ? 'disabled' : ''}>${T('重试', 'Retry')}</button>` });
 }
 
 function suggestionHTML(s: NoteRefinement, busy: boolean, models: ModelList | null): Html {
@@ -163,7 +163,7 @@ function suggestionHTML(s: NoteRefinement, busy: boolean, models: ModelList | nu
       <div class="field"><span class="fl">${T('建议 · 背面', 'Suggested · Back')}</span><p lang="en" data-testid="suggested-back">${s.suggestion.back}</p></div>
       <div class="rmeta">${ic('adv', 'xs')}${T('建议性 · 不会自动采用', 'Advisory · never applied by itself')}<span class="sep"></span>${whoMeta(s.provider, s.model, models)}<span class="sep"></span><span class="num nw">${(s.latency_ms / 1000).toFixed(1)} s</span></div>
     </div>
-    <div class="acts-row"><button class="btn adv sm" data-act="refine-use" ${busy ? 'disabled' : ''}>${T('使用建议', 'Use suggestion')}</button><button class="btn quiet sm" data-act="refine-retry" ${busy ? 'disabled' : ''}>${T('再预览一次', 'Preview again')}</button></div>
+    <div class="acts-row"><button class="btn adv sm" data-act="refine-use" data-primary ${busy ? 'disabled' : ''}>${T('使用建议', 'Use suggestion')}</button><button class="btn quiet sm" data-act="refine-retry" ${busy ? 'disabled' : ''}>${T('再预览一次', 'Preview again')}</button></div>
     <p class="fine">${T('使用建议只会填入左侧字段，接受仍由你来点。', 'Using it only fills the fields on the left; accepting stays your step.')}</p>`;
 }
 
@@ -229,7 +229,7 @@ function refinePreview(d: NoteDraft, r: AnkiRefine, busy: boolean, models: Model
           html`<div class="muted" data-testid="refine-unverified">${nextStep('capability_unverified')} ${settingsLink('capability_unverified')}${rawDetail({ code: 'capability_unverified', action: v.action ?? null })}</div>`
         : ''
     }
-      <div><button class="btn adv sm" data-act="refine-send" ${canSend ? '' : 'disabled'}>${ic(v.external ? 'ext' : 'local', 'xs')}${
+      <div><button class="btn adv sm" data-act="refine-send" data-primary ${canSend ? '' : 'disabled'}>${ic(v.external ? 'ext' : 'local', 'xs')}${
         r.sending ? T('发送中……', 'Sending…') : html`${T('发送到 ', 'Send to ')}<span translate="no">${providerName(models, v.provider)}</span>`
       }</button></div></div>`;
 }
@@ -242,9 +242,11 @@ export function refinePanelHTML(d: NoteDraft, r: AnkiRefine, busy: boolean, mode
     </div>`;
 }
 
+// While the refine panel is open its Send is the step (data-primary) and Accept steps back to a
+// secondary look, so the marked action is also the one that reads first; closing the panel restores it.
 function editSheetHTML(d: NoteDraft, f: NoteFields, u: AnkiUi, r: AnkiRefine): Html {
   const fl = (zh: string, en: string) => html`<span class="fl">${T(zh, en)}</span>`;
-  return html`<section class="esheet" role="region" aria-label="${T('编辑笔记字段', 'Edit note fields')}">
+  return html`<section class="esheet ${u.refine ? 'refining' : ''}" role="region" aria-label="${T('编辑笔记字段', 'Edit note fields')}">
     <div class="grab"></div>
     <div class="es-b ${u.refine ? 'refining' : ''}">
       <div>
@@ -262,7 +264,7 @@ function editSheetHTML(d: NoteDraft, f: NoteFields, u: AnkiUi, r: AnkiRefine): H
       <span class="sp"></span>
       ${u.refine ? '' : html`<button class="btn adv sm" data-act="refine">${ic('adv', 'xs')}${T('AI 润色', 'Refine with AI')}</button>`}
       <button class="btn quiet sm" data-act="askip" ${u.busy ? 'disabled' : ''}>${T('跳过', 'Skip')}</button>
-      <button class="btn primary sm" data-act="accept" id="acceptbtn2" data-primary ${u.busy ? 'disabled' : ''}>${ic('check', 'xs')}${T('接受', 'Accept')}</button>
+      <button class="btn ${u.refine ? 'ghost' : 'primary'} sm" data-act="accept" id="acceptbtn2" ${u.refine ? '' : 'data-primary'} ${u.busy ? 'disabled' : ''}>${ic('check', 'xs')}${T('接受', 'Accept')}</button>
       <button class="btn ghost sm" data-act="edit">${T('完成', 'Done')}<kbd>Esc</kbd></button>
     </div>
   </section>`;
@@ -293,7 +295,8 @@ export function vAnki(
   // Push only does something for notes not yet in Anki (local, queued, failed or conflicting); with
   // nothing waiting it is not offered.
   const waiting = notes.status === 'ready' ? pushable(notes.value) : 0;
-  const pushBtn = html`<button class="btn ghost" data-act="push" ${u.busy ? 'disabled' : ''}>${ic('arrow', 'xs')}${T('推送到 Anki', 'Push to Anki')}</button>`;
+  // With no draft open, pushing is the room's one step; beside a draft, accepting is.
+  const pushBtn = html`<button class="btn ghost" data-act="push" ${d ? '' : 'data-primary'} ${u.busy ? 'disabled' : ''}>${ic('arrow', 'xs')}${T('推送到 Anki', 'Push to Anki')}</button>`;
   const list = notes.status === 'ready' ? notes.value.notes : [];
   if (!d)
     return html`<div class="scene anki" id="ankiscene" data-testid="anki">
