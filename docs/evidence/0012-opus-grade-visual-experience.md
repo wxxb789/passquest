@@ -12,7 +12,16 @@ macOS was not run locally; CI is its only evidence.
 
 ## Gate runs
 
-GATE_RUNS
+| Command | Result |
+|---|---|
+| `bun run gate` (final tree, Windows, landscape display) | 22 passed, 2 failed, 0 skipped. Failed: `agent smoke`, `provider smoke` — see below |
+| `go test` gate | 22 packages, 862 tests, 0 skipped (831 at goal 0011) |
+| `desktop smoke` | 328 assertions over 11 scenarios (Windows); 327 in WSL Ubuntu 24.04 under `xvfb-run`, where the Windows-only Credential Manager check does not run |
+| `desktop ux` | 104 audits over 13 states × 4 modes × 2 sizes, 13 probes, 52 focus checks, 0 allowed — on Windows and in WSL Ubuntu 24.04 under `xvfb-run` |
+| `harness self-test` | 46 cases (2 must pass) over 23/23 gates |
+| `note smoke` / `assess smoke` | 1367 / 275 assertions |
+| `golden contract` | no golden changed against `cf66996` |
+| CI (ubuntu, macOS, Windows) | CI_RESULT |
 
 **Why gates fail locally.** As in goal 0011 (Q-0011-16): the npm feed this machine must use
 (`packagefeedproxy.microsoft.io`) still lacks the locked Pi Durable packages (`@earendil-works/*@1.5.1`,
@@ -47,7 +56,16 @@ check). A second, read-only review of the fixes found two medium issues it had i
 suggestion lost when leaving the Anki route mid-request, and a POSIX `ps` table that could parse as empty and
 silently pass the orphan check — plus two low ones (DST fall-back start times, an unordered preview reply);
 all four were fixed and adversarially re-verified, and a one-second start-time slack on Linux found during that
-verification was applied. One behaviour beyond the window changed: `assess report` no longer prints the
+verification was applied.
+
+The first CI run found what a Windows machine cannot: on Linux a hidden GTK window is never allocated, so the
+page laid out at 0×0 (fixed by allocating the unmapped window to its default size, `internal/desktop/hidden_linux.go`);
+hidden WebKit pages throttle timers and suspend CSS animations, which left card frames at their default height on
+macOS and stalled the motion stage (frames are now fitted by timers after insertion, the motion check counts only
+transitions the condition change starts, and hidden windows run with background throttling off); Linux's wider
+system font pushed the coach header's close button out of the sheet (the advisory chip now wraps); and the Windows
+runner's 1024×768 display clamped the window (CI now sets 1920×1080). A local portrait 125 % display fails the
+viewport precondition the same way, by design. One behaviour beyond the window changed: `assess report` no longer prints the
 evidence or reasoning of an unavailable item (CLI and window alike; no golden covers that case).
 
 ## Known limits

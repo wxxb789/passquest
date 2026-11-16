@@ -802,6 +802,8 @@ const frameState = (f) => {
     height: f.clientHeight,
     // The height the window set on the frame, if any: tells a fit that never ran from one that measured wrong.
     styled: f.style.height || "unset",
+    // How the frame's box reads by other routes, and whether the page is shown: diagnostics only.
+    layout: "offset " + f.offsetHeight + ", rect " + Math.round(f.getBoundingClientRect().height) + ", computed " + getComputedStyle(f).height + ", page " + document.visibilityState,
     width: f.clientWidth,
     scripts: doc ? doc.scripts.length : -1,
   };
@@ -933,7 +935,7 @@ return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-co
         );
         s.check(
           Math.abs(height - (numberField(frame, "contentHeight") ?? -100)) <= 1,
-          `anki: the ${where} frame is not sized to its card (document ${String(numberField(frame, "contentHeight"))} px, body ${String(numberField(frame, "bodyHeight"))} px, frame ${height} px, set ${String(stringField(frame, "styled"))})`,
+          `anki: the ${where} frame is not sized to its card (document ${String(numberField(frame, "contentHeight"))} px, body ${String(numberField(frame, "bodyHeight"))} px, frame ${height} px, set ${String(stringField(frame, "styled"))}; ${String(stringField(frame, "layout"))})`,
         );
         s.check(
           (numberField(frame, "scrollWidth") ?? Infinity) <= (numberField(frame, "width") ?? 0),
