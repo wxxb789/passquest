@@ -9,7 +9,7 @@ import type { Consent, ModelList, Note, NoteDraft, NoteFields, NoteList, NotePre
 import { html, type Html } from '../core/html';
 import { ankiStateOf, errorTitle, nextStep, T } from '../core/i18n';
 import type { Loadable, Theme } from '../core/state';
-import { callStrip, providerName } from '../components/callstrip';
+import { callStrip, callTarget } from '../components/callstrip';
 import { failureNote, rawDetail, settingsLink } from '../components/failure';
 import { sheetWrap } from '../components/sheet';
 import { ic } from '../icons';
@@ -215,9 +215,12 @@ function refinePreview(d: NoteDraft, r: AnkiRefine, busy: boolean, models: Model
   if (p.status === 'error') return refineFailure(p.error, busy);
   if (p.status !== 'ready') return html`<div class="pending">${T('正在准备发送预览……', 'Preparing the send preview…')}</div>`;
   const v = p.value;
-  if (!v.provider) return refineFailure({ code: 'not_configured', message: '', action: null }, busy);
+  // A hand-configured endpoint has no registry provider id: it is configured all the same (the core
+  // refuses a preview with no configuration), and its consent is the every-provider decision.
+  if (!v.endpoint) return refineFailure({ code: 'not_configured', message: '', action: null }, busy);
   const source = d.target.source_id;
-  const consent = v.consent.private_source && !v.consent.granted && source ? refineConsent(source, v.provider, providerName(models, v.provider), ledger, busy) : undefined;
+  const name = callTarget(models, v);
+  const consent = v.consent.private_source && !v.consent.granted && source ? refineConsent(source, v.provider, name, ledger, busy) : undefined;
   const where = v.external ? T('外部调用', 'external call') : T('本地调用', 'local call');
   const canSend = v.consent.granted && !r.sending && !busy;
   return html`${callStrip(v, busy, models, 'refine-strip', consent)}
@@ -230,7 +233,7 @@ function refinePreview(d: NoteDraft, r: AnkiRefine, busy: boolean, models: Model
         : ''
     }
       <div><button class="btn adv sm" data-act="refine-send" data-primary ${canSend ? '' : 'disabled'}>${ic(v.external ? 'ext' : 'local', 'xs')}${
-        r.sending ? T('发送中……', 'Sending…') : html`${T('发送到 ', 'Send to ')}<span translate="no">${providerName(models, v.provider)}</span>`
+        r.sending ? T('发送中……', 'Sending…') : html`${T('发送到 ', 'Send to ')}<span translate="no">${name}</span>`
       }</button></div></div>`;
 }
 

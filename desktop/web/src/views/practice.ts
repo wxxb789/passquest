@@ -2,7 +2,8 @@
 // column with the condition capsule, the learner's own clock (from the core's presented_at) and the
 // gated hint. A guided tactic item shows its walkthrough as guidance; it is assisted from the start.
 // An opened hint or a walkthrough sits in a drawer under the passage, so the question card keeps
-// every option and Submit in view without a scroll inside the card.
+// every option and Submit in view; only a question too long for the column scrolls its stem and
+// options inside the card, under a head and a foot (Submit) that stay in place.
 import type { Hint, PracticeItem } from '../api/types';
 import { html, type Html } from '../core/html';
 import { langOf, skillName, T } from '../core/i18n';
@@ -61,9 +62,11 @@ function qcolHTML(item: PracticeItem, u: PracticeUi): Html {
     </div>
     <article class="qcard card rise${helped ? ' hinted' : ''}" style="--i:2" aria-label="${T('题目', 'Question')}" data-testid="practice-item" data-token="${item.token}" data-question="${item.question_id}" data-presented-at="${item.presented_at}">
       <div class="q-head"><span class="eyebrow">${T(`第 ${item.index + 1} 题 · 共 ${item.count} 题`, `Question ${item.index + 1} of ${item.count}`)}</span><span class="r">${skills}</span></div>
-      <p class="q-stem exam" lang="en">${item.stem}</p>
-      ${glossary}
-      ${optsHTML(item.options, u.sel, 'pick')}
+      <div class="q-scroll">
+        <p class="q-stem exam" lang="en">${item.stem}</p>
+        ${glossary}
+        ${optsHTML(item.options, u.sel, 'pick')}
+      </div>
       <div class="q-foot">
         ${hintFoot(item)}
         <span class="sp"></span>

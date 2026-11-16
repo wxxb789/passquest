@@ -64,6 +64,7 @@ export const UX_STATES = [
   "settings-row",
   "run-form",
   "assess-running",
+  "practice-long",
 ];
 
 export interface Audited {
@@ -328,6 +329,33 @@ await each("assess-running", true);
 return { results, focus, checked };
 `;
 
+/** The question of the long source (seeded on its own database). */
+const LONG_QUESTION = "p01-q1";
+
+/**
+ * An imported question whose stem and four options run to several sentences each, opened by the
+ * recommendation (its guided walkthrough and one skill attempt are recorded through the CLI). The
+ * audit's primary check needs Submit in view and its unreachable check every option within a scroll
+ * the learner can make; choosing the last option by key must bring it into view.
+ */
+const PART_LONG = `
+await today();
+press("Enter");
+const item = await until("the long imported item", () => q('[data-testid="practice-item"]'));
+if (item.dataset.question !== "${LONG_QUESTION}") throw new Error("the recommendation opened " + item.dataset.question + ", not the long question");
+await sleep(250);
+after("Enter on Today");
+await each("practice-long", true);
+const last = all(".opt").pop();
+press(last.dataset.v);
+await until("the last option to be selected", () => last.getAttribute("aria-checked") === "true");
+await sleep(150);
+checked++;
+const hidden = UX.hidden(last);
+if (hidden) focus.push(Object.assign({ check: "chosen-option-hidden", el: UX.path(last) }, hidden));
+return { results, focus, checked };
+`;
+
 /**
  * The planted-defect probes, then motion: with motion allowed, leaving an
  * independent item for the assessment room must run the room transition; with
@@ -528,6 +556,17 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
       const result = await call(args);
       if (!check(result.code === 0, `seed: passquest ${args.join(" ")} exit = ${result.code}: ${tail(result.stderr, 4)}`)) return done();
     }
+    // The long question's own database: one reviewed page with one long question tagged with the
+    // scoring skill; after its guided walkthrough and one skill attempt the recommendation opens it.
+    const longTemplate = path.join(temp, "long-template");
+    const longData = path.join(longTemplate, "data");
+    mkdirSync(longData, { recursive: true });
+    const longCall = (args: string[]) => cliJson(cli, path.join(longData, "passquest.sqlite"), ctx.root, args, {});
+    if (!(await seedReviewedSource(longCall, check, path.join(longTemplate, "source"), 1, 1, true))) return done();
+    for (const args of [["tactic", "practice", SKILL, "--stage", "guided", "--answer", "A"], ["skill", "practice", SKILL, "--answer", "A"]]) {
+      const result = await longCall(args);
+      if (!check(result.code === 0, `seed: passquest ${args.join(" ")} exit = ${result.code}: ${tail(result.stderr, 4)}`)) return done();
+    }
 
     let launches = 0;
     const launch = async (label: string, dataDir: string, size: readonly [number, number], body: string) => {
@@ -563,9 +602,9 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
       }
       return launched.value;
     };
-    const copyTemplate = (label: string) => {
+    const copyTemplate = (label: string, from = templateData) => {
       const dataDir = path.join(temp, label, "data");
-      cpSync(templateData, dataDir, { recursive: true });
+      cpSync(from, dataDir, { recursive: true });
       return dataDir;
     };
 
@@ -600,9 +639,9 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
     const audited: Audited[] = [];
     for (const size of UX_SIZES) {
       const sizeName = `${size[0]}x${size[1]}`;
-      for (const [part, body] of [["one", PART_ONE], ["two", PART_TWO]] as const) {
+      for (const [part, body, from] of [["one", PART_ONE, templateData], ["two", PART_TWO, templateData], ["long", PART_LONG, longData]] as const) {
         const label = `audit-${sizeName}-${part}`;
-        const value = await launch(label, copyTemplate(label), size, `${DRIVE}\n${body}`);
+        const value = await launch(label, copyTemplate(label, from), size, `${DRIVE}\n${body}`);
         if (value === null) return done();
         for (const result of arrayField(value, "results")) {
           const state = stringField(result, "state") ?? "?";

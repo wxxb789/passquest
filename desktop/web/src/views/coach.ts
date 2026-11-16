@@ -6,7 +6,7 @@ import type { CoachCall, CoachHistory, CoachMode, CoachPreview, CoachReply, Mode
 import { html, type Html } from '../core/html';
 import { COACH_MODES, errorLabel, langOf, T } from '../core/i18n';
 import type { Loadable } from '../core/state';
-import { callStrip, providerName } from '../components/callstrip';
+import { callStrip, callTarget, providerName } from '../components/callstrip';
 import { failureNote, rawDetail } from '../components/failure';
 import { ic } from '../icons';
 
@@ -87,14 +87,15 @@ function body(d: CoachData, mode: CoachMode, unusable: string | null): Html {
   }
   if (p.status !== 'ready') return html`<div class="pending">${T('正在准备发送预览……', 'Preparing the send preview…')}</div>`;
   const v = p.value;
-  if (!v.provider) return failureNote({ code: 'not_configured', message: '', action: null }, { testid: 'coach-failure' });
+  // A hand-configured endpoint has no registry provider id; it is configured all the same.
+  if (!v.endpoint) return failureNote({ code: 'not_configured', message: '', action: null }, { testid: 'coach-failure' });
   const where = v.external ? T('外部调用', 'external call') : T('本地调用', 'local call');
   return html`<div class="pending">${T(
     `这一模式还没有回复。发送将进行一次${where}，消耗 1 次预算`,
     `No reply in this mode yet. Sending makes one ${where} and spends 1 budget slot`,
   )} <span class="num nw">(${v.budget.calls} → ${v.budget.calls + 1} / ${v.budget.limit})</span>${T('。', '.')}
         <div><button class="btn adv sm" data-act="coach-send" ${d.sending || d.busy ? 'disabled' : ''}>${ic(v.external ? 'ext' : 'local', 'xs')}${
-          d.sending ? T('发送中……', 'Sending…') : html`${T('发送到 ', 'Send to ')}<span translate="no">${providerName(d.models, v.provider)}</span>`
+          d.sending ? T('发送中……', 'Sending…') : html`${T('发送到 ', 'Send to ')}<span translate="no">${callTarget(d.models, v)}</span>`
         }</button></div></div>`;
 }
 
@@ -149,7 +150,7 @@ export function coachHTML(d: CoachData, mode: CoachMode): Html {
           d.showHistory
             ? historyBody(d.history, d.models)
             : html`${unusable ? html`<div class="pending held" data-testid="providers-unusable">${unusable} <a class="btn quiet sm" href="#/settings">${T('打开设置', 'Open Settings')}</a></div>` : ''}
-        ${d.preview.status === 'ready' && d.preview.value.provider ? callStrip(d.preview.value, d.busy, d.models) : ''}
+        ${d.preview.status === 'ready' && d.preview.value.endpoint ? callStrip(d.preview.value, d.busy, d.models) : ''}
         ${body(d, mode, unusable)}`
         }
       </div>

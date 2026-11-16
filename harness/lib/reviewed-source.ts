@@ -3,7 +3,9 @@
  * and one question per page (more on page 1), imported and reviewed through
  * the CLI. Twenty pages with four questions on page 1 make the 23-item unseen
  * pool the assessment gates run on. The text is self-authored filler, never
- * exam material.
+ * exam material. A long source (`long`) carries the same questions with a
+ * stem and four options of several sentences each, as an imported question
+ * can have.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -14,17 +16,29 @@ function fixturePageText(page: number): string {
   return `Page ${page}. The library closes at 4 p.m. on Saturdays. It opens at 9 a.m. on weekdays.\n`;
 }
 
+/** Self-authored filler that runs a stem or an option to several lines. */
+const LONG_FILLER =
+  "The notice hangs beside the front desk, repeats the hours for every day of the week and adds a line about holidays, so a reader who only skims it can still find the Saturday entry after a careful second look.";
+
 /** Writes questions/<id>.json for one fixture question (answer B) and returns its id. */
-export function writeFixtureQuestion(dir: string, page: number, index: number): string {
+export function writeFixtureQuestion(dir: string, page: number, index: number, long = false): string {
   const id = `p${String(page).padStart(2, "0")}-q${index}`;
+  const lead = long ? `${LONG_FILLER} ${LONG_FILLER} ${LONG_FILLER} ` : "";
+  const tail = long ? ` ${LONG_FILLER}` : "";
   writeFileSync(
     path.join(dir, "questions", `${id}.json`),
     JSON.stringify({
       id,
-      stem: `Page ${page} question ${index}: When does the library close on Saturdays?`,
+      stem: `Page ${page} question ${index}: ${lead}When does the library close on Saturdays?`,
       options: [
-        { label: "A", text: "At 9 a.m." },
-        { label: "B", text: "At 4 p.m." },
+        { label: "A", text: `At 9 a.m.${tail}` },
+        { label: "B", text: `At 4 p.m.${tail}` },
+        ...(long
+          ? [
+              { label: "C", text: `At noon.${tail}` },
+              { label: "D", text: `It does not close.${tail}` },
+            ]
+          : []),
       ],
       answer: "B",
       evidence: "closes at 4 p.m. on Saturdays",
@@ -32,6 +46,7 @@ export function writeFixtureQuestion(dir: string, page: number, index: number): 
       option_reasoning: {
         A: "Nine is the weekday opening time.",
         B: "The passage states 4 p.m. on Saturdays.",
+        ...(long ? { C: "Noon is not stated.", D: "The passage states a closing time." } : {}),
       },
       tactics: [index === 1 ? "not-except-polarity" : "vocabulary-in-context"],
       glossary: [{ term: "closes", meaning: "shuts" }],
@@ -40,7 +55,7 @@ export function writeFixtureQuestion(dir: string, page: number, index: number): 
   return id;
 }
 
-function writeFixtureTree(dir: string, pages: number, firstPageQuestions: number): Array<{ page: number; id: string }> {
+function writeFixtureTree(dir: string, pages: number, firstPageQuestions: number, long: boolean): Array<{ page: number; id: string }> {
   mkdirSync(path.join(dir, "pages"), { recursive: true });
   mkdirSync(path.join(dir, "questions"), { recursive: true });
   const written: Array<{ page: number; id: string }> = [];
@@ -48,7 +63,7 @@ function writeFixtureTree(dir: string, pages: number, firstPageQuestions: number
     writeFileSync(path.join(dir, "pages", `page-${String(page).padStart(3, "0")}.txt`), fixturePageText(page));
     const count = page === 1 ? firstPageQuestions : 1;
     for (let index = 1; index <= count; index++) {
-      written.push({ page, id: writeFixtureQuestion(dir, page, index) });
+      written.push({ page, id: writeFixtureQuestion(dir, page, index, long) });
     }
   }
   return written;
@@ -68,8 +83,9 @@ export async function seedReviewedSource(
   dir: string,
   pages: number,
   firstPageQuestions: number,
+  long = false,
 ): Promise<string | null> {
-  const questions = writeFixtureTree(dir, pages, firstPageQuestions);
+  const questions = writeFixtureTree(dir, pages, firstPageQuestions, long);
   const imported = await call(["import", "--path", dir]);
   if (!check(imported.code === 0, `import ${dir} exit = ${imported.code}: ${imported.stderr}`)) return null;
   const sourceID = stringField(field(imported.doc, "source"), "id");

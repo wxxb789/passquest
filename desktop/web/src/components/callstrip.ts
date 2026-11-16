@@ -15,22 +15,36 @@ export function providerName(models: ModelList | null, id: string): string {
   return models?.providers.find((p) => p.id === id)?.name || id;
 }
 
+/**
+ * Who a previewed call goes to: the registry provider's name, or for a hand-configured endpoint
+ * (`tutor config --endpoint`, which has no registry provider id) the endpoint's host.
+ */
+export function callTarget(models: ModelList | null, p: Pick<CallPreview, 'provider' | 'endpoint'>): string {
+  if (p.provider) return providerName(models, p.provider);
+  try {
+    return new URL(p.endpoint).host || T('手动配置的端点', 'manual endpoint');
+  } catch {
+    return T('手动配置的端点', 'manual endpoint');
+  }
+}
+
 function consentLine(c: CoachConsent, provider: string, providerId: string, busy: boolean): Html {
   if (!c.private_source) return html`<span data-consent="first_party">${T('第一方内容 · 无需授权', 'First-party content · no consent needed')}</span>`;
   const v = `${c.source_id ?? ''}|${providerId}`;
   const d = busy ? 'disabled' : '';
-  const to = html`<span translate="no">${provider}</span>`;
+  // A manual endpoint has no provider id: its consent is the every-provider decision, so say so.
+  const to = providerId ? html`<span translate="no">${provider}</span>` : html`${T('所有提供方', 'every provider')}`;
   if (c.granted)
     return html`<span data-consent="granted">${T('这份导入资料已授权给 ', 'This imported source is granted to ')}${to} <span class="muted">· ${T('可撤回', 'revocable')}</span>
       <button class="btn quiet sm" data-act="consent-revoke" data-v="${v}" ${d}>${T('撤回', 'Revoke')}</button></span>`;
   return html`<span data-consent="withheld"><span class="held">${T('这份导入资料未授权给 ', 'This imported source is not granted to ')}${to}${T(' · 原文已扣留', ' · its text is withheld')}</span>
-      <button class="btn ghost sm" data-act="consent-grant" data-v="${v}" ${d}>${T('授权发送原文', 'Grant consent')}</button></span>`;
+      <button class="btn ghost sm" data-act="consent-grant" data-v="${v}" ${d}>${providerId ? T('授权发送原文', 'Grant consent') : T('授权原文（所有提供方）', 'Allow the text (every provider)')}</button></span>`;
 }
 
 /** What the strip reads: the fields CoachPreview and NoteRefinePreview have in common. */
 export type CallPreview = Pick<
   CoachPreview,
-  'provider' | 'model' | 'external' | 'verified' | 'credential' | 'consent' | 'messages' | 'request_sha256' | 'request_bytes' | 'budget'
+  'provider' | 'model' | 'endpoint' | 'external' | 'verified' | 'credential' | 'consent' | 'messages' | 'request_sha256' | 'request_bytes' | 'budget'
 >;
 
 /** Bytes in the learner's unit: B under 1 KB, else KB with one decimal. */
@@ -61,7 +75,7 @@ function payload(p: CallPreview): Html {
  * caller needs another decision (a note's every-provider grant).
  */
 export function callStrip(p: CallPreview, busy: boolean, models: ModelList | null, testid = 'call-strip', consent?: Html): Html {
-  const name = providerName(models, p.provider);
+  const name = callTarget(models, p);
   const where = p.external
     ? html`<span class="ext">${ic('ext', 'xs')}${T('外部', 'External')}</span>`
     : html`<span>${ic('local', 'xs')}${T('本地', 'Local')}</span>`;

@@ -10,7 +10,10 @@
  * - layout: page-h-overflow, text-clipped-x, text-clipped-y, text-cut-by-ancestor,
  *   outside-viewport-x, interactive-covered, interactive-not-hit, interactive-offscreen,
  *   scroll-without-content (a scroll container that scrolls although its content and end padding
- *   fit: decoration such as a pseudo-element makes a scrollbar that reveals nothing)
+ *   fit: decoration such as a pseudo-element makes a scrollbar that reveals nothing),
+ *   unreachable (text or a control out of view that no scrolling a learner can do brings into view:
+ *   once every ancestor that scrolls (overflow auto or scroll) has scrolled to it, an ancestor that
+ *   does not (overflow hidden or clip), or the viewport of a page that does not scroll, still cuts it)
  * - primary action: primary-missing, primary-ambiguous, primary-hidden, primary-covered
  * - must-see: must-see-hidden (an element the app marks [data-must-see], such as the consent and
  *   budget rows of a call strip, is not wholly inside the viewport and every clipping ancestor:
@@ -310,6 +313,47 @@ const UX = (() => {
     }
     return out;
   }
+  // Whether the page itself scrolls on an axis: the root's overflow, or the body's when the root's is
+  // visible (the body's overflow then applies to the viewport).
+  const pageScrolls = (prop) => {
+    const own = getComputedStyle(document.documentElement)[prop];
+    return !/hidden|clip/.test(own === "visible" ? getComputedStyle(document.body)[prop] : own);
+  };
+  // Null when a learner can scroll el into view: every ancestor that scrolls (overflow auto or scroll)
+  // is scrolled to it, innermost first, and then no ancestor that does not scroll (overflow hidden or
+  // clip) and, on a page that does not scroll, no viewport edge cuts it. Otherwise what cuts it.
+  // The caller puts the scroll offsets back.
+  function unreachable(el) {
+    for (let e = el.parentElement; e && e !== document.documentElement; e = e.parentElement) {
+      const cs = getComputedStyle(e);
+      const r = el.getBoundingClientRect();
+      const p = e.getBoundingClientRect();
+      if (/auto|scroll/.test(cs.overflowY) && e.scrollHeight > e.clientHeight) {
+        const top = p.top + e.clientTop;
+        const bottom = top + e.clientHeight;
+        if (r.bottom > bottom) e.scrollTop += Math.min(r.bottom - bottom, r.top - top);
+        else if (r.top < top) e.scrollTop -= top - r.top;
+      }
+      if (/auto|scroll/.test(cs.overflowX) && e.scrollWidth > e.clientWidth) {
+        const left = p.left + e.clientLeft;
+        const right = left + e.clientWidth;
+        if (r.right > right) e.scrollLeft += Math.min(r.right - right, r.left - left);
+        else if (r.left < left) e.scrollLeft -= left - r.left;
+      }
+    }
+    const r = el.getBoundingClientRect();
+    const box = [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)];
+    for (let e = el.parentElement; e && e !== document.documentElement; e = e.parentElement) {
+      const cs = getComputedStyle(e);
+      const p = e.getBoundingClientRect();
+      if (/hidden|clip/.test(cs.overflowY) && (r.top < p.top - 1 || r.bottom > p.bottom + 1)) return { by: desc(e), axis: "y", box: box };
+      if (/hidden|clip/.test(cs.overflowX) && (r.left < p.left - 1 || r.right > p.right + 1)) return { by: desc(e), axis: "x", box: box };
+    }
+    const vp = viewport();
+    if (!pageScrolls("overflowY") && (r.top < -1 || r.bottom > vp.vh + 1)) return { by: "viewport", axis: "y", box: box };
+    if (!pageScrolls("overflowX") && (r.left < -1 || r.right > vp.vw + 1)) return { by: "viewport", axis: "x", box: box };
+    return null;
+  }
   // Text outside the first viewport, measured in sections: scroll the first unmeasured element
   // into view, measure everything now in view, repeat. What no scroll can bring into view
   // (clipped away by a non-scrolling ancestor) has no composited background to sample.
@@ -458,6 +502,18 @@ const UX = (() => {
       }
       if (lang === "en" && /[㐀-鿿]/.test(text) && !el.closest('[lang^="zh"],[data-raw],[translate="no"]')) add("en-cjk-text", el, { text: text.slice(0, 40) });
       if (RAW_PATTERNS.some((p) => p.test(text)) && !el.closest(RAW_EXEMPT)) add("raw-code", el, { text: text.slice(0, 60) });
+    }
+    // What the first viewport does not show must be reachable by a scroll the learner can make.
+    if (unseen.length) {
+      const saved = scrollPositions();
+      for (const el of new Set(unseen)) {
+        const cut = unreachable(el);
+        if (cut) add("unreachable", el, Object.assign(cut, { text: (ownText(el) || el.innerText || el.getAttribute("aria-label") || "").trim().slice(0, 40) }));
+      }
+      for (const [e, top, left] of saved) {
+        e.scrollTop = top;
+        e.scrollLeft = left;
+      }
     }
     const folded = belowTheFold(add, unseen, vh);
 
@@ -678,6 +734,7 @@ const UX = (() => {
       '<div id="qa-stray" style="position:relative;height:40px;overflow:auto">QA stray scrollbar</div>' +
       '<div id="qa-scroll" style="height:40px;overflow:auto"><div style="height:200px"></div><button id="qa-primary" data-primary>QA primary</button></div>' +
       '<div style="height:40px;overflow:auto"><div style="height:200px"></div><p id="qa-must-see" data-must-see>QA consent row</p></div>' +
+      '<div style="height:40px;overflow:hidden"><div style="height:200px"></div><p id="qa-unreachable">QA text no scroll reaches</p></div>' +
       '<i id="qa-spin" style="display:inline-block;animation:qa-spin 2s linear infinite !important">QA spin</i>' +
       '<b id="qa-fade" style="transition:color 2s !important">QA fade</b>';
     const wide = document.createElement("div");
@@ -715,6 +772,7 @@ const UX = (() => {
       "primary-hidden": fired("primary-hidden", "qa-primary"),
       "must-see-hidden": fired("must-see-hidden", "qa-must-see"),
       "scroll-without-content": fired("scroll-without-content", "qa-stray"),
+      unreachable: fired("unreachable", "qa-unreachable"),
       "motion-under-reduce": motion.some((m) => m.el.includes("#qa-spin")),
       "transition-under-reduce": transitions.some((m) => m.el.includes("#qa-fade")),
     };
@@ -727,6 +785,6 @@ const UX = (() => {
     return result;
   }
 
-  return { audit: audit, primary: primary, path: path, desc: desc, visible: visible, emulateReducedMotion: emulateReducedMotion, emulateNoPreference: emulateNoPreference, restoreMotion: restoreMotion, motionReport: motionReport, transitionReport: transitionReport, roomTransitions: roomTransitions, probes: probes };
+  return { audit: audit, primary: primary, hidden: hiddenPart, path: path, desc: desc, visible: visible, emulateReducedMotion: emulateReducedMotion, emulateNoPreference: emulateNoPreference, restoreMotion: restoreMotion, motionReport: motionReport, transitionReport: transitionReport, roomTransitions: roomTransitions, probes: probes };
 })();
 `;

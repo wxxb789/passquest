@@ -448,7 +448,11 @@ export function onRoute(loc: Location): void {
 // ---------------------------------------------------------------- targeted updates
 
 function setChecked(v: string): void {
-  document.querySelectorAll<HTMLElement>('.opt').forEach((o) => o.setAttribute('aria-checked', String(o.dataset.v === v)));
+  document.querySelectorAll<HTMLElement>('.opt').forEach((o) => {
+    o.setAttribute('aria-checked', String(o.dataset.v === v));
+    // A long question scrolls its options: the one chosen by key comes into view.
+    if (o.dataset.v === v) o.scrollIntoView({ block: 'nearest' });
+  });
 }
 
 function syncPressed(act: string, v: string): void {
