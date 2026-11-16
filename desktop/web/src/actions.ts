@@ -12,7 +12,7 @@ import { data, idle, ui, valueOf, type Loadable, type Route } from './core/state
 import { savePref } from './core/prefs';
 import { toast } from './core/toast';
 import { activeRun, assessState, practiceItem } from './screens';
-import { previewHTML, ankiStatus, pushSummary, refinePanelHTML } from './views/anki';
+import { previewHTML, ankiStatus, pushSummary, refineHold, refinePanelHTML } from './views/anki';
 import { opensItem } from './views/today';
 import { optionSpan } from './views/feedback';
 
@@ -249,12 +249,20 @@ function refreshRefine(): void {
   const inside = panel.contains(document.activeElement);
   const fk = inside && document.activeElement !== panel ? focusKey(document.activeElement) : null;
   panel.outerHTML = refinePanelHTML(d, data.anki.refine, ui.busy, valueOf(data.models) ?? null, valueOf(data.settings.consents) ?? null).value;
+  refreshHold();
   if (!inside) return;
   const fresh = $('.es-refine');
   if (!fresh) return;
   const same = fk ? fresh.querySelector<HTMLElement>(fk) : null;
   const next = focusable(same) ? same : (REFINE_NEXT.map((s) => fresh.querySelector<HTMLElement>(s)).find(focusable) ?? fresh);
   next.focus({ preventScroll: true });
+}
+
+/** Accept and Skip, outside the panel, follow a send starting and settling (refineHold). */
+function refreshHold(): void {
+  const r = data.anki.refine;
+  document.querySelectorAll<HTMLButtonElement>('#ankiscene [data-act="accept"], #ankiscene [data-act="askip"]').forEach((b) => (b.disabled = ui.busy || r.sending));
+  document.querySelectorAll<HTMLElement>('#ankiscene [data-hold]').forEach((el) => (el.innerHTML = refineHold(r).value));
 }
 
 /**
@@ -553,11 +561,13 @@ async function answered(fbPromise: (a: StudyApi, token: string) => Promise<Feedb
 async function propose(req: NoteRequest): Promise<void> {
   const d = await write((a) => a.proposeNote(req));
   if (!d) return;
+  const prev = data.anki.draft;
   data.anki.draft = d;
   data.anki.preview = idle();
   ui.anki.fields = null;
   ui.anki.dirty = false;
-  resetRefine();
+  // Proposing the same note again returns the same draft: a refinement still on its way stays its own.
+  if (!(data.anki.refine.sending && prev?.id === d.id)) resetRefine();
   if (ui.route === 'anki') void loadAnki();
   else go('anki');
 }
@@ -940,16 +950,20 @@ export const ACT: Record<string, Act> = {
   refine() {
     if (!data.anki.draft) return;
     ui.anki.editing = true;
-    if (!ui.anki.refine) {
-      ui.anki.refine = true;
-      data.anki.refine = { preview: idle(), suggestion: null, failure: null, sending: false };
-    }
+    const r = data.anki.refine;
+    // A send closed away while it waited comes back as it stands: pending, then its reply or failure,
+    // never a fresh preview that could pay for the same draft a second time.
+    const held = r.sending || !!r.suggestion || !!r.failure;
+    if (!ui.anki.refine && !held) data.anki.refine = { preview: idle(), suggestion: null, failure: null, sending: false };
+    ui.anki.refine = true;
     render();
     $('.es-refine [data-act="refine-close"]')?.focus({ preventScroll: true });
-    void loadRefinePreview();
+    if (!held) void loadRefinePreview();
   },
   'refine-close'() {
-    resetRefine();
+    // Closing hides a send in flight but keeps it: its paid reply lands in the panel when it reopens.
+    if (data.anki.refine.sending) ui.anki.refine = false;
+    else resetRefine();
     render();
     // The editor's own button: the room's one is hidden while the sheet is open.
     $(ui.anki.editing ? '.esheet [data-act="refine"]' : '[data-act="refine"]')?.focus({ preventScroll: true });
@@ -966,7 +980,8 @@ export const ACT: Record<string, Act> = {
       r.sending = false;
       // The budget moved whether or not the panel is still there to show the reply.
       void loadToday();
-      if (data.anki.draft !== d || data.anki.refine !== r) return;
+      // The same draft proposed again while this waited is still this draft.
+      if (data.anki.draft?.id !== d.id || data.anki.refine !== r) return;
       if (res.ok) r.suggestion = res.value;
       else r.failure = res.error;
       // Away from the room the state waits; the return renders it.
@@ -995,7 +1010,8 @@ export const ACT: Record<string, Act> = {
   accept() {
     const d = data.anki.draft;
     const f = ankiFields();
-    if (!d || !f) return;
+    // A refinement on its way holds the draft open (the buttons say so).
+    if (!d || !f || data.anki.refine.sending) return;
     void write((a) => a.acceptNote(d.id, f)).then((res) => {
       if (!res) return;
       data.anki.draft = null;
@@ -1011,7 +1027,7 @@ export const ACT: Record<string, Act> = {
   },
   askip() {
     const d = data.anki.draft;
-    if (!d) return;
+    if (!d || data.anki.refine.sending) return;
     void writeOk((a) => a.skipNote(d.id)).then((ok) => {
       if (!ok) return;
       data.anki.draft = null;

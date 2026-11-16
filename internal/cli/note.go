@@ -799,7 +799,12 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 	if err != nil {
 		return draft, nil, internalError(opt, jsonMode, err)
 	}
-	if err := st.SetNoteDraftRefinement(draft.ID, saved.ID, cfg.Model, front, back); err != nil {
+	// The provider call stays recorded above; the draft takes the suggestion
+	// only if nobody accepted or skipped it while the call ran.
+	if err := st.SetNoteDraftRefinement(draft, saved.ID, cfg.Model, front, back); errors.Is(err, store.ErrNoteDraftChanged) {
+		return draft, nil, usageError(opt, jsonMode, "draft_changed",
+			fmt.Sprintf("note draft #%d was accepted or skipped while the refinement ran; refinement #%d is recorded but not applied", draft.ID, saved.ID))
+	} else if err != nil {
 		return draft, nil, internalError(opt, jsonMode, err)
 	}
 	updated, found, err := st.NoteDraftByID(draft.ID)

@@ -320,6 +320,11 @@ func (w *Workspace) RefineNote(draftID int64) (studio.NoteRefinement, error) {
 	if err := w.requireNode(w.hostTutor); err != nil {
 		return studio.NoteRefinement{}, err
 	}
+	if !w.startRefining(draftID) {
+		return studio.NoteRefinement{}, &studio.Error{Code: "refine_in_progress",
+			Message: "a refinement of this draft is already waiting for its reply; nothing was sent"}
+	}
+	defer w.stopRefining(draftID)
 	var refinement studio.NoteRefinement
 	err := w.invoke(func(st *store.Store, opt Options) int {
 		draft, err := noteDraftFor(st, draftID)
@@ -545,4 +550,24 @@ func studioNote(n noteView) studio.Note {
 	}
 	_ = convertJSON(n.Target, &view.Target)
 	return view
+}
+
+// startRefining claims draftID for one refinement; false when one is in flight.
+func (w *Workspace) startRefining(draftID int64) bool {
+	w.refiningMu.Lock()
+	defer w.refiningMu.Unlock()
+	if w.refining[draftID] {
+		return false
+	}
+	if w.refining == nil {
+		w.refining = map[int64]bool{}
+	}
+	w.refining[draftID] = true
+	return true
+}
+
+func (w *Workspace) stopRefining(draftID int64) {
+	w.refiningMu.Lock()
+	defer w.refiningMu.Unlock()
+	delete(w.refining, draftID)
 }

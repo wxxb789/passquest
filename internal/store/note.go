@@ -527,12 +527,23 @@ func (s *Store) SetNoteDraftStatus(id int64, status string) error {
 	return nil
 }
 
-// SetNoteDraftRefinement stores an advisory refined front/back on a draft.
-func (s *Store) SetNoteDraftRefinement(id, refinementID int64, model, front, back string) error {
+// ErrNoteDraftChanged reports that a draft was accepted, skipped or superseded
+// after a refinement read it, so the refinement no longer applies to it.
+var ErrNoteDraftChanged = errors.New("store: note draft changed while it was being refined")
+
+// SetNoteDraftRefinement stores an advisory refined front/back on a draft. It
+// applies only while the draft is as observed when the refinement began: same
+// status and same accepted content. A refinement that finishes after the
+// learner accepted or skipped the draft changes nothing and returns
+// ErrNoteDraftChanged, so it never erases an acceptance it did not see.
+func (s *Store) SetNoteDraftRefinement(observed NoteDraft, refinementID int64, model, front, back string) error {
 	res, err := s.db.Exec(`UPDATE note_drafts SET origin = 'refined', model = ?, refinement_id = ?,
 		refined_front = ?, refined_back = ?,
 		accepted_front = '', accepted_back = '', accepted_tactic = '', accepted_origin = '', accepted_model = ''
-		WHERE id = ?`, model, refinementID, front, back, id)
+		WHERE id = ? AND status = ? AND accepted_front = ? AND accepted_back = ? AND accepted_tactic = ?
+			AND accepted_origin = ? AND accepted_model = ?`,
+		model, refinementID, front, back, observed.ID, observed.Status, observed.AcceptedFront, observed.AcceptedBack,
+		observed.AcceptedTactic, observed.AcceptedOrigin, observed.AcceptedModel)
 	if err != nil {
 		return fmt.Errorf("store: refine note draft: %w", err)
 	}
@@ -540,10 +551,15 @@ func (s *Store) SetNoteDraftRefinement(id, refinementID int64, model, front, bac
 	if err != nil {
 		return fmt.Errorf("store: read note draft refinement: %w", err)
 	}
-	if affected != 1 {
-		return ErrNotFound
+	if affected == 1 {
+		return nil
 	}
-	return nil
+	if _, found, err := s.NoteDraftByID(observed.ID); err != nil {
+		return fmt.Errorf("store: read note draft: %w", err)
+	} else if found {
+		return ErrNoteDraftChanged
+	}
+	return ErrNotFound
 }
 
 // AcceptNote inserts or revises one note in a single transaction. Equal content

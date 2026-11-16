@@ -1268,7 +1268,11 @@ func TestNotePreviewIgnoresAStoredAnswerRevealingRefinement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetNoteDraftRefinement(draft.Draft.ID, 1, "hostile-model", "At 4 p.m.", "The library closes at 4 p.m. on Saturdays."); err != nil {
+	observed, _, err := st.NoteDraftByID(draft.Draft.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNoteDraftRefinement(observed, 1, "hostile-model", "At 4 p.m.", "The library closes at 4 p.m. on Saturdays."); err != nil {
 		t.Fatalf("store hostile refinement: %v", err)
 	}
 	st.Close()

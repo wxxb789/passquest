@@ -50,6 +50,8 @@ const HOSTILE_MARKUP = '<b>x</b><img src=x onerror="document.title=\'pwned\'">';
 /** The AI refinement the stub returns; its back carries markup that must stay text. */
 const REFINED_FRONT = "smoke-refined NOT EXCEPT";
 const REFINED_BACK = `Refined back: read the options against the passage. ${HOSTILE_MARKUP}`;
+/** How long the stub holds the refinement sent after Retry: the window is checked while it waits. */
+const REFINE_HOLD_MS = 5_000;
 const NAVIGATOR_STATES = ["pending", "presented", "answered", "timed_out", "unavailable"];
 const NAVIGATOR_CLASSES = ["cell", "cur", "ans", "to"];
 const NAVIGATOR_ATTRIBUTES = ["class", "role", "data-state", "data-position", "aria-label", "title", "aria-current"];
@@ -770,11 +772,17 @@ return { draft: data('[data-testid="anki"]').draft, preview: data('[data-testid=
       });
       if (!pending) return;
       provider.received.length = 0;
-      // The first refinement is not a JSON object (a typed failure); the one sent after Retry is.
-      provider.respond = () =>
-        provider.received.length === 1
-          ? chatReply("I would rather not answer in JSON.")
-          : chatReply(JSON.stringify({ front: REFINED_FRONT, back: REFINED_BACK }));
+      // The first refinement is not a JSON object (a typed failure); the one sent after Retry is, and
+      // it is held back so the window can be checked while the request waits.
+      let refineReleasedAt = 0;
+      provider.respond = async () => {
+        if (provider.received.length === 1) return chatReply("I would rather not answer in JSON.");
+        if (provider.received.length === 2) {
+          await new Promise((done) => setTimeout(done, REFINE_HOLD_MS));
+          refineReleasedAt = Date.now();
+        }
+        return chatReply(JSON.stringify({ front: REFINED_FRONT, back: REFINED_BACK }));
+      };
       const launched = await launch(s, {
         label: "anki",
         env: { PASSQUEST_ANKI_ENDPOINT: stub.endpoint, ...keyEnv },
@@ -847,7 +855,32 @@ await click('[data-testid="refine-failure"] [data-act="refine-retry"]');
 await until("the preview after Retry", () => !q('[data-testid="refine-failure"]') && strip() && q('[data-act="refine-send"]:not([disabled])'), 20000);
 const refineRetried = data('[data-testid="refine-strip"]');
 await click('[data-act="refine-send"]');
+// The stub holds this reply. While it waits the draft is held: no Accept or Skip.
+await until("the send in flight", () => q('[data-act="refine-send"][disabled]'), 5000);
+const accepts = () => all('[data-act="accept"]').map((b) => b.disabled);
+const skips = () => all('[data-act="askip"]').map((b) => b.disabled);
+const sending = { accept: accepts(), skip: skips(), reason: q('[data-testid="refine-wait"]')?.textContent ?? null };
+// Closing the panel hides the request without dropping it; reopening shows it still waiting.
+await click('[data-act="refine-close"]');
+await until("the closed panel", () => !q('[data-testid="refine"]'));
+const closed = { accept: accepts(), skip: skips(), reason: q('[data-testid="refine-wait"]')?.textContent ?? null };
+await click('.esheet [data-act="refine"]');
+await until("the reopened panel", () => q('[data-testid="refine"]'));
+// Long enough for a fresh preview to load, if the window wrongly asked for one.
+await sleep(800);
+const resend = q('[data-act="refine-send"]');
+const reopened = {
+  send: resend ? { disabled: resend.disabled, text: resend.textContent } : null,
+  strip: data('[data-testid="refine-strip"]'),
+  suggestion: !!q('[data-testid="refine-suggestion"]'),
+  failure: !!q('[data-testid="refine-failure"]'),
+  focused: q('[data-testid="refine"]').contains(document.activeElement),
+  accept: accepts(),
+};
+// A second send for the same draft must not start while the first waits.
+if (resend && !resend.disabled) resend.click();
 const sug = await until("the suggestion", () => q('[data-testid="refine-suggestion"]'), 30000);
+const refineSettled = { at: Date.now(), accept: accepts(), skip: skips(), reason: !!q('[data-testid="refine-wait"]') };
 const suggestion = {
   front: q('[data-testid="suggested-front"]').textContent,
   back: q('[data-testid="suggested-back"]').textContent,
@@ -888,7 +921,7 @@ await until("the second accepted note", () => q('[data-testid="note"][data-state
 await sleep(300);
 await click('[data-act="push"]');
 await until("a queued note", () => q('[data-testid="sync-counts"]')?.dataset.queued === "1", 30000);
-return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-counts"]'), notes: all('[data-testid="note"]').map((note) => note.dataset.state), card, refinePreview, refineFailed, refineRetried, suggestion, used };
+return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-counts"]'), notes: all('[data-testid="note"]').map((note) => note.dataset.state), card, refinePreview, refineFailed, refineRetried, sending, closed, reopened, refineSettled, suggestion, used };
 `),
       });
       if (!launched) return;
@@ -964,6 +997,36 @@ return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-co
         s.check(refinedBody.sha256 === stringField(field(value, "refineRetried"), "sha"), "anki: the preview shown after Retry is not the body the provider received");
         s.check(failedBody.authorization === `Bearer ${key}`, "anki: the provider did not receive the credential");
       }
+      // A refinement on its way holds the draft, survives closing the panel and is never sent twice.
+      const held = (what: string, state: unknown) => {
+        const accept = arrayField(state, "accept");
+        const skip = arrayField(state, "skip");
+        s.check(accept.length > 0 && accept.every((d) => d === true), `anki: Accept is enabled while a refinement waits (${what}: ${JSON.stringify(accept)})`);
+        s.check(skip.length > 0 && skip.every((d) => d === true), `anki: Skip is enabled while a refinement waits (${what}: ${JSON.stringify(skip)})`);
+        s.check((stringField(state, "reason") ?? "").trim() !== "", `anki: no reason is shown for the held Accept and Skip (${what})`);
+      };
+      held("sending", field(value, "sending"));
+      held("panel closed", field(value, "closed"));
+      const reopened = field(value, "reopened");
+      const resend = field(reopened, "send");
+      s.check(
+        resend !== undefined && resend !== null && field(resend, "disabled") === true && field(reopened, "suggestion") === false && field(reopened, "failure") === false,
+        `anki: the reopened panel does not show the waiting request (send ${JSON.stringify(resend)}, suggestion ${String(field(reopened, "suggestion"))})`,
+      );
+      s.check(
+        stringField(field(reopened, "strip"), "sha") === stringField(field(value, "refineRetried"), "sha"),
+        "anki: the reopened panel shows a fresh preview instead of the request on its way",
+      );
+      s.check(field(reopened, "focused") === true, "anki: focus is not in the reopened refinement panel");
+      const settled = field(value, "refineSettled");
+      s.check(
+        refineReleasedAt > 0 && (numberField(settled, "at") ?? 0) >= refineReleasedAt,
+        `anki: the suggestion was shown before the held reply was released (shown ${String(numberField(settled, "at"))}, released ${refineReleasedAt})`,
+      );
+      s.check(
+        arrayField(settled, "accept").every((d) => d === false) && arrayField(settled, "skip").every((d) => d === false) && field(settled, "reason") === false,
+        "anki: Accept or Skip stays held after the refinement settled",
+      );
       s.check(
         stringField(field(value, "refineFailed"), "code") === "invalid_response",
         `anki: a non-JSON refinement shows failure code ${String(stringField(field(value, "refineFailed"), "code"))}`,

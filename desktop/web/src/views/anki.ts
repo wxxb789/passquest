@@ -242,10 +242,20 @@ export function refinePanelHTML(d: NoteDraft, r: AnkiRefine, busy: boolean, mode
     </div>`;
 }
 
+/**
+ * While a refinement is on its way the draft cannot be accepted or skipped: the reply belongs to this
+ * draft, and closing it first would leave a paid call with nowhere to land. The reason sits in a
+ * `data-hold` slot the refinement panel's own refresh rewrites, with the buttons' disabled state.
+ */
+export function refineHold(r: AnkiRefine): Html {
+  return r.sending ? html`<span class="muted" data-testid="refine-wait">${T('AI 建议返回前，先不能接受或跳过', 'Accept and Skip wait for the AI suggestion')}</span>` : html``;
+}
+
 // While the refine panel is open its Send is the step (data-primary) and Accept steps back to a
 // secondary look, so the marked action is also the one that reads first; closing the panel restores it.
 function editSheetHTML(d: NoteDraft, f: NoteFields, u: AnkiUi, r: AnkiRefine): Html {
   const fl = (zh: string, en: string) => html`<span class="fl">${T(zh, en)}</span>`;
+  const held = u.busy || r.sending ? 'disabled' : '';
   return html`<section class="esheet ${u.refine ? 'refining' : ''}" role="region" aria-label="${T('编辑笔记字段', 'Edit note fields')}">
     <div class="grab"></div>
     <div class="es-b ${u.refine ? 'refining' : ''}">
@@ -263,8 +273,9 @@ function editSheetHTML(d: NoteDraft, f: NoteFields, u: AnkiUi, r: AnkiRefine): H
       <span id="estatus">${ankiStatus(d, u.dirty)}</span><span class="muted" style="font-size:12px">${T('改动实时显示在上方卡片；清空的字段保留草稿原值', 'Changes show live on the card above; an emptied field keeps the draft value')}</span>
       <span class="sp"></span>
       ${u.refine ? '' : html`<button class="btn adv sm" data-act="refine">${ic('adv', 'xs')}${T('AI 润色', 'Refine with AI')}</button>`}
-      <button class="btn quiet sm" data-act="askip" ${u.busy ? 'disabled' : ''}>${T('跳过', 'Skip')}</button>
-      <button class="btn ${u.refine ? 'ghost' : 'primary'} sm" data-act="accept" id="acceptbtn2" ${u.refine ? '' : 'data-primary'} ${u.busy ? 'disabled' : ''}>${ic('check', 'xs')}${T('接受', 'Accept')}</button>
+      <span data-hold>${refineHold(r)}</span>
+      <button class="btn quiet sm" data-act="askip" ${held}>${T('跳过', 'Skip')}</button>
+      <button class="btn ${u.refine ? 'ghost' : 'primary'} sm" data-act="accept" id="acceptbtn2" ${u.refine ? '' : 'data-primary'} ${held}>${ic('check', 'xs')}${T('接受', 'Accept')}</button>
       <button class="btn ghost sm" data-act="edit">${T('完成', 'Done')}<kbd>Esc</kbd></button>
     </div>
   </section>`;
@@ -320,6 +331,7 @@ export function vAnki(
     }</div>
   </div>`;
   const fields = f ?? d.fields;
+  const held = u.busy || refine.sending ? 'disabled' : '';
   return html`<div class="scene anki ${u.editing ? 'editing' : ''}" id="ankiscene" data-testid="anki" data-draft="${d.id}">
     <div class="an-top settle" style="--i:0">
       <div class="src"><span class="t">${T('笔记草稿', 'Note draft')}</span><span id="astatus">${ankiStatus(d, u.dirty)}</span>${restrictedLine(d)}${modelLine(lastPush)}<span class="muted">${sourceLine(d)}</span></div>
@@ -342,9 +354,9 @@ export function vAnki(
       ] as const)}
     </div>
     <div class="an-acts settle" style="--i:3">
-      <button class="btn primary" data-act="accept" id="acceptbtn" ${u.editing ? '' : 'data-primary'} ${u.busy ? 'disabled' : ''}>${ic('check', 'xs')}${T('接受', 'Accept')}</button>
+      <button class="btn primary" data-act="accept" id="acceptbtn" ${u.editing ? '' : 'data-primary'} ${held}>${ic('check', 'xs')}${T('接受', 'Accept')}</button>
       <button class="btn ghost" data-act="edit">${ic('edit', 'xs')}${T('编辑字段', 'Edit fields')}<kbd>E</kbd></button>
-      <button class="btn quiet" data-act="askip" ${u.busy ? 'disabled' : ''}>${T('跳过', 'Skip')}</button>
+      <button class="btn quiet" data-act="askip" ${held}>${T('跳过', 'Skip')}</button>${u.editing ? '' : html`<span data-hold>${refineHold(refine)}</span>`}
       <span class="div"></span>
       <button class="btn adv sm" data-act="refine">${ic('adv', 'xs')}${T('AI 润色', 'Refine with AI')}</button><span class="cap">${T('建议性 · 先确认', 'Advisory · asks first')}</span>
       ${waiting ? html`<span class="div"></span>${pushBtn}` : ''}

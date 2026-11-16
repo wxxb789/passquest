@@ -80,7 +80,13 @@ first-party package imports a network package directly (the local-only gate chec
   relaunch instead of putting it into the fields. An emptied field falls back to the draft's own value, never
   to the suggestion. On accept, a field equal to the draft's own value keeps its origin, one equal to the
   suggestion is recorded as `refined`, and anything else as `edited`. Retry after a failure only shows the
-  preview again.
+  preview again. While a send waits, Accept and Skip are disabled with the reason beside them; closing the
+  panel hides the request without dropping it, and reopening shows it waiting and then its reply, never a
+  fresh preview, so one draft never has two refinements in flight from the window. A reply that comes
+  back after the draft was accepted or skipped elsewhere changes nothing: `RefineNote` returns
+  `draft_changed`, the call stays recorded and the draft keeps what was accepted. The backend also refuses a second
+  `RefineNote` for a draft whose refinement is still waiting (`refine_in_progress`, nothing sent), so a
+  reload or another route cannot start one either.
 - **Coach history.** `CoachHistory(attemptID)` lists the attempt's recorded coach calls, oldest first, with
   mode, provider, model, time and state; an advisory call carries its reply text, a failed one its typed
   failure. It carries no credential and no request body. The coach sheet shows it as text in its history view.

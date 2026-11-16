@@ -207,6 +207,12 @@ export const assessSmoke: Gate = {
       const resumeRun = spawnWithStdin(resumeDB, ["assess", "start", "--size", "20", "--minutes", "60", "--json"]);
       const resumeCollected = collect(resumeRun);
       resumeRun.stdin!.write("B\n".repeat(5));
+      // Kill only once the run is stored: a fixed pause raced the CLI's start
+      // under load, and the resume below then found no run 1.
+      for (let waited = 0; waited < 15000; waited += 100) {
+        if ((await callJSON(resumeDB, ["assess", "report", "1"])).code === 0) break;
+        await Bun.sleep(100);
+      }
       await Bun.sleep(300);
       resumeRun.kill();
       await resumeCollected;

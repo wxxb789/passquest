@@ -303,6 +303,15 @@ own fields are not replaced by the suggestion, even after a relaunch (the sugges
 beside them); a field left equal to the draft's own value keeps its origin, a field equal to the
 suggestion records `refined`, and anything else `edited`.
 
+A refinement applies only to the draft it read. If the draft is accepted or skipped while the
+provider call is still on its way, the reply does not touch it: the call stays recorded in the
+refinement ledger and spends its budget slot, the draft keeps the accepted values (so a relaunch does
+not bring it back as pending), and `RefineNote` returns the typed refusal `draft_changed`. The CLI's
+`note propose --refine` saves the draft and refines it in one command, so its output is unchanged;
+it refuses with the same code only if another process accepts or skips that draft during its call. The window also holds a draft while its refinement waits: Accept and Skip are disabled with the
+reason shown, and closing the refinement panel keeps the request; reopening it shows the request still
+waiting and then its reply, and never a fresh preview that could send a second request for the draft.
+
 ## Exit codes
 
 | Exit | Meaning |

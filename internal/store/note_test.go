@@ -407,7 +407,11 @@ func TestNoteDraftRefinementClearsAcceptedContent(t *testing.T) {
 	if _, err := st.AcceptDraftNote(draft.ID, target, content, at); err != nil {
 		t.Fatalf("accept draft: %v", err)
 	}
-	if err := st.SetNoteDraftRefinement(draft.ID, 1, "m", "refined front", "refined back"); err != nil {
+	observed, _, err := st.NoteDraftByID(draft.ID)
+	if err != nil {
+		t.Fatalf("read accepted draft: %v", err)
+	}
+	if err := st.SetNoteDraftRefinement(observed, 1, "m", "refined front", "refined back"); err != nil {
 		t.Fatalf("set refinement: %v", err)
 	}
 	stored, found, err := st.NoteDraftByID(draft.ID)

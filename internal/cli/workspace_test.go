@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/tutor"
 )
 
 // wsClock advances by step on every reading and can jump forward, so elapsed
@@ -1306,6 +1308,111 @@ func TestWorkspaceAssessmentReportHidesUnseenUnavailableItems(t *testing.T) {
 // field falls back to the deterministic value; accepting the draft's own
 // fields records a deterministic note, and only the suggestion itself records
 // a refined one.
+// gatedTutorTransport answers like fakeTutorTransport; with a gate set, a call
+// reports that it started and then waits for the gate before it replies.
+type gatedTutorTransport struct {
+	fakeTutorTransport
+	started chan struct{}
+	gate    chan struct{}
+}
+
+func (g *gatedTutorTransport) Call(ctx context.Context, req tutor.HostRequest) (tutor.HostResponse, error) {
+	if g.gate != nil {
+		close(g.started)
+		<-g.gate
+	}
+	return g.fakeTutorTransport.Call(ctx, req)
+}
+
+// TestWorkspaceRefinementDoesNotUndoAnAccept: a refinement that is still
+// waiting on the provider when the learner accepts the draft must not erase
+// that acceptance when its reply lands. The paid call stays recorded; the
+// draft keeps the accepted fields, so a restart does not bring it back.
+func TestWorkspaceRefinementDoesNotUndoAnAccept(t *testing.T) {
+	transport := &gatedTutorTransport{fakeTutorTransport: fakeTutorTransport{response: fixedTutorResponse("OK")}}
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
+	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
+	f.reopen(t)
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, "A")
+	mustNoErr(t, err)
+	draft, err := f.w.ProposeNote(studio.NoteRequest{AttemptID: feedback.AttemptID})
+	mustNoErr(t, err)
+	_, err = f.w.UseModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	_, err = f.w.TestModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	before, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+
+	transport.response = fixedTutorResponse(`{"front": "closes at 4 p.m.", "back": "To shut at a stated time.\n\nExample: The library closes at 4 p.m."}`)
+	transport.started, transport.gate = make(chan struct{}), make(chan struct{})
+	type outcome struct {
+		refinement studio.NoteRefinement
+		err        error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		refinement, err := f.w.RefineNote(draft.ID)
+		done <- outcome{refinement, err}
+	}()
+	select {
+	case <-transport.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the refinement never reached the provider")
+	}
+	// One paid request per draft at a time, whatever the window remembers.
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "refine_in_progress" {
+		t.Fatalf("a second refinement while the first waits = %v; want refine_in_progress", err)
+	}
+	accepted, err := f.w.AcceptNote(draft.ID, draft.Fields)
+	mustNoErr(t, err)
+	close(transport.gate)
+	var result outcome
+	select {
+	case result = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the refinement did not return after its reply")
+	}
+	if studioCode(result.err) != "draft_changed" {
+		t.Fatalf("a refinement that finished after the accept = %+v, %v; want draft_changed", result.refinement, result.err)
+	}
+
+	f.reopen(t)
+	open, err := f.w.OpenNoteDraft()
+	mustNoErr(t, err)
+	if open != nil {
+		t.Fatalf("after a restart the accepted draft is pending again: %+v", open)
+	}
+	st, err := store.Open(f.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	stored, found, err := st.NoteDraftByID(draft.ID)
+	if err != nil || !found {
+		t.Fatalf("read draft = %+v, %t, %v", stored, found, err)
+	}
+	if stored.AcceptedFront != accepted.Note.Fields.Front || stored.AcceptedBack != accepted.Note.Fields.Back ||
+		stored.RefinedFront != "" || stored.Origin != "deterministic" {
+		t.Fatalf("the late refinement changed the accepted draft: %+v", stored)
+	}
+	records, err := st.NoteRefinements()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Status != "ok" || records[0].DraftID != draft.ID {
+		t.Fatalf("the provider call is not recorded: %+v", records)
+	}
+	after, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if after.Budget.Calls != before.Budget.Calls+1 {
+		t.Fatalf("budget calls %d -> %d, want the paid call counted", before.Budget.Calls, after.Budget.Calls)
+	}
+}
+
 func TestWorkspaceRefinementStaysAdvisory(t *testing.T) {
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
 	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
