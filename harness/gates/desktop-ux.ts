@@ -328,11 +328,18 @@ await today();
 const probes = await UX.probes(q('[data-testid="hero"]'));
 UX.emulateNoPreference();
 await startFromSheet("start-skill", "${SKILL}");
-await until("the room to settle", () => UX.roomTransitions().length === 0, 5000);
+// Only transitions the condition change starts count. What entering practice started may still be
+// running, and in a window WebKit does not show (macOS runs this window hidden) CSS animations are
+// suspended and never end, so waiting for them would never return: they are set aside by identity
+// instead. A transition that changes its end value is a new animation (CSS Transitions, "starting of
+// transitions"), so the room change's own transitions are never among them.
+const earlier = new Set(document.getAnimations());
 const before = document.body.dataset.room;
 location.hash = "#/assess";
 await until("the assessment room", () => document.body.dataset.room !== before, 5000);
-const room = { before, after: document.body.dataset.room, transitions: UX.roomTransitions() };
+const room = { before, after: document.body.dataset.room, transitions: UX.roomTransitions(earlier) };
+// Motion allowed ends here: its transitions end as they would on screen before reduced motion starts.
+for (const a of document.getAnimations()) if (a.transitionProperty && a.playState === "running") a.finish();
 UX.emulateReducedMotion();
 const motion = [];
 const snap = async (label) => {

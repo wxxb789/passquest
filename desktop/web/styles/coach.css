@@ -3,7 +3,9 @@
 .co-head { padding: 18px 20px 0; display: flex; align-items: center; gap: 10px; position: relative; }
 .co-head .o { width: 12px; height: 12px; border-radius: 50%; flex: none; background: radial-gradient(circle at 40% 35%, #fff, var(--orb-core) 65%); box-shadow: 0 0 0 4px var(--orb-halo), 0 0 14px var(--orb-halo); }
 .co-head .t { font-weight: 650; font-size: var(--t-b); }
-.co-head .chip { margin-left: auto; }
+/* The advisory chip may wrap inside itself where system fonts are wider (e.g. Linux), rather than push the header's buttons out of the sheet. */
+.co-head .chip { margin-left: auto; min-width: 0; height: auto; min-height: 22px; padding-block: 3px; white-space: normal; line-height: 1.25; }
+.co-head .chip > svg { flex: none; }
 .co-head .icon-btn { margin-right: -8px; }
 .modes { margin: 14px 20px 0; display: grid; grid-template-columns: repeat(3, 1fr); padding: 3px; border-radius: var(--r-pill); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); position: relative; }
 .modes button { height: 32px; border-radius: var(--r-pill); font-size: var(--t-s); font-weight: 600; color: var(--ink-3); display: flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap; transition: all var(--d2) var(--ease); }

@@ -587,9 +587,10 @@ const UX = (() => {
     }
     return out;
   }
-  // Running transitions of the room colours (the .atmos custom properties or the page background).
-  function roomTransitions() {
-    return document.getAnimations().filter((a) => a.transitionProperty && /^(--a[123]|background(-color)?)$/.test(a.transitionProperty) && a.effect.getComputedTiming().duration > 1).map((a) => a.transitionProperty + " " + a.effect.getComputedTiming().duration + "ms");
+  // Running transitions of the room colours (the .atmos custom properties or the page background),
+  // leaving out the animations in except (those that were running before a condition change).
+  function roomTransitions(except = new Set()) {
+    return document.getAnimations().filter((a) => !except.has(a) && a.transitionProperty && /^(--a[123]|background(-color)?)$/.test(a.transitionProperty) && a.effect.getComputedTiming().duration > 1).map((a) => a.transitionProperty + " " + a.effect.getComputedTiming().duration + "ms");
   }
 
   // ---------- planted defects ----------

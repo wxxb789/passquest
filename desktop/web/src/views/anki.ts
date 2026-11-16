@@ -49,18 +49,41 @@ export function ankiStatus(d: NoteDraft | null, dirty: boolean): Html {
 /**
  * Sets a card frame's height to its document's height: nothing is clipped and nothing scrolls. The
  * root element's box is the content's height whatever the frame's current viewport (the model CSS
- * sizes nothing by the viewport), so no script has to run inside the frame.
+ * sizes nothing by the viewport), so no script has to run inside the frame. Returns the height set,
+ * or null while the frame still holds its initial empty document.
  */
-export function fitCardFrame(frame: HTMLIFrameElement): void {
+export function fitCardFrame(frame: HTMLIFrameElement): number | null {
   const doc = frame.contentDocument;
-  const fit = () => {
-    const root = frame.contentDocument?.documentElement;
-    if (root) frame.style.height = `${Math.ceil(root.getBoundingClientRect().height)}px`;
+  if (!doc || doc.URL !== 'about:srcdoc' || doc.readyState !== 'complete') return null;
+  const height = Math.ceil(doc.documentElement.getBoundingClientRect().height);
+  frame.style.height = `${height}px`;
+  return height;
+}
+
+const FIT_TRIES = 40;
+const FIT_STEP_MS = 50;
+
+/**
+ * Fits a newly placed card frame without depending on one event: plain timers re-measure it until its
+ * card document has loaded and two measurements agree, then once more when its fonts are in. A page
+ * WebKit does not show (a hidden or occluded window) runs no animation frames, and on macOS CI the frame
+ * was never fitted although its document had loaded — the load event was not observed before the read
+ * (assumed, not proven). Timers still run in such a page, so the frame is sized whether or not the window
+ * is on screen. 'load', a width transition's end and a window resize refit through fitCardFrame as well.
+ */
+export function watchCardFrame(frame: HTMLIFrameElement): void {
+  let last: number | null = null;
+  const step = (tries: number) => {
+    if (!frame.isConnected) return;
+    const height = fitCardFrame(frame);
+    if (height !== null && height === last) {
+      void frame.contentDocument?.fonts?.ready.then(() => fitCardFrame(frame));
+      return;
+    }
+    last = height;
+    if (tries > 1) setTimeout(() => step(tries - 1), FIT_STEP_MS);
   };
-  fit();
-  // Once more after the frame has laid out at its new height and its fonts are in.
-  requestAnimationFrame(fit);
-  void doc?.fonts?.ready.then(fit);
+  step(FIT_TRIES);
 }
 
 const SIDES: Record<CardSide, readonly ('question' | 'answer')[]> = {

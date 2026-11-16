@@ -8,7 +8,7 @@ import '../styles/index.css';
 import { bindApi, connectStudy } from './api/client';
 import { ACT, doMark, keyActions, onDeadline, onFieldInput, onRoute, recoverOnBoot, setEv, watchBrief } from './actions';
 import { checkSelection, hideMarkPop, onMark } from './components/passage';
-import { fitCardFrame } from './views/anki';
+import { fitCardFrame, watchCardFrame } from './views/anki';
 import { startClock } from './core/clock';
 import { installKeyboard } from './core/keyboard';
 import { moreCue, render, setScreens } from './core/render';
@@ -84,13 +84,20 @@ function delegate(): void {
     if (!pointerDown) checkSelection();
   });
   onMark(() => void doMark());
-  // Anki card frames take their document's height once loaded, after the width animates and when the
-  // window resizes ('load' does not bubble, so it is caught on the way down).
-  const fitFrames = () => document.querySelectorAll<HTMLIFrameElement>('iframe.ac-frame').forEach(fitCardFrame);
+  // Anki card frames take their document's height as they are placed, once loaded, after the width
+  // animates and when the window resizes ('load' does not bubble, so it is caught on the way down).
+  const fitFrames = () => document.querySelectorAll<HTMLIFrameElement>('iframe.ac-frame').forEach((frame) => fitCardFrame(frame));
+  new MutationObserver((records) => {
+    for (const record of records)
+      for (const node of record.addedNodes) {
+        if (node instanceof HTMLIFrameElement && node.classList.contains('ac-frame')) watchCardFrame(node);
+        else if (node instanceof Element) node.querySelectorAll<HTMLIFrameElement>('iframe.ac-frame').forEach(watchCardFrame);
+      }
+  }).observe(document.body, { childList: true, subtree: true });
   document.addEventListener(
     'load',
     (e) => {
-      if (e.target instanceof HTMLIFrameElement && e.target.classList.contains('ac-frame')) fitCardFrame(e.target);
+      if (e.target instanceof HTMLIFrameElement && e.target.classList.contains('ac-frame')) watchCardFrame(e.target);
     },
     true,
   );

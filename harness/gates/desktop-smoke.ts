@@ -800,6 +800,8 @@ const frameState = (f) => {
     bodyHeight: doc && doc.body ? Math.ceil(doc.body.getBoundingClientRect().height) : -1,
     scrollWidth: root ? root.scrollWidth : -1,
     height: f.clientHeight,
+    // The height the window set on the frame, if any: tells a fit that never ran from one that measured wrong.
+    styled: f.style.height || "unset",
     width: f.clientWidth,
     scripts: doc ? doc.scripts.length : -1,
   };
@@ -931,7 +933,7 @@ return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-co
         );
         s.check(
           Math.abs(height - (numberField(frame, "contentHeight") ?? -100)) <= 1,
-          `anki: the ${where} frame is not sized to its card (document ${String(numberField(frame, "contentHeight"))} px, body ${String(numberField(frame, "bodyHeight"))} px, frame ${height} px)`,
+          `anki: the ${where} frame is not sized to its card (document ${String(numberField(frame, "contentHeight"))} px, body ${String(numberField(frame, "bodyHeight"))} px, frame ${height} px, set ${String(stringField(frame, "styled"))})`,
         );
         s.check(
           (numberField(frame, "scrollWidth") ?? Infinity) <= (numberField(frame, "width") ?? 0),

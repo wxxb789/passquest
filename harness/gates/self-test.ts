@@ -990,7 +990,8 @@ func main() {
         const earlier = failures.find((line) => /go build|bun build|viewport precondition|probes:|script failed|seed:/.test(line));
         if (earlier) return `desktop-ux: the mutated stylesheet broke an earlier stage: ${earlier}`;
         if (!failures.some((line) => line.startsWith("no-focus-indicator "))) return "desktop-ux: did not report no-focus-indicator";
-        if (!failures.some((line) => line.startsWith("contrast-fail ") && line.includes("hero-title"))) {
+        // The audit names an element by its id when it has one (h1#hero-t), not by its classes.
+        if (!failures.some((line) => line.startsWith("contrast-fail ") && /\bh1#hero-t\b/.test(line))) {
           return "desktop-ux: did not report contrast-fail on the hero title";
         }
         return null;
