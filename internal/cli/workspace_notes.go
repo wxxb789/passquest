@@ -41,7 +41,8 @@ func (w *Workspace) ProposeNote(request studio.NoteRequest) (studio.NoteDraft, e
 // latest open draft) while it is still pending: proposed and neither accepted
 // nor skipped. It is nil otherwise. An accepted draft stays open in the store
 // for a repeated accept, but the window has already closed it. It lets the
-// window restore a pending draft after a restart.
+// window restore a pending draft after a restart: the draft's own fields, with
+// a refinement the learner has not used returned apart as its Suggestion.
 func (w *Workspace) OpenNoteDraft() (*studio.NoteDraft, error) {
 	var open *studio.NoteDraft
 	err := w.withStore(func(st *store.Store) error {
@@ -59,11 +60,81 @@ func (w *Workspace) OpenNoteDraft() (*studio.NoteDraft, error) {
 		if err != nil {
 			return noteStudioError(err)
 		}
-		restored, err := studioNoteDraft(noteDraftViewOf(effective), notePlainViewOf(effective), effective.Advisory, noteLimits)
+		view := noteWindowOf(effective)
+		restored, err := studioNoteDraft(noteDraftViewOf(view.base), notePlainViewOf(view.base), view.base.Advisory, noteLimits)
+		if err != nil {
+			return err
+		}
+		if view.suggestion != nil {
+			record, err := noteRefinementRecord(st, draft.RefinementID)
+			if err != nil {
+				return err
+			}
+			suggestion := studioNoteRefinement(draft.ID, record, *view.suggestion)
+			restored.Suggestion = &suggestion
+		}
 		open = &restored
-		return err
+		return nil
 	})
 	return open, err
+}
+
+// noteWindow is a draft as the window edits it. base holds the draft's own
+// fields: the deterministic proposal, or the values accepted last. A stored
+// refinement the learner has not used stays apart as suggestion; it reaches
+// the card only when the learner puts it in the fields. effective is what
+// `note accept` without edits would record.
+type noteWindow struct {
+	effective  noteEffective
+	base       noteEffective
+	suggestion *studio.NoteFields
+}
+
+func noteWindowOf(effective noteEffective) noteWindow {
+	view := noteWindow{effective: effective, base: effective}
+	if effective.Draft.AcceptedFront != "" || effective.Origin != note.OriginRefined {
+		return view
+	}
+	own := effective.Draft
+	own.Origin = string(note.OriginDeterministic)
+	own.Model, own.RefinedFront, own.RefinedBack = "", "", ""
+	view.base = noteEffectiveOf(own, effective.Input, effective.Built)
+	view.base.Draft = effective.Draft
+	view.suggestion = &studio.NoteFields{Front: effective.Front, Back: effective.Back, Tactic: effective.Tactic}
+	return view
+}
+
+func noteFieldsOf(e noteEffective) studio.NoteFields {
+	return studio.NoteFields{Front: e.Front, Back: e.Back, Tactic: e.Tactic}
+}
+
+func noteRefinementRecord(st *store.Store, id int64) (store.NoteRefinement, error) {
+	records, err := st.NoteRefinements()
+	if err != nil {
+		return store.NoteRefinement{}, err
+	}
+	for _, record := range records {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+	return store.NoteRefinement{}, fmt.Errorf("note refinement #%d is not recorded", id)
+}
+
+func studioNoteRefinement(draftID int64, record store.NoteRefinement, suggestion studio.NoteFields) studio.NoteRefinement {
+	return studio.NoteRefinement{
+		State:         "advisory",
+		DraftID:       draftID,
+		RefinementID:  record.ID,
+		Suggestion:    suggestion,
+		Provider:      record.Provider,
+		Model:         record.Model,
+		Advisory:      true,
+		RequestSHA256: record.RequestSHA256,
+		RequestBytes:  record.RequestBytes,
+		LatencyMS:     record.LatencyMS,
+		Limits:        noteLimits,
+	}
 }
 
 func studioNoteDraft(view noteDraftView, plain notePlainView, advisory bool, limits []string) (studio.NoteDraft, error) {
@@ -88,16 +159,17 @@ func studioNoteDraft(view noteDraftView, plain notePlainView, advisory bool, lim
 
 // PreviewNote renders the draft with the real note model. Non-empty fields
 // are the learner's edits, sanitised exactly as `note accept` sanitises them;
-// empty fields keep the draft's values. The card documents come from
+// empty fields keep the draft's own values, never an unused suggestion. The card documents come from
 // note.RenderSides and note.CardDocument: the same templates and stylesheet a
 // push sends to Anki.
 func (w *Workspace) PreviewNote(draftID int64, fields studio.NoteFields) (studio.NotePreview, error) {
 	var preview studio.NotePreview
 	err := w.withStore(func(st *store.Store) error {
-		effective, edited, err := noteEdit(st, draftID, fields)
+		view, edited, err := noteEdit(st, draftID, fields)
 		if err != nil {
 			return err
 		}
+		effective := view.base
 		rendered := note.HTML(edited.Front, edited.Back, edited.Tactic, effective.Built.SourceLabel)
 		question, answer := note.RenderSides(rendered)
 		model := note.TemplateModel()
@@ -121,7 +193,7 @@ func (w *Workspace) PreviewNote(draftID int64, fields studio.NoteFields) (studio
 			ModelVersion: model.Version,
 			Deck:         note.Deck,
 			Model:        note.ModelName,
-			Edited:       edited != studio.NoteFields{Front: effective.Front, Back: effective.Back, Tactic: effective.Tactic},
+			Edited:       edited != noteFieldsOf(effective) && (view.suggestion == nil || edited != *view.suggestion),
 		}
 		return nil
 	})
@@ -242,8 +314,8 @@ func (w *Workspace) RefineNotePreview(draftID int64) (studio.NoteRefinePreview, 
 // the provider; a budget slot is reserved, and a provider failure is recorded
 // and returned with its typed code. The suggestion is advisory and is never
 // applied by the window: the learner copies what they keep into the fields and
-// accepts them with AcceptNote, which records an edited note when the fields
-// differ from the suggestion.
+// accepts them with AcceptNote, which records a refined note only for the
+// suggestion's own fields.
 func (w *Workspace) RefineNote(draftID int64) (studio.NoteRefinement, error) {
 	if err := w.requireNode(w.hostTutor); err != nil {
 		return studio.NoteRefinement{}, err
@@ -269,27 +341,12 @@ func (w *Workspace) RefineNote(draftID int64) (studio.NoteRefinement, error) {
 		if code != 0 {
 			return code
 		}
-		records, err := st.NoteRefinements()
+		record, err := noteRefinementRecord(st, view.ID)
 		if err != nil {
 			return internalError(opt, true, err)
 		}
-		refinement = studio.NoteRefinement{
-			State:         "advisory",
-			DraftID:       refined.ID,
-			RefinementID:  view.ID,
-			Suggestion:    studio.NoteFields{Front: refined.RefinedFront, Back: refined.RefinedBack, Tactic: built.Tactic},
-			Model:         view.Model,
-			Advisory:      true,
-			RequestSHA256: view.RequestSHA256,
-			RequestBytes:  view.RequestBytes,
-			LatencyMS:     view.LatencyMS,
-			Limits:        noteLimits,
-		}
-		for _, record := range records {
-			if record.ID == view.ID {
-				refinement.Provider = record.Provider
-			}
-		}
+		refinement = studioNoteRefinement(refined.ID, record,
+			studio.NoteFields{Front: refined.RefinedFront, Back: refined.RefinedBack, Tactic: built.Tactic})
 		return 0
 	})
 	return refinement, err
@@ -315,36 +372,39 @@ func (w *Workspace) invoke(fn func(st *store.Store, opt Options) int) error {
 	return nil
 }
 
-// noteEdit loads a draft's effective fields and applies sanitised edits.
-func noteEdit(st *store.Store, draftID int64, fields studio.NoteFields) (noteEffective, studio.NoteFields, error) {
+// noteEdit loads a draft as the window edits it and applies sanitised edits
+// over the draft's own fields: an emptied field keeps the draft's own value,
+// never an unused suggestion.
+func noteEdit(st *store.Store, draftID int64, fields studio.NoteFields) (noteWindow, studio.NoteFields, error) {
 	draft, err := noteDraftFor(st, draftID)
 	if err != nil {
-		return noteEffective{}, studio.NoteFields{}, noteStudioError(err)
+		return noteWindow{}, studio.NoteFields{}, noteStudioError(err)
 	}
 	effective, err := noteEffectiveFor(st, draft)
 	if err != nil {
-		return noteEffective{}, studio.NoteFields{}, noteStudioError(err)
+		return noteWindow{}, studio.NoteFields{}, noteStudioError(err)
 	}
 	if len(effective.Built.Withheld) > 0 {
-		return noteEffective{}, studio.NoteFields{}, refuse("consent_required", "%s", noteConsentMessage(draft))
+		return noteWindow{}, studio.NoteFields{}, refuse("consent_required", "%s", noteConsentMessage(draft))
 	}
-	edited := studio.NoteFields{Front: effective.Front, Back: effective.Back, Tactic: effective.Tactic}
+	view := noteWindowOf(effective)
+	edited := noteFieldsOf(view.base)
 	if strings.TrimSpace(fields.Front) != "" {
 		if edited.Front, err = note.SanitizeFront(fields.Front); err != nil {
-			return noteEffective{}, studio.NoteFields{}, refuse("invalid_front", "%s", err.Error())
+			return noteWindow{}, studio.NoteFields{}, refuse("invalid_front", "%s", err.Error())
 		}
 	}
 	if strings.TrimSpace(fields.Back) != "" {
 		if edited.Back, err = note.SanitizeBack(fields.Back); err != nil {
-			return noteEffective{}, studio.NoteFields{}, refuse("invalid_back", "%s", err.Error())
+			return noteWindow{}, studio.NoteFields{}, refuse("invalid_back", "%s", err.Error())
 		}
 	}
 	if strings.TrimSpace(fields.Tactic) != "" {
 		if edited.Tactic, err = note.SanitizeTactic(fields.Tactic); err != nil {
-			return noteEffective{}, studio.NoteFields{}, refuse("invalid_tactic", "%s", err.Error())
+			return noteWindow{}, studio.NoteFields{}, refuse("invalid_tactic", "%s", err.Error())
 		}
 	}
-	return effective, edited, nil
+	return view, edited, nil
 }
 
 func noteStudioError(err error) error {
@@ -354,35 +414,29 @@ func noteStudioError(err error) error {
 	return err
 }
 
-// AcceptNote is `note accept`: the changed fields are passed as edits, so an
-// unchanged draft keeps its origin and an edited one is recorded as edited.
+// AcceptNote records the learner's fields as `note accept` records them. The
+// origin follows what the learner accepts: the draft's own fields keep its
+// origin, the unused suggestion's own fields are a refined note, and anything
+// else is an edited one.
 func (w *Workspace) AcceptNote(draftID int64, fields studio.NoteFields) (studio.NoteAccept, error) {
-	var args []string
+	var doc noteAcceptDoc
 	err := w.withStore(func(st *store.Store) error {
-		effective, edited, err := noteEdit(st, draftID, fields)
+		view, edited, err := noteEdit(st, draftID, fields)
 		if err != nil {
 			return err
 		}
-		args = []string{"note", "accept", "--draft", strconv.FormatInt(effective.Draft.ID, 10)}
-		if edited.Front != effective.Front {
-			args = append(args, "--front="+edited.Front)
+		recorded, origin := view.base, view.base.Origin
+		switch {
+		case edited == noteFieldsOf(view.base):
+		case view.suggestion != nil && edited == *view.suggestion:
+			recorded, origin = view.effective, view.effective.Origin
+		default:
+			recorded, origin = view.effective, note.OriginEdited
 		}
-		if edited.Back != effective.Back {
-			args = append(args, "--back="+edited.Back)
-		}
-		if edited.Tactic != effective.Tactic {
-			args = append(args, "--tactic="+edited.Tactic)
-		}
-		return nil
+		doc, err = noteAcceptRecord(st, recorded, edited.Front, edited.Back, edited.Tactic, origin, w.opt.Now())
+		return err
 	})
 	if err != nil {
-		return studio.NoteAccept{}, err
-	}
-	w.mu.Lock()
-	result := w.run(args...)
-	w.mu.Unlock()
-	var doc noteAcceptDoc
-	if err := result.decode(&doc); err != nil {
 		return studio.NoteAccept{}, err
 	}
 	return studio.NoteAccept{

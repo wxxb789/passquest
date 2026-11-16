@@ -3,10 +3,11 @@
 // where the presence comes from); keys entered here go to the OS credential store.
 import type { Budget, Consent, CredentialStatus, Model, ModelList, ModelProvider, Services } from '../api/types';
 import { html, type Html } from '../core/html';
-import { capabilityOf, capName, failureTypeLabel, shortStamp, T } from '../core/i18n';
+import { capabilityOf, capName, failureTypeLabel, nextStep, shortStamp, T } from '../core/i18n';
 import type { Loadable } from '../core/state';
 import { sat, type Flag } from '../components/satellite';
 import { sheetWrap } from '../components/sheet';
+import { rawDetail } from '../components/failure';
 import { ic } from '../icons';
 import { unusableLine } from './coach';
 import { errorCard, loadingCard, retryButton } from './states';
@@ -236,7 +237,7 @@ function servicesSheet(s: Services): Html {
     html`<div class="svc" data-testid="svc-node" data-available="${s.node_available}"><span class="state-dot ${s.node_available ? 'ok' : 'bad'}"></span><span>${T('Agent 宿主', 'Agent host')} <span class="muted">(Node${
       s.node_path ? html` · <code>${s.node_path}</code>` : ''
     })</span></span><span class="st ${s.node_available ? 'ok' : 'bad'}">${s.node_available ? T('可用 · 按次启动', 'available · started per call') : T('不可用', 'unavailable')}</span></div>
-      ${s.node_available || !s.node_action ? '' : html`<p class="fine">${s.node_action}</p>`}
+      ${s.node_available ? '' : html`<div class="fine" data-testid="svc-node-next">${nextStep('node_unavailable')}${rawDetail({ code: 'node_unavailable', action: s.node_action })}</div>`}
       <div class="svc"><span class="state-dot off"></span><span>AnkiConnect <code class="muted">${s.anki_endpoint}</code></span><span class="st">${T('推送时才连接', 'contacted only on push')}</span></div>
       <div class="svc"><span class="state-dot ${s.search_configured ? 'ok' : 'off'}"></span><span>${T('搜索提供方', 'Search provider')} <code class="muted">${s.search_env}</code></span><span class="st">${
         s.search_configured ? T('已配置', 'configured') : T('未配置', 'not configured')

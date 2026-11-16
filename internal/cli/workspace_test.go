@@ -1225,3 +1225,143 @@ func TestWorkspaceCoachHistory(t *testing.T) {
 		t.Fatalf("unknown attempt = %v", err)
 	}
 }
+
+// TestWorkspaceAssessmentReportWithholdsQuestions: the report's question and
+// verified key appear only after the run, and only for items the learner was
+// shown and that reached an outcome. An active run shows none; an abandoned
+// run shows the answered item and not the pending one.
+func TestWorkspaceAssessmentReportWithholdsQuestions(t *testing.T) {
+	f := newWSFixture(t, nil)
+	seedAssessmentSource(t, f.db, 22, 1)
+	state, err := f.w.StartAssessment(3, 30)
+	mustNoErr(t, err)
+	runID := state.Run.ID
+	_, err = f.w.AnswerAssessmentItem(runID, 0, "A")
+	mustNoErr(t, err)
+	active, err := f.w.AssessmentReport(runID)
+	mustNoErr(t, err)
+	if len(active.Items) != 3 {
+		t.Fatalf("active report items = %+v", active.Items)
+	}
+	for _, item := range active.Items {
+		if item.Question != nil || !item.Annotations.Withheld || item.Annotations.Available {
+			t.Fatalf("active run item %d reveals its question: %+v / %+v", item.Position, item.Question, item.Annotations)
+		}
+	}
+	_, err = f.w.AbandonAssessment(runID)
+	mustNoErr(t, err)
+	abandoned, err := f.w.AssessmentReport(runID)
+	mustNoErr(t, err)
+	if q := abandoned.Items[0].Question; q == nil || q.Key == "" || q.Selected != "A" {
+		t.Fatalf("answered item after abandon = %+v", q)
+	}
+	for _, item := range abandoned.Items[1:] {
+		if item.Question != nil || !item.Annotations.Withheld {
+			t.Fatalf("pending item %d of an abandoned run reveals its question: %+v / %+v", item.Position, item.Question, item.Annotations)
+		}
+	}
+}
+
+// TestWorkspaceAssessmentReportHidesUnseenUnavailableItems: an item marked
+// unavailable before it was presented stays unspent, so it can be selected as
+// unseen again. When its content loads again at the same version, the report
+// must still not show its question, key or annotations.
+func TestWorkspaceAssessmentReportHidesUnseenUnavailableItems(t *testing.T) {
+	f := newWSFixture(t, nil)
+	seedAssessmentSource(t, f.db, 22, 1)
+	state, err := f.w.StartAssessment(2, 30)
+	mustNoErr(t, err)
+	runID := state.Run.ID
+	// A transient load failure marks the pending item unavailable; the content
+	// itself is unchanged, so its version matches again at report time.
+	st, err := store.Open(f.db)
+	mustNoErr(t, err)
+	err = st.MarkAssessmentUnavailable(runID, 1, f.clock.Now(), "transient read failure")
+	st.Close()
+	mustNoErr(t, err)
+	_, err = f.w.AnswerAssessmentItem(runID, 0, "A")
+	mustNoErr(t, err)
+	done, err := f.w.PresentAssessmentItem(runID)
+	mustNoErr(t, err)
+	if done.State != studio.AssessmentCompletedState {
+		t.Fatalf("run after the last available item = %+v", done)
+	}
+	report, err := f.w.AssessmentReport(runID)
+	mustNoErr(t, err)
+	if len(report.Items) != 2 || report.Items[1].State != assess.StateUnavailable {
+		t.Fatalf("report items = %+v", report.Items)
+	}
+	if report.Items[0].Question == nil {
+		t.Fatal("the answered item lost its question")
+	}
+	unseen := report.Items[1]
+	if unseen.Question != nil || unseen.Annotations.Available || unseen.Annotations.Evidence != "" || unseen.Annotations.Reasoning != "" {
+		t.Fatalf("an unseen unavailable item reveals its question: %+v / %+v", unseen.Question, unseen.Annotations)
+	}
+}
+
+// TestWorkspaceRefinementStaysAdvisory: a stored refinement is a suggestion
+// beside the draft, never the draft's own fields. After a restart the window
+// restores the deterministic fields with the suggestion apart; an emptied
+// field falls back to the deterministic value; accepting the draft's own
+// fields records a deterministic note, and only the suggestion itself records
+// a refined one.
+func TestWorkspaceRefinementStaysAdvisory(t *testing.T) {
+	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
+	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
+	f.reopen(t)
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, "A")
+	mustNoErr(t, err)
+	draft, err := f.w.ProposeNote(studio.NoteRequest{AttemptID: feedback.AttemptID})
+	mustNoErr(t, err)
+	_, err = f.w.UseModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	_, err = f.w.TestModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	transport.response = fixedTutorResponse(`{"front": "closes at 4 p.m.", "back": "To shut at a stated time.\n\nExample: The library closes at 4 p.m."}`)
+	refined, err := f.w.RefineNote(draft.ID)
+	mustNoErr(t, err)
+
+	f.reopen(t)
+	open, err := f.w.OpenNoteDraft()
+	mustNoErr(t, err)
+	if open == nil || open.ID != draft.ID || open.Fields != draft.Fields || open.Origin != "deterministic" || open.Advisory {
+		t.Fatalf("restored draft = %+v, want the deterministic fields %+v", open, draft.Fields)
+	}
+	if open.Suggestion == nil || open.Suggestion.Suggestion != refined.Suggestion || open.Suggestion.RefinementID != refined.RefinementID ||
+		!open.Suggestion.Advisory || open.Suggestion.Provider != "alpha" || open.Suggestion.Model != "alpha-text" {
+		t.Fatalf("restored suggestion = %+v, want %+v", open.Suggestion, refined)
+	}
+
+	own, err := f.w.PreviewNote(draft.ID, draft.Fields)
+	mustNoErr(t, err)
+	if own.Fields != draft.Fields || own.Edited {
+		t.Fatalf("preview of the draft's own fields = %+v (edited %v)", own.Fields, own.Edited)
+	}
+	used, err := f.w.PreviewNote(draft.ID, refined.Suggestion)
+	mustNoErr(t, err)
+	if used.Fields != refined.Suggestion || used.Edited {
+		t.Fatalf("preview of the used suggestion = %+v (edited %v)", used.Fields, used.Edited)
+	}
+	emptied, err := f.w.PreviewNote(draft.ID, studio.NoteFields{Front: "My own front", Tactic: draft.Fields.Tactic})
+	mustNoErr(t, err)
+	if emptied.Fields.Back != draft.Fields.Back || !emptied.Edited {
+		t.Fatalf("an emptied back became %q, want the draft's %q", emptied.Fields.Back, draft.Fields.Back)
+	}
+
+	accepted, err := f.w.AcceptNote(draft.ID, draft.Fields)
+	mustNoErr(t, err)
+	if accepted.Note.Origin != "deterministic" || accepted.Note.Fields.Front != draft.Fields.Front ||
+		accepted.Note.Fields.Back != draft.Fields.Back {
+		t.Fatalf("accepting the draft's own fields recorded %+v", accepted.Note)
+	}
+	again, err := f.w.AcceptNote(draft.ID, refined.Suggestion)
+	mustNoErr(t, err)
+	if again.Note.Origin != "edited" || again.Note.Fields.Front != refined.Suggestion.Front {
+		t.Fatalf("a later accept of the suggestion over the accepted fields = %+v", again.Note)
+	}
+}

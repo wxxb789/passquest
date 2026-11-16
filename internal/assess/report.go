@@ -71,10 +71,14 @@ func BuildReport(run Run, items []Item, attempts []attempt.Attempt, events []Eve
 		// annotations. An item that was selected but never finalized (pending,
 		// or presented before an abandon) must not reveal them either: its unit
 		// can stay eligible for the next run, and abandoning must not hand the
-		// learner the answers first. An unavailable item has no annotation
-		// content to leak, so it keeps the "unavailable" label.
+		// learner the answers first. An unavailable item keeps the
+		// "unavailable" label and no annotation content: its content may load
+		// again at the same version, and one marked before it was presented
+		// stays unspent, so it can be selected as unseen in a later run.
 		if run.Status == StatusActive || (!item.Finalized() && item.State != StateUnavailable) {
 			entry.Annotations = Annotations{Withheld: true}
+		} else if item.State == StateUnavailable {
+			entry.Annotations = Annotations{}
 		}
 		if !item.PresentedAt.IsZero() {
 			counts.Presented++

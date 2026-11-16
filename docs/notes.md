@@ -298,8 +298,10 @@ row — and sends nothing; while consent withholds the source text the messages 
 shown. `RefineNote` then runs the same code as `note propose --refine` on that draft (verification,
 credential, provider-scoped consent, budget reservation, recorded failure with the same codes) and
 returns the suggested front and back as an advisory suggestion. The window never applies it: the
-learner copies what they keep into the fields and accepts them with the usual accept, which records a
-`refined` note when the suggestion is kept as it is and an `edited` one otherwise.
+learner copies what they keep into the fields and accepts them with the usual accept. The draft's
+own fields are not replaced by the suggestion, even after a relaunch (the suggestion is returned
+beside them); a field left equal to the draft's own value keeps its origin, a field equal to the
+suggestion records `refined`, and anything else `edited`.
 
 ## Exit codes
 

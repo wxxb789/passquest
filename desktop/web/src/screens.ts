@@ -12,7 +12,7 @@ import { html, type Html } from './core/html';
 import { conditionOf, T, TITLES, TP } from './core/i18n';
 import type { Screens } from './core/render';
 import { data, ui, valueOf } from './core/state';
-import { vAnki, ankiSheet } from './views/anki';
+import { vAnki, ankiSheet, noteConsentOf, sourceTitleOf } from './views/anki';
 import { vAssess } from './views/assess';
 import { vFeedback } from './views/feedback';
 import { vPractice } from './views/practice';
@@ -92,6 +92,7 @@ function stage(): Html {
           busy: ui.busy,
           theme: ui.theme,
           models: valueOf(data.models) ?? null,
+          consents: valueOf(data.settings.consents) ?? null,
         },
         data.anki.refine,
         data.anki.lastPush,
@@ -183,7 +184,12 @@ function layer(): Html {
       const source = ui.anki.consentSource;
       const m = data.models;
       const names = m.status === 'ready' ? m.value.providers.map((p) => p.name) : m.status === 'error' ? 'unreadable' : 'loading';
-      return source ? consentAllDialog(source, names) : html``;
+      const ledger = valueOf(data.settings.consents) ?? null;
+      const providers = valueOf(data.models)?.providers ?? [];
+      const denied = (ledger ?? [])
+        .filter((c) => c.source_id === source && c.provider && noteConsentOf(ledger, c.source_id, c.provider).providerDenied)
+        .map((c) => providers.find((p) => p.id === c.provider)?.name || c.provider || '');
+      return source ? consentAllDialog(source, sourceTitleOf(ledger, source), names, denied) : html``;
     }
   }
   return html``;

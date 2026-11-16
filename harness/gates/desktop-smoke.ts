@@ -102,7 +102,7 @@ return {
   textLength: document.body.innerText.length,
   stageChildren: node ? node.children.length : -1,
   stageTextLength: node ? node.innerText.trim().length : 0,
-  stageText: node ? node.innerText.replace(/\s+/g, " ").trim().slice(0, 240) : "",
+  stageText: node ? node.innerText.replace(/\\s+/g, " ").trim().slice(0, 240) : "",
   errorBars: errors.length,
   errorText: Array.from(errors, (element) => element.textContent ?? "").join(" | ").slice(0, 300),
   ready: window.__pq === undefined ? null : window.__pq.ready === true,

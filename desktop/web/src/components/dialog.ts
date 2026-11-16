@@ -99,8 +99,10 @@ export function leaveDialog(position: number | null): Html {
  * The Anki preview's consent: note text accepts only the global decision (`tutor consent` without a
  * provider), and that same event reaches every model provider without its own decision. The dialog
  * names that scope and the registry's providers before anything is recorded; Cancel is the default.
+ * The source is named by its title (else "this imported source"); its id stays in the button's data.
+ * `denied` names providers with their own refusal for this source: the global grant does not reach them.
  */
-export function consentAllDialog(source: string, providers: readonly string[] | 'loading' | 'unreadable'): Html {
+export function consentAllDialog(source: string, title: string | null, providers: readonly string[] | 'loading' | 'unreadable', denied: readonly string[] = []): Html {
   const list =
     providers === 'loading'
       ? html`<span class="muted">${T('正在读取模型注册表……', 'Reading the model registry…')}</span>`
@@ -109,15 +111,23 @@ export function consentAllDialog(source: string, providers: readonly string[] | 
         : providers.length
         ? html`<b>${providers.join(T('、', ', '))}</b>`
         : html`<span class="muted">${T('注册表里还没有提供方', 'no provider is registered yet')}</span>`;
+  const zh = title ? `「${title}」` : '这份导入资料';
+  const en = title ? `“${title}”` : 'this imported source';
+  const kept = denied.length
+    ? html`<p class="fine" data-testid="consent-denied"><b translate="no">${denied.join(T('、', ', '))}</b>${T(
+        ' 保留你单独做出的撤回：这次授权不会改变它，原文仍不会发给它们。要恢复，请对它们单独授权。',
+        ' keep the revocation you made for them alone: this grant does not change it, and the text is still not sent to them. Grant them separately to restore it.',
+      )}</p>`
+    : '';
   return dlg(
     'warm',
     'shield',
     'dca',
-    T(`授权 ${source} 的原文用于笔记和所有提供方？`, `Allow the text of ${source} for notes and every provider?`),
+    T(`授权${zh}的原文用于笔记和所有提供方？`, `Allow the text of ${en} for notes and every provider?`),
     html`<p>${T(
-      `Anki 笔记只接受对所有去向生效的授权。这一次授权同样允许每个没有单独决定的模型提供方在导师调用里收到 ${source} 的原文，包括以后添加的提供方：`,
-      `Anki notes accept only a grant that covers every destination. The same grant lets every model provider without its own decision receive the text of ${source} in coach calls, including providers added later: `,
-    )}${list}</p>
+      `Anki 笔记只接受对所有去向生效的授权。这一次授权同样允许每个没有单独决定的模型提供方在导师调用里收到${zh}的原文，包括以后添加的提供方：`,
+      `Anki notes accept only a grant that covers every destination. The same grant lets every model provider without its own decision receive the text of ${en} in coach calls, including providers added later: `,
+    )}${list}</p>${kept}
       <p class="fine" data-testid="consent-scope" data-scope="all-providers">${T(
         '只想给某一个提供方授权，请在反馈页的导师面板或设置里按提供方授权（那样不会解锁笔记）。可随时在设置里撤回。',
         'To allow one provider only, grant per provider from the coach panel or Settings (that does not unlock notes). Revocable in Settings at any time.',
@@ -177,6 +187,6 @@ export function startRunDialog(pool: AssessmentPool): Html {
         <label class="field"><span class="fl">${T(`题数（剩余 ${pool.qualifying_items} 题）`, `Items (${pool.qualifying_items} left)`)}</span><input type="number" name="size" min="1" max="${pool.qualifying_items}" step="1" value="${Math.min(pool.default_size, pool.qualifying_items)}"></label>
         <label class="field"><span class="fl">${T('时长（分钟）', 'Time window (minutes)')}</span><input type="number" name="minutes" min="1" max="1440" step="1" value="${pool.default_minutes}"></label>
       </form>`,
-    html`<button class="btn quiet" data-act="close" autofocus>${T('取消', 'Cancel')}</button><button class="btn primary" data-act="run-start">${T('开始', 'Start')}</button>`,
+    html`<button class="btn quiet" data-act="close" autofocus>${T('取消', 'Cancel')}</button><button class="btn primary" data-act="run-start" data-primary>${T('开始', 'Start')}</button>`,
   );
 }

@@ -14,7 +14,7 @@ Reserve the high-fidelity interface, interaction design and Anki card look-and-f
 ## Refined contract (activated 2026-11-15)
 
 Goal 0011 delivered a functional MyGo workspace that already carries the owner-chosen **"C · Stage"**
-tokens and layout ([`design/prototypes/c-stage.html`](../../design/prototypes/c-stage.html)). A
+tokens and layout ([`design/prototypes/c-stage.html`](../../../design/prototypes/c-stage.html)). A
 route-by-route comparison with the prototype, an Anki model audit and an in-window quality audit (80 audits
 over 2 window sizes × 10 states × 2 themes × 2 languages) found what still separates it from a finished,
 memorable study experience: a primary action pushed out of view in guided practice, internal identifiers, hashes
@@ -56,7 +56,8 @@ Packaging, installers and first-run onboarding (goal 0013); new practice content
 - Quality is measured by a new `desktop-ux` gate against an explicit allowlist that may only shrink; it must be
   empty at close except for entries whose reason is exam content or a learner-entered value (Q-0012-01).
 - Note model upgrade: in place under the same model name via `updateModelStyling`/`updateModelTemplates`, only
-  from a byte-identical known version (Q-0012-02).
+  when each of the stylesheet, front and back is a part Pass Quest itself shipped (line endings and surrounding
+  whitespace aside), so no learner text can be overwritten (Q-0012-02).
 - The tactic name stays on the back of the card, so the front does not hint the answer (Q-0012-04).
 - Window sizes measured: 1280×800 and the largest 1440-wide height the development display allows (1440×844);
   a smoke-only content-size switch fixes the viewport (Q-0012-05).

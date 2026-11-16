@@ -41,6 +41,9 @@ type NoteDraft struct {
 	Source         string     `json:"source"`
 	Advisory       bool       `json:"advisory"`
 	Limits         []string   `json:"limits"`
+	// Suggestion is a stored refinement the learner has not used. It stays
+	// advisory beside Fields and never fills them; nil when there is none.
+	Suggestion *NoteRefinement `json:"suggestion,omitempty"`
 }
 
 // NotePreview is the card rendered with the real note model. Question and

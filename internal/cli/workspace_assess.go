@@ -274,8 +274,10 @@ func (w *Workspace) AssessmentReport(runID int64) (studio.AssessmentReport, erro
 
 // attachReportQuestions adds each item's question, the learner's choice and
 // the verified key to the report items whose annotations are open (after the
-// run), so the window can show them beside the annotations. An item whose
-// stored content version no longer matches gets none, exactly as its
+// run), so the window can show them beside the annotations. Only an item the
+// learner was shown and that reached an outcome (answered or timed out) gets
+// one: a pending or unavailable item may be selected again as unseen. An item
+// whose stored content version no longer matches gets none, exactly as its
 // annotations are unavailable.
 func attachReportQuestions(st *store.Store, runID int64, material assessmentMaterial, view *studio.AssessmentReport) error {
 	_, items, _, err := st.AssessmentRun(runID)
@@ -300,8 +302,11 @@ func attachReportQuestions(st *store.Store, runID int64, material assessmentMate
 			continue
 		}
 		item, ok := byPosition[entry.Position]
+		if !ok || !item.Finalized() || item.PresentedAt.IsZero() || entry.State == assess.StateUnavailable {
+			continue
+		}
 		unit, found := units[item.ContentID]
-		if !ok || !found || unit.Version != item.ContentVersion {
+		if !found || unit.Version != item.ContentVersion {
 			continue
 		}
 		for _, question := range unit.Questions {

@@ -21,7 +21,7 @@ export function stateCard(s: StateCard): Html {
     <article class="obj hero card rise" style="--i:0" aria-labelledby="state-t" data-testid="state" ${s.code ? html`data-code="${s.code}"` : ''}>
       <div class="obj-top"><span class="eyebrow">${s.eyebrow}</span><span class="r">${ic(s.ico, 'xs')}</span></div>
       <h1 class="hero-title h-disp" id="state-t" style="font-size:var(--t-2xl)">${s.title}</h1>
-      <p class="reason">${s.body}</p>
+      <div class="reason">${s.body}</div>
       ${s.action ? html`<div class="obj-foot"><span></span><span class="acts-row">${s.action}</span></div>` : ''}
     </article>
   </div>`;

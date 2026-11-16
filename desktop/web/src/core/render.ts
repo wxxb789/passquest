@@ -94,11 +94,22 @@ export function landFocus(): void {
   $('#stage')?.focus({ preventScroll: true });
 }
 
+/**
+ * Re-renders the orb (the coach sheet). Focus that was inside it stays inside: on the same control
+ * when it is still there and enabled (a send button is disabled while its call runs), else on the
+ * coach sheet itself, never on <body>.
+ */
 export function renderOrb(): void {
   const orb = $('#orb');
   if (!screens || !orb) return;
+  const inside = orb.contains(document.activeElement);
+  const fk = inside ? focusKey(document.activeElement) : null;
   orb.innerHTML = screens.orb().value;
   moreCue();
+  if (!inside || orb.contains(document.activeElement)) return;
+  const same = fk ? orb.querySelector<HTMLElement>(fk) : null;
+  const next = same && !(same as HTMLButtonElement).disabled ? same : (orb.querySelector<HTMLElement>('#coach') ?? orb.querySelector<HTMLElement>('button'));
+  next?.focus({ preventScroll: true });
 }
 
 /** A control inside the layer that can be found again after a rebuild: a form field by name, else focusKey. */

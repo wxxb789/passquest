@@ -12,7 +12,9 @@
  * - primary action: primary-missing, primary-ambiguous, primary-hidden, primary-covered
  * - contrast (WCAG AA, 4.5 or 3 for large text) over the composited layers:
  *   contrast-fail when even the best background candidate fails,
- *   contrast-position when only some candidates fail (the text's position decides)
+ *   contrast-position when only some candidates fail (the text's position decides);
+ *   text below the fold is scrolled into view to be measured, and form controls
+ *   are measured on the text they draw (value, placeholder, chosen option)
  * - type: font-under-12px (text and generated ::before/::after text)
  * - keyboard: not-tabbable, focus-refused, no-focus-indicator, modal-not-trapping
  * - language: zh-ascii-words, en-cjk-text, raw-code
@@ -257,6 +259,77 @@ const UX = (() => {
     if (c.best < c.need) add("contrast-fail", el, Object.assign({ ratio: +c.min.toFixed(2), best: +c.best.toFixed(2), need: c.need, flags: c.flags }, extra));
     else if (c.min < c.need) add("contrast-position", el, Object.assign({ ratio: +c.min.toFixed(2), best: +c.best.toFixed(2), need: c.need, flags: c.flags }, extra));
   }
+  // Some of the visible part of c lies inside the viewport, where the composited background can be sampled.
+  const inView = (c, vh) => c.w > 0 && c.h > 0 && c.t < vh && c.b > 0;
+  // An element's own text nodes, measured over the box of its first non-blank one.
+  function textContrast(add, el, text) {
+    const cs = getComputedStyle(el);
+    const fs = parseFloat(cs.fontSize);
+    const range = document.createRange();
+    const node = Array.from(el.childNodes).find((n) => n.nodeType === 3 && n.textContent.trim());
+    range.selectNodeContents(node);
+    const tr = range.getBoundingClientRect();
+    contrastFinding(add, el, contrast(el, cs.color, tr.width ? tr : el.getBoundingClientRect(), fs, parseInt(cs.fontWeight, 10)), { px: fs, text: text.slice(0, 40) });
+  }
+  // Text a form control draws without a text node: an input's value or placeholder, a select's chosen option.
+  const NO_TEXT_INPUTS = /^(checkbox|radio|range|color|file|hidden|image)$/;
+  function controlText(el, cs) {
+    let text = "";
+    let color = cs.color;
+    if (el.tagName === "SELECT") text = el.selectedOptions[0] ? el.selectedOptions[0].text : "";
+    else if (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !NO_TEXT_INPUTS.test(el.type))) {
+      if (el.tagName === "TEXTAREA" && ownText(el)) return null; // its text node is measured as text
+      text = el.type === "password" ? "" : el.value;
+      if (!text && el.placeholder) {
+        text = el.placeholder;
+        color = getComputedStyle(el, "::placeholder").color;
+      }
+    }
+    text = text.replace(/\s+/g, " ").trim();
+    return text ? { text: text, color: color } : null;
+  }
+  function controlContrast(add, el, control) {
+    const cs = getComputedStyle(el);
+    const fs = parseFloat(cs.fontSize);
+    contrastFinding(add, el, contrast(el, control.color, el.getBoundingClientRect(), fs, parseInt(cs.fontWeight, 10)), { px: fs, text: control.text.slice(0, 40), control: true });
+  }
+  // Scroll containers and their offsets, to put back after measuring text below the fold.
+  function scrollPositions() {
+    const out = [[document.scrollingElement || document.documentElement, 0, 0]];
+    for (const e of document.querySelectorAll("body *")) if (e.scrollTop || e.scrollLeft || e.scrollHeight > e.clientHeight || e.scrollWidth > e.clientWidth) out.push([e, 0, 0]);
+    for (const p of out) {
+      p[1] = p[0].scrollTop;
+      p[2] = p[0].scrollLeft;
+    }
+    return out;
+  }
+  // Text outside the first viewport, measured in sections: scroll the first unmeasured element
+  // into view, measure everything now in view, repeat. What no scroll can bring into view
+  // (clipped away by a non-scrolling ancestor) has no composited background to sample.
+  function belowTheFold(add, pending, vh) {
+    if (!pending.length) return 0;
+    const saved = scrollPositions();
+    let measured = 0;
+    while (pending.length) {
+      const first = pending[0];
+      first.scrollIntoView({ block: "start", inline: "nearest" });
+      const rest = [];
+      for (const el of pending) {
+        if (inView(clipRect(el), vh)) {
+          measured++;
+          const control = controlText(el, getComputedStyle(el));
+          if (control) controlContrast(add, el, control);
+          else textContrast(add, el, ownText(el));
+        } else if (el !== first) rest.push(el);
+      }
+      pending = rest;
+    }
+    for (const [e, top, left] of saved) {
+      e.scrollTop = top;
+      e.scrollLeft = left;
+    }
+    return measured;
+  }
 
   // ---------- language ----------
   const LANG_EXEMPT = '[lang="en"],.exam,.pas-body,kbd,code,.mono,[data-raw],[translate="no"],input,textarea,[data-field]';
@@ -322,11 +395,18 @@ const UX = (() => {
     const de = document.documentElement;
     if (de.scrollWidth > de.clientWidth + 1) add("page-h-overflow", de, { sw: de.scrollWidth, cw: de.clientWidth });
 
+    // Text the viewport does not show yet: measured after the pass, scrolled into view.
+    const unseen = [];
     for (const el of vis) {
       if (el.matches(".sr") || (el.offsetWidth <= 2 && el.offsetHeight <= 2)) continue;
       const cs = getComputedStyle(el);
       const text = ownText(el);
       const r = el.getBoundingClientRect();
+      const control = controlText(el, cs);
+      if (control) {
+        if (inView(clipRect(el), vh)) controlContrast(add, el, control);
+        else unseen.push(el);
+      }
       if (text || (el.innerText && el.innerText.trim())) {
         if (cs.overflowX !== "visible" && !/auto|scroll/.test(cs.overflowX) && cs.textOverflow !== "ellipsis" && el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) {
           const box = el.getBoundingClientRect();
@@ -356,13 +436,8 @@ const UX = (() => {
       }
       const fs = parseFloat(cs.fontSize);
       if (fs < 12) add("font-under-12px", el, { px: fs, text: text.slice(0, 40) });
-      if (c.w > 0 && c.h > 0 && c.t < vh && c.b > 0) {
-        const range = document.createRange();
-        const node = Array.from(el.childNodes).find((n) => n.nodeType === 3 && n.textContent.trim());
-        range.selectNodeContents(node);
-        const tr = range.getBoundingClientRect();
-        contrastFinding(add, el, contrast(el, cs.color, tr.width ? tr : r, fs, parseInt(cs.fontWeight, 10)), { px: fs, text: text.slice(0, 40) });
-      }
+      if (inView(c, vh)) textContrast(add, el, text);
+      else unseen.push(el);
       if (/^zh/.test(lang) && !el.closest(LANG_EXEMPT)) {
         const words = (text.match(/[A-Za-z][A-Za-z'’-]{2,}/g) || []).filter((w) => !ZH_WORDS_OK.test(w));
         if (words.length) add("zh-ascii-words", el, { words: words.slice(0, 6).join(" "), text: text.slice(0, 50) });
@@ -370,6 +445,7 @@ const UX = (() => {
       if (lang === "en" && /[㐀-鿿]/.test(text) && !el.closest('[lang^="zh"],[data-raw],[translate="no"]')) add("en-cjk-text", el, { text: text.slice(0, 40) });
       if (RAW_PATTERNS.some((p) => p.test(text)) && !el.closest(RAW_EXEMPT)) add("raw-code", el, { text: text.slice(0, 60) });
     }
+    const folded = belowTheFold(add, unseen, vh);
 
     // Controls: the centre of the visible part must hit the control itself.
     for (const el of vis.filter((e) => e.matches(INTERACTIVE))) {
@@ -422,7 +498,7 @@ const UX = (() => {
       const outside = Array.from(document.querySelectorAll("button,a[href],input,select,textarea,[tabindex]")).filter((e) => !scope.el.contains(e) && focusable(e) && visible(e));
       if (outside.length) add("modal-not-trapping", scope.el, { outside: outside.slice(0, 3).map(desc).join(" ") });
     }
-    return { label: label, issues: issues, ms: Math.round(performance.now() - t0) };
+    return { label: label, issues: issues, folded: folded, ms: Math.round(performance.now() - t0) };
   }
 
   // The state's primary action: exactly one visible [data-primary] in the audited root, wholly
@@ -524,6 +600,8 @@ const UX = (() => {
     box.innerHTML =
       '<div id="qa-clip" style="width:80px;overflow:hidden;white-space:nowrap">QA clipped sentence that cannot fit in eighty pixels</div>' +
       '<p id="qa-low" style="color:rgb(150,150,150);background:#fff">QA low contrast text</p>' +
+      '<div style="height:40px;overflow:auto"><div style="height:400px"></div><p id="qa-low-fold" style="color:rgb(150,150,150);background:#fff">QA low contrast below the fold</p></div>' +
+      '<input id="qa-low-input" style="color:rgb(150,150,150);background:#fff" value="QA faint value">' +
       '<p id="qa-tiny" style="font-size:10px">QA tiny text</p>' +
       '<span id="qa-div-act" data-act="qa-noop">QA div control</span>' +
       '<button id="qa-nofocus" class="qa-nofocus">QA no ring</button>' +
@@ -547,11 +625,14 @@ const UX = (() => {
     await new Promise((done) => setTimeout(done, 100));
     const found = audit("probes").issues.concat(primary(box));
     const motion = motionReport("probes");
-    const fired = (check, id) => found.some((i) => i.check === check && i.el.includes("#" + id));
+    // The id itself, not a longer id it starts (#qa-low is not #qa-low-fold).
+    const fired = (check, id) => found.some((i) => i.check === check && i.el.split("#" + id).slice(1).some((rest) => !/^[-_a-zA-Z0-9]/.test(rest)));
     const result = {
       "text-clipped-x": fired("text-clipped-x", "qa-clip"),
       "outside-viewport-x": fired("outside-viewport-x", "qa-wide"),
       "contrast-fail": fired("contrast-fail", "qa-low"),
+      "contrast-fail below the fold": fired("contrast-fail", "qa-low-fold"),
+      "contrast-fail on a control's value": fired("contrast-fail", "qa-low-input"),
       "font-under-12px": fired("font-under-12px", "qa-tiny"),
       "not-tabbable": fired("not-tabbable", "qa-div-act"),
       "no-focus-indicator": fired("no-focus-indicator", "qa-nofocus"),

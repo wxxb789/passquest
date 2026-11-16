@@ -34,7 +34,7 @@
 .sk .nm { font-size: var(--t-sm); color: var(--ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sk .nm .id { margin-left: 6px; }
 .sk .v { font-weight: 650; font-size: var(--t-sm); }
-.sk .v small { color: var(--ink-3); font-weight: 400; }
+.sk .v small { color: var(--ink-3); font-weight: 400; font-size: 12px; }
 .sk .pips { grid-column: 1 / -1; display: flex; gap: 3px; }
 .sk .pips i { flex: 1; max-width: 22px; height: 6px; border-radius: 3px; background: var(--line-2); }
 .sk .pips i.on { background: var(--ink-2); }

@@ -5,12 +5,12 @@
 // so the card is never clipped and never scrolls. Pass Quest proposes; the learner edits, accepts or
 // skips; the outbox pushes. "Refine with AI" previews the call, sends once on the learner's word and
 // shows an advisory suggestion that only fills the editor when used.
-import type { ModelList, Note, NoteDraft, NoteFields, NoteList, NotePreview, NotePush, NoteRefinePreview, NoteRefinement, StudioError } from '../api/types';
+import type { Consent, ModelList, Note, NoteDraft, NoteFields, NoteList, NotePreview, NotePush, NoteRefinePreview, NoteRefinement, StudioError } from '../api/types';
 import { html, type Html } from '../core/html';
-import { ankiStateOf, errorTitle, T } from '../core/i18n';
+import { ankiStateOf, errorTitle, nextStep, T } from '../core/i18n';
 import type { Loadable, Theme } from '../core/state';
 import { callStrip, providerName } from '../components/callstrip';
-import { failureNote } from '../components/failure';
+import { failureNote, rawDetail, settingsLink } from '../components/failure';
 import { sheetWrap } from '../components/sheet';
 import { ic } from '../icons';
 import { whoMeta } from './coach';
@@ -29,6 +29,8 @@ export interface AnkiUi {
   theme: Theme;
   /** The provider registry, for provider names. */
   models: ModelList | null;
+  /** The consent ledger (latest decision per source and provider), for the refinement's consent line. */
+  consents: Consent[] | null;
 }
 
 /** The refinement strip's data (data.anki.refine). */
@@ -119,10 +121,10 @@ function syncs(notes: Loadable<NoteList>): Html {
       </div>`;
 }
 
-/** Where the draft came from, in words: the ids (source, question) stay in the draft's data. */
+/** Where the draft came from, in words: the ids (source, question, attempt) stay in the draft's data. */
 function sourceLine(d: NoteDraft): string {
   const t = d.target;
-  const from = t.mark ? T('来自文章标记', 'From a passage mark') : t.attempt_id ? T(`来自第 ${t.attempt_id} 次作答`, `From attempt #${t.attempt_id}`) : T('来自题目', 'From a question');
+  const from = t.mark ? T('来自文章标记', 'From a passage mark') : t.attempt_id ? T('来自一次作答', 'From an answer') : T('来自题目', 'From a question');
   const page = t.page ? T(` · 第 ${t.page} 页`, ` · page ${t.page}`) : '';
   return `${from}${page} · ${T('由 Pass Quest 提议，你来决定', 'proposed by Pass Quest, your call')}`;
 }
@@ -142,33 +144,76 @@ function suggestionHTML(s: NoteRefinement, busy: boolean, models: ModelList | nu
     <p class="fine">${T('使用建议只会填入左侧字段，接受仍由你来点。', 'Using it only fills the fields on the left; accepting stays your step.')}</p>`;
 }
 
-function refinePreview(d: NoteDraft, r: AnkiRefine, busy: boolean, models: ModelList | null): Html {
+/**
+ * A private source's consent as notes see it, from the ledger: the note's text needs the global
+ * (every-provider) decision, and a provider's own refusal outranks that global grant for its calls.
+ * `global` is null while the ledger is unknown.
+ */
+export function noteConsentOf(ledger: readonly Consent[] | null, source: string, provider: string): { global: boolean | null; providerDenied: boolean } {
+  if (!ledger) return { global: null, providerDenied: false };
+  const rows = ledger.filter((c) => c.source_id === source);
+  const own = provider ? rows.find((c) => c.provider === provider) : undefined;
+  return { global: rows.some((c) => !c.provider && c.granted), providerDenied: !!own?.recorded_at && !own.granted };
+}
+
+/** An imported source in words: its title from the ledger, never its content id. */
+export function sourceTitleOf(ledger: readonly Consent[] | null, source: string): string | null {
+  return ledger?.find((c) => c.source_id === source && c.title)?.title || null;
+}
+
+/**
+ * The refinement's withheld-consent line: the every-provider grant when the note's text lacks it, and
+ * the provider-scoped grant when this provider has its own refusal (which the global grant cannot clear).
+ */
+function refineConsent(source: string, providerId: string, name: string, ledger: Consent[] | null, busy: boolean): Html {
+  const scope = noteConsentOf(ledger, source, providerId);
+  const needGlobal = scope.global !== true || !scope.providerDenied;
+  const dis = busy ? 'disabled' : '';
+  const to = html`<span translate="no">${name}</span>`;
+  const global = needGlobal
+    ? html`<button class="btn ghost sm" data-act="consent-all-ask" data-v="${source}" ${dis}>${T('授权原文（所有提供方）…', 'Allow the text (every provider)…')}</button><span class="muted">${T(
+        '笔记只接受对所有提供方生效的授权',
+        'Notes accept only a grant for every provider',
+      )}</span>`
+    : '';
+  const own = scope.providerDenied
+    ? html`<button class="btn ghost sm" data-act="consent-grant" data-v="${source}|${providerId}" data-testid="refine-consent-provider" ${dis}>${T('重新授权给 ', 'Grant again to ')}${to}</button><span class="muted">${
+        needGlobal
+          ? html`${T('你撤回过对 ', 'You revoked ')}${to}${T(' 的授权；所有提供方的授权不会改变这一点', '; a grant for every provider does not change that')}`
+          : html`${T('你撤回过对 ', 'You revoked ')}${to}${T(' 的授权；这只恢复给它的授权', '; this restores the grant for it only')}`
+      }</span>`
+    : '';
+  return html`<span data-consent="withheld" data-scope="${needGlobal ? (scope.providerDenied ? 'both' : 'all-providers') : 'provider'}"><span class="held">${T('这份导入资料的原文已扣留', "This imported source's text is withheld")}</span>
+      ${global}${own}</span>`;
+}
+
+function refinePreview(d: NoteDraft, r: AnkiRefine, busy: boolean, models: ModelList | null, ledger: Consent[] | null): Html {
   const p = r.preview;
   if (p.status === 'error') return refineFailure(p.error, busy);
   if (p.status !== 'ready') return html`<div class="pending">${T('正在准备发送预览……', 'Preparing the send preview…')}</div>`;
   const v = p.value;
   if (!v.provider) return refineFailure({ code: 'not_configured', message: '', action: null }, busy);
   const source = d.target.source_id;
-  // Notes accept only the every-provider decision, so a private source is granted through its dialog.
-  const consent =
-    v.consent.private_source && !v.consent.granted && source
-      ? html`<span data-consent="withheld"><span class="held">${T('这份资料的原文已扣留', "This source's text is withheld")}</span>
-      <button class="btn ghost sm" data-act="consent-all-ask" data-v="${source}" ${busy ? 'disabled' : ''}>${T('授权原文…', 'Allow the text…')}</button></span>`
-      : undefined;
+  const consent = v.consent.private_source && !v.consent.granted && source ? refineConsent(source, v.provider, providerName(models, v.provider), ledger, busy) : undefined;
   const where = v.external ? T('外部调用', 'external call') : T('本地调用', 'local call');
   const canSend = v.consent.granted && !r.sending && !busy;
   return html`${callStrip(v, busy, models, 'refine-strip', consent)}
     <div class="pending">${T(`发送将进行一次${where}，消耗 1 次预算`, `Sending makes one ${where} and spends 1 budget slot`)} <span class="num nw">(${v.budget.calls} → ${v.budget.calls + 1} / ${v.budget.limit})</span>${T('。', '.')}${
       v.unanswered ? html`<div class="muted">${T('这道题还没作答：建议不会写出答案。', 'The question is unanswered: the suggestion may not reveal its answer.')}</div>` : ''
-    }${!v.verified && v.action ? html`<div class="muted">${T('下一步：', 'Next: ')}${v.action}</div>` : ''}
+    }${
+      !v.verified
+        ? // The core's next step is a CLI line: it stays folded as raw detail; the learner's step is in Settings.
+          html`<div class="muted" data-testid="refine-unverified">${nextStep('capability_unverified')} ${settingsLink('capability_unverified')}${rawDetail({ code: 'capability_unverified', action: v.action ?? null })}</div>`
+        : ''
+    }
       <div><button class="btn adv sm" data-act="refine-send" ${canSend ? '' : 'disabled'}>${ic(v.external ? 'ext' : 'local', 'xs')}${
         r.sending ? T('发送中……', 'Sending…') : html`${T('发送到 ', 'Send to ')}<span translate="no">${providerName(models, v.provider)}</span>`
       }</button></div></div>`;
 }
 
-export function refinePanelHTML(d: NoteDraft, r: AnkiRefine, busy: boolean, models: ModelList | null): Html {
-  const body = r.suggestion ? suggestionHTML(r.suggestion, busy, models) : r.failure ? refineFailure(r.failure, busy) : refinePreview(d, r, busy, models);
-  return html`<div class="es-refine" data-testid="refine" role="region" aria-label="${T('AI 润色', 'Refine with AI')}">
+export function refinePanelHTML(d: NoteDraft, r: AnkiRefine, busy: boolean, models: ModelList | null, ledger: Consent[] | null): Html {
+  const body = r.suggestion ? suggestionHTML(r.suggestion, busy, models) : r.failure ? refineFailure(r.failure, busy) : refinePreview(d, r, busy, models, ledger);
+  return html`<div class="es-refine" data-testid="refine" role="region" tabindex="-1" aria-label="${T('AI 润色', 'Refine with AI')}">
       <div class="rf-h"><span class="chip adv sm">${ic('adv', 'xs')}${T('AI 润色 · 建议性', 'Refine with AI · advisory')}</span><button class="btn quiet sm" data-act="refine-close">${T('收起', 'Close')}</button></div>
       ${body}
     </div>`;
@@ -187,7 +232,7 @@ function editSheetHTML(d: NoteDraft, f: NoteFields, u: AnkiUi, r: AnkiRefine): H
       <div>
         <label class="field">${fl('背面', 'Back')}<textarea data-field="back" lang="en" rows="5">${f.back}</textarea></label>
       </div>
-      ${u.refine ? refinePanelHTML(d, r, u.busy, u.models) : ''}
+      ${u.refine ? refinePanelHTML(d, r, u.busy, u.models, u.consents) : ''}
     </div>
     <div class="es-f">
       <span id="estatus">${ankiStatus(d, u.dirty)}</span><span class="muted" style="font-size:12px">${T('改动实时显示在上方卡片；清空的字段保留草稿原值', 'Changes show live on the card above; an emptied field keeps the draft value')}</span>

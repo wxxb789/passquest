@@ -75,9 +75,12 @@ first-party package imports a network package directly (the local-only gate chec
   carries no messages and no hash. `RefineNote(draftID)` makes one call through the same path as
   `note propose --refine` and returns an advisory suggestion (`NoteRefinement`) or a typed error. The window
   renders the suggestion as text beside the fields; "Use suggestion" only fills the editor, and accepting
-  stays the learner's action. Because a refined draft falls back to the suggestion for empty fields, the
-  window always sends its full editor fields to `PreviewNote` and `AcceptNote`: an unchanged suggestion is
-  recorded as `refined`, a changed one as `edited`. Retry after a failure only shows the preview again.
+  stays the learner's action. The editor's fields stay the draft's own (the deterministic text, or what was
+  last accepted); a suggestion is kept beside them, and `OpenNoteDraft` returns it as `suggestion` after a
+  relaunch instead of putting it into the fields. An emptied field falls back to the draft's own value, never
+  to the suggestion. On accept, a field equal to the draft's own value keeps its origin, one equal to the
+  suggestion is recorded as `refined`, and anything else as `edited`. Retry after a failure only shows the
+  preview again.
 - **Coach history.** `CoachHistory(attemptID)` lists the attempt's recorded coach calls, oldest first, with
   mode, provider, model, time and state; an advisory call carries its reply text, a failed one its typed
   failure. It carries no credential and no request body. The coach sheet shows it as text in its history view.

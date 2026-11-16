@@ -19,8 +19,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { childProcesses, listeningSockets, startDesktop, stillRunning } from "./desktop.ts";
-import type { LaunchResult, ProcessInfo } from "./desktop.ts";
+import { childProcesses, descendants, listeningSockets, listProcesses, startDesktop, stillRunning } from "./desktop.ts";
+import type { LaunchResult, ProcessIdentity, ProcessInfo } from "./desktop.ts";
 import { hasGoMod } from "./go.ts";
 import { field } from "./json.ts";
 import { run } from "./process.ts";
@@ -274,6 +274,14 @@ export async function launchPage(spec: PageLaunch): Promise<Launched | null> {
     WEBVIEW2_USER_DATA_FOLDER: path.join(spec.dir, `${spec.label}.webview2`),
     ...spec.env,
   };
+  // The app cannot have been created before this instant; it is the app's
+  // creation time until the process table shows the real one, so a process
+  // that only carries the app's pid as a stale parent id is never its child.
+  // Floored to the second and one more second earlier: `ps` reports start
+  // times to the second, and on Linux derives them from an integer boot time,
+  // so a process started now can be listed up to a second before the floor.
+  // Erring early only ever keeps a process in the orphan check.
+  const launchedAt = Math.floor(Date.now() / 1000) * 1000 - 1000;
   const handle = startDesktop({ binary: spec.binary, env, timeoutMs: LAUNCH_TIMEOUT_MS, cwd: spec.cwd });
   let exited = false;
   let outcome: LaunchResult | undefined;
@@ -282,17 +290,29 @@ export async function launchPage(spec: PageLaunch): Promise<Launched | null> {
     outcome = result;
   });
 
-  let appPid: number | null = null;
+  let app: ProcessIdentity | null = null;
   const seen = new Map<number, ProcessInfo>();
   let listenerProbes = 0;
+  // The first process-table failure: the orphan check cannot see children it never listed.
+  let tableError: string | null = null;
   let killed = false;
   while (!exited) {
-    appPid ??= await handle.appPid();
-    if (appPid !== null && !exited) {
-      const children = await childProcesses(appPid);
-      if ("items" in children) for (const child of children.items) seen.set(child.pid, child);
+    if (app === null) {
+      const pid = await handle.appPid();
+      if (pid !== null && typeof pid === "object") tableError ??= pid.error;
+      else if (pid !== null) app = { pid, started: launchedAt };
+    }
+    if (app !== null && !exited) {
+      const table = await listProcesses();
+      if ("error" in table) tableError ??= table.error;
+      const rows = "items" in table ? table.items : [];
+      const pid: number = app.pid;
+      const self = rows.find((entry) => entry.pid === pid && entry.started >= launchedAt);
+      if (self) app = { pid, started: self.started };
+      const children = descendants(rows, app);
+      for (const child of children) seen.set(child.pid, child);
       if (spec.probeListeners && !exited) {
-        const owners = [appPid, ...("items" in children ? children.items.map((child) => child.pid) : [])];
+        const owners = [app.pid, ...children.map((child) => child.pid)];
         const sockets = await listeningSockets(owners);
         if ("error" in sockets) {
           check(false, `${where}: cannot list listening sockets: ${sockets.error}`);
@@ -312,6 +332,7 @@ export async function launchPage(spec: PageLaunch): Promise<Launched | null> {
   }
   await finished;
   const result = outcome as LaunchResult;
+  check(tableError === null, `${where}: cannot list processes while the app ran: ${tableError}`);
   if (spec.probeListeners) {
     check(listenerProbes > 0, `${where}: no listening-socket probe completed while the app ran`);
   }
@@ -328,7 +349,8 @@ export async function launchPage(spec: PageLaunch): Promise<Launched | null> {
   const deadline = Date.now() + ORPHAN_GRACE_MS;
   for (;;) {
     const remembered = await stillRunning([...seen.values()]);
-    const orphans = process.platform === "win32" && appPid !== null ? await childProcesses(appPid) : { items: [] };
+    // Windows keeps the dead app's pid on its orphans: children created between the app's start and its exit.
+    const orphans = process.platform === "win32" && app !== null ? await childProcesses(app, result.exitedAt) : { items: [] };
     if ("error" in remembered || "error" in orphans) {
       const error = "error" in remembered ? remembered.error : "error" in orphans ? orphans.error : "";
       check(false, `${where}: cannot list child processes: ${error}`);

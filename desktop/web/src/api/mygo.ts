@@ -725,6 +725,11 @@ export interface NoteDraft {
   source: string;
   advisory: boolean;
   limits: string[];
+  /**
+   * Suggestion is a stored refinement the learner has not used. It stays
+   * advisory beside Fields and never fills them; nil when there is none.
+   */
+  suggestion?: NoteRefinement;
 }
 
 /** NoteFields are the learner-editable plain fields of a card. */

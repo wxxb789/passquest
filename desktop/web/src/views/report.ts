@@ -133,7 +133,7 @@ export function vReport(
       )}</div>
     </article>
     <div class="rail r">
-      ${sat('ann', 'eye', T('逐题注释 · 已解锁', 'Annotations · unlocked'), html`<span class="num">${annotated}</span><small>${T('题 · 证据与解析', 'items · evidence & reasoning')}</small>`, 'ok', 4)}
+      ${sat('ann', 'eye', T('逐题注释 · 已解锁', 'Annotations · unlocked'), html`<span class="num">${annotated}</span><small>${T('题 · 证据与解析', 'items · evidence & reasoning')}</small>`, 'ok', 4, true)}
       ${sat('resume', 'door', T('恢复', 'Resumes'), html`<span class="num">${r.run.resume_count}</span><small>${T(`次 · 恢复后作答 ${r.counts.answered_after_resume} 题`, `· ${r.counts.answered_after_resume} answered after`)}</small>`, '', 5)}
       ${
         pool && pool.source_count > 0

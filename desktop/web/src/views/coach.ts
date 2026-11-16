@@ -136,7 +136,7 @@ function historyBody(h: Loadable<CoachHistory>, models: ModelList | null): Html 
 
 export function coachHTML(d: CoachData, mode: CoachMode): Html {
   const unusable = d.models ? unusableLine(d.models) : null;
-  return html`<aside class="csheet" id="coach" aria-label="${T('导师 · 建议性', 'Coach · advisory')}">
+  return html`<aside class="csheet" id="coach" tabindex="-1" aria-label="${T('导师 · 建议性', 'Coach · advisory')}">
     <div class="co-head"><span class="o"></span><span class="t">${T('导师', 'Coach')}</span><span class="chip adv sm">${ic('adv', 'xs')}${T('建议性 · 不改变评分', 'Advisory · never grades')}</span><button class="icon-btn" data-act="coach-history" aria-pressed="${d.showHistory}" aria-label="${T('调用记录', 'Call history')}" title="${T('调用记录', 'Call history')}">${ic('clock', 's')}</button><button class="icon-btn" data-act="coach" aria-label="${T('收起导师', 'Collapse coach')}">${ic('chev', 's')}</button></div>
     <div class="modes" role="group" aria-label="${T('模式', 'Mode')}">
       ${COACH_MODES.map(

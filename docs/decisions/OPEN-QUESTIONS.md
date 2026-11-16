@@ -1315,10 +1315,13 @@ Entry format:
 - Context: the note model is created once and never updated (goal 0007); a new model name would turn every
   pushed note into `model_mismatch` and need a schema change in Anki.
 - Options considered: (A) update styling and templates in place under the same model name, only when the deck
-  holds a byte-identical earlier version; (B) a new model name and a note-type migration; (C) leave old decks.
-- Default taken: (A). A model the learner customised in Anki is reported and never overwritten; fields, field
-  order, model name and template name do not change, so conflict detection and the deck claim of goal 0014 are
-  unaffected.
+  holds parts Pass Quest shipped; (B) a new model name and a note-type migration; (C) leave old decks.
+- Default taken: (A). The stylesheet, the front and the back are each compared with every version Pass Quest
+  shipped, after normalising line endings and surrounding whitespace (a client may store them differently); a
+  deck whose parts all match some shipped version — including one left half-updated by an interrupted update —
+  is upgraded, because overwriting it can only replace Pass Quest's own text. Any other difference is the
+  learner's customisation: it is reported as `model_customized` and never overwritten. Fields, field order, model
+  name and template name do not change, so conflict detection and the deck claim of goal 0014 are unaffected.
 - Revisit when: real Anki evidence shows a template update forces a full sync.
 
 ### Q-0012-03 — Is there a free-text coach composer?

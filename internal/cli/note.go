@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/attempt"
@@ -486,6 +487,22 @@ func runNoteAccept(args []string, opt Options) int {
 	if edited {
 		origin = note.OriginEdited
 	}
+	doc, err := noteAcceptRecord(st, effective, front, back, tactic, origin, opt.Now())
+	if err != nil {
+		return internalError(opt, *jsonFlag, err)
+	}
+	if *jsonFlag {
+		return writeJSON(opt, doc)
+	}
+	writeNoteAccept(opt.Stdout, doc)
+	return 0
+}
+
+// noteAcceptRecord writes the accepted fields of a draft with their origin and
+// returns the accept document. `note accept` and the window's AcceptNote both
+// record through it; each decides the origin from its own view of the draft.
+func noteAcceptRecord(st *store.Store, effective noteEffective, front, back, tactic string, origin note.Origin, at time.Time) (noteAcceptDoc, error) {
+	draft := effective.Draft
 	target := store.NoteTarget{
 		NoteID:         note.NoteID(draft.TargetKey),
 		TargetKey:      draft.TargetKey,
@@ -507,16 +524,16 @@ func runNoteAccept(args []string, opt Options) int {
 		Origin:      string(origin),
 		Model:       effective.Model,
 	}
-	result, err := st.AcceptDraftNote(draft.ID, target, content, opt.Now())
+	result, err := st.AcceptDraftNote(draft.ID, target, content, at)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return noteAcceptDoc{}, err
 	}
 	fields := note.HTML(front, back, tactic, effective.Built.SourceLabel)
 	state := "accepted"
 	if !result.Changed {
 		state = "unchanged"
 	}
-	doc := noteAcceptDoc{
+	return noteAcceptDoc{
 		SchemaVersion:    ProtocolVersion,
 		State:            state,
 		Note:             noteViewOf(result.Note),
@@ -526,12 +543,7 @@ func runNoteAccept(args []string, opt Options) int {
 		Changed:          result.Changed,
 		PreviousRevision: result.Previous,
 		Limits:           noteLimits,
-	}
-	if *jsonFlag {
-		return writeJSON(opt, doc)
-	}
-	writeNoteAccept(opt.Stdout, doc)
-	return 0
+	}, nil
 }
 
 func runNoteSkip(args []string, opt Options) int {

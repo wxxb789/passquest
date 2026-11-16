@@ -5,9 +5,10 @@ import { ic, type IconName } from '../icons';
 
 export type Flag = '' | 'bad' | 'warm' | 'ok';
 
-export function sat(key: string, ico: IconName | Html, lb: Interp, vl: Interp, flag: Flag = '', i = 0): Html {
+/** `primary` marks the satellite as its room's primary action (`data-primary`). */
+export function sat(key: string, ico: IconName | Html, lb: Interp, vl: Interp, flag: Flag = '', i = 0, primary = false): Html {
   const icon = ico instanceof Html ? ico : html`<span class="ico">${ic(ico, 's')}</span>`;
-  return html`<button class="sat settle" style="--i:${i}" data-act="sheet" data-v="${key}" aria-haspopup="dialog">${icon}${
+  return html`<button class="sat settle" style="--i:${i}" data-act="sheet" data-v="${key}" aria-haspopup="dialog" ${primary ? 'data-primary' : ''}>${icon}${
     flag ? html`<span class="flag ${flag}"></span>` : ''
   }<span class="tx"><span class="lb">${lb}</span><span class="vl">${vl}</span></span></button>`;
 }

@@ -47,6 +47,48 @@ export const UX_SIZES: ReadonlyArray<readonly [number, number]> = [
 ];
 const ALLOWLIST = "harness/ux-allow.json";
 const MODES = ["light-zh", "light-en", "dark-zh", "dark-en"];
+/** Every state PART_ONE and PART_TWO audit; each must be audited once per mode at each size. */
+export const UX_STATES = [
+  "today",
+  "practice-sheet",
+  "shortcut-sheet",
+  "practice-independent",
+  "hint-gate",
+  "feedback-coach",
+  "anki-edit",
+  "practice-guided",
+  "report",
+  "report-annotations",
+  "settings-row",
+  "run-form",
+  "assess-running",
+];
+
+export interface Audited {
+  size: string;
+  state: string;
+  mode: string;
+}
+
+/** What the audits left out or did twice: a state skipped silently would otherwise pass. */
+export function coverageProblems(audited: Audited[], sizes: string[]): string[] {
+  const problems: string[] = [];
+  const count = new Map<string, number>();
+  for (const entry of audited) {
+    const key = `${entry.size} ${entry.state} ${entry.mode}`;
+    count.set(key, (count.get(key) ?? 0) + 1);
+    if (!UX_STATES.includes(entry.state)) problems.push(`coverage: ${entry.size} audited an undeclared state ${entry.state}`);
+  }
+  for (const size of sizes) {
+    for (const state of UX_STATES) {
+      const missing = MODES.filter((mode) => !count.has(`${size} ${state} ${mode}`));
+      if (missing.length > 0) problems.push(`coverage: ${size} ${state} was not audited in ${missing.join(", ")}`);
+      const twice = MODES.filter((mode) => (count.get(`${size} ${state} ${mode}`) ?? 0) > 1);
+      if (twice.length > 0) problems.push(`coverage: ${size} ${state} was audited more than once in ${twice.join(", ")}`);
+    }
+  }
+  return [...new Set(problems)];
+}
 const COACH_REPLY =
   "Before you look at the key: which word in option C would you check against the passage? In an EXCEPT item three options are supported by the notice.";
 
@@ -111,7 +153,23 @@ const setMode = async (theme, lang) => {
   if (document.documentElement.lang !== (lang === "zh" ? "zh-CN" : "en")) q('[data-act="lang"][data-v="' + lang + '"]').click();
   await sleep(120);
 };
+const loading = () => q('#stage [aria-busy="true"]');
+// A probe that has held for a while with no loading card: a render that a pending load is
+// about to replace does not count. Resolves to the probe's latest value.
+const steady = (what, probe, holdMs = 500) => {
+  let since = 0;
+  return until(what + " to settle", () => {
+    const value = loading() ? null : probe();
+    if (!value) {
+      since = 0;
+      return null;
+    }
+    since ||= Date.now();
+    return Date.now() - since >= holdMs ? value : null;
+  });
+};
 const each = async (state, withPrimary) => {
+  await steady(state + " without a loading card", () => true, 0);
   for (const [theme, lang] of MODES) {
     await setMode(theme, lang);
     const audit = UX.audit(state);
@@ -170,12 +228,11 @@ await until("an independent item", () => q('[data-testid="practice-item"]'));
 await sleep(250);
 after("start from the practice sheet");
 await each("practice-independent", true);
-if (q('[data-act="hint"]')) {
-  opener = q('[data-act="hint"]');
-  back = await openDialog("hint gate", opener, () => opener.click());
-  await each("hint-gate", false);
-  await closeDialog("hint gate", back);
-}
+// The skill's independent item has an authored hint; a missing hint button fails the script.
+opener = await until("the hint button", () => q('[data-act="hint"]'), 5000);
+back = await openDialog("hint gate", opener, () => opener.click());
+await each("hint-gate", false);
+await closeDialog("hint gate", back);
 press("2");
 await until("a selected option", () => q('.opt[aria-checked="true"]'));
 press("Enter");
@@ -198,7 +255,7 @@ await each("anki-edit", true);
 return { results, focus, checked };
 `;
 
-/** The recommended item and the next one, a guided item, the report's annotations, Settings, the dock, a running assessment. */
+/** The recommended item and the next one, a guided item, the report and its annotations, Settings, the dock, the run form, a running assessment. */
 const PART_TWO = `
 await today();
 press("Enter");
@@ -218,22 +275,21 @@ await sleep(250);
 after("start a guided item");
 await each("practice-guided", true);
 location.hash = "#/report";
-await until("the run report", () => q('[data-testid="report"]') && q('[data-act="sheet"][data-v="ann"]'));
-await sleep(250);
-opener = q('[data-act="sheet"][data-v="ann"]');
+await steady("the run report", () => q('[data-testid="report"]') && q('[data-act="sheet"][data-v="ann"]'));
+await each("report", true);
+opener = await steady("the annotations button", () => q('[data-act="sheet"][data-v="ann"]'));
 back = await openDialog("annotation sheet", opener, () => opener.click());
 await click('#layer [data-act="ann"]');
 await sleep(250);
 await each("report-annotations", true);
 await closeDialog("annotation sheet", back);
 location.hash = "#/settings";
-await until("the provider rows", () => q('[data-act="row"][data-v="${STUB_PROVIDER}"]'));
-await sleep(200);
-opener = q('[data-act="row"][data-v="${STUB_PROVIDER}"]');
+// Settings first draws the cached registry, then its reloads may swap in the loading card:
+// use the row only once it has held, and in the same tick it was found.
+opener = await steady("the provider rows", () => q('[data-act="row"][data-v="${STUB_PROVIDER}"]'));
 opener.focus();
 opener.click();
-await until("the expanded row", () => q(".rrow.open"));
-await sleep(200);
+await steady("the expanded row", () => q(".rrow.open"));
 after("expand a provider row");
 await each("settings-row", true);
 for (const href of all(".dock a[href]").map((link) => link.getAttribute("href"))) {
@@ -248,7 +304,7 @@ await until("the run button", () => q('[data-act="run-ask"]'));
 await sleep(200);
 opener = q('[data-act="run-ask"]');
 back = await openDialog("run form", opener, () => opener.click());
-await each("run-form", false);
+await each("run-form", true);
 await closeDialog("run form", back);
 await click('[data-act="run-ask"]');
 await until("the run form", () => q('#runform input[name="size"]'));
@@ -520,6 +576,7 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
     }
 
     const states = new Set<string>();
+    const audited: Audited[] = [];
     for (const size of UX_SIZES) {
       const sizeName = `${size[0]}x${size[1]}`;
       for (const [part, body] of [["one", PART_ONE], ["two", PART_TWO]] as const) {
@@ -530,6 +587,7 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
           const state = stringField(result, "state") ?? "?";
           const mode = stringField(result, "mode") ?? "?";
           states.add(state);
+          audited.push({ size: sizeName, state, mode });
           out.audits++;
           check(stringField(result, "shown") === mode, `${label}: ${state} was audited as ${String(stringField(result, "shown"))}, not ${mode}`);
           for (const issue of arrayField(result, "issues")) out.findings.push(toFinding(issue, state, mode, sizeName));
@@ -541,6 +599,7 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
       }
     }
     out.states = states.size;
+    out.problems.push(...coverageProblems(audited, UX_SIZES.map((size) => `${size[0]}x${size[1]}`)));
 
     const used = new Set<number>();
     out.findings = out.findings.filter((finding) => {
