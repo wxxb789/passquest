@@ -2,16 +2,17 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/note"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/notes"
+	"github.com/wxxb789/passquest/internal/study/outbox"
 )
 
 // ProposeNote is `note propose`: a deterministic draft from a recorded
@@ -455,37 +456,59 @@ func (w *Workspace) PushNotes(force bool) (studio.NotePush, error) {
 			return studio.NotePush{}, err
 		}
 	}
-	args := []string{"note", "push"}
-	if force {
-		args = append(args, "--force")
+	// The shimmed call ran `note push` without flags, so the endpoint came from
+	// the environment or the loopback default and the timeout stayed the
+	// flag's default.
+	endpoint, err := anki.NormalizeEndpoint(noteAnkiEndpoint("", w.getenv))
+	if err != nil {
+		return studio.NotePush{}, cliCoded(study.Refuse("invalid_endpoint", "%s", err.Error()))
 	}
-	result := w.run(args...)
-	raw := result.stdout
-	if result.code != 0 {
-		raw = result.stderr
-	}
-	var doc notePushDoc
-	if json.Unmarshal(raw, &doc) != nil || doc.State == "" {
-		return studio.NotePush{}, result.err()
-	}
-	push := studio.NotePush{
-		State:           doc.State,
-		Endpoint:        doc.Endpoint,
-		Deck:            doc.Deck,
-		Model:           doc.Model,
-		Notes:           []studio.NotePushItem{},
-		Limits:          doc.Limits,
-		ModelUpdated:    doc.ModelUpdated,
-		ModelCustomized: doc.ModelCustomized,
-	}
-	if err := convertJSON(doc.Counts, &push.Counts); err != nil {
-		return studio.NotePush{}, workspaceError(err)
-	}
-	if err := convertJSON(doc.Notes, &push.Notes); err != nil {
-		return studio.NotePush{}, workspaceError(err)
-	}
-	if doc.Error != nil {
-		push.Error = withAction(&studio.Error{Code: doc.Error.Code, Message: doc.Error.Message})
+	var push studio.NotePush
+	if err := w.codedCall(func(svc *study.Service) error {
+		out, err := outbox.Push(context.Background(), svc, outbox.PushRequest{
+			Endpoint: endpoint, TimeoutSeconds: defaultAnkiTimeoutSeconds, Force: force,
+		})
+		if err != nil {
+			return err
+		}
+		if out.Report == nil {
+			// The push stopped before its report: the CLI printed this
+			// failure's code and message as its error document.
+			return study.Refuse(out.Failure.Code, "%s", out.Failure.Message)
+		}
+		report := out.Report
+		push = studio.NotePush{
+			State:    report.State,
+			Endpoint: report.Endpoint,
+			Deck:     note.Deck,
+			Model:    note.ModelName,
+			Counts: studio.NotePushCounts{
+				Pending:        report.Counts.Pending,
+				Pushed:         report.Counts.Pushed,
+				AlreadyPresent: report.Counts.AlreadyPresent,
+				Conflicts:      report.Counts.Conflicts,
+				Failed:         report.Counts.Failed,
+				Queued:         report.Counts.Queued,
+				DeckMismatch:   report.Counts.DeckMismatch,
+			},
+			Notes:           []studio.NotePushItem{},
+			Limits:          noteLimits,
+			ModelUpdated:    report.ModelUpdated,
+			ModelCustomized: report.ModelCustomized,
+		}
+		for _, item := range report.Items {
+			push.Notes = append(push.Notes, studio.NotePushItem{
+				NoteID: item.NoteID, Revision: item.Revision,
+				AnkiNoteID: item.AnkiNoteID, State: item.State, Outcome: item.Outcome,
+				Code: item.Code, Detail: item.Detail, Deck: item.Deck,
+			})
+		}
+		if report.Error != nil {
+			push.Error = withAction(&studio.Error{Code: report.Error.Code, Message: report.Error.Message})
+		}
+		return nil
+	}); err != nil {
+		return studio.NotePush{}, err
 	}
 	return push, nil
 }

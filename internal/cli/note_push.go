@@ -10,6 +10,10 @@ import (
 	"github.com/wxxb789/passquest/internal/study/outbox"
 )
 
+// defaultAnkiTimeoutSeconds is the AnkiConnect timeout of `note push` when
+// --timeout-seconds is not given; the desktop push uses the same value.
+const defaultAnkiTimeoutSeconds = 10
+
 // runNotePush sends every pending note to AnkiConnect and renders the push
 // report: exit 0 with the report on stdout, exit 3 with the same document on
 // stderr when the push failed or left a conflict, and exit 3 with an error
@@ -19,7 +23,7 @@ func runNotePush(args []string, opt Options) int {
 	args = reorderArgs(args, map[string]bool{"endpoint": true, "timeout-seconds": true, "db": true})
 	fs := newFlagSet("note push", opt, wantJSON)
 	endpointFlag := fs.String("endpoint", "", "AnkiConnect endpoint (loopback only)")
-	timeoutFlag := fs.Int("timeout-seconds", 10, "AnkiConnect timeout in seconds (1-120)")
+	timeoutFlag := fs.Int("timeout-seconds", defaultAnkiTimeoutSeconds, "AnkiConnect timeout in seconds (1-120)")
 	forceFlag := fs.Bool("force", false, "overwrite a card whose Anki fields changed")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
