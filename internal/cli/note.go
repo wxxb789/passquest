@@ -8,7 +8,6 @@ import (
 
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/note"
-	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/notes"
 )
@@ -38,17 +37,6 @@ func runNote(args []string, opt Options) int {
 	default:
 		return usageError(opt, jsonFlagRequested(args), "invalid_input", fmt.Sprintf("unknown note command %q", args[0]))
 	}
-}
-
-// consentGranted reports whether the latest recorded global consent for a
-// source is a grant. Note text and its Anki export are a different destination
-// from provider inference, so a provider-scoped tutor grant never authorizes
-// them; only the global decision does. A lookup error is treated as no consent.
-// The notes module applies the same policy to the derivation input; this copy
-// answers the export and push refusal, which stay in the CLI for now.
-func consentGranted(st *store.Store, sourceID string) bool {
-	event, ok, err := st.TutorConsent(sourceID, "")
-	return err == nil && ok && event.Granted
 }
 
 func runNotePropose(args []string, opt Options) int {

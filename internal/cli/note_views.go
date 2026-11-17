@@ -546,25 +546,3 @@ func firstLine(value string) string {
 	}
 	return value
 }
-
-// noteCountsOf tallies push item states.
-func noteCountsOf(items []notePushItemView) notePushCounts {
-	var counts notePushCounts
-	for _, item := range items {
-		switch item.State {
-		case store.AnkiStatePushed:
-			counts.Pushed++
-		case store.AnkiStateAlreadyExists:
-			counts.AlreadyPresent++
-		case store.AnkiStateConflict:
-			counts.Conflicts++
-		case store.AnkiStateFailed:
-			counts.Failed++
-		case store.AnkiStateQueued:
-			counts.Queued++
-		case store.AnkiStateDeckMismatch:
-			counts.DeckMismatch++
-		}
-	}
-	return counts
-}

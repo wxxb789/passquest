@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/note"
+	"github.com/wxxb789/passquest/internal/study/outbox"
 )
 
 func runNoteExport(args []string, opt Options) int {
@@ -29,7 +30,7 @@ func runNoteExport(args []string, opt Options) int {
 	if len(notes) == 0 {
 		return usageError(opt, *jsonFlag, "no_notes", "no accepted note is recorded; run passquest note propose and passquest note accept first")
 	}
-	if message, denied := noteConsentRefusal(st, notes, "exported"); denied {
+	if message, denied := outbox.ConsentRefusal(st, notes, "exported"); denied {
 		return usageError(opt, *jsonFlag, "consent_required", message)
 	}
 	rows := make([]note.Fields, 0, len(notes))

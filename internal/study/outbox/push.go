@@ -1,17 +1,27 @@
-package cli
+// Package outbox orchestrates the Anki outbox: one push of every pending note
+// to the local AnkiConnect endpoint, and the consent policy export and push
+// share. Results carry exactly the inputs the CLI's view builders and the
+// window's studio mappers read; nothing here renders. The CLI's `note push`
+// and the window's PushNotes are the two adapters.
+package outbox
 
 import (
 	"context"
 	"fmt"
 	"strings"
-	"unicode/utf8"
+	"time"
 
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/note"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/internal/kernel"
 )
 
-type notePushWork struct {
+// pushWork is one pending note's work item: the stored outbox entry, the local
+// note row and the fields this push writes for it. Every classified outcome is
+// recorded through persist.
+type pushWork struct {
 	Entry      store.NoteOutboxEntry
 	Note       store.Note
 	Fields     note.Fields
@@ -27,70 +37,109 @@ type notePushWork struct {
 	Persisted  bool
 }
 
-func runNotePush(args []string, opt Options) int {
-	wantJSON := jsonFlagRequested(args)
-	args = reorderArgs(args, map[string]bool{"endpoint": true, "timeout-seconds": true, "db": true})
-	fs := newFlagSet("note push", opt, wantJSON)
-	endpointFlag := fs.String("endpoint", "", "AnkiConnect endpoint (loopback only)")
-	timeoutFlag := fs.Int("timeout-seconds", 10, "AnkiConnect timeout in seconds (1-120)")
-	forceFlag := fs.Bool("force", false, "overwrite a card whose Anki fields changed")
-	dbFlag := fs.String("db", "", "SQLite database path")
-	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
-		return code
-	}
-	if *timeoutFlag < 1 || *timeoutFlag > 120 {
-		return usageError(opt, *jsonFlag, "invalid_input", "--timeout-seconds must be 1..120")
-	}
-	endpoint, err := anki.NormalizeEndpoint(noteAnkiEndpoint(*endpointFlag, opt.Getenv))
-	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_endpoint", err.Error())
-	}
-	st, err := openDatabase(*dbFlag, opt)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	defer st.Close()
+// PushRequest is one push's inputs: the AnkiConnect endpoint the caller
+// normalized, the host timeout in seconds and the explicit overwrite control.
+type PushRequest struct {
+	Endpoint       string
+	TimeoutSeconds int
+	Force          bool
+}
+
+// Failure is one push failure's body: the code and message the CLI prints as
+// an error document and the window maps to a studio error.
+type Failure struct {
+	Code    string
+	Message string
+}
+
+// Item is one note's report line, in work order. It carries exactly the fields
+// the CLI's view builder and the window's studio item read.
+type Item struct {
+	NoteID     string
+	Revision   int
+	AnkiNoteID int64
+	State      string
+	Outcome    string
+	Code       string
+	Detail     string
+	Deck       string
+}
+
+// Counts is the report's tally of item states, plus the pending count read
+// back after the push.
+type Counts struct {
+	Pending        int
+	Pushed         int
+	AlreadyPresent int
+	Conflicts      int
+	Failed         int
+	Queued         int
+	DeckMismatch   int
+}
+
+// Report is one completed push report: the endpoint and model verdicts, the
+// doc-level state, the counts, the per-note lines, and the error body of a
+// failed push (nil when the push ended clean).
+type Report struct {
+	Endpoint        string
+	ModelCreated    bool
+	ModelUpdated    bool
+	ModelCustomized bool
+	State           string
+	Counts          Counts
+	Items           []Item
+	Error           *Failure
+}
+
+// Pushed is the outcome of one push. Report is set for every push that reached
+// the outbox — Empty says nothing was queued, so no endpoint was contacted. A
+// push that stopped before its report (the endpoint or the host failed, or an
+// outcome could not be recorded) sets Failure instead; the caller prints that
+// failure alone.
+type Pushed struct {
+	Empty   bool
+	Report  *Report
+	Failure *Failure
+}
+
+// Push sends every pending note to the local AnkiConnect endpoint: today's
+// `note push`, in today's order — capability pass, model upgrade, read-back,
+// write, readd and deck verification. A withheld source is a refusal (the
+// shared consent policy); a failure the CLI reports with exit 3 is a result.
+func Push(ctx context.Context, s *study.Service, req PushRequest) (Pushed, error) {
+	st := kernel.Store(s)
+	p := kernel.P(s)
+	endpoint := req.Endpoint
 	entries, err := st.PendingNoteOutbox()
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return Pushed{}, err
 	}
-	doc := notePushDoc{
-		SchemaVersion: ProtocolVersion,
-		State:         "idle",
-		Endpoint:      endpoint,
-		Deck:          note.Deck,
-		Model:         note.ModelName,
-		Notes:         []notePushItemView{},
-		Limits:        noteLimits,
+	doc := Report{
+		State:    "idle",
+		Endpoint: endpoint,
+		Items:    []Item{},
 	}
 	if len(entries) == 0 {
 		doc.Counts.Pending = 0
-		if *jsonFlag {
-			return writeJSON(opt, doc)
-		}
-		fmt.Fprintln(opt.Stdout, "Pass Quest — Anki push")
-		fmt.Fprintln(opt.Stdout, "Nothing is queued; no endpoint was contacted.")
-		fmt.Fprintf(opt.Stdout, "%s\n", noteSyncStatement)
-		return 0
+		return Pushed{Empty: true, Report: &doc}, nil
 	}
 	doc.Counts.Pending = len(entries)
 
-	work := make([]notePushWork, 0, len(entries))
+	work := make([]pushWork, 0, len(entries))
 	for _, entry := range entries {
 		n, err := st.Note(entry.NoteID)
 		if err != nil {
-			work = append(work, notePushWork{Entry: entry, Action: "check", State: store.AnkiStateFailed, Outcome: "failed",
+			work = append(work, pushWork{Entry: entry, Action: "check", State: store.AnkiStateFailed, Outcome: "failed",
 				Detail: "local note row is missing"})
 			continue
 		}
 		revision, err := st.NoteRevision(entry.NoteID, entry.Revision)
 		if err != nil {
-			work = append(work, notePushWork{Entry: entry, Note: n, Action: "check", State: store.AnkiStateFailed, Outcome: "failed",
+			work = append(work, pushWork{Entry: entry, Note: n, Action: "check", State: store.AnkiStateFailed, Outcome: "failed",
 				Detail: "queued revision is missing"})
 			continue
 		}
-		work = append(work, notePushWork{
+		work = append(work, pushWork{
 			Entry:  entry,
 			Note:   n,
 			Fields: note.HTML(revision.Front, revision.Back, revision.Tactic, revision.SourceLabel),
@@ -101,14 +150,13 @@ func runNotePush(args []string, opt Options) int {
 	for i := range work {
 		pushNotes = append(pushNotes, work[i].Note)
 	}
-	if message, denied := noteConsentRefusal(st, pushNotes, "pushed"); denied {
-		return usageError(opt, *jsonFlag, "consent_required", message)
+	if message, denied := ConsentRefusal(st, pushNotes, "pushed"); denied {
+		return Pushed{}, study.Refuse("consent_required", "%s", message)
 	}
 
-	timeoutMS := int64(*timeoutFlag) * 1000
-	ctx := context.Background()
+	timeoutMS := int64(req.TimeoutSeconds) * 1000
 	call := func(actions []anki.Action) (anki.HostResponse, error) {
-		return opt.AnkiTransport.Call(ctx, anki.HostRequest{
+		return p.Anki.Call(ctx, anki.HostRequest{
 			ProtocolVersion: anki.ProtocolVersion,
 			Endpoint:        endpoint,
 			TimeoutMS:       timeoutMS,
@@ -137,7 +185,7 @@ func runNotePush(args []string, opt Options) int {
 			}
 			attempt := store.AnkiAttempt{
 				NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: action, Outcome: outcome,
-				Detail: item.Detail, At: opt.Now(), AnkiNoteID: item.AnkiNoteID, AnkiState: item.State,
+				Detail: item.Detail, At: p.Now(), AnkiNoteID: item.AnkiNoteID, AnkiState: item.State,
 				Drain: item.Drain,
 			}
 			if item.Drain {
@@ -150,24 +198,27 @@ func runNotePush(args []string, opt Options) int {
 		}
 		return nil
 	}
-	report := func(exit int, failure *errorBody) int {
-		doc.Notes = doc.Notes[:0]
+	// report builds the outcome from the work items: the per-note lines, the
+	// counts, the doc-level state and the error body of a failed push, which is
+	// also the decision the caller reads the exit code off.
+	report := func(failure *Failure) Pushed {
+		doc.Items = doc.Items[:0]
 		for i := range work {
 			item := &work[i]
 			if item.State == "" {
 				continue
 			}
-			view := notePushItemView{
+			entry := Item{
 				NoteID: item.Entry.NoteID, Revision: item.Entry.Revision,
 				AnkiNoteID: item.AnkiNoteID, State: item.State, Outcome: item.Outcome,
 				Code: item.Code, Detail: item.Detail, Deck: item.Deck,
 			}
-			if view.AnkiNoteID == 0 && item.Note.AnkiNoteID != 0 {
-				view.AnkiNoteID = item.Note.AnkiNoteID
+			if entry.AnkiNoteID == 0 && item.Note.AnkiNoteID != 0 {
+				entry.AnkiNoteID = item.Note.AnkiNoteID
 			}
-			doc.Notes = append(doc.Notes, view)
+			doc.Items = append(doc.Items, entry)
 		}
-		counts := noteCountsOf(doc.Notes)
+		counts := countsOf(doc.Items)
 		doc.Counts.Pushed = counts.Pushed
 		doc.Counts.AlreadyPresent = counts.AlreadyPresent
 		doc.Counts.Conflicts = counts.Conflicts
@@ -176,7 +227,7 @@ func runNotePush(args []string, opt Options) int {
 		doc.Counts.DeckMismatch = counts.DeckMismatch
 		remaining, err := st.PendingNoteOutbox()
 		if err != nil {
-			return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+			return failed("storage_error", err.Error())
 		}
 		doc.Counts.Pending = len(remaining)
 		switch {
@@ -197,6 +248,7 @@ func runNotePush(args []string, opt Options) int {
 		default:
 			doc.State = "idle"
 		}
+		exit := 0
 		if failure != nil {
 			doc.Error = failure
 			exit = 3
@@ -207,39 +259,26 @@ func runNotePush(args []string, opt Options) int {
 		if exit != 0 && doc.Error == nil {
 			switch doc.State {
 			case "conflict":
-				doc.Error = &errorBody{Code: "anki_conflict", Message: fmt.Sprintf(
+				doc.Error = &Failure{Code: "anki_conflict", Message: fmt.Sprintf(
 					"%d note(s) remain queued in conflict; nothing was overwritten", counts.Conflicts)}
 			case "deck_mismatch":
-				doc.Error = &errorBody{Code: "anki_deck_mismatch", Message: fmt.Sprintf(
+				doc.Error = &Failure{Code: "anki_deck_mismatch", Message: fmt.Sprintf(
 					"%d note(s) landed in a deck other than %q; their Anki note ids are kept", counts.DeckMismatch, note.Deck)}
 			default:
-				doc.Error = &errorBody{Code: "anki_failed", Message: fmt.Sprintf(
+				doc.Error = &Failure{Code: "anki_failed", Message: fmt.Sprintf(
 					"%d note(s) failed and remain queued", counts.Failed)}
 			}
 		}
-		if *jsonFlag {
-			if exit != 0 {
-				_ = writeJSONTo(opt.Stderr, doc)
-			} else {
-				_ = writeJSONTo(opt.Stdout, doc)
-			}
-		} else {
-			writer := opt.Stdout
-			if exit != 0 {
-				writer = opt.Stderr
-			}
-			writeNotePush(writer, doc)
-		}
-		return exit
+		return Pushed{Report: &doc}
 	}
 	// unreachable marks every unclassified note as queued before reporting. It
 	// is used when the endpoint did not answer or the host call failed after an
 	// earlier batch was already persisted.
-	unreachable := func(exit int, failure *errorBody, detail string) int {
-		if err := noteMarkUnreachable(work, st, opt, detail); err != nil {
-			return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+	unreachable := func(failure *Failure, detail string) Pushed {
+		if err := markUnreachable(work, st, p.Now, detail); err != nil {
+			return failed("storage_error", err.Error())
 		}
-		return report(exit, failure)
+		return report(failure)
 	}
 
 	// Capability pass. A transport error means Node or the host is missing;
@@ -250,28 +289,28 @@ func runNotePush(args []string, opt Options) int {
 		{Action: "modelNames"},
 	})
 	if err != nil {
-		return noteAnkiFailure(opt, *jsonFlag, "anki_unavailable", err.Error())
+		return failed("anki_unavailable", err.Error()), nil
 	}
 	if anki.IsUnreachable(capabilities) {
-		return unreachable(0, nil, "endpoint did not answer")
+		return unreachable(nil, "endpoint did not answer"), nil
 	}
-	version, err := noteActionResultInt(capabilities, 0)
+	version, err := actionResultInt(capabilities, 0)
 	if err != nil {
-		return noteAnkiFailure(opt, *jsonFlag, "anki_error", err.Error())
+		return failed("anki_error", err.Error()), nil
 	}
 	if version < anki.MinAPIVersion {
-		return noteAnkiFailure(opt, *jsonFlag, "anki_protocol",
-			fmt.Sprintf("AnkiConnect version %d is older than the required %d", version, anki.MinAPIVersion))
+		return failed("anki_protocol",
+			fmt.Sprintf("AnkiConnect version %d is older than the required %d", version, anki.MinAPIVersion)), nil
 	}
-	if err := noteResultOK(capabilities, 1, "createDeck"); err != nil {
-		return noteAnkiFailure(opt, *jsonFlag, "anki_error", err.Error())
+	if err := resultOK(capabilities, 1, "createDeck"); err != nil {
+		return failed("anki_error", err.Error()), nil
 	}
-	if err := noteResultOK(capabilities, 2, "modelNames"); err != nil {
-		return noteAnkiFailure(opt, *jsonFlag, "anki_error", err.Error())
+	if err := resultOK(capabilities, 2, "modelNames"); err != nil {
+		return failed("anki_error", err.Error()), nil
 	}
 	modelNames, err := anki.DecodeStringList(capabilities.Results[2].Result)
 	if err != nil {
-		return noteAnkiFailure(opt, *jsonFlag, "anki_error", err.Error())
+		return failed("anki_error", err.Error()), nil
 	}
 	if !containsString(modelNames, note.ModelName) {
 		model := note.TemplateModel()
@@ -280,22 +319,22 @@ func runNotePush(args []string, opt Options) int {
 			FrontTemplate: model.FrontTemplate, BackTemplate: model.BackTemplate,
 		})}})
 		if err != nil {
-			return noteAnkiFailure(opt, *jsonFlag, "anki_unavailable", err.Error())
+			return failed("anki_unavailable", err.Error()), nil
 		}
 		if anki.IsUnreachable(created) {
-			return unreachable(0, nil, "endpoint did not answer while creating the model")
+			return unreachable(nil, "endpoint did not answer while creating the model"), nil
 		}
-		if err := noteResultOK(created, 0, "createModel"); err != nil {
-			return noteAnkiFailure(opt, *jsonFlag, "anki_error", err.Error())
+		if err := resultOK(created, 0, "createModel"); err != nil {
+			return failed("anki_error", err.Error()), nil
 		}
 		doc.ModelCreated = true
-	} else if code, stop := noteUpgradeModel(call, &doc, unreachable, opt, *jsonFlag); stop {
-		return code
+	} else if out, stop := upgradeModel(call, &doc, unreachable); stop {
+		return out, nil
 	}
 
 	// Read back the cards we already pushed so a learner edit is a conflict,
 	// not a silent overwrite. --force is the explicit overwrite control.
-	if !*forceFlag {
+	if !req.Force {
 		var ids []int64
 		for _, item := range work {
 			if item.Note.AnkiNoteID > 0 && item.State == "" {
@@ -310,17 +349,17 @@ func runNotePush(args []string, opt Options) int {
 				end := min(start+anki.MaxActionsPerCall, len(ids))
 				readback, err := call([]anki.Action{{Action: "notesInfo", Params: anki.NotesInfoParams(ids[start:end])}})
 				if err != nil {
-					return unreachable(3, &errorBody{Code: "anki_unavailable", Message: err.Error()}, err.Error())
+					return unreachable(&Failure{Code: "anki_unavailable", Message: err.Error()}, err.Error()), nil
 				}
 				if anki.IsUnreachable(readback) {
-					return unreachable(0, nil, "endpoint did not answer during read-back")
+					return unreachable(nil, "endpoint did not answer during read-back"), nil
 				}
-				if err := noteResultOK(readback, 0, "notesInfo"); err != nil {
-					return unreachable(3, &errorBody{Code: "anki_error", Message: err.Error()}, err.Error())
+				if err := resultOK(readback, 0, "notesInfo"); err != nil {
+					return unreachable(&Failure{Code: "anki_error", Message: err.Error()}, err.Error()), nil
 				}
 				infos, err := anki.DecodeNotesInfo(readback.Results[0].Result)
 				if err != nil {
-					return unreachable(3, &errorBody{Code: "anki_error", Message: err.Error()}, err.Error())
+					return unreachable(&Failure{Code: "anki_error", Message: err.Error()}, err.Error()), nil
 				}
 				for _, info := range infos {
 					byID[info.NoteID] = info
@@ -337,10 +376,10 @@ func runNotePush(args []string, opt Options) int {
 					// ledger shows why a new id was written.
 					if err := st.RecordAnkiAttempt(store.AnkiAttempt{
 						NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: "check", Outcome: "not_found",
-						Detail: "note was missing in Anki", At: opt.Now(),
+						Detail: "note was missing in Anki", At: p.Now(),
 						AnkiNoteID: item.Note.AnkiNoteID, AnkiState: store.AnkiStateQueued,
 					}); err != nil {
-						return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+						return failed("storage_error", err.Error()), nil
 					}
 					item.Action = "readd"
 					continue
@@ -353,7 +392,7 @@ func runNotePush(args []string, opt Options) int {
 					item.Detail = "Anki note uses model " + info.ModelName
 					continue
 				}
-				expected, err := notePushedFields(st, item.Note)
+				expected, err := pushedFields(st, item.Note)
 				if err != nil {
 					item.State = store.AnkiStateConflict
 					item.Outcome = "conflict"
@@ -361,7 +400,7 @@ func runNotePush(args []string, opt Options) int {
 					item.Detail = "recorded pushed revision is unavailable"
 					continue
 				}
-				if !noteFieldsMatch(info, expected) {
+				if !fieldsMatch(info, expected) {
 					item.State = store.AnkiStateConflict
 					item.Outcome = "conflict"
 					item.Code = "fields_changed"
@@ -371,12 +410,12 @@ func runNotePush(args []string, opt Options) int {
 				item.Action = "update"
 			}
 			if err := persist(); err != nil {
-				return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+				return failed("storage_error", err.Error()), nil
 			}
 		}
 	}
 
-	if *forceFlag {
+	if req.Force {
 		for i := range work {
 			if work[i].Note.AnkiNoteID > 0 && work[i].State == "" {
 				work[i].Action = "update"
@@ -420,7 +459,7 @@ func runNotePush(args []string, opt Options) int {
 			end := min(start+anki.MaxActionsPerCall, len(writes))
 			response, err := call(actions[start:end])
 			if err != nil {
-				return unreachable(3, &errorBody{Code: "anki_unavailable", Message: err.Error()}, err.Error())
+				return unreachable(&Failure{Code: "anki_unavailable", Message: err.Error()}, err.Error()), nil
 			}
 			for position, ref := range writes[start:end] {
 				item := &work[ref.index]
@@ -433,16 +472,16 @@ func runNotePush(args []string, opt Options) int {
 				if classifyWriteResult(item, response.Results[position], ref.action, false) {
 					if err := st.RecordAnkiAttempt(store.AnkiAttempt{
 						NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: "update", Outcome: "not_found",
-						Detail: "note was missing in Anki", At: opt.Now(), AnkiState: store.AnkiStateQueued,
+						Detail: "note was missing in Anki", At: p.Now(), AnkiState: store.AnkiStateQueued,
 					}); err != nil {
-						return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+						return failed("storage_error", err.Error()), nil
 					}
 					item.CardIDs = nil
 					readdIndexes = append(readdIndexes, ref.index)
 				}
 			}
 			if err := persist(); err != nil {
-				return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+				return failed("storage_error", err.Error()), nil
 			}
 		}
 		// A card deleted after the read-back is re-added once; there is no
@@ -459,7 +498,7 @@ func runNotePush(args []string, opt Options) int {
 				end := min(start+anki.MaxActionsPerCall, len(readdActions))
 				readd, err := call(readdActions[start:end])
 				if err != nil {
-					return unreachable(3, &errorBody{Code: "anki_unavailable", Message: err.Error()}, err.Error())
+					return unreachable(&Failure{Code: "anki_unavailable", Message: err.Error()}, err.Error()), nil
 				}
 				for position := start; position < end; position++ {
 					item := &work[readdRefs[position]]
@@ -473,7 +512,7 @@ func runNotePush(args []string, opt Options) int {
 					classifyWriteResult(item, readd.Results[position-start], "readd", true)
 				}
 				if err := persist(); err != nil {
-					return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+					return failed("storage_error", err.Error()), nil
 				}
 			}
 		}
@@ -481,11 +520,11 @@ func runNotePush(args []string, opt Options) int {
 
 	// Deck verification. AnkiConnect's addNote is known to ignore deckName on
 	// some builds, so every note this push wrote is read back.
-	deckFailed := func(code, detail string) int {
+	deckFailed := func(code, detail string) Pushed {
 		if err := persist(); err != nil {
-			return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+			return failed("storage_error", err.Error())
 		}
-		return report(3, &errorBody{Code: code, Message: fmt.Sprintf(
+		return report(&Failure{Code: code, Message: fmt.Sprintf(
 			"the deck read-back failed after the write was acknowledged: %s; no note records a deck", detail)})
 	}
 	var verified []int
@@ -506,17 +545,17 @@ func runNotePush(args []string, opt Options) int {
 				end := min(start+anki.MaxActionsPerCall, len(askNotes))
 				read, err := call([]anki.Action{{Action: "notesInfo", Params: anki.NotesInfoParams(askNotes[start:end])}})
 				if err != nil {
-					return deckFailed("anki_unavailable", err.Error())
+					return deckFailed("anki_unavailable", err.Error()), nil
 				}
 				if anki.IsUnreachable(read) {
-					return deckFailed("anki_unavailable", "the endpoint did not answer")
+					return deckFailed("anki_unavailable", "the endpoint did not answer"), nil
 				}
-				if err := noteResultOK(read, 0, "notesInfo"); err != nil {
-					return deckFailed("anki_error", err.Error())
+				if err := resultOK(read, 0, "notesInfo"); err != nil {
+					return deckFailed("anki_error", err.Error()), nil
 				}
 				infos, err := anki.DecodeNotesInfo(read.Results[0].Result)
 				if err != nil {
-					return deckFailed("anki_error", err.Error())
+					return deckFailed("anki_error", err.Error()), nil
 				}
 				for _, info := range infos {
 					cards[info.NoteID] = info.Cards
@@ -545,17 +584,17 @@ func runNotePush(args []string, opt Options) int {
 			end := min(start+anki.MaxActionsPerCall, len(cardIDs))
 			read, err := call([]anki.Action{{Action: "cardsInfo", Params: anki.CardsInfoParams(cardIDs[start:end])}})
 			if err != nil {
-				return deckFailed("anki_unavailable", err.Error())
+				return deckFailed("anki_unavailable", err.Error()), nil
 			}
 			if anki.IsUnreachable(read) {
-				return deckFailed("anki_unavailable", "the endpoint did not answer")
+				return deckFailed("anki_unavailable", "the endpoint did not answer"), nil
 			}
-			if err := noteResultOK(read, 0, "cardsInfo"); err != nil {
-				return deckFailed("anki_error", err.Error())
+			if err := resultOK(read, 0, "cardsInfo"); err != nil {
+				return deckFailed("anki_error", err.Error()), nil
 			}
 			cards, err := anki.DecodeCardsInfo(read.Results[0].Result)
 			if err != nil {
-				return deckFailed("anki_error", err.Error())
+				return deckFailed("anki_error", err.Error()), nil
 			}
 			for _, card := range cards {
 				if index, ok := owner[card.CardID]; ok {
@@ -571,7 +610,7 @@ func runNotePush(args []string, opt Options) int {
 			// leaving it to contradict the deck_mismatch state.
 			attempt := store.AnkiAttempt{
 				NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: "check",
-				Outcome: "ok", At: opt.Now(), AnkiDeck: note.Deck, SetDeck: true, AnkiState: store.AnkiStatePushed,
+				Outcome: "ok", At: p.Now(), AnkiDeck: note.Deck, SetDeck: true, AnkiState: store.AnkiStatePushed,
 				Detail: fmt.Sprintf("card is in %q", note.Deck), Keep: true,
 			}
 			if !verdict.Matched {
@@ -585,7 +624,7 @@ func runNotePush(args []string, opt Options) int {
 				attempt.Detail = verdict.Detail
 			}
 			if err := st.RecordAnkiAttempt(attempt); err != nil {
-				return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+				return failed("storage_error", err.Error()), nil
 			}
 		}
 	}
@@ -593,42 +632,49 @@ func runNotePush(args []string, opt Options) int {
 	// A storage failure leaves the outbox pending, so the next push retries
 	// safely.
 	if err := persist(); err != nil {
-		return noteAnkiFailure(opt, *jsonFlag, "storage_error", err.Error())
+		return failed("storage_error", err.Error()), nil
 	}
-	return report(0, nil)
+	return report(nil), nil
 }
 
-// noteUpgradeModel reads the existing model's stylesheet and card template and
+// failed builds the outcome of a push that stopped before its report: the code
+// and message today's noteAnkiFailure printed as an error document. The caller
+// renders them; the message names what keeps the notes queued.
+func failed(code, message string) Pushed {
+	return Pushed{Failure: &Failure{Code: code, Message: message}}
+}
+
+// upgradeModel reads the existing model's stylesheet and card template and
 // brings a known earlier Pass Quest version up to this build's design in
 // place (Q-0012-02). A model the learner changed in Anki is reported and never
 // overwritten; its notes are still pushed, because fields, field order, model
 // name and template name are unchanged. stop is true when the push ends here,
-// with that exit code.
-func noteUpgradeModel(call func([]anki.Action) (anki.HostResponse, error), doc *notePushDoc,
-	unreachable func(int, *errorBody, string) int, opt Options, jsonMode bool) (code int, stop bool) {
+// with that outcome.
+func upgradeModel(call func([]anki.Action) (anki.HostResponse, error), doc *Report,
+	unreachable func(*Failure, string) Pushed) (out Pushed, stop bool) {
 	read, err := call([]anki.Action{
 		{Action: "modelStyling", Params: anki.ModelNameParams(note.ModelName)},
 		{Action: "modelTemplates", Params: anki.ModelNameParams(note.ModelName)},
 	})
 	if err != nil {
-		return noteAnkiFailure(opt, jsonMode, "anki_unavailable", err.Error()), true
+		return failed("anki_unavailable", err.Error()), true
 	}
 	if anki.IsUnreachable(read) {
-		return unreachable(0, nil, "endpoint did not answer while reading the model"), true
+		return unreachable(nil, "endpoint did not answer while reading the model"), true
 	}
-	if err := noteResultOK(read, 0, "modelStyling"); err != nil {
-		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+	if err := resultOK(read, 0, "modelStyling"); err != nil {
+		return failed("anki_error", err.Error()), true
 	}
-	if err := noteResultOK(read, 1, "modelTemplates"); err != nil {
-		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+	if err := resultOK(read, 1, "modelTemplates"); err != nil {
+		return failed("anki_error", err.Error()), true
 	}
 	css, err := anki.DecodeModelStyling(read.Results[0].Result)
 	if err != nil {
-		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+		return failed("anki_error", err.Error()), true
 	}
 	templates, err := anki.DecodeModelTemplates(read.Results[1].Result)
 	if err != nil {
-		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+		return failed("anki_error", err.Error()), true
 	}
 	// A second card type or a renamed template is the learner's design too.
 	state := note.ModelCustomized
@@ -637,10 +683,10 @@ func noteUpgradeModel(call func([]anki.Action) (anki.HostResponse, error), doc *
 	}
 	switch state {
 	case note.ModelCurrent:
-		return 0, false
+		return Pushed{}, false
 	case note.ModelCustomized:
 		doc.ModelCustomized = true
-		return 0, false
+		return Pushed{}, false
 	}
 	model := note.TemplateModel()
 	updated, err := call([]anki.Action{
@@ -648,159 +694,24 @@ func noteUpgradeModel(call func([]anki.Action) (anki.HostResponse, error), doc *
 		{Action: "updateModelStyling", Params: anki.UpdateModelStylingParams(model.Name, model.CSS)},
 	})
 	if err != nil {
-		return noteAnkiFailure(opt, jsonMode, "anki_unavailable", err.Error()), true
+		return failed("anki_unavailable", err.Error()), true
 	}
 	if anki.IsUnreachable(updated) {
-		return unreachable(0, nil, "endpoint did not answer while updating the model"), true
+		return unreachable(nil, "endpoint did not answer while updating the model"), true
 	}
-	if err := noteResultOK(updated, 0, "updateModelTemplates"); err != nil {
-		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+	if err := resultOK(updated, 0, "updateModelTemplates"); err != nil {
+		return failed("anki_error", err.Error()), true
 	}
-	if err := noteResultOK(updated, 1, "updateModelStyling"); err != nil {
-		return noteAnkiFailure(opt, jsonMode, "anki_error", err.Error()), true
+	if err := resultOK(updated, 1, "updateModelStyling"); err != nil {
+		return failed("anki_error", err.Error()), true
 	}
 	doc.ModelUpdated = true
-	return 0, false
+	return Pushed{}, false
 }
 
-// noteDeckRead is the deck verdict for one written note: Matched is true only
-// when the endpoint reported every card of the note and named them all in the
-// expected deck. Anything else leaves the claim unconfirmed, and Detail says
-// what could not be read or which deck the card reached instead.
-type noteDeckRead struct {
-	Deck    string
-	Detail  string
-	Matched bool
-}
-
-// readNoteDecks decides one note's deck claim from its cardsInfo rows. asked
-// lists the cards this push knows belong to the note; a row about another card
-// is not part of this verdict.
-func readNoteDecks(cards []anki.CardInfo, asked []int64, expected string) noteDeckRead {
-	answered := make(map[int64]bool, len(cards))
-	var unexpected []string
-	for _, card := range cards {
-		answered[card.CardID] = true
-		deck := strings.TrimSpace(card.DeckName)
-		if !usableDeckName(deck) {
-			return noteDeckRead{Detail: fmt.Sprintf("Anki reported no usable deck for card %d", card.CardID)}
-		}
-		if deck != expected && !containsString(unexpected, deck) {
-			unexpected = append(unexpected, deck)
-		}
-	}
-	for _, id := range asked {
-		if !answered[id] {
-			return noteDeckRead{Detail: fmt.Sprintf("Anki reported no card %d for this note", id)}
-		}
-	}
-	if len(asked) == 0 {
-		return noteDeckRead{Detail: "Anki reported no card for this note"}
-	}
-	if len(unexpected) == 0 {
-		return noteDeckRead{Matched: true}
-	}
-	claim := strings.Join(unexpected, ", ")
-	if !usableDeckName(claim) {
-		return noteDeckRead{Detail: fmt.Sprintf(
-			"Anki reported %d decks for this note; the combined name exceeds %d characters",
-			len(unexpected), anki.MaxDeckNameChars)}
-	}
-	quoted := make([]string, 0, len(unexpected))
-	for _, deck := range unexpected {
-		quoted = append(quoted, fmt.Sprintf("%q", deck))
-	}
-	return noteDeckRead{
-		Deck:   claim,
-		Detail: fmt.Sprintf("card landed in %s, not %q", strings.Join(quoted, ", "), expected),
-	}
-}
-
-// classifyWriteResult applies one Anki write result to its work item. It
-// returns true when an update found the note missing and the caller should
-// retry that item once with addNote.
-func classifyWriteResult(item *notePushWork, result anki.ActionResult, action string, readded bool) bool {
-	if result.State == "unreachable" {
-		item.State = store.AnkiStateQueued
-		item.Outcome = "unreachable"
-		item.Detail = result.Error
-		return false
-	}
-	if result.State != "ok" {
-		message := strings.TrimSpace(result.Error)
-		if message == "" {
-			message = "AnkiConnect returned an error"
-		}
-		switch {
-		case !readded && action == "update" && anki.IsNotFoundError(message):
-			item.Detail = "note was missing; re-adding"
-			return true
-		case readded && anki.IsDuplicateError(message):
-			item.State = store.AnkiStateConflict
-			item.Outcome = "conflict"
-			item.Code = "note_id_unknown"
-			item.Detail = "Anki already holds a note with this front and reports no note id; remove that card in Anki or align the local content, then push again"
-		case anki.IsDuplicateError(message) && item.Note.AnkiPushedRevision == 0 && item.Entry.Revision == 1:
-			item.State = store.AnkiStateAlreadyExists
-			item.Outcome = "duplicate"
-			item.Detail = "already present in Anki"
-			item.Drain = true
-			item.AnkiNoteID = 0
-		case anki.IsDuplicateError(message):
-			item.State = store.AnkiStateConflict
-			item.Outcome = "conflict"
-			item.Code = "note_id_unknown"
-			item.Detail = "Anki already holds a note with this front and reports no note id; remove that card in Anki or align the local content, then push again"
-		default:
-			item.State = store.AnkiStateFailed
-			item.Outcome = "failed"
-			item.Detail = message
-		}
-		return false
-	}
-	if action == "update" {
-		item.State = store.AnkiStatePushed
-		item.Outcome = "ok"
-		item.AnkiNoteID = item.Note.AnkiNoteID
-		item.Drain = true
-		return false
-	}
-	id, err := anki.DecodeInt(result.Result)
-	if err != nil {
-		item.State = store.AnkiStateFailed
-		item.Outcome = "failed"
-		item.Detail = err.Error()
-		return false
-	}
-	item.State = store.AnkiStatePushed
-	item.Outcome = "ok"
-	if readded {
-		item.Detail = "note was missing in Anki; re-added"
-	}
-	item.AnkiNoteID = id
-	item.Drain = true
-	return false
-}
-
-// noteConsentRefusal names restricted sources without a global grant. Export
-// and push share this policy; verb states what was refused. A provider-scoped
-// tutor grant authorizes inference, not this export destination.
-func noteConsentRefusal(st *store.Store, notes []store.Note, verb string) (string, bool) {
-	var denied []string
-	for _, n := range notes {
-		if n.Restricted && n.SourceID != "" && !consentGranted(st, n.SourceID) {
-			denied = appendUnique(denied, n.SourceID)
-		}
-	}
-	if len(denied) == 0 {
-		return "", false
-	}
-	return fmt.Sprintf(
-		"restricted note text from %s cannot be %s because consent is not recorded; run passquest tutor consent SOURCE --reviewer NAME",
-		strings.Join(denied, ", "), verb), true
-}
-
-func noteMarkUnreachable(work []notePushWork, st *store.Store, opt Options, detail string) error {
+// markUnreachable records one queued attempt per unclassified work item, so an
+// endpoint that never answered leaves every note queued for the next push.
+func markUnreachable(work []pushWork, st *store.Store, now func() time.Time, detail string) error {
 	for i := range work {
 		item := &work[i]
 		if item.State != "" {
@@ -815,7 +726,7 @@ func noteMarkUnreachable(work []notePushWork, st *store.Store, opt Options, deta
 		}
 		if err := st.RecordAnkiAttempt(store.AnkiAttempt{
 			NoteID: item.Entry.NoteID, Revision: item.Entry.Revision, Action: action, Outcome: "unreachable",
-			Detail: detail, At: opt.Now(), AnkiState: store.AnkiStateQueued,
+			Detail: detail, At: now(), AnkiState: store.AnkiStateQueued,
 		}); err != nil {
 			return err
 		}
@@ -824,7 +735,9 @@ func noteMarkUnreachable(work []notePushWork, st *store.Store, opt Options, deta
 	return nil
 }
 
-func notePushedFields(st *store.Store, n store.Note) (note.Fields, error) {
+// pushedFields reads the fields the last pushed revision recorded, so the
+// read-back compares against what Anki actually holds.
+func pushedFields(st *store.Store, n store.Note) (note.Fields, error) {
 	if n.AnkiPushedRevision == 0 {
 		return note.Fields{}, fmt.Errorf("no pushed revision")
 	}
@@ -835,7 +748,9 @@ func notePushedFields(st *store.Store, n store.Note) (note.Fields, error) {
 	return note.HTML(revision.Front, revision.Back, revision.Tactic, revision.SourceLabel), nil
 }
 
-func noteFieldsMatch(info anki.NoteInfo, expected note.Fields) bool {
+// fieldsMatch reports whether every field the push wrote still holds its
+// trimmed value in Anki.
+func fieldsMatch(info anki.NoteInfo, expected note.Fields) bool {
 	for name, want := range expected.Map() {
 		if strings.TrimSpace(info.FieldValue(name)) != strings.TrimSpace(want) {
 			return false
@@ -844,17 +759,19 @@ func noteFieldsMatch(info anki.NoteInfo, expected note.Fields) bool {
 	return true
 }
 
-func noteActionResultInt(resp anki.HostResponse, index int) (int64, error) {
+// actionResultInt decodes one integer result, or reports the action's failure.
+func actionResultInt(resp anki.HostResponse, index int) (int64, error) {
 	if index < 0 || index >= len(resp.Results) {
 		return 0, fmt.Errorf("anki: result %d is missing", index)
 	}
-	if err := noteResultOK(resp, index, resp.Results[index].Action); err != nil {
+	if err := resultOK(resp, index, resp.Results[index].Action); err != nil {
 		return 0, err
 	}
 	return anki.DecodeInt(resp.Results[index].Result)
 }
 
-func noteResultOK(resp anki.HostResponse, index int, action string) error {
+// resultOK turns one non-ok action result into the error the push prints.
+func resultOK(resp anki.HostResponse, index int, action string) error {
 	if index < 0 || index >= len(resp.Results) {
 		return fmt.Errorf("anki: %s result is missing", action)
 	}
@@ -869,43 +786,24 @@ func noteResultOK(resp anki.HostResponse, index int, action string) error {
 	return fmt.Errorf("anki: %s failed: %s", action, message)
 }
 
-func noteAnkiFailure(opt Options, jsonMode bool, code, message string) int {
-	if jsonMode {
-		_ = writeJSONTo(opt.Stderr, errorDoc{SchemaVersion: ProtocolVersion, Error: errorBody{Code: code, Message: message}})
-	} else {
-		fmt.Fprintf(opt.Stderr, "passquest: %s: %s\n", code, message)
-		fmt.Fprintln(opt.Stderr, "Pending notes stay queued; fix the problem and run passquest note push again.")
-	}
-	return 3
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
+// countsOf tallies push item states.
+func countsOf(items []Item) Counts {
+	var counts Counts
+	for _, item := range items {
+		switch item.State {
+		case store.AnkiStatePushed:
+			counts.Pushed++
+		case store.AnkiStateAlreadyExists:
+			counts.AlreadyPresent++
+		case store.AnkiStateConflict:
+			counts.Conflicts++
+		case store.AnkiStateFailed:
+			counts.Failed++
+		case store.AnkiStateQueued:
+			counts.Queued++
+		case store.AnkiStateDeckMismatch:
+			counts.DeckMismatch++
 		}
 	}
-	return false
-}
-
-func appendUnique(values []string, value string) []string {
-	if !containsString(values, value) {
-		values = append(values, value)
-	}
-	return values
-}
-
-// usableDeckName reports whether a deck name from the endpoint can be the deck
-// part of the claim: non-empty, bounded and printable, so a name the learner
-// cannot read in Anki is never reported as where the card went.
-func usableDeckName(deck string) bool {
-	if deck == "" || utf8.RuneCountInString(deck) > anki.MaxDeckNameChars {
-		return false
-	}
-	for _, char := range deck {
-		if char < 0x20 || char == 0x7f {
-			return false
-		}
-	}
-	return true
+	return counts
 }
