@@ -1,16 +1,18 @@
 package cli
 
 import (
+	"context"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/wxxb789/passquest/internal/adaptive"
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/search"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/recommend"
 )
 
 // todayLimitations are the statements the Today view carries with its
@@ -68,11 +70,14 @@ func (w *Workspace) Today() (studio.Today, error) {
 }
 
 func (w *Workspace) todayRecommendation(st *store.Store, today *studio.Today, now time.Time) error {
-	input, unclassified, _, err := buildAdaptiveInput(st, "")
+	// The render already holds this call's store (withStore); the unit wraps
+	// it, so the recommendation read does not open a second one. The unit is
+	// not closed: the store belongs to withStore.
+	svc := study.Wrap(st, w.ports)
+	result, err := recommend.Recommend(context.Background(), svc, "", recommend.SpendNone)
 	if err != nil {
 		return err
 	}
-	result := adaptive.Recommend(input)
 	// The window renders Today on boot and on leaving a run without the
 	// learner asking for `next`; a spend then could name a pending item of the
 	// active run and mark it prior exposure. No spend while a run is active.
@@ -81,7 +86,9 @@ func (w *Workspace) todayRecommendation(st *store.Store, today *studio.Today, no
 		return err
 	}
 	if !running {
-		if err := recordNextPresentation(st, result.Recommendation, now); err != nil {
+		// The spend uses the clock read this render opened with: a fresh port
+		// read would be a read the render did not make.
+		if err := recommend.RecordPresentation(context.Background(), svc, result.Adaptive.Recommendation, now); err != nil {
 			return err
 		}
 	}
@@ -89,16 +96,16 @@ func (w *Workspace) todayRecommendation(st *store.Store, today *studio.Today, no
 	if err != nil {
 		shell, _ = detectShell(func(string) string { return "" }, runtime.GOOS)
 	}
-	doc := nextDocOf(result, unclassified, "", 0, nextDatabaseArgument(w.dbPath, w.opt), commandQuoter{shell: shell})
+	doc := nextDocOf(result.Adaptive, result.Unclassified, "", 0, nextDatabaseArgument(w.dbPath, w.opt), commandQuoter{shell: shell})
 	if err := convertJSON(doc.Skills, &today.Skills); err != nil {
 		return err
 	}
-	today.Unclassified = len(unclassified)
-	if result.Recommendation == nil {
+	today.Unclassified = len(result.Unclassified)
+	if result.Adaptive.Recommendation == nil {
 		return nil
 	}
 	rec := doc.Recommendation
-	primary, followUp := nextTargetsOf(result.Recommendation)
+	primary, followUp := recommend.Targets(result.Adaptive.Recommendation)
 	today.Recommendation = &studio.Recommendation{
 		Action:             rec.Action,
 		State:              rec.State,
@@ -116,19 +123,19 @@ func (w *Workspace) todayRecommendation(st *store.Store, today *studio.Today, no
 	return nil
 }
 
-func studioTarget(t *nextTarget) studio.Target {
+func studioTarget(t *recommend.Target) studio.Target {
 	if t == nil {
 		return studio.Target{}
 	}
-	target := studio.Target{Kind: t.kind, Skill: t.skillID}
-	if t.kind == nextTargetTactic {
+	target := studio.Target{Kind: t.Kind, Skill: t.SkillID}
+	if t.Kind == recommend.TargetTactic {
 		target.Stage = stageGuided
 	}
-	if t.material != nil {
-		target.SourceID = t.material.SourceID
-		target.ContentID = t.material.ContentID
-		if t.includeQuestion {
-			target.QuestionID = t.material.QuestionID
+	if t.Material != nil {
+		target.SourceID = t.Material.SourceID
+		target.ContentID = t.Material.ContentID
+		if t.IncludeQuestion {
+			target.QuestionID = t.Material.QuestionID
 		}
 	}
 	return target

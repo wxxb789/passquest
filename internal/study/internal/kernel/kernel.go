@@ -32,6 +32,12 @@ func Open(p Ports) (*Unit, error) {
 	return &Unit{st: st, p: p}, nil
 }
 
+// Wrap returns a unit of work over a store the caller already opened, for the
+// desktop paths that hold the call's store (withStore) and must not open a
+// second one: a second open adds a migration and a failure path the call does
+// not have.
+func Wrap(st *store.Store, p Ports) *Unit { return &Unit{st: st, p: p} }
+
 // Close releases the store.
 func (u *Unit) Close() error { return u.st.Close() }
 

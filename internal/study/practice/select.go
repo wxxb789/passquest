@@ -119,10 +119,9 @@ func choose(st *store.Store, r Request) (selection, error) {
 }
 
 // selectNextPractice selects the practice a resolved recommendation target
-// names. The recommendation read still lives in the desktop adapter
-// (internal/cli) and moves to internal/study/recommend in a later step, so the
-// request names the target: a guided tactic, or a skill with the material the
-// target pinned.
+// names. The recommendation module resolves the target
+// (recommend.PracticeRequest), so the request names it: a guided tactic, or a
+// skill with the material the target pinned.
 func selectNextPractice(st *store.Store, r Request) (selection, error) {
 	switch {
 	case r.TacticID != "":

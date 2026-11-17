@@ -13,6 +13,7 @@ import (
 	"github.com/wxxb789/passquest/internal/studio"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/practice"
+	"github.com/wxxb789/passquest/internal/study/recommend"
 	"github.com/wxxb789/passquest/internal/tactic"
 )
 
@@ -35,13 +36,11 @@ func (w *Workspace) StartPractice(request studio.PracticeRequest) (studio.Practi
 		}
 		defer svc.Close()
 		if request.Kind == studio.PracticeNext {
-			// The recommendation read still lives in this package (step C2
-			// moves it to internal/study/recommend), so the adapter resolves
-			// the target; the item keeps the "next" presentation kind. The
+			// The recommendation read lives in internal/study/recommend; the
 			// resolution only reads, but Show's guard runs after it, so a
 			// failing resolution still reports assessment_active while a run is
 			// active: before this step the guard preceded the whole selection.
-			next, err := nextPracticeRequest(st)
+			next, err := recommend.PracticeRequest(context.Background(), svc)
 			if err != nil {
 				if guardErr := study.Guard(svc, "practice"); guardErr != nil {
 					return guardErr

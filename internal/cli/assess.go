@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wxxb789/passquest/internal/adaptive"
 	"github.com/wxxb789/passquest/internal/assess"
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
@@ -881,27 +880,6 @@ func assessmentRunLimitations() []string {
 		"The real item count, time limit and pass threshold are unknown; the requested values are local flags and the report prints the values it used.",
 		"Contaminated items are excluded from the headline and listed separately; a partial run reports only finalized items.",
 	}
-}
-
-// recordNextPresentation spends the unit named by the recommendation. `next`
-// prints a command rather than a stem, but the contract explicitly lists it as
-// a presentation surface; this is the conservative reading. It is idempotent
-// per recommended question: the pool counts one spend per unit and keeps the
-// earliest time, so rendering the same recommendation again (the desktop Today
-// view does on every render) writes nothing new.
-func recordNextPresentation(st *store.Store, rec *adaptive.Recommendation, at time.Time) error {
-	if rec == nil {
-		return nil
-	}
-	material := rec.FreshMaterial
-	if material == nil {
-		material = rec.ReviewMaterial
-	}
-	if material == nil {
-		return nil
-	}
-	_, err := st.RecordPresentationOnce(material.ContentID, material.QuestionID, assess.SurfaceNext, at)
-	return err
 }
 
 // guardAssessmentCommand refuses tutor, skill and find while an assessment run

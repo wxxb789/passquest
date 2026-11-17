@@ -1,20 +1,16 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"runtime"
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/adaptive"
-	"github.com/wxxb789/passquest/internal/attempt"
-	"github.com/wxxb789/passquest/internal/exam"
-	"github.com/wxxb789/passquest/internal/skill"
-	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study"
-	"github.com/wxxb789/passquest/internal/study/practice"
-	"github.com/wxxb789/passquest/internal/tactic"
+	"github.com/wxxb789/passquest/internal/study/recommend"
 )
 
 func runNext(args []string, opt Options) int {
@@ -28,110 +24,44 @@ func runNext(args []string, opt Options) int {
 		return code
 	}
 
-	st, err := openDatabase(*dbFlag, opt)
+	// The shell is resolved before the recommendation read, which spends: an
+	// unusable override must refuse before anything is written, as it did when
+	// the check sat between the read and the spend. Its error is reported after
+	// the read, so a failing read keeps precedence.
+	shell, shellErr := detectShell(opt.Getenv, runtime.GOOS)
+	spend := recommend.SpendRecommended
+	if shellErr != nil {
+		spend = recommend.SpendNone
+	}
+	svc, err := study.Open(opt.ports(*dbFlag))
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	defer st.Close()
-	input, unclassified, catalog, err := buildAdaptiveInput(st, *sourceFlag)
+	defer svc.Close()
+	result, err := recommend.Recommend(context.Background(), svc, *sourceFlag, spend)
 	if err != nil {
 		if *sourceFlag != "" {
 			return sourceError(opt, *jsonFlag, err)
 		}
 		return internalError(opt, *jsonFlag, err)
 	}
-
-	shell, err := detectShell(opt.Getenv, runtime.GOOS)
-	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_input", err.Error())
+	if shellErr != nil {
+		return usageError(opt, *jsonFlag, "invalid_input", shellErr.Error())
 	}
-	result := adaptive.Recommend(input)
-	if err := recordNextPresentation(st, result.Recommendation, opt.PresentationNow()); err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	doc := nextDocOf(result, unclassified, *sourceFlag, catalog.sourceTaggedQuestions, nextDatabaseArgument(*dbFlag, opt), commandQuoter{shell: shell})
+	doc := nextDocOf(result.Adaptive, result.Unclassified, *sourceFlag, result.Catalog.SourceTaggedQuestions, nextDatabaseArgument(*dbFlag, opt), commandQuoter{shell: shell})
 	if *jsonFlag {
 		return writeJSON(opt, doc)
 	}
-	writeNext(opt.Stdout, doc, st.Path())
+	writeNext(opt.Stdout, doc, svc.Path())
 	return 0
 }
 
-// buildAdaptiveInput maps every recorded attempt through the same skill
-// snapshot and current-tag fallback the adaptive policy uses, and catalogs the
-// practiceable material. It is shared by `next` and the durable study brief so
-// both read learner evidence the same way.
-func buildAdaptiveInput(st *store.Store, sourceID string) (adaptive.Input, []unclassifiedAttemptView, nextCatalog, error) {
-	records, err := st.List()
-	if err != nil {
-		return adaptive.Input{}, nil, nextCatalog{}, err
-	}
-	catalog, err := buildNextCatalog(st, sourceID)
-	if err != nil {
-		return adaptive.Input{}, nil, nextCatalog{}, err
-	}
-	input := adaptive.Input{
-		Skills:    nextSkills(),
-		Materials: catalog.materials,
-	}
-	unclassified := make([]unclassifiedAttemptView, 0)
-	for _, record := range records {
-		adapted, reason := nextRecord(record, catalog.tagsByKey)
-		if reason != "" {
-			unclassified = append(unclassified, unclassifiedAttemptView{
-				ID:         record.ID,
-				ContentID:  record.ContentID,
-				QuestionID: record.QuestionID,
-				Reason:     reason,
-			})
-		}
-		input.Records = append(input.Records, adapted)
-	}
-	return input, unclassified, catalog, nil
-}
-
-// nextPracticeRequest resolves the adaptive recommendation to the practice
-// request the desktop opens for a "next" start: the primary target, or the
-// follow-up when the primary is a lesson. The read is the CLI's own, and the
-// refusals keep the messages the desktop showed before the practice module
-// took over the display.
-func nextPracticeRequest(st *store.Store) (practice.Request, error) {
-	input, _, _, err := buildAdaptiveInput(st, "")
-	if err != nil {
-		return practice.Request{}, err
-	}
-	result := adaptive.Recommend(input)
-	if result.Recommendation == nil {
-		return practice.Request{}, refuse("no_recommendation", "no practiceable skill material is available")
-	}
-	target, followUp := nextTargetsOf(result.Recommendation)
-	if target != nil && target.kind == nextTargetLesson {
-		target = followUp
-	}
-	if target == nil {
-		return practice.Request{}, refuse("no_recommendation",
-			"the recommendation for %s is a lesson with no practice to open", result.Recommendation.Skill.ID)
-	}
-	request := practice.Request{Kind: practice.KindNext}
-	switch target.kind {
-	case nextTargetTactic:
-		if _, ok := tactic.Get(target.skillID); !ok {
-			return practice.Request{}, refuse("unknown_tactic", "tactic %q is not registered", target.skillID)
-		}
-		request.TacticID, request.Stage = target.skillID, stageGuided
-	default:
-		if _, ok := skill.Get(target.skillID); !ok {
-			return practice.Request{}, refuse("unknown_skill", "skill %q is not registered", target.skillID)
-		}
-		request.SkillID = target.skillID
-		if target.material != nil {
-			request.SourceID = target.material.SourceID
-			if target.includeQuestion {
-				request.QuestionID = target.material.QuestionID
-			}
-		}
-	}
-	return request, nil
+// buildAdaptiveInput delegates to the recommendation module, mapping its
+// unclassified attempts onto this package's document type. It is shared by the
+// durable study brief, find and TestAssessNextSpendsRecommendedUnit.
+func buildAdaptiveInput(st *store.Store, sourceID string) (adaptive.Input, []unclassifiedAttemptView, recommend.Catalog, error) {
+	input, unclassified, catalog, err := recommend.BuildInput(st, sourceID)
+	return input, unclassifiedViews(unclassified), catalog, err
 }
 
 // nextDatabaseArgument is the database selection repeated in generated
@@ -147,165 +77,28 @@ func nextDatabaseArgument(flagValue string, opt Options) string {
 	return selected
 }
 
-func nextSkills() []adaptive.Skill {
-	all := skill.All()
-	out := make([]adaptive.Skill, 0, len(all))
-	for _, candidate := range all {
-		out = append(out, adaptive.Skill{ID: candidate.ID, Kind: string(candidate.Kind), Title: candidate.Title})
+// unclassifiedViews renders the recommendation module's unclassified attempts
+// as this package's document type.
+func unclassifiedViews(items []recommend.Unclassified) []unclassifiedAttemptView {
+	out := make([]unclassifiedAttemptView, 0, len(items))
+	for _, item := range items {
+		out = append(out, unclassifiedAttemptView{
+			ID:         item.ID,
+			ContentID:  item.ContentID,
+			QuestionID: item.QuestionID,
+			Reason:     item.Reason,
+		})
 	}
 	return out
 }
 
-type nextCatalog struct {
-	materials             []adaptive.Material
-	tagsByKey             map[attempt.QuestionKey][]string
-	sourceTaggedQuestions int
-}
-
-func buildNextCatalog(st *store.Store, sourceID string) (nextCatalog, error) {
-	catalog := nextCatalog{tagsByKey: make(map[attempt.QuestionKey][]string)}
-	seen := make(map[attempt.QuestionKey]map[string]bool)
-
-	addContent := func(content exam.Exam, sourceID string) {
-		for _, question := range content.Questions {
-			key := attempt.QuestionKey{ContentID: content.ID, QuestionID: question.ID}
-			if _, known := catalog.tagsByKey[key]; !known {
-				catalog.tagsByKey[key] = []string{}
-			}
-			registered := 0
-			for _, tag := range question.Tactics {
-				if !skill.IsRegistered(tag) {
-					continue
-				}
-				if seen[key] == nil {
-					seen[key] = make(map[string]bool)
-				}
-				if seen[key][tag] {
-					continue
-				}
-				seen[key][tag] = true
-				catalog.tagsByKey[key] = append(catalog.tagsByKey[key], tag)
-				catalog.materials = append(catalog.materials, adaptive.Material{
-					SkillID:    tag,
-					ContentID:  content.ID,
-					QuestionID: question.ID,
-					SourceID:   sourceID,
-				})
-				registered++
-			}
-			if sourceID != "" && registered > 0 {
-				catalog.sourceTaggedQuestions++
-			}
-		}
-	}
-
-	addSources := func(sourceIDs []string) error {
-		for _, id := range sourceIDs {
-			src, questions, err := study.LoadSourceBundle(st, id)
-			if err != nil {
-				return err
-			}
-			for _, page := range src.Pages {
-				content, _, buildErr := source.BuildPracticeExam(src, page, questions)
-				if buildErr != nil {
-					continue
-				}
-				addContent(content, src.ID)
-			}
-		}
-		return nil
-	}
-
-	embedded := func() error {
-		contents, err := study.EmbeddedContents()
-		if err != nil {
-			return err
-		}
-		// The sample is untagged, but cataloguing it distinguishes an untagged
-		// attempt from an attempt on unavailable content.
-		for _, content := range contents {
-			addContent(content, "")
-		}
-		return nil
-	}
-
-	if strings.TrimSpace(sourceID) != "" {
-		// A scoped source is placed first so the recommendation's command uses
-		// it when it has fresh material. Embedded content remains available.
-		if err := addSources([]string{sourceID}); err != nil {
-			return nextCatalog{}, err
-		}
-		if err := embedded(); err != nil {
-			return nextCatalog{}, err
-		}
-		return catalog, nil
-	}
-
-	if err := embedded(); err != nil {
-		return nextCatalog{}, err
-	}
-	summaries, err := st.Sources()
-	if err != nil {
-		return nextCatalog{}, err
-	}
-	ids := make([]string, 0, len(summaries))
-	for _, summary := range summaries {
-		ids = append(ids, summary.ID)
-	}
-	if err := addSources(ids); err != nil {
-		return nextCatalog{}, err
-	}
-	return catalog, nil
-}
-
-// nextRecord maps one attempt to the policy's shape. A recorded snapshot is
-// authoritative even when it is empty: it means the question had no registered
-// skill tag at answer time. Only a row written before the snapshot column
-// existed (SkillsRecorded false) falls back to the current question tags, and
-// that fallback is marked so the output can disclose it. An unmapped attempt is
-// still passed to the policy with no skills so its content still counts as a
-// seen passage.
-func nextRecord(record attempt.Attempt, tagsByKey map[attempt.QuestionKey][]string) (adaptive.Record, string) {
-	key := attempt.QuestionKey{ContentID: record.ContentID, QuestionID: record.QuestionID}
-	current, currentKnown := tagsByKey[key]
-	ids, fromCurrent, unregistered := effectiveSkills(record, current, currentKnown)
-	adapted := adaptive.Record{
-		AttemptID:       record.ID,
-		ContentID:       record.ContentID,
-		QuestionID:      record.QuestionID,
-		AttemptNumber:   record.AttemptNumber,
-		Assistance:      record.Assistance,
-		Status:          record.Status,
-		ElapsedMS:       record.ElapsedMS,
-		Skills:          ids,
-		FromCurrentTags: fromCurrent,
-		TacticID:        record.TacticID,
-	}
-	if record.SkillsRecorded {
-		if len(record.Skills) == 0 {
-			return adapted, "question had no registered skill tag when the attempt was recorded"
-		}
-		if unregistered != "" {
-			return adapted, fmt.Sprintf("recorded skill tags include %q, which is not registered in this build", unregistered)
-		}
-		return adapted, ""
-	}
-	if len(ids) > 0 {
-		return adapted, ""
-	}
-	if currentKnown {
-		return adapted, "pre-v6 attempt on a question with no registered skill tag"
-	}
-	return adapted, "content or question is unavailable in the current material"
-}
-
-func nextDocOf(result adaptive.Result, unclassified []unclassifiedAttemptView, sourceScope string, sourceTagged int, dbArg string, quoter commandQuoter) nextDoc {
+func nextDocOf(result adaptive.Result, unclassified []recommend.Unclassified, sourceScope string, sourceTagged int, dbArg string, quoter commandQuoter) nextDoc {
 	doc := nextDoc{
 		SchemaVersion:         ProtocolVersion,
 		State:                 "recommendation",
 		Shell:                 shellViewOf(quoter.shell),
 		Skills:                make([]nextSkillView, 0, len(result.Skills)),
-		UnclassifiedAttempts:  unclassified,
+		UnclassifiedAttempts:  unclassifiedViews(unclassified),
 		Limitations:           nextLimitations(len(unclassified)),
 		SourceScope:           sourceScope,
 		SourceTaggedQuestions: sourceTagged,
@@ -336,68 +129,23 @@ func nextDocOf(result adaptive.Result, unclassified []unclassifiedAttemptView, s
 }
 
 func nextCommands(rec *adaptive.Recommendation, dbArg string, quoter commandQuoter) (string, string) {
-	primary, followUp := nextTargetsOf(rec)
-	return primary.command(dbArg, quoter), followUp.command(dbArg, quoter)
+	primary, followUp := recommend.Targets(rec)
+	return targetCommand(primary, dbArg, quoter), targetCommand(followUp, dbArg, quoter)
 }
 
-// Recommendation target kinds: a guided tactic practice, a skill practice
-// (optionally on named material) or a skill lesson.
-const (
-	nextTargetTactic = "tactic"
-	nextTargetSkill  = "skill"
-	nextTargetLesson = "lesson"
-)
-
-// nextTarget is one destination a recommendation names. The CLI renders it as
-// a command; the desktop workspace opens it directly.
-type nextTarget struct {
-	kind            string
-	skillID         string
-	material        *adaptive.Material
-	includeQuestion bool
-}
-
-// nextTargetsOf maps a recommendation to its primary destination and an
-// optional follow-up.
-func nextTargetsOf(rec *adaptive.Recommendation) (primary, followUp *nextTarget) {
-	skillTarget := func(material *adaptive.Material, includeQuestion bool) *nextTarget {
-		return &nextTarget{kind: nextTargetSkill, skillID: rec.Skill.ID, material: material, includeQuestion: includeQuestion}
-	}
-	lesson := &nextTarget{kind: nextTargetLesson, skillID: rec.Skill.ID}
-	switch rec.Action {
-	case adaptive.ActionExplain:
-		if rec.FreshMaterial != nil {
-			followUp = skillTarget(rec.FreshMaterial, false)
-		} else if rec.ReviewMaterial != nil {
-			followUp = skillTarget(rec.ReviewMaterial, true)
-		}
-		if rec.Skill.Kind == adaptive.KindScoring {
-			return &nextTarget{kind: nextTargetTactic, skillID: rec.Skill.ID}, followUp
-		}
-		return lesson, followUp
-	case adaptive.ActionPracticeNew:
-		return skillTarget(rec.FreshMaterial, false), nil
-	case adaptive.ActionReview:
-		if rec.ReviewMaterial != nil {
-			return skillTarget(rec.ReviewMaterial, true), nil
-		}
-		return lesson, nil
-	default:
-		return nil, nil
-	}
-}
-
-func (t *nextTarget) command(dbArg string, quoter commandQuoter) string {
+// targetCommand renders one recommendation target as the command that reaches
+// it.
+func targetCommand(t *recommend.Target, dbArg string, quoter commandQuoter) string {
 	if t == nil {
 		return ""
 	}
-	switch t.kind {
-	case nextTargetTactic:
-		return tacticPracticeCommand(t.skillID, dbArg, quoter)
-	case nextTargetLesson:
-		return fmt.Sprintf("passquest skill show %s", t.skillID)
+	switch t.Kind {
+	case recommend.TargetTactic:
+		return tacticPracticeCommand(t.SkillID, dbArg, quoter)
+	case recommend.TargetLesson:
+		return fmt.Sprintf("passquest skill show %s", t.SkillID)
 	default:
-		return skillPracticeCommand(t.skillID, t.material, t.includeQuestion, dbArg, quoter)
+		return skillPracticeCommand(t.SkillID, t.Material, t.IncludeQuestion, dbArg, quoter)
 	}
 }
 

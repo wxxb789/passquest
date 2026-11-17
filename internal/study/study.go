@@ -8,6 +8,7 @@ package study
 import (
 	"time"
 
+	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study/internal/kernel"
 )
 
@@ -25,6 +26,10 @@ type Error = kernel.Error
 
 // Open opens the database the ports select.
 func Open(p Ports) (*Service, error) { return kernel.Open(p) }
+
+// Wrap returns a unit of work over a store the caller already opened, for an
+// adapter path that holds the call's store and must not open a second one.
+func Wrap(st *store.Store, p Ports) *Service { return kernel.Wrap(st, p) }
 
 // Complete fills the port defaults a root did not set.
 func Complete(p *Ports) { kernel.Complete(p) }
