@@ -12,6 +12,7 @@ import (
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
 	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/models"
 	"github.com/wxxb789/passquest/internal/study/recommend"
 )
 
@@ -238,56 +239,67 @@ func (w *Workspace) findStatus(st *store.Store, now time.Time) (studio.FindStatu
 // modelStatus is the active model, its text.chat state, authorization and the
 // per-provider budget, read the way `model list` reads them.
 func (w *Workspace) modelStatus(st *store.Store) (studio.ModelStatus, error) {
-	cfg, configured, err := configuredTutor(st)
+	// The render already holds this call's store (withStore); the unit wraps
+	// it, so the catalog read does not open a second one. The unit is not
+	// closed: the store belongs to withStore.
+	svc := study.Wrap(st, w.ports)
+	listing, err := models.Status(context.Background(), svc)
 	if err != nil {
 		return studio.ModelStatus{}, err
 	}
-	registry, _, err := provider.Load(w.getenv)
-	if err != nil {
-		return studio.ModelStatus{Problem: err.Error(), Budget: studio.Budget{Providers: []studio.BudgetProvider{}}}, nil
+	if listing.RegistryErr != nil {
+		return studio.ModelStatus{Problem: listing.RegistryErr.Error(), Budget: studio.Budget{Providers: []studio.BudgetProvider{}}}, nil
 	}
-	activeID := strings.TrimSpace(cfg.Provider)
+	activeID := strings.TrimSpace(listing.Active.Provider)
 	status := studio.ModelStatus{
-		Configured: configured && activeID != "",
-		Legacy:     configured && activeID == "",
+		Configured: listing.Configured && activeID != "",
+		Legacy:     listing.Configured && activeID == "",
 		Provider:   activeID,
-		Model:      cfg.Model,
+		Model:      listing.Active.Model,
 	}
-	if !configured {
+	if !listing.Configured {
 		status.Model = ""
 	}
-	_, model, refreshed, _, err := activeProvider(cfg, registry)
-	if err != nil {
-		status.Problem = err.Error()
-	} else {
-		cfg = refreshed
+	if listing.ActiveErr != nil {
+		status.Problem = listing.ActiveErr.Error()
 	}
 	_, present := credentialState(w.opt, activeID)
 	status.Auth = authState(present)
 	switch {
 	case status.Legacy:
 		status.TextChatState = "legacy"
-	case status.Configured && err == nil:
-		index, err := loadVerificationIndex(st)
-		if err != nil {
-			return studio.ModelStatus{}, err
-		}
-		view := capabilityView(provider.CapTextChat, model.Has(provider.CapTextChat), index.forModel(activeID, cfg.Model))
-		status.TextChatState = view.State
+	case status.Configured && listing.ActiveErr == nil:
+		state := models.CapabilityStateOf(provider.CapTextChat,
+			listing.Model.Has(provider.CapTextChat), listing.Index.ForModel(activeID, listing.Active.Model))
+		status.TextChatState = state.State
 	default:
 		status.TextChatState = "none"
 	}
-	budget, err := buildBudgetView(st, cfg, registry, activeID, w.opt)
-	if err != nil {
-		return studio.ModelStatus{}, err
-	}
-	if err := convertJSON(budget, &status.Budget); err != nil {
-		return studio.ModelStatus{}, err
-	}
-	if status.Budget.Providers == nil {
-		status.Budget.Providers = []studio.BudgetProvider{}
-	}
+	status.Budget = studioBudgetOf(listing.Budget)
 	return status, nil
+}
+
+// studioBudgetOf renders the catalog's budget as the window's value. The
+// provider list is always present, empty when there is none.
+func studioBudgetOf(budget models.Budget) studio.Budget {
+	view := studio.Budget{
+		PerProviderLimit: budget.PerProviderLimit,
+		Providers:        make([]studio.BudgetProvider, 0, len(budget.Providers)),
+		TotalCalls:       budget.TotalCalls,
+		TotalLimit:       budget.TotalLimit,
+		ProviderCount:    budget.ProviderCount,
+		Ceiling:          budget.Ceiling,
+	}
+	for _, p := range budget.Providers {
+		view.Providers = append(view.Providers, studio.BudgetProvider{
+			Provider: p.Provider,
+			Label:    p.Label,
+			Calls:    p.Calls,
+			Limit:    p.Limit,
+			Active:   p.Active,
+		})
+	}
+	return view
 }
 
 // prepStatus derives the prep day from the first recorded attempt and reads

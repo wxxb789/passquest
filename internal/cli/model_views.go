@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/provider"
+	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study/models"
 )
 
 // Model JSON documents. Field names are protocol; the four axes stay separate:
@@ -127,6 +129,67 @@ var modelLimits = []string{
 	"A capability that is not verified is never offered as working.",
 	"The daily budget is counted per provider in UTC; the ceiling is the printed sum, not one global cap.",
 	"Model text, provider availability and price are not exam facts and never change an attempt or answer key.",
+}
+
+// capabilityViewOf renders a study capability state as this package's document
+// type.
+func capabilityViewOf(state models.CapabilityState) modelCapabilityView {
+	return modelCapabilityView{
+		ID:          state.ID,
+		Declared:    state.Declared,
+		State:       state.State,
+		Verified:    state.Verified,
+		CheckedAt:   state.CheckedAt,
+		FailureType: state.FailureType,
+		Action:      state.Action,
+	}
+}
+
+// capabilityView reads one capability's evidence the way the model and tutor
+// documents show it.
+func capabilityView(capability provider.Capability, declared bool, verifications map[provider.Capability]store.ProviderVerification) modelCapabilityView {
+	return capabilityViewOf(models.CapabilityStateOf(capability, declared, verifications))
+}
+
+// modelViewsOf renders one registry provider's models with their capability
+// evidence, the way `model list` shows them.
+func modelViewsOf(listing models.Listing, providerID string, p provider.Provider, active bool) []modelView {
+	views := make([]modelView, 0, len(p.Models))
+	for _, m := range p.Models {
+		item := modelView{
+			ID:      m.ID,
+			Label:   m.Label,
+			Default: m.Default,
+			Active:  active && listing.Active.Model == m.ID,
+		}
+		verifications := listing.Index.ForModel(providerID, m.ID)
+		for _, c := range provider.Capabilities {
+			item.Capabilities = append(item.Capabilities, capabilityView(c, m.Has(c), verifications))
+		}
+		views = append(views, item)
+	}
+	return views
+}
+
+// budgetViewOf renders the catalog's budget as this package's document type.
+func budgetViewOf(budget models.Budget) modelBudgetView {
+	view := modelBudgetView{
+		PerProviderLimit: budget.PerProviderLimit,
+		TotalCalls:       budget.TotalCalls,
+		TotalLimit:       budget.TotalLimit,
+		ProviderCount:    budget.ProviderCount,
+		Ceiling:          budget.Ceiling,
+	}
+	for _, p := range budget.Providers {
+		view.Providers = append(view.Providers, modelBudgetProviderView{
+			Provider: p.Provider,
+			Label:    p.Label,
+			Calls:    p.Calls,
+			Limit:    p.Limit,
+			Active:   p.Active,
+		})
+	}
+	return view
 }
 
 func writeModelList(w io.Writer, doc modelListDoc) {
