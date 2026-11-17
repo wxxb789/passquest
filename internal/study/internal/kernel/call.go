@@ -46,3 +46,19 @@ func DayStart(now time.Time) time.Time {
 	year, month, day := now.UTC().Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 }
+
+// HostError is the code and message a host error response carries; a response
+// without error detail keeps the defaults.
+func HostError(resp tutor.HostResponse) (code, message string) {
+	code = "host_error"
+	message = "the tutor host returned no error detail"
+	if resp.Error != nil {
+		if tutor.ValidHostErrorCode(resp.Error.Code) {
+			code = resp.Error.Code
+		}
+		if strings.TrimSpace(resp.Error.Message) != "" {
+			message = resp.Error.Message
+		}
+	}
+	return code, message
+}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
@@ -371,21 +370,4 @@ func runModelBudget(args []string, opt Options) int {
 	}
 	writeModelBudget(opt.Stdout, doc)
 	return 0
-}
-
-func validTutorText(text string) bool {
-	return strings.TrimSpace(text) != "" && utf8.ValidString(text) && !strings.ContainsRune(text, 0) &&
-		!tutor.ContainsUnsafeControl(text) && utf8.RuneCountInString(text) <= tutor.MaxResponseChars
-}
-
-// buildBudgetView is the store-reading budget renderer for the paths that
-// still read their own store; the model commands render the catalog's budget.
-// Its remaining caller is the coach history, and it leaves this package with
-// it.
-func buildBudgetView(st *store.Store, cfg tutor.Config, registry provider.Registry, activeID string, opt Options) (modelBudgetView, error) {
-	counts, err := st.ProviderCallCountsSince(tutorDayStart(opt.Now()))
-	if err != nil {
-		return modelBudgetView{}, err
-	}
-	return budgetViewOf(models.BudgetOf(cfg, registry, activeID, counts)), nil
 }

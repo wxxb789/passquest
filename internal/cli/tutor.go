@@ -3,22 +3,18 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
-	"github.com/wxxb789/passquest/internal/provider"
-	"github.com/wxxb789/passquest/internal/skill"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/coach"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -52,125 +48,9 @@ func runTutor(args []string, opt Options) int {
 	}
 }
 
-func runTutorConfig(args []string, opt Options) int {
-	wantJSON := jsonFlagRequested(args)
-	args = reorderArgs(args, map[string]bool{
-		"endpoint": true, "model": true, "timeout-seconds": true,
-		"max-output-tokens": true, "daily-calls": true, "db": true,
-	})
-	fs := newFlagSet("tutor config", opt, wantJSON)
-	endpointFlag := fs.String("endpoint", "", "OpenAI-compatible chat-completions endpoint URL")
-	modelFlag := fs.String("model", "", "provider model name")
-	timeoutFlag := fs.Int("timeout-seconds", 0, "provider timeout in seconds (1-120)")
-	maxTokensFlag := fs.Int("max-output-tokens", 0, "provider max_tokens (64-2048)")
-	dailyFlag := fs.Int("daily-calls", 0, "daily call budget (1-200)")
-	dbFlag := fs.String("db", "", "SQLite database path")
-	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
-	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
-		return code
-	}
-
-	st, err := openDatabase(*dbFlag, opt)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	defer st.Close()
-
-	cfg, configured, err := st.TutorConfig()
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	if !configured {
-		cfg = tutor.DefaultConfig()
-	}
-	changed := false
-	manual := false
-	invalid := ""
-	fs.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "endpoint":
-			changed = true
-			manual = true
-			cfg.Endpoint = *endpointFlag
-		case "model":
-			changed = true
-			manual = true
-			cfg.Model = *modelFlag
-		case "timeout-seconds":
-			changed = true
-			if *timeoutFlag < tutor.MinTimeoutMS/1000 || *timeoutFlag > tutor.MaxTimeoutMS/1000 {
-				invalid = fmt.Sprintf("--timeout-seconds %d is outside %d..%d",
-					*timeoutFlag, tutor.MinTimeoutMS/1000, tutor.MaxTimeoutMS/1000)
-				return
-			}
-			cfg.TimeoutMS = int64(*timeoutFlag) * 1000
-		case "max-output-tokens":
-			changed = true
-			cfg.MaxOutputTokens = *maxTokensFlag
-		case "daily-calls":
-			changed = true
-			cfg.DailyCalls = *dailyFlag
-		}
-	})
-	if invalid != "" {
-		return usageError(opt, *jsonFlag, "invalid_config", invalid)
-	}
-	if manual {
-		// A hand-edited endpoint and model are the goal-0005 legacy
-		// configuration; the registry selection no longer describes them.
-		cfg.Provider = ""
-	}
-	if changed {
-		if err := cfg.Validate(); err != nil {
-			return usageError(opt, *jsonFlag, "invalid_config", err.Error())
-		}
-		if err := st.SaveTutorConfig(cfg, opt.Now()); err != nil {
-			return internalError(opt, *jsonFlag, err)
-		}
-		configured = true
-	}
-
-	env, _, present := provider.CredentialValue(opt.Getenv, cfg.Provider)
-	doc := tutorConfigDoc{
-		SchemaVersion: ProtocolVersion,
-		State:         "config",
-		Configured:    configured,
-		Config:        tutorConfigViewOf(cfg),
-		Credential:    tutorCredentialView{Env: env, Present: present},
-		Limits:        tutorLimits,
-	}
-	if *jsonFlag {
-		return writeJSON(opt, doc)
-	}
-	writeTutorConfig(opt.Stdout, doc)
-	return 0
-}
-
-func writeTutorConfig(w io.Writer, doc tutorConfigDoc) {
-	fmt.Fprintln(w, "Pass Quest — tutor configuration")
-	if !doc.Configured {
-		fmt.Fprintln(w, "Provider: not configured")
-		fmt.Fprintln(w, "Set one OpenAI-compatible endpoint and model:")
-		fmt.Fprintln(w, `  passquest tutor config --endpoint https://api.example.com/v1/chat/completions --model MODEL`)
-	} else {
-		if doc.Config.Provider != "" {
-			fmt.Fprintf(w, "Provider: %s\n", doc.Config.Provider)
-		}
-		fmt.Fprintf(w, "Provider endpoint: %s\n", doc.Config.Endpoint)
-		fmt.Fprintf(w, "Model: %s\n", doc.Config.Model)
-		fmt.Fprintf(w, "Timeout: %d ms\n", doc.Config.TimeoutMS)
-		fmt.Fprintf(w, "Max output tokens: %d\n", doc.Config.MaxOutputTokens)
-		fmt.Fprintf(w, "Daily call budget: %d (UTC day, failed calls included)\n", doc.Config.DailyCalls)
-	}
-	if doc.Credential.Present {
-		fmt.Fprintf(w, "Credential: %s is set (value never shown or stored)\n", doc.Credential.Env)
-	} else {
-		fmt.Fprintf(w, "Credential: %s is missing (export it in this environment before tutor ask)\n", doc.Credential.Env)
-	}
-	fmt.Fprintln(w, "\nThe agent host is the only component that contacts the provider; ordinary practice works without it.")
-	fmt.Fprintln(w, "Prefer a registered provider: passquest model list, then passquest model use <provider>/<model>.")
-}
-
+// runTutorPreview renders the exact request `tutor ask` would send: the
+// configuration, target, chat content, text.chat evidence and credential
+// state. Nothing is sent and no budget slot is claimed.
 func runTutorPreview(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
 	fs := newFlagSet("tutor preview", opt, wantJSON)
@@ -181,61 +61,37 @@ func runTutorPreview(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	mode, code := tutorMode(*modeFlag, opt, *jsonFlag)
-	if code != 0 {
-		return code
+	mode, err := coach.ParseMode(*modeFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
 	}
-	st, err := openDatabase(*dbFlag, opt)
+	svc, err := study.Open(opt.ports(*dbFlag))
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	defer st.Close()
-	cfg, configured, err := st.TutorConfig()
+	defer svc.Close()
+	prepared, err := coach.Preview(context.Background(), svc, coach.Request{AttemptID: *attemptFlag, Mode: mode})
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	if !configured {
-		return usageError(opt, *jsonFlag, "not_configured",
-			"no tutor provider is configured; run passquest tutor config --endpoint URL --model NAME")
-	}
-	record, err := tutorAttemptRecord(st, *attemptFlag)
-	if err != nil {
-		return tutorCommandError(opt, *jsonFlag, err)
-	}
-	cfg, _, _, code = resolveActive(cfg, opt, *jsonFlag)
-	if code != 0 {
-		return code
-	}
-	providerID := strings.TrimSpace(cfg.Provider)
-	target, err := loadTutorTargetForProvider(st, record, providerID)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	preview, err := tutor.Build(cfg, mode, target)
-	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_input", err.Error())
+		return fail(opt, *jsonFlag, err)
 	}
 	doc := tutorPreviewDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         "preview",
-		Attempt:       tutorAttemptViewOf(record),
-		Mode:          string(mode),
-		Provider:      tutorProviderViewOf(cfg, opt),
-		Context:       tutorContextViewOf(preview.Context),
-		Chat:          preview.Request.Chat,
-		RequestSHA256: preview.RequestSHA,
-		RequestBytes:  preview.RequestBytes,
+		Attempt:       tutorAttemptViewOf(prepared.Attempt),
+		Mode:          string(prepared.Mode),
+		Provider:      tutorProviderViewOf(prepared.Config, opt),
+		Context:       tutorContextViewOf(prepared.Preview.Context),
+		Chat:          prepared.Preview.Request.Chat,
+		RequestSHA256: prepared.Preview.RequestSHA,
+		RequestBytes:  prepared.Preview.RequestBytes,
 		Limits:        tutorLimits,
 	}
-	if providerID != "" {
-		index, err := loadVerificationIndex(st)
-		if err != nil {
-			return internalError(opt, *jsonFlag, err)
-		}
-		state := capabilityView(provider.CapTextChat, true, index.forModel(providerID, cfg.Model))
+	if prepared.TextChat != nil {
+		state := capabilityViewOf(*prepared.TextChat)
 		doc.Provider.TextChatState = renderCapability(state)
 		if !state.Verified {
-			doc.Provider.TextChatAction = fmt.Sprintf("passquest model test %s/%s", providerID, cfg.Model)
+			doc.Provider.TextChatAction = fmt.Sprintf("passquest model test %s/%s",
+				strings.TrimSpace(prepared.Config.Provider), prepared.Config.Model)
 		}
 	}
 	if *jsonFlag {
@@ -243,15 +99,6 @@ func runTutorPreview(args []string, opt Options) int {
 	}
 	writeTutorPreview(opt.Stdout, doc)
 	return 0
-}
-
-func tutorMode(raw string, opt Options, jsonMode bool) (tutor.Mode, int) {
-	mode := tutor.Mode(strings.TrimSpace(raw))
-	if !mode.Valid() {
-		return "", usageError(opt, jsonMode, "invalid_mode",
-			fmt.Sprintf("mode %q is not supported; use explain, probe or micro_lesson", raw))
-	}
-	return mode, 0
 }
 
 func writeTutorPreview(w io.Writer, doc tutorPreviewDoc) {
@@ -333,6 +180,8 @@ func writeTutorContent(w io.Writer, context tutorContextView) {
 	}
 }
 
+// runTutorAsk sends one advisory request and renders its outcome: exit 0 with
+// the advisory document, or exit 3 with the recorded failure on stderr.
 func runTutorAsk(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
 	fs := newFlagSet("tutor ask", opt, wantJSON)
@@ -343,369 +192,59 @@ func runTutorAsk(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	mode, code := tutorMode(*modeFlag, opt, *jsonFlag)
-	if code != 0 {
-		return code
+	mode, err := coach.ParseMode(*modeFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
 	}
-	st, err := openDatabase(*dbFlag, opt)
+	svc, err := study.Open(opt.ports(*dbFlag))
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	defer st.Close()
-
-	cfg, configured, err := st.TutorConfig()
+	defer svc.Close()
+	out, err := coach.Ask(context.Background(), svc, coach.Request{AttemptID: *attemptFlag, Mode: mode})
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
-	if !configured {
-		return usageError(opt, *jsonFlag, "not_configured",
-			"no tutor provider is configured; run passquest tutor config --endpoint URL --model NAME")
-	}
-	cfg, registry, hasProvider, code := resolveActive(cfg, opt, *jsonFlag)
-	if code != 0 {
-		return code
-	}
-	providerID := strings.TrimSpace(cfg.Provider)
-	env := tutor.CredentialEnv
-	key := strings.TrimSpace(opt.Getenv(env))
-	if hasProvider {
-		if code := requireVerifiedTextChat(st, registry, opt, providerID, cfg.Model, *jsonFlag); code != 0 {
-			return code
-		}
-		env, key, _ = provider.CredentialValue(opt.Getenv, providerID)
-		if key == "" {
-			return usageError(opt, *jsonFlag, "no_credential",
-				fmt.Sprintf("%s is not set; export it in this environment (it is never stored)", env))
-		}
-	} else if key == "" {
-		return usageError(opt, *jsonFlag, "missing_credential",
-			fmt.Sprintf("%s is not set; export it in this environment (it is never stored)", tutor.CredentialEnv))
-	}
-	now := opt.Now()
-	reservation, used, err := st.ReserveTutorCall(providerID, tutorDayStart(now), now, cfg.DailyCalls)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	if reservation == 0 {
-		return usageError(opt, *jsonFlag, "budget_exhausted",
-			fmt.Sprintf("%s has used %d of %d provider calls today (UTC); raise the budget with passquest tutor config --daily-calls N",
-				budgetLabel(providerID), used, cfg.DailyCalls))
-	}
-	// The slot stays claimed until the call record replaces it. A path that
-	// fails before the host is invoked releases it; a crash or storage failure
-	// after that leaves it spent for the UTC day, which can under-spend but
-	// never over-spend the budget.
-	sendStarted := false
-	defer func() {
-		if !sendStarted {
-			_ = st.ReleaseTutorCallReservation(reservation)
-		}
-	}()
-	record, err := tutorAttemptRecord(st, *attemptFlag)
-	if err != nil {
-		return tutorCommandError(opt, *jsonFlag, err)
-	}
-	target, err := loadTutorTargetForProvider(st, record, providerID)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	preview, err := tutor.Build(cfg, mode, target)
-	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_input", err.Error())
-	}
-	preview.Request.CredentialEnv = env
-
-	call := tutorCallRecord(record, preview, cfg, mode, providerID, cfg.Model, "", now)
-	sendStarted = true
-	saved, text, failure, ok, code := sendTutorCall(opt, st, call, preview, key, reservation)
-	if code != 0 {
-		return internalError(opt, *jsonFlag, errors.New("the advisory call could not be recorded"))
-	}
-	var failover *tutorFailoverView
-	if !ok && providerID != "" && provider.Retryable(failure) {
-		var failoverCode int
-		saved, text, failure, ok, failover, failoverCode = attemptFailover(opt, st, registry, cfg, record, mode, target, saved, failure)
-		if failoverCode != 0 {
-			return internalError(opt, *jsonFlag, errors.New("the failover call could not be recorded"))
-		}
-	}
+	failover := tutorFailoverViewOf(out.Failover)
 	if !*jsonFlag && failover != nil {
 		writeFailoverLine(opt.Stdout, failover)
 	}
-	if ok {
+	if out.Failure == nil {
 		doc := tutorAdvisoryDoc{
 			SchemaVersion: ProtocolVersion,
 			State:         "advisory",
-			Call:          tutorCallViewOf(saved, false),
-			Suggestion:    tutorSuggestionView{Text: text, Advisory: true, VerifiedAnswer: false},
-			Context:       tutorContextViewOf(preview.Context),
+			Call:          tutorCallViewOf(out.Call, false),
+			Suggestion:    tutorSuggestionView{Text: out.Text, Advisory: true, VerifiedAnswer: false},
+			Context:       tutorContextViewOf(out.Prepared.Preview.Context),
 			Failover:      failover,
 			Limits:        tutorLimits,
 		}
 		if *jsonFlag {
 			return writeJSON(opt, doc)
 		}
-		writeTutorAdvisory(opt.Stdout, doc, record, st.Path())
+		writeTutorAdvisory(opt.Stdout, doc, out.Prepared.Attempt, svc.Path())
 		return 0
 	}
 	doc := tutorFailureDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         "failed",
-		Error:         errorBody{Code: saved.ErrorCode, Message: saved.ErrorMessage},
-		Action:        failure.Action,
-		Call:          tutorCallViewOf(saved, false),
+		Error:         errorBody{Code: out.Call.ErrorCode, Message: out.Call.ErrorMessage},
+		Action:        out.Failure.Action,
+		Call:          tutorCallViewOf(out.Call, false),
 		Failover:      failover,
 		Limits:        tutorLimits,
 	}
 	if *jsonFlag {
 		_ = writeJSONTo(opt.Stderr, doc)
 	} else {
-		fmt.Fprintf(opt.Stderr, "passquest: %s: %s\n", saved.ErrorCode, saved.ErrorMessage)
-		if failure.Action != "" {
-			fmt.Fprintf(opt.Stderr, "Next: %s\n", failure.Action)
+		fmt.Fprintf(opt.Stderr, "passquest: %s: %s\n", out.Call.ErrorCode, out.Call.ErrorMessage)
+		if out.Failure.Action != "" {
+			fmt.Fprintf(opt.Stderr, "Next: %s\n", out.Failure.Action)
 		}
-		fmt.Fprintf(opt.Stderr, "Advisory call #%d recorded as a failure; no attempt or answer key was changed.\n", saved.ID)
+		fmt.Fprintf(opt.Stderr, "Advisory call #%d recorded as a failure; no attempt or answer key was changed.\n", out.Call.ID)
 		fmt.Fprintf(opt.Stderr, "See `passquest tutor history` for usage and `passquest practice` to keep practicing locally.\n")
 	}
 	return 3
-}
-
-func budgetLabel(providerID string) string {
-	if strings.TrimSpace(providerID) == "" {
-		return "the manual provider"
-	}
-	return providerID
-}
-
-// tutorCallRecord builds one ledger row from the resolved target and preview so
-// the first call and the failover call cannot drift apart when a field is added.
-func tutorCallRecord(record attempt.Attempt, preview tutor.Preview, cfg tutor.Config, mode tutor.Mode,
-	providerID, modelID, failoverFrom string, at time.Time) store.TutorCall {
-	return store.TutorCall{
-		CreatedAt:     at,
-		AttemptID:     record.ID,
-		Mode:          string(mode),
-		Provider:      providerID,
-		ProviderHost:  cfg.ProviderHost(),
-		FailoverFrom:  failoverFrom,
-		Model:         modelID,
-		PromptVersion: preview.Context.PromptVersion,
-		SourceID:      preview.Context.SourceID,
-		ContentID:     record.ContentID,
-		QuestionID:    record.QuestionID,
-		RequestSHA256: preview.RequestSHA,
-		RequestBytes:  preview.RequestBytes,
-	}
-}
-
-// sendTutorCall sends one prepared advisory request and records its outcome.
-// It returns a typed failure on a provider failure, never an untyped message.
-func sendTutorCall(opt Options, st *store.Store, call store.TutorCall, preview tutor.Preview, key string, reservation int64) (store.TutorCall, string, provider.Failure, bool, int) {
-	callStarted := opt.Now()
-	response, transportErr := opt.TutorTransport.Call(context.Background(), preview.Request)
-	if transportErr != nil {
-		call.Status = "error"
-		call.ErrorCode = "agent_unavailable"
-		call.ErrorMessage = tutorMessage(transportErr.Error(), key)
-		call.LatencyMS = opt.Now().Sub(callStarted).Milliseconds()
-		saved, err := st.FinalizeTutorCall(call, reservation)
-		if err != nil {
-			return store.TutorCall{}, "", provider.Failure{}, false, 1
-		}
-		return saved, "", provider.ClassifyTransport(transportErr), false, 0
-	}
-	// Private text is shared only when the host actually posted the request. A
-	// host that failed before its fetch left the prompt on this machine.
-	call.SourceTextShared = response.RequestSent && preview.Context.SourceTextShared
-	if response.Status == "error" {
-		code := "host_error"
-		message := "the tutor host returned no error detail"
-		if response.Error != nil {
-			if tutor.ValidHostErrorCode(response.Error.Code) {
-				code = response.Error.Code
-			}
-			if strings.TrimSpace(response.Error.Message) != "" {
-				message = response.Error.Message
-			}
-		}
-		call.Status = "error"
-		call.ErrorCode = code
-		call.ErrorMessage = tutorMessage(message, key)
-		call.HTTPStatus = response.HTTPStatus
-		call.LatencyMS = response.LatencyMS
-		saved, err := st.FinalizeTutorCall(call, reservation)
-		if err != nil {
-			return store.TutorCall{}, "", provider.Failure{}, false, 1
-		}
-		return saved, "", provider.Classify(code, response.HTTPStatus, message), false, 0
-	}
-	text := strings.TrimSpace(response.Text)
-	if !validTutorText(text) {
-		call.Status = "error"
-		call.ErrorCode = "invalid_response"
-		call.ErrorMessage = "the provider text was empty, invalid or larger than the local bound"
-		call.HTTPStatus = response.HTTPStatus
-		call.LatencyMS = response.LatencyMS
-		saved, err := st.FinalizeTutorCall(call, reservation)
-		if err != nil {
-			return store.TutorCall{}, "", provider.Failure{}, false, 1
-		}
-		return saved, "", provider.Classify(provider.FailureInvalidResponse, response.HTTPStatus, call.ErrorMessage), false, 0
-	}
-	text = strings.ReplaceAll(text, key, "[redacted]")
-	call.Status = "ok"
-	call.OutputText = text
-	call.OutputChars = utf8.RuneCountInString(text)
-	call.HTTPStatus = response.HTTPStatus
-	call.LatencyMS = response.LatencyMS
-	if response.Usage != nil {
-		prompt := response.Usage.PromptTokens
-		completion := response.Usage.CompletionTokens
-		call.PromptTokens = &prompt
-		call.CompletionTokens = &completion
-	}
-	saved, err := st.FinalizeTutorCall(call, reservation)
-	if err != nil {
-		return store.TutorCall{}, "", provider.Failure{}, false, 1
-	}
-	return saved, text, provider.Failure{}, true, 0
-}
-
-// attemptFailover makes at most one retry on another registry provider. Every
-// precondition is checked before a target is contacted; a refusal appends the
-// reason and never widens the consent scope.
-func attemptFailover(opt Options, st *store.Store, registry provider.Registry, cfg tutor.Config, record attempt.Attempt, mode tutor.Mode, sourceTarget tutor.Target, sourceCall store.TutorCall, sourceFailure provider.Failure) (store.TutorCall, string, provider.Failure, bool, *tutorFailoverView, int) {
-	sourceScope := consentScopeKey(sourceTarget)
-	firstTarget := ""
-	firstReason := ""
-	firstDetail := ""
-	keepReason := func(targetID, reason, detail string) {
-		if firstReason == "" {
-			firstTarget = targetID
-			firstReason = reason
-			firstDetail = detail
-		}
-	}
-	for _, p := range registry.Providers {
-		if p.Custom || p.ID == cfg.Provider {
-			continue
-		}
-		model, ok := p.DefaultModel()
-		if !ok || !model.Has(provider.CapTextChat) {
-			continue
-		}
-		verification, found, err := st.LatestProviderVerification(p.ID, model.ID, string(provider.CapTextChat))
-		if err != nil {
-			return store.TutorCall{}, "", provider.Failure{}, false, nil, 1
-		}
-		if !found || verification.Status != "verified" {
-			keepReason(p.ID, "target_unverified", "model "+model.ID+" is not verified for text.chat")
-			continue
-		}
-		env, key, present := provider.CredentialValue(opt.Getenv, p.ID)
-		if !present {
-			keepReason(p.ID, "no_credential", env+" is not set")
-			continue
-		}
-		target := sourceTarget
-		target.ConsentGranted = false
-		if target.PrivateSource && target.SourceID != "" {
-			event, ok, err := st.TutorConsent(target.SourceID, p.ID)
-			if err != nil {
-				return store.TutorCall{}, "", provider.Failure{}, false, nil, 1
-			}
-			target.ConsentGranted = ok && event.Granted
-		}
-		if consentScopeKey(target) != sourceScope {
-			detail := "consent scope differs"
-			if target.PrivateSource && target.SourceID != "" {
-				detail = fmt.Sprintf("source %s is %s for %s but %s for %s",
-					target.SourceID, grantWord(sourceTarget.ConsentGranted), cfg.Provider,
-					grantWord(target.ConsentGranted), p.ID)
-			}
-			keepReason(p.ID, "consent_scope_differs", detail)
-			continue
-		}
-		targetCfg := cfg
-		targetCfg.Provider = p.ID
-		targetCfg.Model = model.ID
-		targetCfg.Endpoint = p.Endpoint
-		preview, err := tutor.Build(targetCfg, mode, target)
-		if err != nil {
-			keepReason(p.ID, "target_invalid", "the target configuration is not usable")
-			continue
-		}
-		preview.Request.CredentialEnv = env
-		reserveAt := opt.Now()
-		reservation, _, err := st.ReserveTutorCall(p.ID, tutorDayStart(reserveAt), reserveAt, targetCfg.DailyCalls)
-		if err != nil {
-			return store.TutorCall{}, "", provider.Failure{}, false, nil, 1
-		}
-		if reservation == 0 {
-			keepReason(p.ID, "budget_exhausted", "the target has no provider budget left today")
-			continue
-		}
-		targetCall := tutorCallRecord(record, preview, targetCfg, mode, p.ID, model.ID, cfg.Provider, opt.Now())
-		saved, text, failure, ok, code := sendTutorCall(opt, st, targetCall, preview, key, reservation)
-		if code != 0 {
-			return store.TutorCall{}, "", provider.Failure{}, false, nil, 1
-		}
-		event := store.ProviderFailover{
-			At:           opt.Now(),
-			FromProvider: cfg.Provider,
-			FromModel:    cfg.Model,
-			ToProvider:   p.ID,
-			ToModel:      model.ID,
-			Reason:       sourceFailure.Type,
-			Applied:      true,
-			FromCallID:   sourceCall.ID,
-			ToCallID:     saved.ID,
-		}
-		if _, err := st.AppendProviderFailover(event); err != nil {
-			return store.TutorCall{}, "", provider.Failure{}, false, nil, 1
-		}
-		view := &tutorFailoverView{
-			FromProvider: cfg.Provider,
-			FromModel:    cfg.Model,
-			ToProvider:   p.ID,
-			ToModel:      model.ID,
-			Reason:       sourceFailure.Type,
-			Applied:      true,
-		}
-		return saved, text, failure, ok, view, 0
-	}
-	view := &tutorFailoverView{
-		FromProvider: cfg.Provider,
-		FromModel:    cfg.Model,
-		ToProvider:   firstTarget,
-		Reason:       sourceFailure.Type,
-		Refusal:      firstReason,
-		Detail:       firstDetail,
-	}
-	if view.Refusal == "" {
-		view.Refusal = "no_eligible_provider"
-		view.Detail = "no other registry provider declares a usable text model"
-	}
-	event := store.ProviderFailover{
-		At:           opt.Now(),
-		FromProvider: cfg.Provider,
-		FromModel:    cfg.Model,
-		ToProvider:   firstTarget,
-		Reason:       sourceFailure.Type,
-		Refusal:      view.Refusal,
-		FromCallID:   sourceCall.ID,
-	}
-	if _, err := st.AppendProviderFailover(event); err != nil {
-		return store.TutorCall{}, "", provider.Failure{}, false, nil, 1
-	}
-	return sourceCall, "", sourceFailure, false, view, 0
-}
-
-func consentScopeKey(target tutor.Target) string {
-	if !target.PrivateSource || target.SourceID == "" {
-		return "first-party"
-	}
-	return fmt.Sprintf("%s=%t", target.SourceID, target.ConsentGranted)
 }
 
 func writeFailoverLine(w io.Writer, view *tutorFailoverView) {
@@ -725,13 +264,6 @@ func writeFailoverLine(w io.Writer, view *tutorFailoverView) {
 		return
 	}
 	fmt.Fprintf(w, "failover refused: %s → %s (reason: %s)\n", view.FromProvider, target, view.Refusal)
-}
-
-func grantWord(granted bool) string {
-	if granted {
-		return "authorized"
-	}
-	return "withheld"
 }
 
 func tutorMessage(value, key string) string {
@@ -787,44 +319,20 @@ func runTutorHistory(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	st, err := openDatabase(*dbFlag, opt)
+	svc, err := study.Open(opt.ports(*dbFlag))
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	defer st.Close()
-	if *attemptFlag < 0 {
-		return usageError(opt, *jsonFlag, "invalid_input", "--attempt must be positive or 0 for all")
-	}
-	if *attemptFlag > 0 {
-		if _, err := tutorAttemptRecord(st, *attemptFlag); err != nil {
-			return tutorCommandError(opt, *jsonFlag, err)
-		}
-	}
-	calls, err := st.TutorCalls(*attemptFlag)
+	defer svc.Close()
+	history, err := coach.History(context.Background(), svc, coach.HistoryQuery{AttemptID: *attemptFlag})
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
-	cfg, configured, err := st.TutorConfig()
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	now := opt.Now()
-	daily, err := st.TutorCallCountSince(cfg.Provider, tutorDayStart(now))
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	summary := tutorHistorySummaryView{DailyCalls: daily, Providers: []modelBudgetProviderView{}}
-	if configured {
-		limit := cfg.DailyCalls
+	budget := budgetViewOf(history.Budget)
+	summary := tutorHistorySummaryView{DailyCalls: history.Daily, Providers: []modelBudgetProviderView{}}
+	if history.Configured {
+		limit := history.Config.DailyCalls
 		summary.DailyLimit = &limit
-	}
-	registry, _, err := provider.Load(opt.Getenv)
-	if err != nil {
-		return usageError(opt, *jsonFlag, "invalid_registry", err.Error())
-	}
-	budget, err := buildBudgetView(st, cfg, registry, strings.TrimSpace(cfg.Provider), opt)
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
 	}
 	summary.Providers = budget.Providers
 	summary.TotalCalls = budget.TotalCalls
@@ -834,10 +342,10 @@ func runTutorHistory(args []string, opt Options) int {
 		SchemaVersion: ProtocolVersion,
 		State:         "history",
 		Summary:       summary,
-		Calls:         make([]tutorCallView, 0, len(calls)),
+		Calls:         make([]tutorCallView, 0, len(history.Calls)),
 		Limits:        tutorLimits,
 	}
-	for _, call := range calls {
+	for _, call := range history.Calls {
 		doc.Summary.Calls++
 		if call.Status == "ok" {
 			doc.Summary.OK++
@@ -855,7 +363,7 @@ func runTutorHistory(args []string, opt Options) int {
 	if *jsonFlag {
 		return writeJSON(opt, doc)
 	}
-	writeTutorHistory(opt.Stdout, doc, st.Path())
+	writeTutorHistory(opt.Stdout, doc, svc.Path())
 	return 0
 }
 
@@ -926,28 +434,25 @@ func runTutorShow(args []string, opt Options) int {
 	if err != nil {
 		return usageError(opt, *jsonFlag, "invalid_input", fmt.Sprintf("invalid call id %q", fs.Arg(0)))
 	}
-	st, err := openDatabase(*dbFlag, opt)
+	svc, err := study.Open(opt.ports(*dbFlag))
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	defer st.Close()
-	call, err := st.TutorCall(callID)
-	if errors.Is(err, store.ErrNotFound) {
-		return usageError(opt, *jsonFlag, "unknown_call", fmt.Sprintf("tutor call #%d is not recorded", callID))
-	}
+	defer svc.Close()
+	shown, err := coach.Call(context.Background(), svc, callID)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	doc := tutorShowDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         "advisory",
-		Call:          tutorCallViewOf(call, true),
+		Call:          tutorCallViewOf(shown.Call, true),
 		Limits:        tutorLimits,
 	}
-	if call.Status == "error" {
+	if shown.Call.Status == "error" {
 		doc.State = "failed"
 	} else {
-		doc.Suggestion = &tutorSuggestionView{Text: call.OutputText, Advisory: true, VerifiedAnswer: false}
+		doc.Suggestion = &tutorSuggestionView{Text: shown.Call.OutputText, Advisory: true, VerifiedAnswer: false}
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)
@@ -973,6 +478,9 @@ func writeTutorShow(w io.Writer, doc tutorShowDoc) {
 	fmt.Fprintln(w, "\nThis stored text is model output, not a verified answer, grade or exam fact.")
 }
 
+// runTutorConsentCommand records `tutor consent` and `tutor revoke`. The
+// reviewer check is the flag layer's, so it precedes the store open exactly as
+// it does today.
 func runTutorConsentCommand(args []string, opt Options, command string, granted bool) int {
 	wantJSON := jsonFlagRequested(args)
 	args = reorderArgs(args, map[string]bool{"reviewer": true, "provider": true, "db": true})
@@ -989,28 +497,21 @@ func runTutorConsentCommand(args []string, opt Options, command string, granted 
 		return usageError(opt, *jsonFlag, "invalid_input", "--reviewer is required")
 	}
 	providerID := strings.TrimSpace(*providerFlag)
-	st, err := openDatabase(*dbFlag, opt)
+	svc, err := study.Open(opt.ports(*dbFlag))
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	defer st.Close()
-	src, err := st.Source(fs.Arg(0))
-	if errors.Is(err, store.ErrNotFound) {
-		return usageError(opt, *jsonFlag, "unknown_source", fmt.Sprintf("source %q is not imported", fs.Arg(0)))
-	}
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	event, err := st.AppendTutorConsent(store.TutorConsentEvent{
-		SourceID: src.ID,
+	defer svc.Close()
+	consented, err := coach.Consent(context.Background(), svc, coach.ConsentChange{
+		SourceID: fs.Arg(0),
 		Provider: providerID,
 		Granted:  granted,
 		Reviewer: reviewer,
-		At:       opt.Now(),
 	})
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
+	event := consented.Event
 	doc := tutorConsentDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         "consent",
@@ -1032,7 +533,7 @@ func runTutorConsentCommand(args []string, opt Options, command string, granted 
 	if event.Provider != "" {
 		scope = "provider " + event.Provider
 	}
-	fmt.Fprintf(opt.Stdout, "Tutor consent for %s (%s): %s (%s)\n", src.ID, src.Title, action, scope)
+	fmt.Fprintf(opt.Stdout, "Tutor consent for %s (%s): %s (%s)\n", consented.SourceID, consented.Title, action, scope)
 	fmt.Fprintf(opt.Stdout, "Recorded by %s at %s.\n", event.Reviewer, doc.RecordedAt)
 	if event.Granted {
 		fmt.Fprintln(opt.Stdout, "`passquest tutor preview` now includes this source's page and question text in the provider payload.")
@@ -1051,55 +552,34 @@ func runTutorConsents(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	st, err := openDatabase(*dbFlag, opt)
+	svc, err := study.Open(opt.ports(*dbFlag))
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	defer st.Close()
-	sources, err := st.Sources()
+	defer svc.Close()
+	entries, err := coach.Consents(context.Background(), svc)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	events, err := st.TutorConsents()
-	if err != nil {
-		return internalError(opt, *jsonFlag, err)
-	}
-	bySource := make(map[string][]store.TutorConsentEvent)
-	for _, event := range events {
-		bySource[event.SourceID] = append(bySource[event.SourceID], event)
+		return fail(opt, *jsonFlag, err)
 	}
 	doc := tutorConsentsDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         "consents",
-		Sources:       make([]tutorConsentSourceView, 0, len(sources)),
+		Sources:       make([]tutorConsentSourceView, 0, len(entries)),
 		Limits:        tutorLimits,
 	}
-	for _, summary := range sources {
-		matched := bySource[summary.ID]
-		if len(matched) == 0 {
-			doc.Sources = append(doc.Sources, tutorConsentSourceView{
-				SourceID: summary.ID,
-				Title:    summary.Title,
-			})
-			continue
+	for _, entry := range entries {
+		item := tutorConsentSourceView{
+			SourceID: entry.SourceID,
+			Provider: entry.Provider,
+			Title:    entry.Title,
+			Granted:  entry.Granted,
+			Reviewer: entry.Reviewer,
 		}
-		for _, event := range matched {
-			doc.Sources = append(doc.Sources, tutorConsentSourceView{
-				SourceID:   summary.ID,
-				Provider:   event.Provider,
-				Title:      summary.Title,
-				Granted:    event.Granted,
-				RecordedAt: event.At.UTC().Format(time.RFC3339Nano),
-				Reviewer:   event.Reviewer,
-			})
+		if entry.RecordedAt != nil {
+			item.RecordedAt = entry.RecordedAt.UTC().Format(time.RFC3339Nano)
 		}
+		doc.Sources = append(doc.Sources, item)
 	}
-	sort.SliceStable(doc.Sources, func(i, j int) bool {
-		if doc.Sources[i].SourceID != doc.Sources[j].SourceID {
-			return doc.Sources[i].SourceID < doc.Sources[j].SourceID
-		}
-		return doc.Sources[i].Provider < doc.Sources[j].Provider
-	})
 	if *jsonFlag {
 		return writeJSON(opt, doc)
 	}
@@ -1132,6 +612,10 @@ func writeTutorConsents(w io.Writer, doc tutorConsentsDoc) {
 	}
 }
 
+// tutorAttemptRecord is the CLI's copy of coach's attempt lookup: `note
+// refine` and `note preview` still read the attempt here, and it leaves this
+// package with them (C5a). It refuses with the same code and message coach
+// uses.
 func tutorAttemptRecord(st *store.Store, id int64) (attempt.Attempt, error) {
 	records, err := st.List()
 	if err != nil {
@@ -1165,7 +649,8 @@ type tutorLoadedContent struct {
 // loadTutorContent resolves the stored attempt's question from embedded
 // material or a reviewed page of an imported source. A missing or no-longer-
 // practiceable question is a state, not an error: the prompt builder discloses
-// that current content is unavailable.
+// that current content is unavailable. Its remaining callers are the note
+// paths, and it leaves this package with them (C5a).
 func loadTutorContent(st *store.Store, contentID, questionID string) (tutorLoadedContent, error) {
 	if content, found, err := study.EmbeddedContent(contentID); err != nil {
 		return tutorLoadedContent{}, err
@@ -1211,71 +696,8 @@ func tutorEmbedded(content exam.Exam, questionID string) tutorLoadedContent {
 	return tutorLoadedContent{Found: true, Content: content, Question: question}
 }
 
-func loadTutorTargetForProvider(st *store.Store, record attempt.Attempt, providerID string) (tutor.Target, error) {
-	loaded, err := loadTutorContent(st, record.ContentID, record.QuestionID)
-	if err != nil {
-		return tutor.Target{}, err
-	}
-	skills, lessons, mapped := tutorSkills(record, loaded)
-	target := tutor.Target{
-		AttemptID:                   record.ID,
-		Status:                      string(record.Status),
-		SelectedLabel:               record.SelectedLabel,
-		SelectedText:                record.SelectedText,
-		CorrectLabel:                record.CorrectLabel,
-		CorrectText:                 record.CorrectText,
-		ElapsedMS:                   record.ElapsedMS,
-		AttemptNumber:               record.AttemptNumber,
-		Repeat:                      record.Repeat(),
-		Assistance:                  string(record.Assistance),
-		Skills:                      skills,
-		SkillsMappedFromCurrentTags: mapped,
-		Lessons:                     lessons,
-		PrivateSource:               loaded.Private,
-		SourceID:                    loaded.SourceID,
-	}
-	if loaded.Found {
-		target.ContentMatched = true
-		target.ContentChanged = loaded.Content.Version != record.ContentVersion
-		target.PassageText = loaded.Content.Passage.Text
-		target.QuestionStem = loaded.Question.Stem
-		target.Evidence = loaded.Question.Evidence
-		target.Reasoning = loaded.Question.Reasoning
-		target.Options = make([]tutor.Option, 0, len(loaded.Question.Options))
-		for _, option := range loaded.Question.Options {
-			target.Options = append(target.Options, tutor.Option{Label: option.Label, Text: option.Text})
-		}
-	}
-	if target.PrivateSource && target.SourceID != "" {
-		event, ok, err := st.TutorConsent(target.SourceID, providerID)
-		if err != nil {
-			return tutor.Target{}, err
-		}
-		target.ConsentGranted = ok && event.Granted
-	}
-	return target, nil
-}
-
-func tutorSkills(record attempt.Attempt, loaded tutorLoadedContent) ([]string, []tutor.SkillLesson, bool) {
-	ids, fromCurrent, _ := study.EffectiveSkills(record, loaded.Question.Tactics, loaded.Found)
-	var lessons []tutor.SkillLesson
-	for _, id := range ids {
-		candidate, _ := skill.Get(id)
-		lessons = append(lessons, tutor.SkillLesson{
-			ID:          candidate.ID,
-			Kind:        string(candidate.Kind),
-			Title:       candidate.Title,
-			Summary:     candidate.Summary,
-			Principle:   candidate.Principle,
-			WhyItWorks:  candidate.WhyItWorks,
-			WhenItWorks: candidate.WhenItWorks,
-			Steps:       append([]string(nil), candidate.Steps...),
-			WatchOut:    candidate.WatchOut,
-		})
-	}
-	return ids, lessons, fromCurrent && len(ids) > 0
-}
-
+// tutorDayStart stays in the CLI for its remaining callers: the note
+// refinement path and its test. It leaves with them (C5a).
 func tutorDayStart(now time.Time) time.Time {
 	year, month, day := now.UTC().Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
@@ -1287,12 +709,4 @@ func parsePositiveInt64(raw string) (int64, error) {
 		return 0, errors.New("not a positive integer")
 	}
 	return value, nil
-}
-
-func tutorCommandError(opt Options, jsonMode bool, err error) int {
-	var refusal *study.Error
-	if errors.As(err, &refusal) {
-		return usageError(opt, jsonMode, refusal.Code, refusal.Message)
-	}
-	return internalError(opt, jsonMode, err)
 }

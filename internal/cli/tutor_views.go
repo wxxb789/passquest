@@ -6,6 +6,7 @@ import (
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study/coach"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -223,6 +224,22 @@ type tutorFailoverView struct {
 	Applied      bool   `json:"applied"`
 	Refusal      string `json:"refusal,omitempty"`
 	Detail       string `json:"detail,omitempty"`
+}
+
+func tutorFailoverViewOf(failover *coach.Failover) *tutorFailoverView {
+	if failover == nil {
+		return nil
+	}
+	return &tutorFailoverView{
+		FromProvider: failover.FromProvider,
+		FromModel:    failover.FromModel,
+		ToProvider:   failover.ToProvider,
+		ToModel:      failover.ToModel,
+		Reason:       failover.Reason,
+		Applied:      failover.Applied,
+		Refusal:      failover.Refusal,
+		Detail:       failover.Detail,
+	}
 }
 
 type tutorAdvisoryDoc struct {
