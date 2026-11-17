@@ -87,11 +87,23 @@ function delegate(): void {
   // Anki card frames take their document's height as they are placed, once loaded, after the width
   // animates and when the window resizes ('load' does not bubble, so it is caught on the way down).
   const fitFrames = () => document.querySelectorAll<HTMLIFrameElement>('iframe.ac-frame').forEach((frame) => fitCardFrame(frame));
+  // The item navigator's cells scroll past three rows: the current item's cell is brought into view.
+  const showCurrentCell = (cells: Element) => {
+    const cur = cells.querySelector('.cell.cur');
+    if (!cur) return;
+    const box = cells.getBoundingClientRect();
+    const r = cur.getBoundingClientRect();
+    cells.scrollTop += r.top - box.top - (box.height - r.height) / 2;
+  };
   new MutationObserver((records) => {
     for (const record of records)
       for (const node of record.addedNodes) {
         if (node instanceof HTMLIFrameElement && node.classList.contains('ac-frame')) watchCardFrame(node);
-        else if (node instanceof Element) node.querySelectorAll<HTMLIFrameElement>('iframe.ac-frame').forEach(watchCardFrame);
+        else if (node instanceof Element) {
+          node.querySelectorAll<HTMLIFrameElement>('iframe.ac-frame').forEach(watchCardFrame);
+          if (node.classList.contains('cells')) showCurrentCell(node);
+          else node.querySelectorAll('.nav40 .cells').forEach(showCurrentCell);
+        }
       }
   }).observe(document.body, { childList: true, subtree: true });
   document.addEventListener(

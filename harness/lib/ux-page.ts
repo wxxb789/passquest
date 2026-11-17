@@ -13,7 +13,9 @@
  *   fit: decoration such as a pseudo-element makes a scrollbar that reveals nothing),
  *   unreachable (text or a control out of view that no scrolling a learner can do brings into view:
  *   once every ancestor that scrolls (overflow auto or scroll) has scrolled to it, an ancestor that
- *   does not (overflow hidden or clip), or the viewport of a page that does not scroll, still cuts it)
+ *   does not (overflow hidden or clip), or the viewport of a page that does not scroll, still cuts it;
+ *   a replaced element such as a card frame is measured by its top and its bottom 1 px edge, so one
+ *   taller than the viewport passes only when a scroll brings each edge into view)
  * - primary action: primary-missing, primary-ambiguous, primary-hidden, primary-covered
  * - must-see: must-see-hidden (an element the app marks [data-must-see], such as the consent and
  *   budget rows of a call strip, is not wholly inside the viewport and every clipping ancestor:
@@ -142,6 +144,7 @@ const UX = (() => {
   const INTERACTIVE = "[data-act],button,a[href],input:not([type=hidden]),select,textarea,[tabindex],[role=button],summary";
   const CONTROLS = "[data-act],button,a[href],input:not([type=hidden]),select,textarea,[role=button]";
   const focusable = (el) => el.tabIndex >= 0 && !el.disabled && !el.closest("[inert]");
+  const REPLACED = "iframe,img,video,canvas,embed,object";
   const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "TEMPLATE", "svg", "path", "g", "use", "circle", "line", "rect", "polyline", "polygon", "defs", "SVG", "PATH"]);
 
   // The open modal layer is the audited root; otherwise the whole page.
@@ -323,10 +326,18 @@ const UX = (() => {
   // is scrolled to it, innermost first, and then no ancestor that does not scroll (overflow hidden or
   // clip) and, on a page that does not scroll, no viewport edge cuts it. Otherwise what cuts it.
   // The caller puts the scroll offsets back.
-  function unreachable(el) {
+  // With an edge ("top" or "bottom"), only that 1 px band of el is measured: a box taller than the
+  // viewport (a card frame) is never wholly in view, but each of its edges must be.
+  function unreachable(el, edge) {
+    const rectOf = () => {
+      const b = el.getBoundingClientRect();
+      if (!edge) return b;
+      const top = edge === "top" ? b.top : b.bottom - 1;
+      return { left: b.left, right: b.right, top: top, bottom: top + 1 };
+    };
     for (let e = el.parentElement; e && e !== document.documentElement; e = e.parentElement) {
       const cs = getComputedStyle(e);
-      const r = el.getBoundingClientRect();
+      const r = rectOf();
       const p = e.getBoundingClientRect();
       if (/auto|scroll/.test(cs.overflowY) && e.scrollHeight > e.clientHeight) {
         const top = p.top + e.clientTop;
@@ -341,7 +352,7 @@ const UX = (() => {
         else if (r.left < left) e.scrollLeft -= left - r.left;
       }
     }
-    const r = el.getBoundingClientRect();
+    const r = rectOf();
     const box = [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)];
     for (let e = el.parentElement; e && e !== document.documentElement; e = e.parentElement) {
       const cs = getComputedStyle(e);
@@ -503,12 +514,21 @@ const UX = (() => {
       if (lang === "en" && /[㐀-鿿]/.test(text) && !el.closest('[lang^="zh"],[data-raw],[translate="no"]')) add("en-cjk-text", el, { text: text.slice(0, 40) });
       if (RAW_PATTERNS.some((p) => p.test(text)) && !el.closest(RAW_EXEMPT)) add("raw-code", el, { text: text.slice(0, 60) });
     }
-    // What the first viewport does not show must be reachable by a scroll the learner can make.
-    if (unseen.length) {
+    // What the first viewport does not show must be reachable by a scroll the learner can make. A
+    // replaced element (a card frame) has no text in this document but is content too: its top and
+    // its bottom edge must each be reachable, whether or not the first viewport shows them.
+    const replaced = vis.filter((e) => e.matches(REPLACED));
+    if (unseen.length || replaced.length) {
       const saved = scrollPositions();
       for (const el of new Set(unseen)) {
         const cut = unreachable(el);
         if (cut) add("unreachable", el, Object.assign(cut, { text: (ownText(el) || el.innerText || el.getAttribute("aria-label") || "").trim().slice(0, 40) }));
+      }
+      for (const el of replaced) {
+        for (const edge of ["top", "bottom"]) {
+          const cut = unreachable(el, edge);
+          if (cut) add("unreachable", el, Object.assign(cut, { edge: edge, text: (el.getAttribute("title") || el.getAttribute("aria-label") || "").trim().slice(0, 40) }));
+        }
       }
       for (const [e, top, left] of saved) {
         e.scrollTop = top;
@@ -520,7 +540,9 @@ const UX = (() => {
     // Scroll containers that scroll although their content fits: the content's boxes (with their
     // end margins) and text, plus the container's own end padding, measured from the scroll origin,
     // fit in the client box, so the overflow is decoration (such as a positioned pseudo-element)
-    // and the scrollbar reveals nothing. A form control scrolls its own text; it is skipped.
+    // and the scrollbar reveals nothing. A form control scrolls its own text; it is skipped. The
+    // boxes are read on screen and the scroll sizes in the container's own pixels: under a scale
+    // transform (the Anki preview while editing) screen distances are converted back.
     for (const el of vis) {
       if (el.matches("textarea,input,select")) continue;
       const cs = getComputedStyle(el);
@@ -528,14 +550,16 @@ const UX = (() => {
       const sx = /auto|scroll/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 1;
       if (!sy && !sx) continue;
       const b = el.getBoundingClientRect();
-      const top = b.top + el.clientTop - el.scrollTop;
-      const left = b.left + el.clientLeft - el.scrollLeft;
+      const ky = el.offsetHeight > 0 ? b.height / el.offsetHeight : 1;
+      const kx = el.offsetWidth > 0 ? b.width / el.offsetWidth : 1;
+      const top = b.top + (el.clientTop - el.scrollTop) * ky;
+      const left = b.left + (el.clientLeft - el.scrollLeft) * kx;
       let needY = 0;
       let needX = 0;
       const reach = (r, mb, mr) => {
         if (r.width + r.height === 0) return;
-        needY = Math.max(needY, r.bottom + mb - top);
-        needX = Math.max(needX, r.right + mr - left);
+        needY = Math.max(needY, (r.bottom - top) / ky + mb);
+        needX = Math.max(needX, (r.right - left) / kx + mr);
       };
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
       const range = document.createRange();
@@ -741,12 +765,17 @@ const UX = (() => {
     wide.id = "qa-wide";
     wide.style.cssText = "position:fixed;top:300px;left:" + (innerWidth - 40) + "px;width:200px";
     wide.textContent = "QA off-screen text";
+    // A frame taller than the page, which does not scroll: neither edge can be brought into view.
+    const tall = document.createElement("iframe");
+    tall.id = "qa-tall-frame";
+    tall.title = "QA frame taller than the page";
+    tall.style.cssText = "position:fixed;top:-40px;left:45%;width:40px;height:calc(100vh + 80px);border:0;pointer-events:none";
     const st = document.createElement("style");
     st.id = "qa-probe-style";
     st.textContent = "@keyframes qa-spin{to{transform:rotate(360deg)}} .qa-nofocus:focus-visible,.qa-nofocus:focus{outline:none!important;box-shadow:none!important} #qa-stray::after{content:'';position:absolute;left:0;top:100%;width:10px;height:30px}";
     document.head.append(st);
     host.append(box);
-    document.body.append(wide);
+    document.body.append(wide, tall);
     const mirror = document.getElementById("qa-fv");
     if (mirror) mirror.remove(); // mirror the probe's own focus rule too
     emulateReducedMotion();
@@ -773,11 +802,13 @@ const UX = (() => {
       "must-see-hidden": fired("must-see-hidden", "qa-must-see"),
       "scroll-without-content": fired("scroll-without-content", "qa-stray"),
       unreachable: fired("unreachable", "qa-unreachable"),
+      "unreachable frame edge": fired("unreachable", "qa-tall-frame"),
       "motion-under-reduce": motion.some((m) => m.el.includes("#qa-spin")),
       "transition-under-reduce": transitions.some((m) => m.el.includes("#qa-fade")),
     };
     box.remove();
     wide.remove();
+    tall.remove();
     st.remove();
     const stale = document.getElementById("qa-fv");
     if (stale) stale.remove();

@@ -5,7 +5,7 @@
  * pool the assessment gates run on. The text is self-authored filler, never
  * exam material. A long source (`long`) carries the same questions with a
  * stem and four options of several sentences each, as an imported question
- * can have.
+ * can have. A `title` is passed to the import as the source's title.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -84,9 +84,10 @@ export async function seedReviewedSource(
   pages: number,
   firstPageQuestions: number,
   long = false,
+  title?: string,
 ): Promise<string | null> {
   const questions = writeFixtureTree(dir, pages, firstPageQuestions, long);
-  const imported = await call(["import", "--path", dir]);
+  const imported = await call(["import", "--path", dir, ...(title ? ["--title", title] : [])]);
   if (!check(imported.code === 0, `import ${dir} exit = ${imported.code}: ${imported.stderr}`)) return null;
   const sourceID = stringField(field(imported.doc, "source"), "id");
   if (!sourceID) {

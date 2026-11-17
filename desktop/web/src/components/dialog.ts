@@ -6,7 +6,7 @@ import { html, type Html, type Interp } from '../core/html';
 import { T } from '../core/i18n';
 import { ic, type IconName } from '../icons';
 
-function dlg(tone: 'warm' | 'neutral' | 'adv', ico: IconName, id: string, title: string, body: Interp, acts: Interp): Html {
+function dlg(tone: 'warm' | 'neutral' | 'adv', ico: IconName, id: string, title: Interp, body: Interp, acts: Interp): Html {
   return html`<div class="scrim" data-act="close"></div><div class="dlg ${tone}" role="dialog" aria-modal="true" aria-labelledby="${id}">
       <span class="ico">${ic(ico, 'l')}</span>
       <h2 class="h-disp" id="${id}">${title}</h2>
@@ -109,10 +109,10 @@ export function consentAllDialog(source: string, title: string | null, providers
       : providers === 'unreadable'
         ? html`<span class="muted">${T('模型注册表读取失败，见设置', 'the model registry could not be read; see Settings')}</span>`
         : providers.length
-        ? html`<b>${providers.join(T('、', ', '))}</b>`
+        ? html`<b translate="no">${providers.join(T('、', ', '))}</b>`
         : html`<span class="muted">${T('注册表里还没有提供方', 'no provider is registered yet')}</span>`;
-  const zh = title ? `「${title}」` : '这份导入资料';
-  const en = title ? `“${title}”` : 'this imported source';
+  // The title is the learner's own data, in whatever language it was imported in.
+  const named = title ? html`${T('「', '“')}<span translate="no">${title}</span>${T('」', '”')}` : T('这份导入资料', 'this imported source');
   const kept = denied.length
     ? html`<p class="fine" data-testid="consent-denied"><b translate="no">${denied.join(T('、', ', '))}</b>${T(
         ' 保留你单独做出的撤回：这次授权不会改变它，原文仍不会发给它们。要恢复，请对它们单独授权。',
@@ -123,11 +123,11 @@ export function consentAllDialog(source: string, title: string | null, providers
     'warm',
     'shield',
     'dca',
-    T(`授权${zh}的原文用于笔记和所有提供方？`, `Allow the text of ${en} for notes and every provider?`),
+    html`${T('授权', 'Allow the text of ')}${named}${T('的原文用于笔记和所有提供方？', ' for notes and every provider?')}`,
     html`<p>${T(
-      `Anki 笔记只接受对所有去向生效的授权。这一次授权同样允许每个没有单独决定的模型提供方在导师调用里收到${zh}的原文，包括以后添加的提供方：`,
-      `Anki notes accept only a grant that covers every destination. The same grant lets every model provider without its own decision receive the text of ${en} in coach calls, including providers added later: `,
-    )}${list}</p>${kept}
+      'Anki 笔记只接受对所有去向生效的授权。这一次授权同样允许每个没有单独决定的模型提供方在导师调用里收到',
+      'Anki notes accept only a grant that covers every destination. The same grant lets every model provider without its own decision receive the text of ',
+    )}${named}${T('的原文，包括以后添加的提供方：', ' in coach calls, including providers added later: ')}${list}</p>${kept}
       <p class="fine" data-testid="consent-scope" data-scope="all-providers">${T(
         '只想给某一个提供方授权，请在反馈页的导师面板或设置里按提供方授权（那样不会解锁笔记）。可随时在设置里撤回。',
         'To allow one provider only, grant per provider from the coach panel or Settings (that does not unlock notes). Revocable in Settings at any time.',

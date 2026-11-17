@@ -16,6 +16,21 @@
 .callstrip .payload .msg { margin-top: 6px; }
 .callstrip .payload pre { margin: 2px 0 0; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--f-mono); padding: 8px 10px; border-radius: var(--r-s); background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
 .rr-more .capgrid { padding-left: 38px; }
+/* A card taller than the stage (a long Back, a phone-width card) scrolls in the preview area, so every
+   part of it can be reached while Accept stays in view; the card frame itself never scrolls and keeps
+   its document's height (fitCardFrame). A card that fits stays centred; one that does not starts at the
+   top. The bottom padding holds the cards' floor shadow (.pv-row::after, 46px below the row). */
+/* Auto block margins instead of 'align-items: safe center', which every WebKit we ship on may not
+   honour: a child that fits is centred, one that does not starts at the top and scrolls. */
+.an-table { overflow-y: auto; align-items: flex-start; padding-bottom: 46px; }
+.an-table > * { margin-block: auto; }
+/* While the editor is open the scaled preview (translateY(-2%) scale(.84) from its top, so it ends at
+   0.82 of its height) stops at the sheet's highest top edge (50vh): the card scrolls above the sheet,
+   never behind it. 120px is where the preview starts: the 64px top bar, the stage's 4px padding, the
+   34px source row and the 18px gap (with the 58px bar of compact heights it starts 6px higher). The
+   floor shadow, which lay under the sheet before, is not drawn, so it never adds a scroll of its own. */
+.anki.editing .an-table { max-height: calc((50vh - 120px) / .82); padding-bottom: 0; }
+.anki.editing .pv-row::after { content: none; }
 .notes-list { flex-direction: column; align-items: stretch; gap: 6px; overflow: auto; }
 /* The cards' floor shadow sits below the row; under a list it would only extend the list's scroll area. */
 .notes-list::after { content: none; }
@@ -104,3 +119,10 @@
 .ann-o.is-key { color: var(--ok); }
 .ann-o.is-key .exam { font-weight: 600; }
 .ann-o .chip { vertical-align: 1px; }
+/* A dialog taller than the window (a long imported source title in the consent dialog) scrolls inside
+   itself, so its title and its buttons can always be reached. */
+.dlg { max-height: calc(100vh - 48px); overflow-y: auto; scrollbar-width: thin; }
+/* A run of more than 60 items keeps the item navigator at three rows of cells, which scroll (the
+   current cell is scrolled into view, main.ts), instead of growing over the question card's Submit.
+   The padding, given back by the margin, holds the current cell's ring inside the scroller. */
+.nav40 .cells { max-height: calc(3 * 16px + 2 * 4px + 6px); overflow-y: auto; padding: 3px; margin: -3px; scrollbar-width: thin; }

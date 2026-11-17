@@ -65,6 +65,11 @@ export const UX_STATES = [
   "run-form",
   "assess-running",
   "practice-long",
+  "anki-long-edit",
+  "anki-long",
+  "anki-long-phone",
+  "consent-long",
+  "assess-many",
 ];
 
 export interface Audited {
@@ -213,7 +218,10 @@ let back = null;
 await setMode("light", "zh");
 `;
 
-/** Today, its two sheets, an independent item (and its hint gate), feedback with the coach, the Anki editor and its refine panel. */
+/** The short lines of the long card's Back (anki-long). */
+const LONG_BACK_LINES = 50;
+
+/** Today, its two sheets, an independent item (and its hint gate), feedback with the coach, the Anki editor and its refine panel, then the card with a long Back in the editor and at desktop and phone width. */
 const PART_ONE = `
 await today();
 await each("today", true);
@@ -259,6 +267,32 @@ await click('.esheet [data-act="refine"]');
 await steady("the refine preview", () => q('.es-refine [data-act="refine-send"]:not([disabled])'));
 after("open the refine panel");
 await each("anki-refine", true);
+await click('[data-act="refine-close"]');
+await until("the closed refine panel", () => !q('[data-testid="refine"]'));
+// A Back of ${LONG_BACK_LINES} short lines (within MaxBackRunes) makes the answer card taller than the stage:
+// the preview scrolls with Accept in view, and both edges of each card frame are reachable; with the
+// editor open, the preview scrolled to its end shows the card's end above the sheet, not behind it.
+const preview = () => q('[data-testid="card-preview"]');
+const shown = preview().dataset.sha;
+const backField = q('[data-field="back"]');
+backField.value = Array.from({ length: ${LONG_BACK_LINES} }, (_, i) => "Line " + (i + 1) + ".").join("\\n");
+backField.dispatchEvent(new Event("input", { bubbles: true }));
+await until("the long card's preview", () => preview() && preview().dataset.sha !== shown, 20000);
+const answerFrame = () => q('[data-testid="card-frame"][data-side="answer"]');
+await steady("the long answer frame fitted in the editor", () => q(".esheet") && answerFrame() && answerFrame().clientHeight > 900);
+await each("anki-long-edit", true);
+const table = q("#preview");
+table.scrollTop = table.scrollHeight;
+const under = answerFrame().getBoundingClientRect().bottom - q(".esheet").getBoundingClientRect().top;
+checked++;
+if (under > 1) focus.push({ check: "card-end-under-sheet", el: UX.path(answerFrame()), under: Math.round(under) });
+table.scrollTop = 0;
+await click('.esheet [data-act="edit"]');
+await steady("the long answer frame fitted", () => !q(".esheet") && answerFrame() && answerFrame().clientWidth > 300 && answerFrame().clientHeight > 900);
+await each("anki-long", true);
+await click('[data-act="cwidth"][data-v="phone"]');
+await steady("the long answer frame at phone width", () => answerFrame() && answerFrame().clientWidth <= 300 && answerFrame().clientHeight > 900);
+await each("anki-long-phone", true);
 return { results, focus, checked };
 `;
 
@@ -353,6 +387,37 @@ await sleep(150);
 checked++;
 const hidden = UX.hidden(last);
 if (hidden) focus.push(Object.assign({ check: "chosen-option-hidden", el: UX.path(last) }, hidden));
+return { results, focus, checked };
+`;
+
+/** The long questions on the first page of the many-item source (seeded on its own database): five rows in the run's navigator. */
+const MANY_ITEMS = 100;
+/** The many-item source's title, self-authored: an import title has no length limit (internal/source/import.go). */
+const LONG_TITLE = `Long title ${"of a self-authored placeholder notice about library opening hours ".repeat(10)}`.slice(0, 600);
+
+/**
+ * A source with a page of MANY_ITEMS long questions and a long title. Its every-provider consent dialog,
+ * opened from the preview of a note drafted through the CLI (its text is withheld until that grant), names
+ * the title twice and must keep Cancel and Allow reachable; a run over the whole pool grows the item navigator
+ * to five rows, which must leave the long question card's Submit uncovered.
+ */
+const PART_MANY = `
+location.hash = "#/anki";
+// The seeded draft's text is withheld until the every-provider grant: the preview offers it.
+opener = await steady("the every-provider grant", () => q('[data-testid="preview-error"] [data-act="consent-all-ask"]:not([disabled])'));
+back = await openDialog("consent dialog", opener, () => opener.click());
+await steady("the dialog with the source title", () => q('#layer [data-testid="consent-scope"]') && q("#dca") && q("#dca").textContent.includes("Long title"));
+await each("consent-long", false);
+await closeDialog("consent dialog", back);
+location.hash = "#/assess";
+await click('[data-act="run-ask"]');
+await until("the run form", () => q('#runform input[name="size"]'));
+q('#runform input[name="size"]').value = "${MANY_ITEMS}";
+q('#runform input[name="minutes"]').value = "1440";
+await click('[data-act="run-start"]');
+await steady("the first item of the long run", () => q('[data-testid="assess-item"]') && all('[data-testid="navigator"] .cells .cell').length > 80);
+after("start a long run");
+await each("assess-many", true);
 return { results, focus, checked };
 `;
 
@@ -568,6 +633,21 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
       if (!check(result.code === 0, `seed: passquest ${args.join(" ")} exit = ${result.code}: ${tail(result.stderr, 4)}`)) return done();
     }
 
+    // The many-item source's own database: a page of MANY_ITEMS long questions and a page of one under a
+    // long title, and a note drafted from one attempt.
+    const manyTemplate = path.join(temp, "many-template");
+    const manyData = path.join(manyTemplate, "data");
+    mkdirSync(manyData, { recursive: true });
+    const manyCall = (args: string[]) => cliJson(cli, path.join(manyData, "passquest.sqlite"), ctx.root, args, {});
+    const manySource = await seedReviewedSource(manyCall, check, path.join(manyTemplate, "source"), 2, MANY_ITEMS, true, LONG_TITLE);
+    if (!manySource) return done();
+    // The note's attempt is on page 2: a practised passage leaves the pool, and page 1 keeps all its items.
+    const practiced = await manyCall(["practice", "--source", manySource, "--page", "2", "--question", "p02-q1", "--answer", "A"]);
+    const attempt = numberField(field(practiced.doc, "attempt"), "id");
+    if (!check(practiced.code === 0 && attempt !== undefined, `seed: passquest practice p02-q1 exit = ${practiced.code}: ${tail(practiced.stderr, 4)}`)) return done();
+    const proposed = await manyCall(["note", "propose", "--attempt", String(attempt)]);
+    if (!check(proposed.code === 0, `seed: passquest note propose exit = ${proposed.code}: ${tail(proposed.stderr, 4)}`)) return done();
+
     let launches = 0;
     const launch = async (label: string, dataDir: string, size: readonly [number, number], body: string) => {
       const dir = path.join(temp, label);
@@ -639,7 +719,7 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
     const audited: Audited[] = [];
     for (const size of UX_SIZES) {
       const sizeName = `${size[0]}x${size[1]}`;
-      for (const [part, body, from] of [["one", PART_ONE, templateData], ["two", PART_TWO, templateData], ["long", PART_LONG, longData]] as const) {
+      for (const [part, body, from] of [["one", PART_ONE, templateData], ["two", PART_TWO, templateData], ["long", PART_LONG, longData], ["many", PART_MANY, manyData]] as const) {
         const label = `audit-${sizeName}-${part}`;
         const value = await launch(label, copyTemplate(label, from), size, `${DRIVE}\n${body}`);
         if (value === null) return done();
