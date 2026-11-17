@@ -30,7 +30,7 @@ import type { RunResult } from "../lib/process.ts";
 import { resolve } from "../lib/repo.ts";
 import { seedReviewedSource } from "../lib/reviewed-source.ts";
 import { fail, pass } from "../lib/types.ts";
-import type { Gate, GateContext } from "../lib/types.ts";
+import type { Gate, GateContext, GateResult } from "../lib/types.ts";
 
 /**
  * Drives the app contract described in harness/lib/desktop-page.ts. Each
@@ -1182,7 +1182,9 @@ const resume: Scenario = {
 await today();
 press("Enter");
 await until("a practice item", () => q('[data-testid="practice-item"]'));
-await new Promise(() => {});
+// Wait for the kill. The pending promise stays reachable through window: WebKit fails a script whose
+// unsettled promise is garbage-collected ("Completion handler ... is no longer reachable").
+await new Promise((hold) => { window.__pqHold = hold; });
 `),
       // Kill one poll after the store holds the open presentation.
       killWhen: async () => {
@@ -1215,62 +1217,74 @@ return { item: data('[data-testid="practice-item"]') };
 /** client-fresh and boot run first; the rest need a window that boots. */
 const SCENARIOS: Scenario[] = [clientFresh, boot, lifecycle, practice, hint, feedback, coach, manual, assess, anki, settings, resume];
 
-export const desktopSmoke: Gate = {
-  id: "desktop-smoke",
-  title: "desktop smoke",
-  async run(ctx) {
-    const surface = desktopSurface(ctx);
-    if (surface) return surface;
+/**
+ * The desktop smoke over every scenario, or, for a self-test case whose failure is decided by one
+ * scenario, over the scenarios `only` names (kept in their usual order; client-fresh and boot always
+ * run first, as every later scenario needs a window that boots).
+ */
+export function makeDesktopSmokeGate(only?: readonly string[]): Gate {
+  const scenarios = only ? SCENARIOS.filter((scenario) => scenario === clientFresh || scenario === boot || only.includes(scenario.id)) : SCENARIOS;
+  return {
+    id: "desktop-smoke",
+    title: "desktop smoke",
+    run: (ctx) => runDesktopSmoke(ctx, scenarios),
+  };
+}
 
-    const temp = mkdtempSync(path.join(tmpdir(), "passquest-desktop-smoke-"));
-    const checks: string[] = [];
-    let assertions = 0;
-    const check: Check = (condition, message) => {
-      assertions++;
-      if (!condition) checks.push(message);
-      return condition;
-    };
-    const provider = startProviderStub();
-    try {
-      const binary = path.join(temp, executable("passquest-desktop"));
-      const build = await buildDesktop(ctx, binary);
-      if (!build.ok) return fail(build.failures);
-      const registry = path.join(temp, "registry.json");
-      writeStubRegistry(registry, provider.endpoint);
-      const shared: Shared = { ctx, binary, cli: "", registry, provider };
-      let ran = 0;
-      for (const scenario of SCENARIOS) {
-        const dir = path.join(temp, scenario.id);
-        const dataDir = path.join(dir, "data");
-        mkdirSync(dataDir, { recursive: true });
-        const before = checks.length;
-        await scenario.run({
-          shared,
-          id: scenario.id,
-          dir,
-          dataDir,
-          database: path.join(dataDir, "passquest.sqlite"),
-          service: `passquest-smoke-${process.pid}-${Date.now()}-${scenario.id}`,
-          check,
-        });
-        ran++;
-        if (scenario !== boot) continue;
-        if (checks.length > before) {
-          checks.push(`${SCENARIOS.length - ran} later scenario(s) not run: the window does not boot`);
-          return fail(checks);
-        }
-        // Later scenarios cross-check the window through a second process.
-        const cliBuild = await buildCLI(ctx);
-        if ("failure" in cliBuild) return fail([...checks, "go build ./cmd/passquest failed", tail(cliBuild.failure)]);
-        shared.cli = cliBuild.binary;
-        const node = await run(executable("node"), ["--version"]);
-        if (node.code !== 0) return fail([...checks, `node is required for the desktop smoke gate: ${node.stderr || node.stdout}`]);
+export const desktopSmoke = makeDesktopSmokeGate();
+
+async function runDesktopSmoke(ctx: GateContext, scenarios: readonly Scenario[]): Promise<GateResult> {
+  const surface = desktopSurface(ctx);
+  if (surface) return surface;
+
+  const temp = mkdtempSync(path.join(tmpdir(), "passquest-desktop-smoke-"));
+  const checks: string[] = [];
+  let assertions = 0;
+  const check: Check = (condition, message) => {
+    assertions++;
+    if (!condition) checks.push(message);
+    return condition;
+  };
+  const provider = startProviderStub();
+  try {
+    const binary = path.join(temp, executable("passquest-desktop"));
+    const build = await buildDesktop(ctx, binary);
+    if (!build.ok) return fail(build.failures);
+    const registry = path.join(temp, "registry.json");
+    writeStubRegistry(registry, provider.endpoint);
+    const shared: Shared = { ctx, binary, cli: "", registry, provider };
+    let ran = 0;
+    for (const scenario of scenarios) {
+      const dir = path.join(temp, scenario.id);
+      const dataDir = path.join(dir, "data");
+      mkdirSync(dataDir, { recursive: true });
+      const before = checks.length;
+      await scenario.run({
+        shared,
+        id: scenario.id,
+        dir,
+        dataDir,
+        database: path.join(dataDir, "passquest.sqlite"),
+        service: `passquest-smoke-${process.pid}-${Date.now()}-${scenario.id}`,
+        check,
+      });
+      ran++;
+      if (scenario !== boot) continue;
+      if (checks.length > before) {
+        checks.push(`${scenarios.length - ran} later scenario(s) not run: the window does not boot`);
+        return fail(checks);
       }
-      if (checks.length > 0) return fail(checks);
-      return pass(`${assertions} assertions over ${SCENARIOS.length} scenarios`);
-    } finally {
-      provider.stop();
-      await removeTree(temp);
+      // Later scenarios cross-check the window through a second process.
+      const cliBuild = await buildCLI(ctx);
+      if ("failure" in cliBuild) return fail([...checks, "go build ./cmd/passquest failed", tail(cliBuild.failure)]);
+      shared.cli = cliBuild.binary;
+      const node = await run(executable("node"), ["--version"]);
+      if (node.code !== 0) return fail([...checks, `node is required for the desktop smoke gate: ${node.stderr || node.stdout}`]);
     }
-  },
-};
+    if (checks.length > 0) return fail(checks);
+    return pass(`${assertions} assertions over ${scenarios.length} scenarios`);
+  } finally {
+    provider.stop();
+    await removeTree(temp);
+  }
+}

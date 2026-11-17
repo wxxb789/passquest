@@ -15,7 +15,7 @@ import { adaptiveSmoke } from "./adaptive-smoke.ts";
 import { agentSmoke } from "./agent-smoke.ts";
 import { assessSmoke } from "./assess-smoke.ts";
 import { baseline } from "./baseline.ts";
-import { desktopSmoke } from "./desktop-smoke.ts";
+import { desktopSmoke, makeDesktopSmokeGate } from "./desktop-smoke.ts";
 import { coverageProblems, desktopUx, makeDesktopUxGate, UX_SIZES, UX_STATES } from "./desktop-ux.ts";
 import type { Audited } from "./desktop-ux.ts";
 import { docsLinks } from "./docs-links.ts";
@@ -983,7 +983,8 @@ func main() {
           : `desktop-smoke: did not report the stale client: ${failures.slice(0, 3).join("; ")}`,
     },
     {
-      gate: desktopSmoke,
+      // The failure is decided in the practice scenario; the later scenarios would only relaunch the stub.
+      gate: makeDesktopSmokeGate(["practice"]),
       label: "desktop practice flow that writes no attempt",
       files: {
         "go.mod": GO_MOD,
@@ -1164,20 +1165,25 @@ export const selfTest: Gate = {
       const problem = unit();
       if (problem) problems.push(problem);
     }
-    for (const testCase of cases) {
-      const problem = await runCase(testCase);
+    const timings: { label: string; ms: number }[] = [];
+    const timed = async (label: string, check: () => Promise<string | null>) => {
+      const started = performance.now();
+      const problem = await check();
+      timings.push({ label, ms: performance.now() - started });
       if (problem) problems.push(problem);
-    }
-    for (const testCase of accepted) {
-      const problem = await runPassCase(testCase);
-      if (problem) problems.push(problem);
-    }
+    };
+    for (const testCase of cases) await timed(testCase.label, () => runCase(testCase));
+    for (const testCase of accepted) await timed(testCase.label, () => runPassCase(testCase));
     const covered = new Set([...cases, ...accepted].map((testCase) => testCase.gate.id));
     const expected = gates.filter((gate) => gate.id !== selfTest.id);
     for (const gate of expected) {
       if (!covered.has(gate.id)) problems.push(`${gate.id}: no self-test case`);
     }
     if (problems.length > 0) return fail(problems);
-    return pass(`${cases.length + accepted.length} cases (${accepted.length} must pass), ${covered.size}/${expected.length} gates`);
+    const slowest = [...timings]
+      .sort((a, b) => b.ms - a.ms)
+      .slice(0, 3)
+      .map((timing) => `${timing.label} ${(timing.ms / 1000).toFixed(1)}s`);
+    return pass(`${cases.length + accepted.length} cases (${accepted.length} must pass), ${covered.size}/${expected.length} gates; slowest cases: ${slowest.join("; ")}`);
   },
 };

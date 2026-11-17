@@ -1417,4 +1417,6 @@ Entry format:
   store package.
 - Default taken: (A). It removes one fixture opening a second connection against its own file; it does not
   prove that was the cause.
+- Evidence since (A): `go test ./internal/store -count=20` passed locally (2026-11-17), and the go-test gate passed
+  in the first split CI run on ubuntu, macOS and Windows.
 - Revisit when: go-test flakes on Windows CI; then take (B).
