@@ -1,22 +1,44 @@
-// Anki (prototype vAnki + editSheetHTML + the sync/conflict sheets). The card preview is the real
-// `note.RenderCard` HTML with the real model CSS (PreviewNote), rendered inside
-// `<iframe sandbox="" srcdoc>` so the card markup never enters the app document. Pass Quest
-// proposes; the learner edits, accepts or skips; the outbox pushes.
-import type { Note, NoteDraft, NoteFields, NoteList, NotePreview, NotePush } from '../api/types';
+// Anki (prototype vAnki + editSheetHTML + the sync/conflict sheets). The card preview is exactly the
+// backend's documents (PreviewNote: question/answer × light/night, the same templates, stylesheet and
+// body classes Anki uses), placed in `<iframe sandbox="allow-same-origin" srcdoc>`: no script runs in
+// the frame, the card markup never enters the app document, and the window reads the frame's height
+// so the card is never clipped and never scrolls. Pass Quest proposes; the learner edits, accepts or
+// skips; the outbox pushes. "Refine with AI" previews the call, sends once on the learner's word and
+// shows an advisory suggestion that only fills the editor when used.
+import type { Consent, ModelList, Note, NoteDraft, NoteFields, NoteList, NotePreview, NotePush, NoteRefinePreview, NoteRefinement, StudioError } from '../api/types';
 import { html, type Html } from '../core/html';
-import { ankiStateOf, errorLabel, errorTitle, T } from '../core/i18n';
+import { ankiStateOf, errorTitle, nextStep, T } from '../core/i18n';
 import type { Loadable, Theme } from '../core/state';
+import { callStrip, callTarget } from '../components/callstrip';
+import { failureNote, rawDetail, settingsLink } from '../components/failure';
 import { sheetWrap } from '../components/sheet';
 import { ic } from '../icons';
-import { errorCard, errorDetail, loadingCard, retryButton } from './states';
+import { whoMeta } from './coach';
+import { errorCard, loadingCard, retryButton } from './states';
+
+export type CardSide = 'both' | 'front' | 'back';
 
 export interface AnkiUi {
   card: Theme | null;
   width: 'desk' | 'phone';
+  side: CardSide;
   editing: boolean;
+  refine: boolean;
   dirty: boolean;
   busy: boolean;
   theme: Theme;
+  /** The provider registry, for provider names. */
+  models: ModelList | null;
+  /** The consent ledger (latest decision per source and provider), for the refinement's consent line. */
+  consents: Consent[] | null;
+}
+
+/** The refinement strip's data (data.anki.refine). */
+export interface AnkiRefine {
+  preview: Loadable<NoteRefinePreview>;
+  suggestion: NoteRefinement | null;
+  failure: StudioError | null;
+  sending: boolean;
 }
 
 export function ankiStatus(d: NoteDraft | null, dirty: boolean): Html {
@@ -24,12 +46,51 @@ export function ankiStatus(d: NoteDraft | null, dirty: boolean): Html {
   return html`<span class="chip cool sm" data-testid="draft-status" data-draft="${d.id}">${T('草稿 · 等你决定', 'Draft · your call')}${dirty ? T(' · 已修改', ' · edited') : ''}</span>`;
 }
 
-function srcdoc(body: string, css: string, dark: boolean): string {
-  // The whole document is one attribute value; html`` escapes it and the browser decodes it back
-  // into the sandboxed frame. No script runs there (sandbox="" without allow-scripts).
-  // Anki's night mode marks an ancestor of `.card` (the model CSS uses `.nightMode .card`).
-  return `<!doctype html><html${dark ? ' class="nightMode night_mode"' : ''}><head><meta charset="utf-8"><style>${css}</style></head><body class="card">${body}</body></html>`;
+/**
+ * Sets a card frame's height to its document's height: nothing is clipped and nothing scrolls. The
+ * root element's box is the content's height whatever the frame's current viewport (the model CSS
+ * sizes nothing by the viewport), so no script has to run inside the frame. Returns the height set,
+ * or null while the frame still holds its initial empty document.
+ */
+export function fitCardFrame(frame: HTMLIFrameElement): number | null {
+  const doc = frame.contentDocument;
+  if (!doc || doc.URL !== 'about:srcdoc' || doc.readyState !== 'complete') return null;
+  const height = Math.ceil(doc.documentElement.getBoundingClientRect().height);
+  frame.style.height = `${height}px`;
+  return height;
 }
+
+const FIT_TRIES = 40;
+const FIT_STEP_MS = 50;
+
+/**
+ * Fits a newly placed card frame without depending on one event: plain timers re-measure it until its
+ * card document has loaded and two measurements agree, then once more when its fonts are in. A page
+ * WebKit does not show (a hidden or occluded window) runs no animation frames, and on macOS CI the frame
+ * was never fitted although its document had loaded — the load event was not observed before the read
+ * (assumed, not proven). Timers still run in such a page, so the frame is sized whether or not the window
+ * is on screen. 'load', a width transition's end and a window resize refit through fitCardFrame as well.
+ */
+export function watchCardFrame(frame: HTMLIFrameElement): void {
+  let last: number | null = null;
+  const step = (tries: number) => {
+    if (!frame.isConnected) return;
+    const height = fitCardFrame(frame);
+    if (height !== null && height === last) {
+      void frame.contentDocument?.fonts?.ready.then(() => fitCardFrame(frame));
+      return;
+    }
+    last = height;
+    if (tries > 1) setTimeout(() => step(tries - 1), FIT_STEP_MS);
+  };
+  step(FIT_TRIES);
+}
+
+const SIDES: Record<CardSide, readonly ('question' | 'answer')[]> = {
+  both: ['question', 'answer'],
+  front: ['question'],
+  back: ['answer'],
+};
 
 export function previewHTML(p: Loadable<NotePreview>, u: AnkiUi, d: NoteDraft | null): Html {
   if (p.status === 'error') {
@@ -38,22 +99,34 @@ export function previewHTML(p: Loadable<NotePreview>, u: AnkiUi, d: NoteDraft | 
       p.error.code === 'consent_required' && source
         ? // Notes accept only the global (every-provider) decision, so the scope is named and confirmed first.
           html`<div class="acts-row" style="margin-top:10px"><button class="btn ghost sm" data-act="consent-all-ask" data-v="${source}" ${u.busy ? 'disabled' : ''}>${ic('shield', 'xs')}${T(
-            `授权 ${source} 的原文…`,
-            `Allow the text of ${source}…`,
+            '授权这份资料的原文…',
+            "Allow this source's text…",
           )}</button><span class="muted">${T('笔记只接受对所有提供方生效的授权；下一步会列出范围', 'Notes accept only a grant for every provider; the next step shows that scope')}</span></div>`
         : '';
-    return html`<div class="pv-row"><div class="fine" data-testid="preview-error" data-code="${p.error.code}"><b>${errorLabel(p.error.code)}</b> ${errorDetail(p.error)}${grant}</div></div>`;
+    return html`<div class="pv-row">${failureNote(p.error, { testid: 'preview-error', extra: grant })}</div>`;
   }
   if (p.status !== 'ready') return html`<div class="pv-row"><p class="fine">${T('正在渲染预览……', 'Rendering the preview…')}</p></div>`;
   const v = p.value;
-  const dark = (u.card ?? u.theme) === 'dark';
-  return html`<div class="pv-row"><div class="pv-side"><div class="pv-lab"><b>${T('卡片', 'Card')} · <span class="id">${v.model}</span></b><span>${
-    u.width === 'phone' ? T('手机宽度 · 300 px', 'Phone · 300 px') : T('桌面宽度 · 500 px', 'Desktop · 500 px')
-  } · ${T('牌组', 'deck')} ${v.deck}</span></div><iframe class="ac-frame" sandbox="" referrerpolicy="no-referrer" title="${T('卡片预览', 'Card preview')}" data-testid="card-preview" data-sha="${v.html_sha256}" data-edited="${v.edited}" srcdoc="${srcdoc(
-    v.html,
-    v.css,
-    dark,
-  )}"></iframe></div></div>`;
+  const night = (u.card ?? u.theme) === 'dark';
+  const theme = night ? 'night' : 'light';
+  const width = u.width === 'phone' ? T('手机宽度 · 300 px', 'Phone · 300 px') : T('桌面宽度 · 500 px', 'Desktop · 500 px');
+  return html`<div class="pv-row" data-testid="card-preview" data-sha="${v.fields_sha256}" data-css-sha="${v.css_sha256}" data-model-version="${v.model_version}" data-edited="${v.edited}" data-side="${u.side}" data-theme="${theme}">${SIDES[u.side].map(
+    (side) => html`<div class="pv-side"><div class="pv-lab"><b>${side === 'question' ? T('正面', 'Front') : T('背面', 'Back')}</b><span>${width} · ${T('牌组', 'deck')} <span translate="no">${v.deck}</span></span></div><iframe class="ac-frame" sandbox="allow-same-origin" scrolling="no" referrerpolicy="no-referrer" title="${
+      side === 'question' ? T('卡片正面预览', 'Card front preview') : T('卡片背面预览', 'Card back preview')
+    }" data-testid="card-frame" data-side="${side}" data-theme="${theme}" srcdoc="${v[side][theme]}"></iframe></div>`,
+  )}</div>`;
+}
+
+/** The card-design outcome of the last push, in the window's words; nothing when the design was current. */
+export function modelLine(p: NotePush | null): Html {
+  if (p?.model_customized)
+    return html`<span class="chip warm sm" data-testid="model-state" data-state="customized" title="${T(
+      '笔记照常推送；Pass Quest 不会覆盖你的改动',
+      'The notes were pushed; Pass Quest does not overwrite your change',
+    )}">${T('Anki 中的卡片样式是你改过的 · 保持原样', 'Card style changed in Anki · left as is')}</span>`;
+  if (p?.model_updated)
+    return html`<span class="chip ok sm" data-testid="model-state" data-state="updated">${ic('check', 'xs')}${T('Anki 中的卡片样式已换成新设计', 'Card style in Anki updated to the new design')}</span>`;
+  return html``;
 }
 
 function syncs(notes: Loadable<NoteList>): Html {
@@ -71,32 +144,141 @@ function syncs(notes: Loadable<NoteList>): Html {
       </div>`;
 }
 
+/** Where the draft came from, in words: the ids (source, question, attempt) stay in the draft's data. */
 function sourceLine(d: NoteDraft): string {
   const t = d.target;
-  const id = [t.source_id, t.page ? `p${String(t.page).padStart(3, '0')}` : null, t.question_id].filter(Boolean).join(' · ');
-  const from = t.mark ? T('来自文章标记', 'From a passage mark') : t.attempt_id ? T(`来自作答 #${t.attempt_id}`, `From attempt #${t.attempt_id}`) : T('来自题目', 'From a question');
-  return `${from}${id ? ' · ' + id : ''} · ${T('由 Pass Quest 提议，你来决定', 'proposed by Pass Quest, your call')}`;
+  const from = t.mark ? T('来自文章标记', 'From a passage mark') : t.attempt_id ? T('来自一次作答', 'From an answer') : T('来自题目', 'From a question');
+  const page = t.page ? T(` · 第 ${t.page} 页`, ` · page ${t.page}`) : '';
+  return `${from}${page} · ${T('由 Pass Quest 提议，你来决定', 'proposed by Pass Quest, your call')}`;
 }
 
-function editSheetHTML(d: NoteDraft, f: NoteFields, u: AnkiUi): Html {
-  const fl = (zh: string, en: string, id: string) => html`<span class="fl">${T(zh, en)}<span class="id">${id}</span></span>`;
-  return html`<section class="esheet" role="region" aria-label="${T('编辑笔记字段', 'Edit note fields')}">
+/** A refinement failure: the localized failure line and Retry (which only re-previews). */
+function refineFailure(e: StudioError, busy: boolean): Html {
+  return failureNote(e, { testid: 'refine-failure', retry: html`<button class="btn quiet sm" data-act="refine-retry" data-primary ${busy ? 'disabled' : ''}>${T('重试', 'Retry')}</button>` });
+}
+
+function suggestionHTML(s: NoteRefinement, busy: boolean, models: ModelList | null): Html {
+  return html`<div class="reply rf-sug" data-testid="refine-suggestion" data-refinement="${s.refinement_id}" data-sha="${s.request_sha256}">
+      <div class="field"><span class="fl">${T('建议 · 正面', 'Suggested · Front')}</span><p class="serif" lang="en" data-testid="suggested-front">${s.suggestion.front}</p></div>
+      <div class="field"><span class="fl">${T('建议 · 背面', 'Suggested · Back')}</span><p lang="en" data-testid="suggested-back">${s.suggestion.back}</p></div>
+      <div class="rmeta">${ic('adv', 'xs')}${T('建议性 · 不会自动采用', 'Advisory · never applied by itself')}<span class="sep"></span>${whoMeta(s.provider, s.model, models)}<span class="sep"></span><span class="num nw">${(s.latency_ms / 1000).toFixed(1)} s</span></div>
+    </div>
+    <div class="acts-row"><button class="btn adv sm" data-act="refine-use" data-primary ${busy ? 'disabled' : ''}>${T('使用建议', 'Use suggestion')}</button><button class="btn quiet sm" data-act="refine-retry" ${busy ? 'disabled' : ''}>${T('再预览一次', 'Preview again')}</button></div>
+    <p class="fine">${T('使用建议只会填入左侧字段，接受仍由你来点。', 'Using it only fills the fields on the left; accepting stays your step.')}</p>`;
+}
+
+/**
+ * A private source's consent as notes see it, from the ledger: the note's text needs the global
+ * (every-provider) decision, and a provider's own refusal outranks that global grant for its calls.
+ * `global` is null while the ledger is unknown.
+ */
+export function noteConsentOf(ledger: readonly Consent[] | null, source: string, provider: string): { global: boolean | null; providerDenied: boolean } {
+  if (!ledger) return { global: null, providerDenied: false };
+  const rows = ledger.filter((c) => c.source_id === source);
+  const own = provider ? rows.find((c) => c.provider === provider) : undefined;
+  return { global: rows.some((c) => !c.provider && c.granted), providerDenied: !!own?.recorded_at && !own.granted };
+}
+
+/** An imported source in words: its title from the ledger, never its content id. */
+export function sourceTitleOf(ledger: readonly Consent[] | null, source: string): string | null {
+  return ledger?.find((c) => c.source_id === source && c.title)?.title || null;
+}
+
+/**
+ * The refinement's withheld-consent line: the every-provider grant when the note's text lacks it, and
+ * the provider-scoped grant when this provider has its own refusal (which the global grant cannot clear).
+ */
+function refineConsent(source: string, providerId: string, name: string, ledger: Consent[] | null, busy: boolean): Html {
+  const scope = noteConsentOf(ledger, source, providerId);
+  const needGlobal = scope.global !== true || !scope.providerDenied;
+  const dis = busy ? 'disabled' : '';
+  const to = html`<span translate="no">${name}</span>`;
+  const global = needGlobal
+    ? html`<button class="btn ghost sm" data-act="consent-all-ask" data-v="${source}" ${dis}>${T('授权原文（所有提供方）…', 'Allow the text (every provider)…')}</button><span class="muted">${T(
+        '笔记只接受对所有提供方生效的授权',
+        'Notes accept only a grant for every provider',
+      )}</span>`
+    : '';
+  const own = scope.providerDenied
+    ? html`<button class="btn ghost sm" data-act="consent-grant" data-v="${source}|${providerId}" data-testid="refine-consent-provider" ${dis}>${T('重新授权给 ', 'Grant again to ')}${to}</button><span class="muted">${
+        needGlobal
+          ? html`${T('你撤回过对 ', 'You revoked ')}${to}${T(' 的授权；所有提供方的授权不会改变这一点', '; a grant for every provider does not change that')}`
+          : html`${T('你撤回过对 ', 'You revoked ')}${to}${T(' 的授权；这只恢复给它的授权', '; this restores the grant for it only')}`
+      }</span>`
+    : '';
+  return html`<span data-consent="withheld" data-scope="${needGlobal ? (scope.providerDenied ? 'both' : 'all-providers') : 'provider'}"><span class="held">${T('这份导入资料的原文已扣留', "This imported source's text is withheld")}</span>
+      ${global}${own}</span>`;
+}
+
+function refinePreview(d: NoteDraft, r: AnkiRefine, busy: boolean, models: ModelList | null, ledger: Consent[] | null): Html {
+  const p = r.preview;
+  if (p.status === 'error') return refineFailure(p.error, busy);
+  if (p.status !== 'ready') return html`<div class="pending">${T('正在准备发送预览……', 'Preparing the send preview…')}</div>`;
+  const v = p.value;
+  // A hand-configured endpoint has no registry provider id: it is configured all the same (the core
+  // refuses a preview with no configuration), and its consent is the every-provider decision.
+  if (!v.endpoint) return refineFailure({ code: 'not_configured', message: '', action: null }, busy);
+  const source = d.target.source_id;
+  const name = callTarget(models, v);
+  const consent = v.consent.private_source && !v.consent.granted && source ? refineConsent(source, v.provider, name, ledger, busy) : undefined;
+  const where = v.external ? T('外部调用', 'external call') : T('本地调用', 'local call');
+  const canSend = v.consent.granted && !r.sending && !busy;
+  return html`${callStrip(v, busy, models, 'refine-strip', consent)}
+    <div class="pending">${T(`发送将进行一次${where}，消耗 1 次预算`, `Sending makes one ${where} and spends 1 budget slot`)} <span class="num nw">(${v.budget.calls} → ${v.budget.calls + 1} / ${v.budget.limit})</span>${T('。', '.')}${
+      v.unanswered ? html`<div class="muted">${T('这道题还没作答：建议不会写出答案。', 'The question is unanswered: the suggestion may not reveal its answer.')}</div>` : ''
+    }${
+      !v.verified
+        ? // The core's next step is a CLI line: it stays folded as raw detail; the learner's step is in Settings.
+          html`<div class="muted" data-testid="refine-unverified">${nextStep('capability_unverified')} ${settingsLink('capability_unverified')}${rawDetail({ code: 'capability_unverified', action: v.action ?? null })}</div>`
+        : ''
+    }
+      <div><button class="btn adv sm" data-act="refine-send" data-primary ${canSend ? '' : 'disabled'}>${ic(v.external ? 'ext' : 'local', 'xs')}${
+        r.sending ? T('发送中……', 'Sending…') : html`${T('发送到 ', 'Send to ')}<span translate="no">${name}</span>`
+      }</button></div></div>`;
+}
+
+export function refinePanelHTML(d: NoteDraft, r: AnkiRefine, busy: boolean, models: ModelList | null, ledger: Consent[] | null): Html {
+  const body = r.suggestion ? suggestionHTML(r.suggestion, busy, models) : r.failure ? refineFailure(r.failure, busy) : refinePreview(d, r, busy, models, ledger);
+  return html`<div class="es-refine" data-testid="refine" role="region" tabindex="-1" aria-label="${T('AI 润色', 'Refine with AI')}">
+      <div class="rf-h"><span class="chip adv sm">${ic('adv', 'xs')}${T('AI 润色 · 建议性', 'Refine with AI · advisory')}</span><button class="btn quiet sm" data-act="refine-close">${T('收起', 'Close')}</button></div>
+      ${body}
+    </div>`;
+}
+
+/**
+ * While a refinement is on its way the draft cannot be accepted or skipped: the reply belongs to this
+ * draft, and closing it first would leave a paid call with nowhere to land. The reason sits in a
+ * `data-hold` slot the refinement panel's own refresh rewrites, with the buttons' disabled state.
+ */
+export function refineHold(r: AnkiRefine): Html {
+  return r.sending ? html`<span class="muted" data-testid="refine-wait">${T('AI 建议返回前，先不能接受或跳过', 'Accept and Skip wait for the AI suggestion')}</span>` : html``;
+}
+
+// While the refine panel is open its Send is the step (data-primary) and Accept steps back to a
+// secondary look, so the marked action is also the one that reads first; closing the panel restores it.
+function editSheetHTML(d: NoteDraft, f: NoteFields, u: AnkiUi, r: AnkiRefine): Html {
+  const fl = (zh: string, en: string) => html`<span class="fl">${T(zh, en)}</span>`;
+  const held = u.busy || r.sending ? 'disabled' : '';
+  return html`<section class="esheet ${u.refine ? 'refining' : ''}" role="region" aria-label="${T('编辑笔记字段', 'Edit note fields')}">
     <div class="grab"></div>
-    <div class="es-b">
+    <div class="es-b ${u.refine ? 'refining' : ''}">
       <div>
-        <label class="field">${fl('正面', 'Front', 'Front')}<textarea class="serif one" data-field="front" lang="en" rows="2">${f.front}</textarea></label>
-        <label class="field">${fl('战术', 'Tactic', 'Tactic')}<textarea class="one" data-field="tactic" lang="en" rows="1">${f.tactic}</textarea></label>
-        <div class="field">${fl('来源', 'Source', 'Source')}<div class="ro">${d.source || '—'}<span>${T('只存编号，不存来源标题', 'id only, never the title')}</span></div></div>
+        <label class="field">${fl('正面', 'Front')}<textarea class="serif one" data-field="front" lang="en" rows="2">${f.front}</textarea></label>
+        <label class="field">${fl('战术', 'Tactic')}<textarea class="one" data-field="tactic" lang="en" rows="1">${f.tactic}</textarea></label>
+        <div class="field">${fl('来源', 'Source')}<div class="ro"><span data-raw translate="no">${d.source || '—'}</span><span>${T('卡片上只写编号，不写来源标题', 'the card carries the id only, never the title')}</span></div></div>
       </div>
       <div>
-        <label class="field">${fl('背面', 'Back', 'Back')}<textarea data-field="back" lang="en" rows="5">${f.back}</textarea></label>
+        <label class="field">${fl('背面', 'Back')}<textarea data-field="back" lang="en" rows="5">${f.back}</textarea></label>
       </div>
+      ${u.refine ? refinePanelHTML(d, r, u.busy, u.models, u.consents) : ''}
     </div>
     <div class="es-f">
       <span id="estatus">${ankiStatus(d, u.dirty)}</span><span class="muted" style="font-size:12px">${T('改动实时显示在上方卡片；清空的字段保留草稿原值', 'Changes show live on the card above; an emptied field keeps the draft value')}</span>
       <span class="sp"></span>
-      <button class="btn quiet sm" data-act="askip" ${u.busy ? 'disabled' : ''}>${T('跳过', 'Skip')}</button>
-      <button class="btn primary sm" data-act="accept" id="acceptbtn2" ${u.busy ? 'disabled' : ''}>${ic('check', 'xs')}${T('接受', 'Accept')}</button>
+      ${u.refine ? '' : html`<button class="btn adv sm" data-act="refine">${ic('adv', 'xs')}${T('AI 润色', 'Refine with AI')}</button>`}
+      <span data-hold>${refineHold(r)}</span>
+      <button class="btn quiet sm" data-act="askip" ${held}>${T('跳过', 'Skip')}</button>
+      <button class="btn ${u.refine ? 'ghost' : 'primary'} sm" data-act="accept" id="acceptbtn2" ${u.refine ? '' : 'data-primary'} ${held}>${ic('check', 'xs')}${T('接受', 'Accept')}</button>
       <button class="btn ghost sm" data-act="edit">${T('完成', 'Done')}<kbd>Esc</kbd></button>
     </div>
   </section>`;
@@ -109,19 +291,31 @@ function restrictedLine(d: NoteDraft): Html {
     : html`<span class="chip warm sm">${ic('shield', 'xs')}${T('私有来源 · 原文未写入卡片', 'Private source · its text is not on the card')}</span>`;
 }
 
-export function vAnki(d: NoteDraft | null, f: NoteFields | null, preview: Loadable<NotePreview>, notes: Loadable<NoteList>, u: AnkiUi): Html {
+export function vAnki(
+  d: NoteDraft | null,
+  f: NoteFields | null,
+  preview: Loadable<NotePreview>,
+  notes: Loadable<NoteList>,
+  u: AnkiUi,
+  refine: AnkiRefine,
+  lastPush: NotePush | null,
+): Html {
   if (notes.status === 'error' && !d) return errorCard(notes.error, retryButton('reload'));
   if (notes.status !== 'ready' && notes.status !== 'error' && !d) return loadingCard();
   const tgl = <K extends string>(act: string, label: string, cur: K, items: readonly (readonly [K, string, string, Html | ''])[]) =>
     html`<div class="tgl" role="group" aria-label="${label}">${items.map(
       ([k, z, e, i]) => html`<button data-act="${act}" data-v="${k}" aria-pressed="${cur === k}">${i}${T(z, e)}</button>`,
     )}</div>`;
-  const pushBtn = html`<button class="btn ghost" data-act="push" ${u.busy ? 'disabled' : ''}>${ic('arrow', 'xs')}${T('推送到 Anki', 'Push to Anki')}</button>`;
+  // Push only does something for notes not yet in Anki (local, queued, failed or conflicting); with
+  // nothing waiting it is not offered.
+  const waiting = notes.status === 'ready' ? pushable(notes.value) : 0;
+  // With no draft open, pushing is the room's one step; beside a draft, accepting is.
+  const pushBtn = html`<button class="btn ghost" data-act="push" ${d ? '' : 'data-primary'} ${u.busy ? 'disabled' : ''}>${ic('arrow', 'xs')}${T('推送到 Anki', 'Push to Anki')}</button>`;
   const list = notes.status === 'ready' ? notes.value.notes : [];
   if (!d)
     return html`<div class="scene anki" id="ankiscene" data-testid="anki">
     <div class="an-top settle" style="--i:0">
-      <div class="src"><span class="t">${T('笔记', 'Notes')}</span><span id="astatus">${ankiStatus(null, false)}</span><span class="muted">${T(
+      <div class="src"><span class="t">${T('笔记', 'Notes')}</span><span id="astatus">${ankiStatus(null, false)}</span>${modelLine(lastPush)}<span class="muted">${T(
         '在反馈里提议一条笔记，或在练习文章中标记文字后生成。',
         'Propose a note from feedback, or mark passage text during practice.',
       )}</span></div>
@@ -131,16 +325,28 @@ export function vAnki(d: NoteDraft | null, f: NoteFields | null, preview: Loadab
       list.length ? list.slice(0, 8).map(noteRow) : html`<p class="fine">${T('还没有接受的笔记。', 'No accepted notes yet.')}</p>`
     }</div></div>
     <div class="an-tools"></div>
-    <div class="an-acts settle" style="--i:3">${pushBtn}</div>
+    <div class="an-acts settle" style="--i:3">${
+      waiting
+        ? pushBtn
+        : html`<span class="cap">${
+            list.length ? T('所有笔记都已在 Anki 中 · 新接受的笔记从这里推送', 'Every note is in Anki · newly accepted notes push from here') : T('接受一条笔记后，从这里推送到 Anki', 'Accept a note first; it pushes to Anki from here')
+          }</span>`
+    }</div>
   </div>`;
   const fields = f ?? d.fields;
+  const held = u.busy || refine.sending ? 'disabled' : '';
   return html`<div class="scene anki ${u.editing ? 'editing' : ''}" id="ankiscene" data-testid="anki" data-draft="${d.id}">
     <div class="an-top settle" style="--i:0">
-      <div class="src"><span class="t">${T('笔记草稿', 'Note draft')}</span><span id="astatus">${ankiStatus(d, u.dirty)}</span>${restrictedLine(d)}<span class="muted">${sourceLine(d)}</span></div>
+      <div class="src"><span class="t">${T('笔记草稿', 'Note draft')}</span><span id="astatus">${ankiStatus(d, u.dirty)}</span>${restrictedLine(d)}${modelLine(lastPush)}<span class="muted">${sourceLine(d)}</span></div>
       ${syncs(notes)}
     </div>
     <div class="an-table ${u.width === 'phone' ? 'phone' : ''} rise" style="--i:1" id="preview">${previewHTML(preview, u, d)}</div>
     <div class="an-tools settle" style="--i:2">
+      ${tgl('side', T('面', 'Side'), u.side, [
+        ['both', '两面', 'Both', ''],
+        ['front', '正面', 'Front', ''],
+        ['back', '背面', 'Back', ''],
+      ] as const)}
       ${tgl('ctheme', T('卡片主题', 'Card theme'), u.card ?? u.theme, [
         ['light', '浅色', 'Light', ic('sun', 'xs')],
         ['dark', '深色', 'Dark', ic('moon', 'xs')],
@@ -151,17 +357,21 @@ export function vAnki(d: NoteDraft | null, f: NoteFields | null, preview: Loadab
       ] as const)}
     </div>
     <div class="an-acts settle" style="--i:3">
-      <button class="btn primary" data-act="accept" id="acceptbtn" ${u.busy ? 'disabled' : ''}>${ic('check', 'xs')}${T('接受', 'Accept')}</button>
+      <button class="btn primary" data-act="accept" id="acceptbtn" ${u.editing ? '' : 'data-primary'} ${held}>${ic('check', 'xs')}${T('接受', 'Accept')}</button>
       <button class="btn ghost" data-act="edit">${ic('edit', 'xs')}${T('编辑字段', 'Edit fields')}<kbd>E</kbd></button>
-      <button class="btn quiet" data-act="askip" ${u.busy ? 'disabled' : ''}>${T('跳过', 'Skip')}</button>
+      <button class="btn quiet" data-act="askip" ${held}>${T('跳过', 'Skip')}</button>${u.editing ? '' : html`<span data-hold>${refineHold(refine)}</span>`}
       <span class="div"></span>
-      ${pushBtn}
+      <button class="btn adv sm" data-act="refine">${ic('adv', 'xs')}${T('AI 润色', 'Refine with AI')}</button><span class="cap">${T('建议性 · 先确认', 'Advisory · asks first')}</span>
+      ${waiting ? html`<span class="div"></span>${pushBtn}` : ''}
     </div>
-    ${u.editing ? editSheetHTML(d, fields, u) : ''}
+    ${u.editing ? editSheetHTML(d, fields, u, refine) : ''}
   </div>`;
 }
 
 // ---------------------------------------------------------------- sheets
+
+/** Notes a push would act on: accepted but not in Anki yet, queued, failed or in conflict. */
+const pushable = (l: NoteList): number => l.counts.local + l.counts.queued + l.counts.failed + l.counts.conflict;
 
 function noteRow(n: Note): Html {
   const st = ankiStateOf(n.anki_state);
@@ -177,8 +387,13 @@ export function pushSummary(p: NotePush): string {
   if (p.state === 'queued')
     return T(`Anki 无法连接，${c.queued} 条笔记已排队，下次可连接时推送一次。`, `Anki is unreachable; ${c.queued} notes are queued and will push once when reachable.`);
   const base = T(`已推送 ${c.pushed} · 已存在 ${c.already_present} · 排队 ${c.queued}`, `pushed ${c.pushed} · already present ${c.already_present} · queued ${c.queued}`);
-  if (p.error) return `${errorTitle(p.error.code)} · ${base}${c.conflicts ? T(` · 冲突 ${c.conflicts}`, ` · conflicts ${c.conflicts}`) : ''}`;
-  return base;
+  const model = p.model_customized
+    ? T(' · Anki 中的卡片样式是你改过的，保持原样', ' · the card style was changed in Anki and is left as is')
+    : p.model_updated
+      ? T(' · Anki 中的卡片样式已换成新设计', ' · the card style in Anki is now the new design')
+      : '';
+  if (p.error) return `${errorTitle(p.error.code)} · ${base}${c.conflicts ? T(` · 冲突 ${c.conflicts}`, ` · conflicts ${c.conflicts}`) : ''}${model}`;
+  return base + model;
 }
 
 export function ankiSheet(key: string, notes: Loadable<NoteList>, endpoint: string | null, busy: boolean): Html | null {
@@ -188,9 +403,9 @@ export function ankiSheet(key: string, notes: Loadable<NoteList>, endpoint: stri
     return sheetWrap(
       'anki',
       T('笔记与同步', 'Notes & sync'),
-      html`${T('本地', 'local')} · <code>${endpoint ?? T('端点未检查', 'endpoint not checked')}</code> · <span class="muted">${T('推送时才连接', 'contacted only on push')}</span>`,
+      html`${T('本地 AnkiConnect', 'Local AnkiConnect')} · <span class="muted">${endpoint ? T('推送时才连接', 'contacted only on push') : T('端点未检查', 'endpoint not checked')}</span>`,
       html`${l.notes.length ? l.notes.map(noteRow) : html`<p class="fine">${T('还没有接受的笔记。', 'No accepted notes yet.')}</p>`}
-      <div class="sh-acts"><button class="btn ghost sm" data-act="push" ${busy ? 'disabled' : ''}>${T('推送排队的笔记', 'Push queued notes')}</button></div>
+      ${pushable(l) ? html`<div class="sh-acts"><button class="btn ghost sm" data-act="push" ${busy ? 'disabled' : ''}>${T('推送排队的笔记', 'Push queued notes')}</button></div>` : ''}
       <p class="fine" style="display:flex;gap:8px;align-items:center;margin-top:14px">${ic('phone', 'xs')}${T('手机同步通过 AnkiWeb，由你自己操作。', 'Phone sync via AnkiWeb is your own action.')}</p>`,
     );
   if (key === 'conflict') {
@@ -199,7 +414,7 @@ export function ankiSheet(key: string, notes: Loadable<NoteList>, endpoint: stri
       'conflict',
       T('冲突', 'Conflict'),
       T('你在 Anki 中改过这些笔记，不会被静默覆盖', 'These notes changed in Anki. Nothing is overwritten silently'),
-      html`${conflicts.length ? conflicts.map((n) => html`<div class="blk"><h3 lang="en">${n.fields.front}</h3><p class="muted">${n.note_id} · ${T(`修订 ${n.revision}`, `rev ${n.revision}`)}</p></div>`) : html`<p class="fine">${T('没有冲突。', 'No conflicts.')}</p>`}
+      html`${conflicts.length ? conflicts.map((n) => html`<div class="blk"><h3 lang="en">${n.fields.front}</h3><p class="muted">${T(`修订 ${n.revision}`, `rev ${n.revision}`)}</p></div>`) : html`<p class="fine">${T('没有冲突。', 'No conflicts.')}</p>`}
       <p class="fine">${T('Anki 一侧的字段内容没有保存，因此这里不能并排显示或采用 Anki 的版本。', "Anki's field values are not stored, so its version cannot be shown or adopted here.")}</p>
       ${
         conflicts.length

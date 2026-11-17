@@ -5,6 +5,7 @@ import { agentSmoke } from "./agent-smoke.ts";
 import { assessSmoke } from "./assess-smoke.ts";
 import { baseline } from "./baseline.ts";
 import { desktopSmoke } from "./desktop-smoke.ts";
+import { desktopUx } from "./desktop-ux.ts";
 import { docsLinks } from "./docs-links.ts";
 import { findSmoke } from "./find-smoke.ts";
 import { goBuild } from "./go-build.ts";
@@ -47,5 +48,18 @@ export const gates: Gate[] = [
   providerSmoke,
   goldenContract,
   desktopSmoke,
+  desktopUx,
   selfTest,
 ];
+
+/**
+ * The CI jobs: `bun run gate --group <name>` runs one group, in `gates` order. Every gate belongs to
+ * exactly one group, and the workflow matrix lists exactly these names (both checked by
+ * `groupProblems`), so no gate can drop out of CI. `core` needs Go, Bun and Node; `desktop` and
+ * `self-test` also need a display and a Secret Service, since self-test feeds the desktop gates too.
+ */
+export const gateGroups: Record<string, readonly Gate[]> = {
+  core: gates.filter((gate) => gate !== desktopSmoke && gate !== desktopUx && gate !== selfTest),
+  desktop: [desktopSmoke, desktopUx],
+  "self-test": [selfTest],
+};

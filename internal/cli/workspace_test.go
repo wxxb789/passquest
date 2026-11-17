@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -14,9 +16,11 @@ import (
 	"time"
 
 	"github.com/wxxb789/passquest/internal/assess"
+	"github.com/wxxb789/passquest/internal/note"
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/tutor"
 )
 
 // wsClock advances by step on every reading and can jump forward, so elapsed
@@ -183,6 +187,7 @@ func countSpends(t *testing.T, db, surface string) int {
 }
 
 func TestWorkspaceTodayIsStructuredAndSpendsOncePerUnit(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	first, err := f.w.Today()
 	mustNoErr(t, err)
@@ -236,6 +241,7 @@ func TestWorkspaceTodayIsStructuredAndSpendsOncePerUnit(t *testing.T) {
 }
 
 func TestWorkspacePracticeRecordsElapsedAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q1"})
 	mustNoErr(t, err)
@@ -322,6 +328,7 @@ func TestWorkspacePracticeRecordsElapsedAndIsIdempotent(t *testing.T) {
 }
 
 func TestWorkspaceHintMakesTacticAttemptAssisted(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	guided, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeTactic, Tactic: "not-except-polarity"})
 	mustNoErr(t, err)
@@ -363,6 +370,7 @@ func TestWorkspaceHintMakesTacticAttemptAssisted(t *testing.T) {
 // The desktop opens the workspace without a session minter; answering must
 // still record the attempt under a fresh session.
 func TestWorkspaceAnswerWithDefaultSession(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, func(o *WorkspaceOptions) { o.NewSession = nil })
 	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample})
 	mustNoErr(t, err)
@@ -374,6 +382,7 @@ func TestWorkspaceAnswerWithDefaultSession(t *testing.T) {
 }
 
 func TestWorkspaceResumesPracticeAfterReopen(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	if none, err := f.w.ResumePractice(); err != nil || none != nil {
 		t.Fatalf("resume on empty = %+v, %v", none, err)
@@ -412,8 +421,10 @@ func TestWorkspaceResumesPracticeAfterReopen(t *testing.T) {
 }
 
 func TestWorkspaceAssessmentStepFlow(t *testing.T) {
-	f := newWSFixture(t, nil)
-	seedAssessmentSource(t, f.db, 22, 1)
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	pool, err := f.w.AssessmentPool()
 	mustNoErr(t, err)
 	if !pool.FloorMet || pool.QualifyingItems != 22 {
@@ -469,6 +480,19 @@ func TestWorkspaceAssessmentStepFlow(t *testing.T) {
 	if report.PassThreshold != "unknown" || report.Counts.TimedOut != 1 || report.Counts.Finalized != 2 || len(report.Items) != 2 {
 		t.Fatalf("report = %+v", report)
 	}
+	// After the run each item carries its question, the learner's choice and the verified key.
+	for _, item := range report.Items {
+		q := item.Question
+		if q == nil || q.Stem == "" || len(q.Options) == 0 || q.Key == "" {
+			t.Fatalf("report item %d question = %+v", item.Position, q)
+		}
+	}
+	if got := report.Items[0].Question.Selected; got != "A" {
+		t.Fatalf("item 1 selected = %q, want A", got)
+	}
+	if got := report.Items[1].Question.Selected; got != "" {
+		t.Fatalf("timed-out item 2 selected = %q, want none", got)
+	}
 
 	second, err := f.w.StartAssessment(2, 2)
 	mustNoErr(t, err)
@@ -508,8 +532,10 @@ func TestWorkspaceAssessmentStepFlow(t *testing.T) {
 }
 
 func TestWorkspaceAssessmentWindowElapseAbandons(t *testing.T) {
-	f := newWSFixture(t, nil)
-	seedAssessmentSource(t, f.db, 22, 1)
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(2, 1)
 	mustNoErr(t, err)
 	f.clock.Advance(2 * time.Minute)
@@ -557,8 +583,10 @@ func TestWorkspaceAssessmentWindowElapseAbandons(t *testing.T) {
 // passed must close the run under the CLI loop's rule, so the item that was
 // on screen is recorded as timed out, not silently dropped from the report.
 func TestWorkspaceTodayAfterElapsedRunTimesOutPresentedItem(t *testing.T) {
-	f := newWSFixture(t, nil)
-	seedAssessmentSource(t, f.db, 22, 1)
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(2, 1)
 	mustNoErr(t, err)
 	if state.Item == nil || state.Item.Position != 0 {
@@ -585,6 +613,7 @@ func TestWorkspaceTodayAfterElapsedRunTimesOutPresentedItem(t *testing.T) {
 }
 
 func TestWorkspaceCredentialStoreLayering(t *testing.T) {
+	t.Parallel()
 	creds := newMemCredentials()
 	const storeKey = "store-key-0123456789-not-real"
 	const envKey = "env-key-9876543210-not-real"
@@ -684,6 +713,7 @@ func TestWorkspaceCredentialStoreLayering(t *testing.T) {
 }
 
 func TestWorkspaceCoachPreviewAndFailure(t *testing.T) {
+	t.Parallel()
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
 	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
 	registry := modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
@@ -742,6 +772,7 @@ func TestWorkspaceCoachPreviewAndFailure(t *testing.T) {
 }
 
 func TestWorkspaceNotesFlow(t *testing.T) {
+	t.Parallel()
 	anki := newFakeAnki()
 	f := newWSFixture(t, func(o *WorkspaceOptions) { o.AnkiTransport = anki })
 	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
@@ -818,6 +849,7 @@ func TestWorkspaceNotesFlow(t *testing.T) {
 }
 
 func TestWorkspaceBriefWithoutRun(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	status, err := f.w.BriefStatus()
 	mustNoErr(t, err)
@@ -827,8 +859,10 @@ func TestWorkspaceBriefWithoutRun(t *testing.T) {
 }
 
 func TestWorkspaceTodaySpendsNothingDuringAnActiveRun(t *testing.T) {
-	f := newWSFixture(t, nil)
-	seedAssessmentSource(t, f.db, 22, 1)
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(2, 30)
 	mustNoErr(t, err)
 	// The window renders Today on boot and on leaving a run; that must not
@@ -851,6 +885,7 @@ func TestWorkspaceTodaySpendsNothingDuringAnActiveRun(t *testing.T) {
 }
 
 func TestWorkspaceCanCountAgreesWithAdaptiveEvidence(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	first, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q1"})
 	mustNoErr(t, err)
@@ -875,6 +910,7 @@ func TestWorkspaceCanCountAgreesWithAdaptiveEvidence(t *testing.T) {
 }
 
 func TestWorkspaceEmptyPracticeKindIsSample(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	item, err := f.w.StartPractice(studio.PracticeRequest{})
 	mustNoErr(t, err)
@@ -886,6 +922,7 @@ func TestWorkspaceEmptyPracticeKindIsSample(t *testing.T) {
 // Q-0011-03: an environment variable still wins over a stored key, including
 // the custom provider's legacy fallback that provider.CredentialValue reads.
 func TestWorkspaceLegacyCustomCredentialBeatsStoredKey(t *testing.T) {
+	t.Parallel()
 	creds := newMemCredentials()
 	const storeKey = "store-key-0123456789-not-real"
 	const legacyKey = "legacy-key-9876543210-not-real"
@@ -910,6 +947,7 @@ func TestWorkspaceLegacyCustomCredentialBeatsStoredKey(t *testing.T) {
 }
 
 func TestLoopbackEndpointParsesTheHost(t *testing.T) {
+	t.Parallel()
 	for endpoint, want := range map[string]bool{
 		"http://127.0.0.1:11434/v1/chat/completions":        true,
 		"http://localhost:8080/v1/chat/completions":         true,
@@ -923,5 +961,544 @@ func TestLoopbackEndpointParsesTheHost(t *testing.T) {
 		if got := loopbackEndpoint(endpoint); got != want {
 			t.Errorf("loopbackEndpoint(%q) = %v, want %v", endpoint, got, want)
 		}
+	}
+}
+
+// TestWorkspaceNotePreviewIsTheDeckCard: the window's card documents are the
+// note package's rendering of the same fields with the model stylesheet, in
+// Anki's DOM, for both sides and both themes.
+func TestWorkspaceNotePreviewIsTheDeckCard(t *testing.T) {
+	t.Parallel()
+	f := newWSFixture(t, nil)
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, "A")
+	mustNoErr(t, err)
+	draft, err := f.w.ProposeNote(studio.NoteRequest{AttemptID: feedback.AttemptID})
+	mustNoErr(t, err)
+	preview, err := f.w.PreviewNote(draft.ID, studio.NoteFields{Front: "{{Back}} stays literal"})
+	mustNoErr(t, err)
+	fields := note.HTML(preview.Fields.Front, preview.Fields.Back, preview.Fields.Tactic, preview.Source)
+	question, answer := note.RenderSides(fields)
+	want := studio.NoteCardSide{Light: note.CardDocument(question, note.ModelCSS, false), Night: note.CardDocument(question, note.ModelCSS, true)}
+	if preview.Question != want {
+		t.Fatalf("question documents = %+v", preview.Question)
+	}
+	want = studio.NoteCardSide{Light: note.CardDocument(answer, note.ModelCSS, false), Night: note.CardDocument(answer, note.ModelCSS, true)}
+	if preview.Answer != want || preview.HTML != answer || preview.CSS != note.ModelCSS {
+		t.Fatalf("answer documents = %+v", preview.Answer)
+	}
+	if !strings.Contains(preview.Answer.Night, `<body class="card card1 nightMode night_mode">`) ||
+		!strings.Contains(preview.Question.Light, `<body class="card card1">`) {
+		t.Fatal("the documents do not carry Anki's body classes")
+	}
+	_, questionBody, _ := strings.Cut(preview.Question.Light, "<body")
+	if !strings.Contains(questionBody, "{{Back}} stays literal") || strings.Contains(questionBody, "pq-tactic") {
+		t.Fatalf("question side = %s", questionBody)
+	}
+	if preview.FieldsSHA256 != fields.Hash() || preview.HTMLSHA256 != preview.FieldsSHA256 {
+		t.Fatalf("field hashes = %s / %s", preview.FieldsSHA256, preview.HTMLSHA256)
+	}
+	if preview.CSSSHA256 != note.CSSSHA256() || preview.ModelVersion != note.ModelVersion || !preview.Edited {
+		t.Fatalf("preview model = %s / %d / %t", preview.CSSSHA256, preview.ModelVersion, preview.Edited)
+	}
+	keys := jsonKeys(t, preview)
+	for _, key := range []string{"question", "answer", "html", "css", "html_sha256", "fields_sha256", "css_sha256", "model_version"} {
+		if _, ok := keys[key]; !ok {
+			t.Fatalf("preview JSON lacks %s: %v", key, keys)
+		}
+	}
+}
+
+// TestWorkspaceRefineNote: the refinement preview is the request the
+// refinement sends; the refusals, the budget and the recorded failure are
+// note propose --refine's; the suggestion is advisory and only accept applies
+// it.
+func TestWorkspaceRefineNote(t *testing.T) {
+	t.Parallel()
+	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
+	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
+	f.reopen(t)
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, "A")
+	mustNoErr(t, err)
+	draft, err := f.w.ProposeNote(studio.NoteRequest{AttemptID: feedback.AttemptID})
+	mustNoErr(t, err)
+
+	if _, err := f.w.RefineNotePreview(draft.ID); studioCode(err) != "not_configured" {
+		t.Fatalf("preview without a model = %v", err)
+	}
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "not_configured" {
+		t.Fatalf("refine without a model = %v", err)
+	}
+	_, err = f.w.UseModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	unverified, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if unverified.Verified || unverified.Action == "" || unverified.TextChatState == "" {
+		t.Fatalf("unverified preview = %+v", unverified)
+	}
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "capability_unverified" {
+		t.Fatalf("refine before the model test = %v", err)
+	}
+	_, err = f.w.TestModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+
+	preview, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if preview.DraftID != draft.ID || preview.Provider != "alpha" || preview.Model != "alpha-text" || preview.External ||
+		!preview.Verified || preview.Action != "" || !preview.Credential.Present || preview.Unanswered {
+		t.Fatalf("preview = %+v", preview)
+	}
+	if preview.Consent.Required || !preview.Consent.Granted || len(preview.Consent.Withheld) != 0 {
+		t.Fatalf("preview consent = %+v", preview.Consent)
+	}
+	if len(preview.Messages) != 2 || preview.Messages[0].Role != "system" || preview.RequestSHA256 == "" || preview.RequestBytes == 0 {
+		t.Fatalf("preview messages = %+v", preview)
+	}
+	if preview.Budget.Provider != "alpha" || preview.Budget.Limit == 0 {
+		t.Fatalf("preview budget = %+v", preview.Budget)
+	}
+	callsBefore := preview.Budget.Calls
+	sent := len(transport.requests)
+
+	transport.response = fixedTutorResponse(`{"front": "closes at 4 p.m.", "back": "To shut at a stated time.\n\nExample: The library closes at 4 p.m."}`)
+	refined, err := f.w.RefineNote(draft.ID)
+	mustNoErr(t, err)
+	if len(transport.requests) != sent+1 {
+		t.Fatalf("provider calls = %d, want %d", len(transport.requests), sent+1)
+	}
+	body := transport.requests[len(transport.requests)-1].Body
+	if sha, size := note.RequestIdentity(body); sha != preview.RequestSHA256 || size != preview.RequestBytes {
+		t.Fatalf("the refinement sent %s/%d, the preview showed %s/%d", sha, size, preview.RequestSHA256, preview.RequestBytes)
+	}
+	if refined.State != "advisory" || !refined.Advisory || refined.DraftID != draft.ID || refined.RefinementID == 0 ||
+		refined.Provider != "alpha" || refined.Model != "alpha-text" || refined.RequestSHA256 != preview.RequestSHA256 {
+		t.Fatalf("refinement = %+v", refined)
+	}
+	if refined.Suggestion.Front != "closes at 4 p.m." || !strings.Contains(refined.Suggestion.Back, "Example: The library") ||
+		refined.Suggestion.Tactic != draft.Fields.Tactic {
+		t.Fatalf("suggestion = %+v", refined.Suggestion)
+	}
+	after, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if after.Budget.Calls != callsBefore+1 {
+		t.Fatalf("budget calls %d -> %d", callsBefore, after.Budget.Calls)
+	}
+	// The window's own fields stay the learner's: previewing them is not the
+	// suggestion.
+	kept, err := f.w.PreviewNote(draft.ID, draft.Fields)
+	mustNoErr(t, err)
+	if kept.Fields.Front != draft.Fields.Front || strings.Contains(kept.HTML, "closes at 4 p.m.</div>") {
+		t.Fatalf("the suggestion replaced the learner's fields: %+v", kept.Fields)
+	}
+
+	// Typed failures are the CLI's: a provider error is recorded and spends
+	// the slot; a malformed reply is invalid_response; no key refuses first.
+	transport.response = fixedTutorError("rate_limited", "slow down")
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "rate_limited" {
+		t.Fatalf("provider failure = %v", err)
+	}
+	transport.response = fixedTutorResponse("no JSON here")
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "invalid_response" {
+		t.Fatalf("malformed reply = %v", err)
+	}
+	failed, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if failed.Budget.Calls != callsBefore+3 {
+		t.Fatalf("recorded failures did not spend the budget: %d -> %d", callsBefore, failed.Budget.Calls)
+	}
+	delete(f.env, provider.CredentialEnvFor("alpha"))
+	sent = len(transport.requests)
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "no_credential" || len(transport.requests) != sent {
+		t.Fatalf("refine without a key = %v (calls %d -> %d)", err, sent, len(transport.requests))
+	}
+	if _, err := f.w.RefineNote(draft.ID + 99); studioCode(err) != "unknown_draft" {
+		t.Fatalf("unknown draft = %v", err)
+	}
+
+	// The learner applies the suggestion explicitly.
+	accepted, err := f.w.AcceptNote(draft.ID, refined.Suggestion)
+	mustNoErr(t, err)
+	if accepted.Note.Origin != "refined" || accepted.Note.Fields.Front != "closes at 4 p.m." {
+		t.Fatalf("accept of the suggestion = %+v", accepted)
+	}
+	if listAttempts(t, f.db) != 1 {
+		t.Fatal("a refinement changed attempts")
+	}
+	for _, value := range []any{preview, refined} {
+		raw, _ := json.Marshal(value)
+		if strings.Contains(string(raw), fakeTutorKey) {
+			t.Fatalf("a document carries the key: %s", raw)
+		}
+	}
+}
+
+// TestWorkspaceRefineNoteRespectsConsent: a private source's draft shows no
+// source text before the grant and the refinement refuses before any call.
+func TestWorkspaceRefineNoteRespectsConsent(t *testing.T) {
+	t.Parallel()
+	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
+	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
+	f.reopen(t)
+	clock := &stepClock{base: goldenBase}
+	sourceID := noteSourceFixture(t, f.db, clock)
+	mustRun(t, f.db, clock, "", "practice", "--source", sourceID, "--page", "1", "--question", "q2", "--answer", "A", "--json")
+	draft, err := f.w.ProposeNote(studio.NoteRequest{AttemptID: 1})
+	mustNoErr(t, err)
+	_, err = f.w.UseModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	_, err = f.w.TestModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	sent := len(transport.requests)
+
+	preview, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if !preview.Consent.Required || preview.Consent.Granted || preview.Consent.SourceID != sourceID ||
+		len(preview.Messages) != 0 || preview.RequestSHA256 != "" || !slices.Contains(preview.Consent.Withheld, "passage") {
+		t.Fatalf("withheld preview = %+v", preview)
+	}
+	raw, _ := json.Marshal(preview)
+	if strings.Contains(string(raw), "Westbridge") {
+		t.Fatalf("the withheld preview shows source text: %s", raw)
+	}
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "consent_required" || len(transport.requests) != sent {
+		t.Fatalf("refine before consent = %v", err)
+	}
+	// A grant for another provider covers the note text, not this provider.
+	_, err = f.w.GrantConsent(sourceID, "")
+	mustNoErr(t, err)
+	_, err = f.w.RevokeConsent(sourceID, "alpha")
+	mustNoErr(t, err)
+	scoped, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if scoped.Consent.Granted || len(scoped.Messages) != 0 {
+		t.Fatalf("provider-scoped denial = %+v", scoped.Consent)
+	}
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "consent_required" || len(transport.requests) != sent {
+		t.Fatalf("refine under a provider denial = %v", err)
+	}
+	_, err = f.w.GrantConsent(sourceID, "alpha")
+	mustNoErr(t, err)
+	granted, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if !granted.Consent.Granted || !granted.Consent.SourceTextShared || len(granted.Messages) != 2 || granted.RequestSHA256 == "" {
+		t.Fatalf("granted preview = %+v", granted)
+	}
+}
+
+// TestWorkspaceCoachHistory lists an attempt's calls with each advisory
+// reply's text and each failure's code, and nothing that was sent.
+func TestWorkspaceCoachHistory(t *testing.T) {
+	t.Parallel()
+	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
+	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
+	f.reopen(t)
+	if _, err := f.w.CoachHistory(0); studioCode(err) != "invalid_input" {
+		t.Fatalf("history without an attempt = %v", err)
+	}
+	if _, err := f.w.CoachHistory(7); studioCode(err) != "no_attempts" {
+		t.Fatalf("history on an empty database = %v", err)
+	}
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, "A")
+	mustNoErr(t, err)
+	empty, err := f.w.CoachHistory(feedback.AttemptID)
+	mustNoErr(t, err)
+	if empty.AttemptID != feedback.AttemptID || empty.Calls == nil || len(empty.Calls) != 0 || len(empty.Limits) == 0 {
+		t.Fatalf("empty history = %+v", empty)
+	}
+	_, err = f.w.UseModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	_, err = f.w.TestModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	transport.response = fixedTutorResponse("Read the <b>second</b> sentence again.")
+	reply, err := f.w.CoachAsk(feedback.AttemptID, studio.CoachExplain)
+	mustNoErr(t, err)
+	transport.response = fixedTutorError("rate_limited", "slow down")
+	failed, err := f.w.CoachAsk(feedback.AttemptID, studio.CoachProbe)
+	mustNoErr(t, err)
+
+	history, err := f.w.CoachHistory(feedback.AttemptID)
+	mustNoErr(t, err)
+	if len(history.Calls) != 2 {
+		t.Fatalf("history = %+v", history)
+	}
+	first, second := history.Calls[0], history.Calls[1]
+	if first.CallID != reply.CallID || first.State != "advisory" || first.Text != "Read the <b>second</b> sentence again." ||
+		first.Mode != studio.CoachExplain || first.Provider != "alpha" || first.Model != "alpha-text" ||
+		!first.Advisory || first.VerifiedAnswer || first.Failure != nil || first.CreatedAt == "" {
+		t.Fatalf("advisory call = %+v", first)
+	}
+	if second.CallID != failed.CallID || second.State != "failed" || second.Text != "" || second.Mode != studio.CoachProbe ||
+		second.Failure == nil || second.Failure.Code != failed.Failure.Code {
+		t.Fatalf("failed call = %+v", second)
+	}
+	raw, _ := json.Marshal(history)
+	for _, leak := range []string{fakeTutorKey, `"messages"`, `"body"`, "request_sha256", "\"system\""} {
+		if strings.Contains(string(raw), leak) {
+			t.Fatalf("history carries %s: %s", leak, raw)
+		}
+	}
+	if _, err := f.w.CoachHistory(feedback.AttemptID + 5); studioCode(err) != "unknown_attempt" {
+		t.Fatalf("unknown attempt = %v", err)
+	}
+}
+
+// TestWorkspaceAssessmentReportWithholdsQuestions: the report's question and
+// verified key appear only after the run, and only for items the learner was
+// shown and that reached an outcome. An active run shows none; an abandoned
+// run shows the answered item and not the pending one.
+func TestWorkspaceAssessmentReportWithholdsQuestions(t *testing.T) {
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
+	state, err := f.w.StartAssessment(3, 30)
+	mustNoErr(t, err)
+	runID := state.Run.ID
+	_, err = f.w.AnswerAssessmentItem(runID, 0, "A")
+	mustNoErr(t, err)
+	active, err := f.w.AssessmentReport(runID)
+	mustNoErr(t, err)
+	if len(active.Items) != 3 {
+		t.Fatalf("active report items = %+v", active.Items)
+	}
+	for _, item := range active.Items {
+		if item.Question != nil || !item.Annotations.Withheld || item.Annotations.Available {
+			t.Fatalf("active run item %d reveals its question: %+v / %+v", item.Position, item.Question, item.Annotations)
+		}
+	}
+	_, err = f.w.AbandonAssessment(runID)
+	mustNoErr(t, err)
+	abandoned, err := f.w.AssessmentReport(runID)
+	mustNoErr(t, err)
+	if q := abandoned.Items[0].Question; q == nil || q.Key == "" || q.Selected != "A" {
+		t.Fatalf("answered item after abandon = %+v", q)
+	}
+	for _, item := range abandoned.Items[1:] {
+		if item.Question != nil || !item.Annotations.Withheld {
+			t.Fatalf("pending item %d of an abandoned run reveals its question: %+v / %+v", item.Position, item.Question, item.Annotations)
+		}
+	}
+}
+
+// TestWorkspaceAssessmentReportHidesUnseenUnavailableItems: an item marked
+// unavailable before it was presented stays unspent, so it can be selected as
+// unseen again. When its content loads again at the same version, the report
+// must still not show its question, key or annotations.
+func TestWorkspaceAssessmentReportHidesUnseenUnavailableItems(t *testing.T) {
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
+	state, err := f.w.StartAssessment(2, 30)
+	mustNoErr(t, err)
+	runID := state.Run.ID
+	// A transient load failure marks the pending item unavailable; the content
+	// itself is unchanged, so its version matches again at report time.
+	st, err := store.Open(f.db)
+	mustNoErr(t, err)
+	err = st.MarkAssessmentUnavailable(runID, 1, f.clock.Now(), "transient read failure")
+	st.Close()
+	mustNoErr(t, err)
+	_, err = f.w.AnswerAssessmentItem(runID, 0, "A")
+	mustNoErr(t, err)
+	done, err := f.w.PresentAssessmentItem(runID)
+	mustNoErr(t, err)
+	if done.State != studio.AssessmentCompletedState {
+		t.Fatalf("run after the last available item = %+v", done)
+	}
+	report, err := f.w.AssessmentReport(runID)
+	mustNoErr(t, err)
+	if len(report.Items) != 2 || report.Items[1].State != assess.StateUnavailable {
+		t.Fatalf("report items = %+v", report.Items)
+	}
+	if report.Items[0].Question == nil {
+		t.Fatal("the answered item lost its question")
+	}
+	unseen := report.Items[1]
+	if unseen.Question != nil || unseen.Annotations.Available || unseen.Annotations.Evidence != "" || unseen.Annotations.Reasoning != "" {
+		t.Fatalf("an unseen unavailable item reveals its question: %+v / %+v", unseen.Question, unseen.Annotations)
+	}
+}
+
+// TestWorkspaceRefinementStaysAdvisory: a stored refinement is a suggestion
+// beside the draft, never the draft's own fields. After a restart the window
+// restores the deterministic fields with the suggestion apart; an emptied
+// field falls back to the deterministic value; accepting the draft's own
+// fields records a deterministic note, and only the suggestion itself records
+// a refined one.
+// gatedTutorTransport answers like fakeTutorTransport; with a gate set, a call
+// reports that it started and then waits for the gate before it replies.
+type gatedTutorTransport struct {
+	fakeTutorTransport
+	started chan struct{}
+	gate    chan struct{}
+}
+
+func (g *gatedTutorTransport) Call(ctx context.Context, req tutor.HostRequest) (tutor.HostResponse, error) {
+	if g.gate != nil {
+		close(g.started)
+		<-g.gate
+	}
+	return g.fakeTutorTransport.Call(ctx, req)
+}
+
+// TestWorkspaceRefinementDoesNotUndoAnAccept: a refinement that is still
+// waiting on the provider when the learner accepts the draft must not erase
+// that acceptance when its reply lands. The paid call stays recorded; the
+// draft keeps the accepted fields, so a restart does not bring it back.
+func TestWorkspaceRefinementDoesNotUndoAnAccept(t *testing.T) {
+	transport := &gatedTutorTransport{fakeTutorTransport: fakeTutorTransport{response: fixedTutorResponse("OK")}}
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
+	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
+	f.reopen(t)
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, "A")
+	mustNoErr(t, err)
+	draft, err := f.w.ProposeNote(studio.NoteRequest{AttemptID: feedback.AttemptID})
+	mustNoErr(t, err)
+	_, err = f.w.UseModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	_, err = f.w.TestModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	before, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+
+	transport.response = fixedTutorResponse(`{"front": "closes at 4 p.m.", "back": "To shut at a stated time.\n\nExample: The library closes at 4 p.m."}`)
+	transport.started, transport.gate = make(chan struct{}), make(chan struct{})
+	type outcome struct {
+		refinement studio.NoteRefinement
+		err        error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		refinement, err := f.w.RefineNote(draft.ID)
+		done <- outcome{refinement, err}
+	}()
+	select {
+	case <-transport.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the refinement never reached the provider")
+	}
+	// One paid request per draft at a time, whatever the window remembers.
+	if _, err := f.w.RefineNote(draft.ID); studioCode(err) != "refine_in_progress" {
+		t.Fatalf("a second refinement while the first waits = %v; want refine_in_progress", err)
+	}
+	accepted, err := f.w.AcceptNote(draft.ID, draft.Fields)
+	mustNoErr(t, err)
+	close(transport.gate)
+	var result outcome
+	select {
+	case result = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the refinement did not return after its reply")
+	}
+	if studioCode(result.err) != "draft_changed" {
+		t.Fatalf("a refinement that finished after the accept = %+v, %v; want draft_changed", result.refinement, result.err)
+	}
+
+	f.reopen(t)
+	open, err := f.w.OpenNoteDraft()
+	mustNoErr(t, err)
+	if open != nil {
+		t.Fatalf("after a restart the accepted draft is pending again: %+v", open)
+	}
+	st, err := store.Open(f.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	stored, found, err := st.NoteDraftByID(draft.ID)
+	if err != nil || !found {
+		t.Fatalf("read draft = %+v, %t, %v", stored, found, err)
+	}
+	if stored.AcceptedFront != accepted.Note.Fields.Front || stored.AcceptedBack != accepted.Note.Fields.Back ||
+		stored.RefinedFront != "" || stored.Origin != "deterministic" {
+		t.Fatalf("the late refinement changed the accepted draft: %+v", stored)
+	}
+	records, err := st.NoteRefinements()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Status != "ok" || records[0].DraftID != draft.ID {
+		t.Fatalf("the provider call is not recorded: %+v", records)
+	}
+	after, err := f.w.RefineNotePreview(draft.ID)
+	mustNoErr(t, err)
+	if after.Budget.Calls != before.Budget.Calls+1 {
+		t.Fatalf("budget calls %d -> %d, want the paid call counted", before.Budget.Calls, after.Budget.Calls)
+	}
+}
+
+func TestWorkspaceRefinementStaysAdvisory(t *testing.T) {
+	t.Parallel()
+	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
+	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
+	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
+	f.reopen(t)
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, "A")
+	mustNoErr(t, err)
+	draft, err := f.w.ProposeNote(studio.NoteRequest{AttemptID: feedback.AttemptID})
+	mustNoErr(t, err)
+	_, err = f.w.UseModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	_, err = f.w.TestModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	transport.response = fixedTutorResponse(`{"front": "closes at 4 p.m.", "back": "To shut at a stated time.\n\nExample: The library closes at 4 p.m."}`)
+	refined, err := f.w.RefineNote(draft.ID)
+	mustNoErr(t, err)
+
+	f.reopen(t)
+	open, err := f.w.OpenNoteDraft()
+	mustNoErr(t, err)
+	if open == nil || open.ID != draft.ID || open.Fields != draft.Fields || open.Origin != "deterministic" || open.Advisory {
+		t.Fatalf("restored draft = %+v, want the deterministic fields %+v", open, draft.Fields)
+	}
+	if open.Suggestion == nil || open.Suggestion.Suggestion != refined.Suggestion || open.Suggestion.RefinementID != refined.RefinementID ||
+		!open.Suggestion.Advisory || open.Suggestion.Provider != "alpha" || open.Suggestion.Model != "alpha-text" {
+		t.Fatalf("restored suggestion = %+v, want %+v", open.Suggestion, refined)
+	}
+
+	own, err := f.w.PreviewNote(draft.ID, draft.Fields)
+	mustNoErr(t, err)
+	if own.Fields != draft.Fields || own.Edited {
+		t.Fatalf("preview of the draft's own fields = %+v (edited %v)", own.Fields, own.Edited)
+	}
+	used, err := f.w.PreviewNote(draft.ID, refined.Suggestion)
+	mustNoErr(t, err)
+	if used.Fields != refined.Suggestion || used.Edited {
+		t.Fatalf("preview of the used suggestion = %+v (edited %v)", used.Fields, used.Edited)
+	}
+	emptied, err := f.w.PreviewNote(draft.ID, studio.NoteFields{Front: "My own front", Tactic: draft.Fields.Tactic})
+	mustNoErr(t, err)
+	if emptied.Fields.Back != draft.Fields.Back || !emptied.Edited {
+		t.Fatalf("an emptied back became %q, want the draft's %q", emptied.Fields.Back, draft.Fields.Back)
+	}
+
+	accepted, err := f.w.AcceptNote(draft.ID, draft.Fields)
+	mustNoErr(t, err)
+	if accepted.Note.Origin != "deterministic" || accepted.Note.Fields.Front != draft.Fields.Front ||
+		accepted.Note.Fields.Back != draft.Fields.Back {
+		t.Fatalf("accepting the draft's own fields recorded %+v", accepted.Note)
+	}
+	again, err := f.w.AcceptNote(draft.ID, refined.Suggestion)
+	mustNoErr(t, err)
+	if again.Note.Origin != "edited" || again.Note.Fields.Front != refined.Suggestion.Front {
+		t.Fatalf("a later accept of the suggestion over the accepted fields = %+v", again.Note)
 	}
 }

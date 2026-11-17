@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { runGo } from "../lib/go.ts";
+import { buildCLI } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
 import { sseText, sseTool } from "../lib/sse.ts";
@@ -31,9 +31,8 @@ export const agentSmoke: Gate = {
   id: "agent-smoke",
   title: "agent smoke",
   async run(ctx: GateContext) {
-    const binaryName = process.platform === "win32" ? "passquest.exe" : "passquest";
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-agent-smoke-"));
-    const binary = path.join(temp, binaryName);
+    let binary = "";
     const checks: string[] = [];
     const seenOutputs: string[] = [];
     let assertions = 0;
@@ -143,10 +142,11 @@ export const agentSmoke: Gate = {
     };
 
     try {
-      const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
-      if (build.code !== 0) {
-        return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
+      const build = await buildCLI(ctx);
+      if ("failure" in build) {
+        return fail(["go build ./cmd/passquest failed", build.failure]);
       }
+      binary = build.binary;
 
       // 1. Fresh run: complete, commit two steps, keep attempts/report intact,
       // and expose the durable history.

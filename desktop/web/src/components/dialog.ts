@@ -6,7 +6,7 @@ import { html, type Html, type Interp } from '../core/html';
 import { T } from '../core/i18n';
 import { ic, type IconName } from '../icons';
 
-function dlg(tone: 'warm' | 'neutral' | 'adv', ico: IconName, id: string, title: string, body: Interp, acts: Interp): Html {
+function dlg(tone: 'warm' | 'neutral' | 'adv', ico: IconName, id: string, title: Interp, body: Interp, acts: Interp): Html {
   return html`<div class="scrim" data-act="close"></div><div class="dlg ${tone}" role="dialog" aria-modal="true" aria-labelledby="${id}">
       <span class="ico">${ic(ico, 'l')}</span>
       <h2 class="h-disp" id="${id}">${title}</h2>
@@ -18,7 +18,7 @@ export function keysDialog(): Html {
   const g = (h: string, rows: [string, string[]][]) =>
     html`<div><h3>${h}</h3>${rows.map(([a, k]) => html`<div class="row"><span>${a}</span><span>${k.map((x) => html`<kbd>${x}</kbd>`)}</span></div>`)}</div>`;
   return html`<div class="scrim" data-act="close"></div><div class="dlg keys" role="dialog" aria-modal="true" aria-labelledby="dk">
-      <div class="hd"><span class="ico" style="width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--well);box-shadow:inset 0 0 0 1px var(--line-2)">${ic('help')}</span><h2 class="h-disp" id="dk" style="margin:0">${T('快捷键', 'Keyboard shortcuts')}</h2><button class="icon-btn" style="margin-left:auto" data-act="close" aria-label="${T('关闭', 'Close')}">${ic('x')}</button></div>
+      <div class="hd"><span class="ico" style="width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--well);box-shadow:inset 0 0 0 1px var(--line-2)">${ic('help')}</span><h2 class="h-disp" id="dk" style="margin:0">${T('快捷键', 'Keyboard shortcuts')}</h2><button class="icon-btn" style="margin-left:auto" data-act="close" data-primary aria-label="${T('关闭', 'Close')}">${ic('x')}</button></div>
       <div class="grid">
         ${g(T('全局', 'Anywhere'), [
           [T('快捷键面板', 'This sheet'), ['?']],
@@ -99,25 +99,35 @@ export function leaveDialog(position: number | null): Html {
  * The Anki preview's consent: note text accepts only the global decision (`tutor consent` without a
  * provider), and that same event reaches every model provider without its own decision. The dialog
  * names that scope and the registry's providers before anything is recorded; Cancel is the default.
+ * The source is named by its title (else "this imported source"); its id stays in the button's data.
+ * `denied` names providers with their own refusal for this source: the global grant does not reach them.
  */
-export function consentAllDialog(source: string, providers: readonly string[] | 'loading' | 'unreadable'): Html {
+export function consentAllDialog(source: string, title: string | null, providers: readonly string[] | 'loading' | 'unreadable', denied: readonly string[] = []): Html {
   const list =
     providers === 'loading'
       ? html`<span class="muted">${T('正在读取模型注册表……', 'Reading the model registry…')}</span>`
       : providers === 'unreadable'
         ? html`<span class="muted">${T('模型注册表读取失败，见设置', 'the model registry could not be read; see Settings')}</span>`
         : providers.length
-        ? html`<b>${providers.join(T('、', ', '))}</b>`
+        ? html`<b translate="no">${providers.join(T('、', ', '))}</b>`
         : html`<span class="muted">${T('注册表里还没有提供方', 'no provider is registered yet')}</span>`;
+  // The title is the learner's own data, in whatever language it was imported in.
+  const named = title ? html`${T('「', '“')}<span translate="no">${title}</span>${T('」', '”')}` : T('这份导入资料', 'this imported source');
+  const kept = denied.length
+    ? html`<p class="fine" data-testid="consent-denied"><b translate="no">${denied.join(T('、', ', '))}</b>${T(
+        ' 保留你单独做出的撤回：这次授权不会改变它，原文仍不会发给它们。要恢复，请对它们单独授权。',
+        ' keep the revocation you made for them alone: this grant does not change it, and the text is still not sent to them. Grant them separately to restore it.',
+      )}</p>`
+    : '';
   return dlg(
     'warm',
     'shield',
     'dca',
-    T(`授权 ${source} 的原文用于笔记和所有提供方？`, `Allow the text of ${source} for notes and every provider?`),
+    html`${T('授权', 'Allow the text of ')}${named}${T('的原文用于笔记和所有提供方？', ' for notes and every provider?')}`,
     html`<p>${T(
-      `Anki 笔记只接受对所有去向生效的授权。这一次授权同样允许每个没有单独决定的模型提供方在导师调用里收到 ${source} 的原文，包括以后添加的提供方：`,
-      `Anki notes accept only a grant that covers every destination. The same grant lets every model provider without its own decision receive the text of ${source} in coach calls, including providers added later: `,
-    )}${list}</p>
+      'Anki 笔记只接受对所有去向生效的授权。这一次授权同样允许每个没有单独决定的模型提供方在导师调用里收到',
+      'Anki notes accept only a grant that covers every destination. The same grant lets every model provider without its own decision receive the text of ',
+    )}${named}${T('的原文，包括以后添加的提供方：', ' in coach calls, including providers added later: ')}${list}</p>${kept}
       <p class="fine" data-testid="consent-scope" data-scope="all-providers">${T(
         '只想给某一个提供方授权，请在反馈页的导师面板或设置里按提供方授权（那样不会解锁笔记）。可随时在设置里撤回。',
         'To allow one provider only, grant per provider from the coach panel or Settings (that does not unlock notes). Revocable in Settings at any time.',
@@ -177,6 +187,6 @@ export function startRunDialog(pool: AssessmentPool): Html {
         <label class="field"><span class="fl">${T(`题数（剩余 ${pool.qualifying_items} 题）`, `Items (${pool.qualifying_items} left)`)}</span><input type="number" name="size" min="1" max="${pool.qualifying_items}" step="1" value="${Math.min(pool.default_size, pool.qualifying_items)}"></label>
         <label class="field"><span class="fl">${T('时长（分钟）', 'Time window (minutes)')}</span><input type="number" name="minutes" min="1" max="1440" step="1" value="${pool.default_minutes}"></label>
       </form>`,
-    html`<button class="btn quiet" data-act="close" autofocus>${T('取消', 'Cancel')}</button><button class="btn primary" data-act="run-start">${T('开始', 'Start')}</button>`,
+    html`<button class="btn quiet" data-act="close" autofocus>${T('取消', 'Cancel')}</button><button class="btn primary" data-act="run-start" data-primary>${T('开始', 'Start')}</button>`,
   );
 }

@@ -169,6 +169,7 @@ type noteModelDoc struct {
 	State         string         `json:"state"`
 	Deck          string         `json:"deck"`
 	Model         string         `json:"model"`
+	ModelVersion  int            `json:"model_version"`
 	Fields        []string       `json:"fields"`
 	CSS           string         `json:"css"`
 	FrontTemplate string         `json:"front_template"`
@@ -227,6 +228,12 @@ type notePushDoc struct {
 	Notes         []notePushItemView `json:"notes"`
 	Error         *errorBody         `json:"error,omitempty"`
 	Limits        []string           `json:"limits"`
+	// ModelUpdated reports that an earlier Pass Quest card design in Anki was
+	// replaced in place by this build's stylesheet and template.
+	ModelUpdated bool `json:"model_updated,omitempty"`
+	// ModelCustomized reports that the note type in Anki was changed by the
+	// learner and left as it is; the notes were still pushed.
+	ModelCustomized bool `json:"model_customized,omitempty"`
 }
 
 func noteTargetViewOf(contentID, questionID, sourceID string, page int, attemptID int64, mark string) noteTargetView {
@@ -447,7 +454,7 @@ func writeNoteShow(w io.Writer, doc noteShowDoc) {
 
 func writeNoteModel(w io.Writer, doc noteModelDoc) {
 	fmt.Fprintln(w, "Pass Quest — Anki note model")
-	fmt.Fprintf(w, "Deck: %s\nModel: %s\nFields: %s\n", doc.Deck, doc.Model, strings.Join(doc.Fields, ", "))
+	fmt.Fprintf(w, "Deck: %s\nModel: %s (version %d)\nFields: %s\n", doc.Deck, doc.Model, doc.ModelVersion, strings.Join(doc.Fields, ", "))
 	fmt.Fprintln(w, "\nCSS:")
 	fmt.Fprintln(w, doc.CSS)
 	fmt.Fprintf(w, "\nFront template:\n%s\n", doc.FrontTemplate)
@@ -471,6 +478,12 @@ func writeNotePush(w io.Writer, doc notePushDoc) {
 	fmt.Fprintln(w, "Pass Quest — Anki push")
 	fmt.Fprintf(w, "Endpoint: %s\n", doc.Endpoint)
 	fmt.Fprintf(w, "Deck: %s · model: %s (created: %t)\n", doc.Deck, doc.Model, doc.ModelCreated)
+	if doc.ModelUpdated {
+		fmt.Fprintln(w, "Card design: the earlier Pass Quest design in Anki was updated in place.")
+	}
+	if doc.ModelCustomized {
+		fmt.Fprintln(w, "Card design: the note type was changed in Anki, so Pass Quest left its design as it is.")
+	}
 	fmt.Fprintf(w, "Pending %d · pushed %d · already present %d · conflicts %d · failed %d · queued %d\n",
 		doc.Counts.Pending, doc.Counts.Pushed, doc.Counts.AlreadyPresent,
 		doc.Counts.Conflicts, doc.Counts.Failed, doc.Counts.Queued)

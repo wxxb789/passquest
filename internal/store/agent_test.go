@@ -31,6 +31,7 @@ func mustCreateAgentRun(t *testing.T, st *Store, run AgentRun) {
 }
 
 func TestAgentStepEffectIsIdempotentAndLeavesAttemptsAlone(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	existing := mustAppend(t, st, sampleAttempt("q1"))
 	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
@@ -90,6 +91,7 @@ func TestAgentStepEffectIsIdempotentAndLeavesAttemptsAlone(t *testing.T) {
 }
 
 func TestAgentRunRefusesASecondUnfinishedRun(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	first := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
 	mustCreateAgentRun(t, st, first)
@@ -107,6 +109,7 @@ func TestAgentRunRefusesASecondUnfinishedRun(t *testing.T) {
 }
 
 func TestAgentStepRefusedAfterCancellation(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
 	mustCreateAgentRun(t, st, run)
@@ -119,6 +122,7 @@ func TestAgentStepRefusedAfterCancellation(t *testing.T) {
 }
 
 func TestAgentCancellationRequestedIsABarrier(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
 	mustCreateAgentRun(t, st, run)
@@ -141,6 +145,7 @@ func TestAgentCancellationRequestedIsABarrier(t *testing.T) {
 }
 
 func TestAgentStepRefusedAfterCompletion(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
 	mustCreateAgentRun(t, st, run)
@@ -153,6 +158,7 @@ func TestAgentStepRefusedAfterCompletion(t *testing.T) {
 }
 
 func TestAgentTablesAreAppendOnly(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
 	mustCreateAgentRun(t, st, run)
@@ -176,6 +182,7 @@ func TestAgentTablesAreAppendOnly(t *testing.T) {
 }
 
 func TestAgentEventAppendRequiresARun(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	if _, err := st.AppendAgentRunEvent("run-20261110T100000Z-aaaaaaaa", AgentEventInterrupted, nil, time.Now()); !errors.Is(err, ErrAgentRunNotFound) {
 		t.Fatalf("unknown run error = %v", err)
@@ -183,6 +190,7 @@ func TestAgentEventAppendRequiresARun(t *testing.T) {
 }
 
 func TestAgentResumeClaimIsSingleWriter(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
 	mustCreateAgentRun(t, st, run)
@@ -227,6 +235,7 @@ func TestAgentResumeClaimIsSingleWriter(t *testing.T) {
 }
 
 func TestAgentTerminalStateIsAbsorbing(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
 	mustCreateAgentRun(t, st, run)
@@ -247,6 +256,7 @@ func TestAgentTerminalStateIsAbsorbing(t *testing.T) {
 }
 
 func TestAgentTerminalEventIsIdempotent(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
 	mustCreateAgentRun(t, st, run)
@@ -265,6 +275,7 @@ func TestAgentTerminalEventIsIdempotent(t *testing.T) {
 }
 
 func TestAgentRunsSummaryListsStepsAndAttempts(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "agent.sqlite"))
 	run := sampleAgentRun("run-20261110T100000Z-aaaaaaaa")
 	mustCreateAgentRun(t, st, run)
@@ -285,6 +296,7 @@ func TestAgentRunsSummaryListsStepsAndAttempts(t *testing.T) {
 }
 
 func TestMigrationFromVersionEightKeepsAttemptsAndTutorRows(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v8.sqlite")
 	db := openSQLite(t, path)
 	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8} {

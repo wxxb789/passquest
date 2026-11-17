@@ -11,6 +11,7 @@ import (
 )
 
 func TestMigrationFromVersionThirteenKeepsAttemptsAndAddsAssessment(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v13.sqlite")
 	db := openSQLite(t, path)
 	for _, statements := range [][]string{
@@ -101,6 +102,7 @@ func assessmentAttemptFixture(contentID, questionID string, status attempt.Statu
 }
 
 func TestAssessmentRunLifecycle(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "assess.sqlite"))
 	run, items := assessmentRunFixture(2)
 	created, err := st.CreateAssessmentRun(run, items)
@@ -164,6 +166,7 @@ func TestAssessmentRunLifecycle(t *testing.T) {
 }
 
 func TestAssessmentRunResumeAbandonAndReconcile(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "assess.sqlite"))
 	run, items := assessmentRunFixture(1)
 	created, err := st.CreateAssessmentRun(run, items)
@@ -201,6 +204,7 @@ func TestAssessmentRunResumeAbandonAndReconcile(t *testing.T) {
 }
 
 func TestMarkAssessmentUnavailableOnlyForOpenItems(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "unavailable.sqlite"))
 	run, items := assessmentRunFixture(2)
 	created, err := st.CreateAssessmentRun(run, items)
@@ -247,6 +251,7 @@ func TestMarkAssessmentUnavailableOnlyForOpenItems(t *testing.T) {
 }
 
 func TestSpendsUnionIncludesOldAndNewEvidence(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "spends.sqlite"))
 	start := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
 	record := assessmentAttemptFixture("src-p001", "q1", attempt.StatusCorrect, start, start.Add(time.Second))
@@ -295,6 +300,7 @@ func TestSpendsUnionIncludesOldAndNewEvidence(t *testing.T) {
 }
 
 func TestContentPresentationsAreAppendOnly(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "present.sqlite"))
 	if err := st.RecordPresentation("src-p001", "q1", assess.SurfacePractice, time.Now()); err != nil {
 		t.Fatal(err)

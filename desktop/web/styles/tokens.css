@@ -1,4 +1,6 @@
-/* Design tokens: @property, :root, light/dark themes, rooms — ported verbatim from design/prototypes/c-stage.html (lines 16-141, 602, 604-606). Do not normalise values. */
+/* Design tokens: @property, :root, light/dark themes, rooms — ported from design/prototypes/c-stage.html (lines 16-141, 602, 604-606).
+   Goal 0012 changes, all measured by the desktop-ux gate: --t-xs 11.5 → 12 px (no text under 12 px); --ink-3 light 49.5% → 45%,
+   dark 71% → 76%, and light --cool 46% → 44% (AA 4.5:1 over every room gradient and translucent layer). Do not normalise other values. */
 /* ==========================================================================
    STAGE 一念 — design system
    One primary object at a time; everything else recedes in depth.
@@ -14,8 +16,8 @@
   --f-read: "Sitka Text", "Sitka", "Iowan Old Style", "Charter", "Georgia", "Noto Serif SC", "Songti SC", serif;
   --f-read-h: "Sitka Subheading", "Sitka Text", "Sitka", "Iowan Old Style", "Georgia", serif;
   --f-mono: "Cascadia Mono", "SF Mono", "Cascadia Code", Consolas, Menlo, monospace;
-  /* scale: 11.5 · 12.5 · 13 · 14.5 · 15.5 · 17 · 18 · 21 · 26 · 34 · 44 · 88 */
-  --t-xs: 11.5px; --t-s: 12.5px; --t-sm: 13.5px; --t-b: 14.5px; --t-m: 15.5px; --t-l: 17px;
+  /* scale: 12 · 12.5 · 13 · 14.5 · 15.5 · 17 · 18 · 21 · 26 · 34 · 44 · 88 */
+  --t-xs: 12px; --t-s: 12.5px; --t-sm: 13.5px; --t-b: 14.5px; --t-m: 15.5px; --t-l: 17px;
   --t-read: 18px; --t-xl: 21px; --t-2xl: 26px; --t-3xl: 34px; --t-4xl: 44px; --t-hero: 88px;
   /* space (4-base) */
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s7: 32px; --s8: 40px; --s9: 56px;
@@ -34,7 +36,7 @@
   --bg: oklch(96.9% 0.006 255);
   --ink: oklch(22.5% 0.026 262);
   --ink-2: oklch(40% 0.024 262);
-  --ink-3: oklch(49.5% 0.02 262);
+  --ink-3: oklch(45% 0.02 262);
   --ink-4: oklch(68% 0.016 262);           /* decorative only */
   --line: oklch(28% 0.04 262 / .09);
   --line-2: oklch(28% 0.04 262 / .15);
@@ -60,7 +62,7 @@
   --bad: oklch(50.5% 0.165 27);   --bad-soft: oklch(62% 0.15 27 / .11);   --bad-line: oklch(50.5% 0.165 27 / .4);
   --adv: oklch(49% 0.14 314);     --adv-soft: oklch(60% 0.13 314 / .09);  --adv-line: oklch(49% 0.14 314 / .34);
   --warm: oklch(49.5% 0.115 58);  --warm-soft: oklch(75% 0.12 70 / .2);   --warm-line: oklch(55% 0.12 60 / .42);
-  --cool: oklch(46% 0.1 222);     --cool-soft: oklch(70% 0.09 215 / .16); --cool-line: oklch(46% 0.1 222 / .34);
+  --cool: oklch(44% 0.1 222);     --cool-soft: oklch(70% 0.09 215 / .16); --cool-line: oklch(46% 0.1 222 / .34);
   --mark: oklch(88% 0.12 95 / .55);
   --sh-1: 0 1px 1px oklch(30% 0.04 262 / .05), 0 3px 10px oklch(30% 0.04 262 / .05);
   --sh-2: 0 1px 2px oklch(30% 0.04 262 / .05), 0 8px 22px oklch(30% 0.04 262 / .07), 0 24px 56px oklch(30% 0.04 262 / .07);
@@ -76,7 +78,7 @@
   --bg: oklch(17.5% 0.03 264);
   --ink: oklch(95% 0.008 260);
   --ink-2: oklch(82% 0.018 260);
-  --ink-3: oklch(71% 0.022 260);
+  --ink-3: oklch(76% 0.022 260);
   --ink-4: oklch(48% 0.03 262);
   --line: oklch(90% 0.03 262 / .08);
   --line-2: oklch(90% 0.03 262 / .14);

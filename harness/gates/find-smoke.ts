@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { runGo } from "../lib/go.ts";
+import { buildCLI } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
 import { fail, pass } from "../lib/types.ts";
@@ -27,9 +27,7 @@ export const findSmoke: Gate = {
   id: "find-smoke",
   title: "find smoke",
   async run(ctx: GateContext) {
-    const binaryName = process.platform === "win32" ? "passquest.exe" : "passquest";
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-find-smoke-"));
-    const binary = path.join(temp, binaryName);
     const checks: string[] = [];
     let assertions = 0;
     const check = (condition: boolean, message: string): boolean => {
@@ -104,10 +102,11 @@ export const findSmoke: Gate = {
       const endpoint = (mode: string) => `http://127.0.0.1:${stub!.port}/search/${mode}`;
       const hostPath = path.join(ctx.root, "agent", "search-host.mjs");
 
-      const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
-      if (build.code !== 0) {
-        return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
+      const build = await buildCLI(ctx);
+      if ("failure" in build) {
+        return fail(["go build ./cmd/passquest failed", build.failure]);
       }
+      const binary = build.binary;
 
       const baseEnv = { PASSQUEST_SEARCH_HOST: hostPath, PASSQUEST_NODE: process.env.PASSQUEST_NODE ?? "" };
       const call = async (db: string, args: string[], env: Record<string, string> = {}) => {
@@ -173,7 +172,9 @@ export const findSmoke: Gate = {
         socket: { open() {}, data() {}, close() {} },
       });
       probe.end();
-      await Bun.sleep(10);
+      // Wait for the accept callback, bounded, instead of a fixed pause that a
+      // loaded runner can outlast.
+      for (let waited = 0; accepted === 0 && waited < 1000; waited += 10) await Bun.sleep(10);
       check(accepted === 1, `TCP accept probe recorded ${accepted} connection(s)`);
 
       const reportBefore = await call(db1, ["report", "--json"]);

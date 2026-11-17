@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/attempt"
@@ -486,6 +487,22 @@ func runNoteAccept(args []string, opt Options) int {
 	if edited {
 		origin = note.OriginEdited
 	}
+	doc, err := noteAcceptRecord(st, effective, front, back, tactic, origin, opt.Now())
+	if err != nil {
+		return internalError(opt, *jsonFlag, err)
+	}
+	if *jsonFlag {
+		return writeJSON(opt, doc)
+	}
+	writeNoteAccept(opt.Stdout, doc)
+	return 0
+}
+
+// noteAcceptRecord writes the accepted fields of a draft with their origin and
+// returns the accept document. `note accept` and the window's AcceptNote both
+// record through it; each decides the origin from its own view of the draft.
+func noteAcceptRecord(st *store.Store, effective noteEffective, front, back, tactic string, origin note.Origin, at time.Time) (noteAcceptDoc, error) {
+	draft := effective.Draft
 	target := store.NoteTarget{
 		NoteID:         note.NoteID(draft.TargetKey),
 		TargetKey:      draft.TargetKey,
@@ -507,16 +524,16 @@ func runNoteAccept(args []string, opt Options) int {
 		Origin:      string(origin),
 		Model:       effective.Model,
 	}
-	result, err := st.AcceptDraftNote(draft.ID, target, content, opt.Now())
+	result, err := st.AcceptDraftNote(draft.ID, target, content, at)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return noteAcceptDoc{}, err
 	}
 	fields := note.HTML(front, back, tactic, effective.Built.SourceLabel)
 	state := "accepted"
 	if !result.Changed {
 		state = "unchanged"
 	}
-	doc := noteAcceptDoc{
+	return noteAcceptDoc{
 		SchemaVersion:    ProtocolVersion,
 		State:            state,
 		Note:             noteViewOf(result.Note),
@@ -526,12 +543,7 @@ func runNoteAccept(args []string, opt Options) int {
 		Changed:          result.Changed,
 		PreviousRevision: result.Previous,
 		Limits:           noteLimits,
-	}
-	if *jsonFlag {
-		return writeJSON(opt, doc)
-	}
-	writeNoteAccept(opt.Stdout, doc)
-	return 0
+	}, nil
 }
 
 func runNoteSkip(args []string, opt Options) int {
@@ -642,6 +654,7 @@ func runNoteModel(args []string, opt Options) int {
 		State:         "model",
 		Deck:          model.Deck,
 		Model:         model.Name,
+		ModelVersion:  model.Version,
 		Fields:        model.Fields,
 		CSS:           model.CSS,
 		FrontTemplate: model.FrontTemplate,
@@ -717,21 +730,7 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 		}
 	}()
 
-	material := note.RefineMaterial{}
-	if input.Question != nil {
-		material.QuestionStem = input.Question.Stem
-	}
-	if deterministic.Unanswered {
-		// The raw passage can contain the keyed option; send only the example
-		// the deterministic draft already deemed pre-answer-visible.
-		material.PassageText = deterministic.Example
-	} else {
-		material.PassageText = input.PassageText
-		if input.Question != nil {
-			material.Evidence = input.Question.Evidence
-		}
-	}
-	request, err := note.BuildRefineRequest(cfg, deterministic, material)
+	request, err := note.BuildRefineRequest(cfg, deterministic, noteRefineMaterial(input, deterministic))
 	if err != nil {
 		return draft, nil, usageError(opt, jsonMode, "invalid_config", err.Error())
 	}
@@ -800,7 +799,12 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 	if err != nil {
 		return draft, nil, internalError(opt, jsonMode, err)
 	}
-	if err := st.SetNoteDraftRefinement(draft.ID, saved.ID, cfg.Model, front, back); err != nil {
+	// The provider call stays recorded above; the draft takes the suggestion
+	// only if nobody accepted or skipped it while the call ran.
+	if err := st.SetNoteDraftRefinement(draft, saved.ID, cfg.Model, front, back); errors.Is(err, store.ErrNoteDraftChanged) {
+		return draft, nil, usageError(opt, jsonMode, "draft_changed",
+			fmt.Sprintf("note draft #%d was accepted or skipped while the refinement ran; refinement #%d is recorded but not applied", draft.ID, saved.ID))
+	} else if err != nil {
 		return draft, nil, internalError(opt, jsonMode, err)
 	}
 	updated, found, err := st.NoteDraftByID(draft.ID)
@@ -812,6 +816,27 @@ func noteRefine(st *store.Store, draft store.NoteDraft, input note.Input, determ
 	}
 	view := noteRefinementViewOf(saved)
 	return updated, &view, 0
+}
+
+// noteRefineMaterial is the context a refinement request carries. The window's
+// refinement preview builds the same request from it, so what it shows is what
+// would be sent.
+func noteRefineMaterial(input note.Input, deterministic note.Draft) note.RefineMaterial {
+	material := note.RefineMaterial{}
+	if input.Question != nil {
+		material.QuestionStem = input.Question.Stem
+	}
+	if deterministic.Unanswered {
+		// The raw passage can contain the keyed option; send only the example
+		// the deterministic draft already deemed pre-answer-visible.
+		material.PassageText = deterministic.Example
+	} else {
+		material.PassageText = input.PassageText
+		if input.Question != nil {
+			material.Evidence = input.Question.Evidence
+		}
+	}
+	return material
 }
 
 func noteRefineFailure(st *store.Store, draft store.NoteDraft, record store.NoteRefinement, reservation int64, opt Options, jsonMode bool) (store.NoteDraft, *noteRefinementView, int) {

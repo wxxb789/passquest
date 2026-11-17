@@ -73,6 +73,32 @@ type CoachReply struct {
 	Limits         []string       `json:"limits"`
 }
 
+// CoachHistory lists the advisory calls recorded for one attempt, oldest
+// first. It never carries a credential or a request body.
+type CoachHistory struct {
+	AttemptID int64       `json:"attempt_id"`
+	Calls     []CoachCall `json:"calls"`
+	Limits    []string    `json:"limits"`
+}
+
+// CoachCall is one recorded call: State "advisory" carries the reply text,
+// State "failed" its Failure.
+type CoachCall struct {
+	CallID           int64         `json:"call_id"`
+	CreatedAt        string        `json:"created_at"`
+	Mode             string        `json:"mode"`
+	Provider         string        `json:"provider"`
+	Model            string        `json:"model"`
+	FailoverFrom     string        `json:"failover_from,omitempty"`
+	State            string        `json:"state"`
+	Text             string        `json:"text"`
+	Advisory         bool          `json:"advisory"`
+	VerifiedAnswer   bool          `json:"verified_answer"`
+	SourceTextShared bool          `json:"source_text_shared"`
+	LatencyMS        int64         `json:"latency_ms"`
+	Failure          *CoachFailure `json:"failure"`
+}
+
 // CoachFailure is a provider failure recorded as a call.
 type CoachFailure struct {
 	Code    string `json:"code"`

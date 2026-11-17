@@ -1,113 +1,60 @@
 import { Database } from "bun:sqlite";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { startAnkiStub } from "../lib/anki-stub.ts";
+import { buildDesktop, launchDesktop, removeTree } from "../lib/desktop.ts";
 import {
-  buildDesktop,
-  childProcesses,
-  launchDesktop,
-  listeningSockets,
-  removeTree,
-  startDesktop,
-  stillRunning,
-} from "../lib/desktop.ts";
-import type { LaunchResult, ProcessInfo } from "../lib/desktop.ts";
-import { hasGoMod, runGo } from "../lib/go.ts";
+  chatReply,
+  cleanEnv,
+  cliJson,
+  desktopSurface,
+  launchPage,
+  pageScript,
+  parse,
+  SKILL,
+  startProviderStub,
+  STUB_CREDENTIAL_ENV,
+  STUB_MODEL,
+  STUB_PROVIDER,
+  tail,
+  writeStubRegistry,
+} from "../lib/desktop-page.ts";
+import type { Check, Launched, ProviderStub } from "../lib/desktop-page.ts";
+import { buildCLI } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
 import type { RunResult } from "../lib/process.ts";
 import { resolve } from "../lib/repo.ts";
 import { seedReviewedSource } from "../lib/reviewed-source.ts";
-import { fail, pass, skip } from "../lib/types.ts";
-import type { Gate, GateContext } from "../lib/types.ts";
+import { fail, pass } from "../lib/types.ts";
+import type { Gate, GateContext, GateResult } from "../lib/types.ts";
 
 /**
- * The app contract this gate drives (implemented by cmd/passquest-desktop):
- * PASSQUEST_DESKTOP_SCRIPT is a .js file whose content is the body of an async
- * function evaluated in the page after load; the app writes
- * {"ok":bool,"value":...,"error":string} to PASSQUEST_DESKTOP_RESULT and quits.
- * PASSQUEST_DESKTOP_HIDDEN=1 hides the window, PASSQUEST_DESKTOP_DATA is the
- * user-data directory (database at <dir>/passquest.sqlite), and
- * PASSQUEST_DESKTOP_SECRET_SERVICE names the credential-store service so a run
- * never touches the learner's real one. With MYGO_GENERATE set the binary only
- * writes its TypeScript client to that path.
- *
- * Each scenario gets a fresh data directory; a scenario about persistence
- * launches the window more than once on its own directory. A second process
+ * Drives the app contract described in harness/lib/desktop-page.ts. Each
+ * scenario gets a fresh data directory; a scenario about persistence launches
+ * the window more than once on its own directory. A second process
  * (`passquest ... --db`) cross-checks what the window recorded.
  */
-const DESKTOP_SURFACES = ["cmd/passquest-desktop", "desktop/web", "internal/desktop"];
 const CLIENT_PATH = "desktop/web/src/api/mygo.ts";
-const LAUNCH_TIMEOUT_MS = 60_000;
 const GENERATE_TIMEOUT_MS = 30_000;
-/** WebView2 and WebKit helpers exit shortly after the host; longer is an orphan. */
-const ORPHAN_GRACE_MS = 10_000;
 const MIN_TODAY_TEXT = 200;
 /** Nothing listens on port 1: the "Anki is not running" endpoint. */
 const UNREACHABLE_ENDPOINT = "http://127.0.0.1:1";
-const STUB_PROVIDER = "stub";
-const STUB_MODEL = `${STUB_PROVIDER}/stub-model`;
-/** The registry requires PASSQUEST_<PROVIDER>_API_KEY. */
-const STUB_CREDENTIAL_ENV = "PASSQUEST_STUB_API_KEY";
-/** The scoring skill a fresh database recommends; its tactic has a guided and an independent stage. */
-const SKILL = "not-except-polarity";
 const IMPORT_FIXTURE = "internal/cli/testdata/import";
 const IMPORTED_SENTENCE = "The Westbridge Community Library closes at 4 p.m. on Saturdays.";
 /** Markup a model could return; it must reach the learner as text, never as elements. */
 const HOSTILE_MARKUP = '<b>x</b><img src=x onerror="document.title=\'pwned\'">';
+/** The AI refinement the stub returns; its back carries markup that must stay text. */
+const REFINED_FRONT = "smoke-refined NOT EXCEPT";
+const REFINED_BACK = `Refined back: read the options against the passage. ${HOSTILE_MARKUP}`;
+/** How long the stub holds the refinement sent after Retry: the window is checked while it waits. */
+const REFINE_HOLD_MS = 5_000;
 const NAVIGATOR_STATES = ["pending", "presented", "answered", "timed_out", "unavailable"];
 const NAVIGATOR_CLASSES = ["cell", "cur", "ans", "to"];
 const NAVIGATOR_ATTRIBUTES = ["class", "role", "data-state", "data-position", "aria-label", "title", "aria-current"];
-
-type Check = (condition: boolean, message: string) => boolean;
-
-interface ProviderRequest {
-  authorization: string;
-  path: string;
-  raw: string;
-  sha256: string;
-}
-
-/** A loopback OpenAI-compatible endpoint; `respond` is set per scenario. */
-interface ProviderStub {
-  endpoint: string;
-  received: ProviderRequest[];
-  respond: (request: ProviderRequest) => Response | Promise<Response>;
-  stop: () => void;
-}
-
-function chatReply(text: string): Response {
-  return Response.json({ choices: [{ message: { content: text } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
-}
-
-function startProviderStub(): ProviderStub {
-  const stub: ProviderStub = {
-    endpoint: "",
-    received: [],
-    respond: () => chatReply("OK"),
-    stop: () => server.stop(true),
-  };
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    async fetch(request) {
-      const raw = await request.text();
-      const entry: ProviderRequest = {
-        authorization: request.headers.get("authorization") ?? "",
-        path: new URL(request.url).pathname,
-        raw,
-        sha256: createHash("sha256").update(raw).digest("hex"),
-      };
-      stub.received.push(entry);
-      return stub.respond(entry);
-    },
-  });
-  stub.endpoint = `http://127.0.0.1:${server.port}/v1/chat/completions`;
-  return stub;
-}
 
 interface Shared {
   ctx: GateContext;
@@ -145,76 +92,6 @@ interface LaunchSpec {
   killWhen?: () => Promise<boolean>;
 }
 
-interface Launched {
-  value: unknown;
-  killed: boolean;
-  /** The app's stdout and stderr. */
-  output: string;
-  resultPath: string;
-}
-
-/**
- * Helpers every scenario script starts with. Steps wait on the DOM hooks the
- * views expose; a step that never happens throws with the route, error bar and
- * toast, so the failed result says where the window stopped.
- */
-const PRELUDE = `
-const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
-const q = (selector) => document.querySelector(selector);
-const all = (selector) => Array.from(document.querySelectorAll(selector));
-const data = (selector) => Object.assign({}, q(selector)?.dataset);
-const situation = () => {
-  const bar = q("#errbar, .error-bar");
-  const toast = q(".toast");
-  return " [route " + (location.hash || "#/today") + (bar ? "; error bar: " + bar.textContent : "") + (toast ? "; toast: " + toast.textContent : "") + "]";
-};
-const until = async (what, probe, ms = 15000) => {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    const value = probe();
-    if (value) return value;
-    if (Date.now() > deadline) throw new Error("timed out waiting for " + what + situation());
-    await sleep(50);
-  }
-};
-const click = async (selector) => {
-  const element = await until(selector + " (enabled)", () => {
-    const found = q(selector);
-    return found && !found.disabled ? found : null;
-  }, 10000);
-  element.click();
-};
-const press = (key) => document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
-const today = async () => {
-  if (location.hash !== "" && location.hash !== "#/today") location.hash = "#/today";
-  await until("Today", () => q('[data-testid="hero"]'));
-  await sleep(150);
-};
-const startFromSheet = async (act, value) => {
-  await today();
-  await click('[data-act="sheet"][data-v="pick"]');
-  const target = '#layer [data-act="' + act + '"][data-v="' + value + '"]';
-  await until("the practice sheet entry " + value, () => q(target));
-  await click(target);
-  await until("a practice item", () => q('[data-testid="practice-item"]'));
-};
-const answer = async (key) => {
-  await until("a practice item", () => q('[data-testid="practice-item"]'));
-  await sleep(250);
-  const shown = { item: data('[data-testid="practice-item"]'), condition: data('[data-testid="condition"]') };
-  press(key);
-  const chosen = await until("option " + key + " to be selected", () => q('.opt[aria-checked="true"]'));
-  press("Enter");
-  await until("the feedback card", () => q('[data-testid="feedback"]'));
-  return { ...shown, chosen: chosen.dataset.v, feedback: data('[data-testid="feedback"]'), counted: data('[data-testid="feedback-condition"]') };
-};
-await until("window.__pq.ready", () => window.__pq && window.__pq.ready === true, 20000);
-`;
-
-function pageScript(body: string): string {
-  return `${PRELUDE}\n${body}`;
-}
-
 const BOOT_SCRIPT = `
 const stage = () => document.querySelector("#stage");
 const ready = () => window.__pq === undefined || window.__pq.ready === true;
@@ -234,159 +111,39 @@ return {
 };
 `;
 
-function tail(text: string, lines = 12): string {
-  return text.replace(/\r\n/g, "\n").trim().split("\n").slice(-lines).join("\n");
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((done) => setTimeout(done, ms));
-}
-
-function describe(processes: ProcessInfo[]): string {
-  return processes.map((entry) => `${entry.pid} ${entry.command}`).join(", ");
-}
-
-function parse(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
 /** Milliseconds since the epoch; the window and the CLI print different sub-millisecond digits. */
 function instant(text: string | undefined): number {
   return text === undefined ? Number.NaN : Date.parse(text.replace(/(\.\d{3})\d+/, "$1"));
 }
 
-/** This process's environment without any PASSQUEST_* variable a developer shell may carry. */
-function cleanEnv(): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = {};
-  for (const [name, value] of Object.entries(process.env)) {
-    if (!name.startsWith("PASSQUEST_")) env[name] = value;
-  }
-  return env;
-}
-
 /** Launches the window once with a script and returns the script's value, or null after a failed check. */
-async function launch(s: ScenarioRun, spec: LaunchSpec): Promise<Launched | null> {
-  const { check } = s;
-  const where = spec.label === s.id ? s.id : `${s.id} (${spec.label})`;
-  const scriptPath = path.join(s.dir, `${spec.label}.js`);
-  const resultPath = path.join(s.dir, `${spec.label}.result.json`);
-  writeFileSync(scriptPath, `// desktop-smoke: ${s.id}/${spec.label}\n${spec.script}`);
-
-  const env: Record<string, string | undefined> = {
-    ...cleanEnv(),
-    PASSQUEST_DESKTOP_SCRIPT: scriptPath,
-    PASSQUEST_DESKTOP_RESULT: resultPath,
-    PASSQUEST_DESKTOP_HIDDEN: "1",
-    PASSQUEST_DESKTOP_DATA: s.dataDir,
-    PASSQUEST_DESKTOP_SECRET_SERVICE: s.service,
-    PASSQUEST_PROVIDER_REGISTRY: s.shared.registry,
-    PASSQUEST_ANKI_ENDPOINT: UNREACHABLE_ENDPOINT,
-    // A fresh profile per launch, removed with the gate's temporary tree once
-    // the orphan check has seen every WebView2 helper exit.
-    WEBVIEW2_USER_DATA_FOLDER: path.join(s.dir, `${spec.label}.webview2`),
-    ...spec.env,
-  };
-  // The repository root is the working directory, so the app finds
-  // agent/*.mjs and runs them under Node the way the CLI smokes do.
-  const handle = startDesktop({ binary: s.shared.binary, env, timeoutMs: LAUNCH_TIMEOUT_MS, cwd: s.shared.ctx.root });
-  let exited = false;
-  let outcome: LaunchResult | undefined;
-  const finished = handle.result.then((result) => {
-    exited = true;
-    outcome = result;
+function launch(s: ScenarioRun, spec: LaunchSpec): Promise<Launched | null> {
+  return launchPage({
+    binary: s.shared.binary,
+    // The repository root is the working directory, so the app finds
+    // agent/*.mjs and runs them under Node the way the CLI smokes do.
+    cwd: s.shared.ctx.root,
+    dir: s.dir,
+    label: spec.label,
+    header: `desktop-smoke: ${s.id}/${spec.label}`,
+    where: spec.label === s.id ? s.id : `${s.id} (${spec.label})`,
+    script: spec.script,
+    env: {
+      PASSQUEST_DESKTOP_DATA: s.dataDir,
+      PASSQUEST_DESKTOP_SECRET_SERVICE: s.service,
+      PASSQUEST_PROVIDER_REGISTRY: s.shared.registry,
+      PASSQUEST_ANKI_ENDPOINT: UNREACHABLE_ENDPOINT,
+      ...spec.env,
+    },
+    check: s.check,
+    probeListeners: spec.probeListeners,
+    killWhen: spec.killWhen,
   });
-
-  // While the app runs: remember its children (POSIX reparents orphans, so the
-  // after-exit check compares against this snapshot) and probe listeners.
-  let appPid: number | null = null;
-  const seen = new Map<number, ProcessInfo>();
-  let listenerProbes = 0;
-  let killed = false;
-  while (!exited) {
-    appPid ??= await handle.appPid();
-    if (appPid !== null && !exited) {
-      const children = await childProcesses(appPid);
-      if ("items" in children) for (const child of children.items) seen.set(child.pid, child);
-      if (spec.probeListeners && !exited) {
-        const owners = [appPid, ...("items" in children ? children.items.map((child) => child.pid) : [])];
-        const sockets = await listeningSockets(owners);
-        if ("error" in sockets) {
-          check(false, `${where}: cannot list listening sockets: ${sockets.error}`);
-        } else {
-          listenerProbes++;
-          for (const socket of sockets.items) {
-            check(false, `${where}: process ${socket.pid} listens on TCP ${socket.address}:${socket.port}`);
-          }
-        }
-      }
-    }
-    if (spec.killWhen && !killed && !exited && (await spec.killWhen())) {
-      killed = true;
-      await handle.kill();
-    }
-    await Promise.race([finished, sleep(250)]);
-  }
-  await finished;
-  const result = outcome as LaunchResult;
-  if (spec.probeListeners) {
-    check(listenerProbes > 0, `${where}: no listening-socket probe completed while the app ran`);
-  }
-
-  const output = `${result.stdout}\n${result.stderr}`;
-  const shortOutput = tail(output);
-  if (result.error) {
-    check(false, `${where}: could not launch: ${result.error}`);
-    return null;
-  }
-  if (!check(!result.timedOut, `${where}: timeout after ${LAUNCH_TIMEOUT_MS} ms; killed\n${shortOutput}`)) return null;
-
-  // After exit: nothing the app started may outlive it.
-  let survivors: ProcessInfo[] = [];
-  const deadline = Date.now() + ORPHAN_GRACE_MS;
-  for (;;) {
-    const remembered = await stillRunning([...seen.values()]);
-    const orphans = process.platform === "win32" && appPid !== null ? await childProcesses(appPid) : { items: [] };
-    if ("error" in remembered || "error" in orphans) {
-      const error = "error" in remembered ? remembered.error : "error" in orphans ? orphans.error : "";
-      check(false, `${where}: cannot list child processes: ${error}`);
-      break;
-    }
-    survivors = [...remembered.items, ...orphans.items.filter((entry) => !seen.has(entry.pid))];
-    if (survivors.length === 0 || Date.now() > deadline) break;
-    await sleep(500);
-  }
-  check(survivors.length === 0, `${where}: child process(es) outlived the app: ${describe(survivors)}`);
-  if (killed) return { value: undefined, killed, output, resultPath };
-
-  if (!existsSync(resultPath)) {
-    check(false, `${where}: app exited ${result.code} without writing a result\n${shortOutput}`);
-    return null;
-  }
-  let document: unknown;
-  try {
-    document = JSON.parse(readFileSync(resultPath, "utf8"));
-  } catch (error) {
-    check(false, `${where}: result is not JSON: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
-  }
-  if (!check(field(document, "ok") === true, `${where}: script failed: ${String(field(document, "error") ?? "no error text")}`)) {
-    return null;
-  }
-  if (!check(result.code === 0, `${where}: app exit = ${result.code}\n${shortOutput}`)) return null;
-  return { value: field(document, "value"), killed, output, resultPath };
 }
 
 /** `passquest <args> --db <scenario db> --json` from the repository root. */
-async function cli(s: ScenarioRun, args: string[], env: Record<string, string> = {}): Promise<RunResult & { doc: unknown }> {
-  const result = await run(s.shared.cli, [...args, "--db", s.database, "--json"], {
-    cwd: s.shared.ctx.root,
-    env: { PASSQUEST_PROVIDER_REGISTRY: s.shared.registry, ...env },
-  });
-  return { ...result, doc: parse(result.stdout) };
+function cli(s: ScenarioRun, args: string[], env: Record<string, string> = {}): Promise<RunResult & { doc: unknown }> {
+  return cliJson(s.shared.cli, s.database, s.shared.ctx.root, args, { PASSQUEST_PROVIDER_REGISTRY: s.shared.registry, ...env });
 }
 
 /** Runs CLI setup steps in order; false after the first one that fails. */
@@ -804,7 +561,15 @@ await sleep(300);
 const retrySentAt = Date.now();
 await click('[data-act="coach-send"]');
 const after = await until("the retried reply", () => q('[data-testid="coach-reply"]') || q('[data-testid="coach-failure"]'), 30000);
-return { answered, withheld, reply: shown, granted, failure: failed, retried, retrySentAt, retry: { failed: after.dataset.testid !== "coach-reply", code: after.dataset.code ?? null, text: after.textContent } };
+// The history view lists this attempt's calls, oldest first, each reply as text.
+await click('[data-act="coach-history"]');
+await until("the coach history", () => q('[data-testid="coach-history"]'), 20000);
+const history = {
+  calls: all('[data-testid="coach-call"]').map((c) => ({ call: c.dataset.call, state: c.dataset.state, mode: c.dataset.mode, text: c.textContent })),
+  elements: document.querySelectorAll('[data-testid="coach-history"] p b, [data-testid="coach-history"] p img, [data-testid="coach-history"] script').length,
+  title: document.title,
+};
+return { answered, withheld, reply: shown, granted, failure: failed, retried, retrySentAt, retry: { failed: after.dataset.testid !== "coach-reply", code: after.dataset.code ?? null, text: after.textContent }, history };
 `),
     });
     provider.respond = () => chatReply("OK");
@@ -845,6 +610,32 @@ return { answered, withheld, reply: shown, granted, failure: failed, retried, re
       "coach: Retry called the provider before the learner sent from the preview",
     );
     s.check(third.sha256 === stringField(field(value, "retried"), "sha"), "coach: the preview shown after Retry is not the body the provider received");
+    // History: the window lists exactly the attempt's recorded calls, in order, replies as text.
+    const attemptID = stringField(field(field(value, "answered"), "feedback"), "attempt");
+    const recorded = attemptID === undefined ? null : await cli(s, ["tutor", "history", "--attempt", attemptID]);
+    const recordedCalls = recorded ? arrayField(recorded.doc, "calls") : [];
+    const history = field(value, "history");
+    const shownCalls = arrayField(history, "calls");
+    s.check(
+      recordedCalls.length === 3 && shownCalls.length === recordedCalls.length,
+      `coach: history shows ${shownCalls.length} call(s); tutor history --attempt records ${recordedCalls.length}, want 3`,
+    );
+    s.check(
+      shownCalls.map((c) => stringField(c, "call")).join(",") === recordedCalls.map((c) => String(numberField(c, "id"))).join(","),
+      "coach: the history's calls are not the attempt's recorded calls in order",
+    );
+    s.check(
+      shownCalls.map((c) => stringField(c, "state")).join(",") === "advisory,failed,advisory",
+      `coach: history states ${shownCalls.map((c) => stringField(c, "state")).join(",")}, want advisory,failed,advisory`,
+    );
+    s.check(
+      shownCalls.map((c) => stringField(c, "mode")).join(",") === recordedCalls.map((c) => stringField(c, "mode")).join(","),
+      "coach: the history's modes are not the recorded modes",
+    );
+    s.check((stringField(shownCalls[0], "text") ?? "").includes(HOSTILE_MARKUP), "coach: the history does not show the earlier advisory reply as literal text");
+    s.check((stringField(shownCalls[1], "text") ?? "").includes("auth_failed"), "coach: the history does not show the failed call's code");
+    s.check((stringField(shownCalls[2], "text") ?? "").includes("Retried"), "coach: the history does not show the retried reply");
+    s.check(numberField(history, "elements") === 0 && stringField(history, "title") !== "pwned", "coach: the history's reply markup became elements");
   },
 };
 
@@ -947,9 +738,63 @@ return { resumed, answered, navigators, report: data('[data-testid="report"]'), 
   },
 };
 
+/**
+ * A hand-configured endpoint (`tutor config --endpoint --model`, the legacy manual configuration): the
+ * core previews its calls with no registry provider id. The coach and the refine panel must show that
+ * preview — its call strip and a Send naming the endpoint's host — not a missing configuration.
+ */
+const manual: Scenario = {
+  id: "manual",
+  async run(s) {
+    const endpoint = s.shared.provider.endpoint;
+    if (!(await setup(s, [["tutor", "config", "--endpoint", endpoint, "--model", STUB_MODEL.split("/")[1]]]))) return;
+    const launched = await launch(s, {
+      label: "manual",
+      script: pageScript(`
+const shown = (element) => ({
+  send: element.matches("[data-act]"),
+  text: element.textContent.replace(/\\s+/g, " ").trim(),
+});
+await today();
+press("Enter");
+await answer("1");
+const coach = await until("the coach preview or its failure", () => q('[data-act="coach-send"]') || q('[data-testid="coach-failure"]'), 20000);
+const coachShown = { ...shown(coach), strip: !!q('[data-testid="call-strip"]') };
+press("k");
+await until("the card preview", () => q('[data-testid="card-preview"]'), 20000);
+press("e");
+await until("the front field", () => q('[data-field="front"]'));
+await click('.esheet [data-act="refine"]');
+const refine = await until("the refine preview or its failure", () => q('[data-act="refine-send"]') || q('[data-testid="refine-failure"]'), 20000);
+return { coach: coachShown, refine: { ...shown(refine), strip: !!q('[data-testid="refine-strip"]') } };
+`),
+    });
+    if (!launched) return;
+    const host = new URL(endpoint).host;
+    for (const name of ["coach", "refine"]) {
+      const shown = field(launched.value, name);
+      s.check(
+        field(shown, "send") === true && field(shown, "strip") === true,
+        `manual: the ${name} shows ${String(stringField(shown, "text"))} instead of the call strip and Send for the configured endpoint`,
+      );
+      s.check(stringField(shown, "text")?.includes(host) === true, `manual: the ${name}'s Send does not name the endpoint ${host}: ${String(stringField(shown, "text"))}`);
+    }
+  },
+};
+
 const anki: Scenario = {
   id: "anki",
   async run(s) {
+    const { provider } = s.shared;
+    const key = `sk-smoke-${randomBytes(12).toString("hex")}`;
+    const keyEnv = { [STUB_CREDENTIAL_ENV]: key };
+    // The refinement goes to the loopback provider stub through the real Node tutor host.
+    if (!(await setup(s, [["model", "test", STUB_MODEL], ["model", "use", STUB_MODEL]], keyEnv))) return;
+    // `note model` reads no database: the model is the package's own.
+    const model = await run(s.shared.cli, ["note", "model", "--json"], { cwd: s.shared.ctx.root });
+    const modelCSS = stringField(parse(model.stdout), "css");
+    if (!s.check(model.code === 0 && modelCSS !== undefined, `anki: note model exit = ${model.code}`)) return;
+    const modelCSSSHA = createHash("sha256").update(modelCSS!).digest("hex");
     const stub = startAnkiStub();
     // After the first push has verified its card, Anki stops listening.
     stub.afterAction = (action) => {
@@ -970,20 +815,139 @@ return { draft: data('[data-testid="anki"]').draft, preview: data('[data-testid=
 `),
       });
       if (!pending) return;
+      provider.received.length = 0;
+      // The first refinement is not a JSON object (a typed failure); the one sent after Retry is, and
+      // it is held back so the window can be checked while the request waits.
+      let refineReleasedAt = 0;
+      provider.respond = async () => {
+        if (provider.received.length === 1) return chatReply("I would rather not answer in JSON.");
+        if (provider.received.length === 2) {
+          await new Promise((done) => setTimeout(done, REFINE_HOLD_MS));
+          refineReleasedAt = Date.now();
+        }
+        return chatReply(JSON.stringify({ front: REFINED_FRONT, back: REFINED_BACK }));
+      };
       const launched = await launch(s, {
         label: "anki",
-        env: { PASSQUEST_ANKI_ENDPOINT: stub.endpoint },
+        env: { PASSQUEST_ANKI_ENDPOINT: stub.endpoint, ...keyEnv },
         script: pageScript(`
 location.hash = "#/anki";
 await until("the restored draft", () => q('[data-testid="anki"][data-draft]') && q('[data-testid="card-preview"]'), 20000);
 const restored = { draft: data('[data-testid="anki"]').draft, preview: data('[data-testid="card-preview"]') };
 // The restored draft is the one edited, accepted and pushed below.
 const proposed = restored.preview;
+// Every shown frame against the backend's own document for the shown side and theme.
+const opened = await window.mygo.call("Study.OpenNoteDraft");
+const backend = await window.mygo.call("Study.PreviewNote", opened.id, opened.fields);
+const frameState = (f) => {
+  const doc = f.contentDocument;
+  const root = doc ? doc.documentElement : null;
+  return {
+    side: f.dataset.side,
+    theme: f.dataset.theme,
+    same: f.getAttribute("srcdoc") === backend[f.dataset.side][f.dataset.theme],
+    body: doc && doc.body ? doc.body.className : null,
+    scrollHeight: root ? root.scrollHeight : -1,
+    contentHeight: root ? Math.ceil(root.getBoundingClientRect().height) : -1,
+    bodyHeight: doc && doc.body ? Math.ceil(doc.body.getBoundingClientRect().height) : -1,
+    scrollWidth: root ? root.scrollWidth : -1,
+    height: f.clientHeight,
+    // The height the window set on the frame, if any: tells a fit that never ran from one that measured wrong.
+    styled: f.style.height || "unset",
+    // How the frame's box reads by other routes, and whether the page is shown: diagnostics only.
+    layout: "offset " + f.offsetHeight + ", rect " + Math.round(f.getBoundingClientRect().height) + ", computed " + getComputedStyle(f).height + ", page " + document.visibilityState +
+      ", anims [" + (f.getAnimations ? f.getAnimations().map((a) => a.transitionProperty || a.animationName || a.constructor.name).join("/") : "n/a") + "]",
+    width: f.clientWidth,
+    scripts: doc ? doc.scripts.length : -1,
+  };
+};
+const settled = async (what, sides, theme) => {
+  await until(what, () => {
+    const frames = all('[data-testid="card-frame"]');
+    return frames.length === sides.length && frames.every((f, i) => f.dataset.side === sides[i] && f.dataset.theme === theme && f.contentDocument && f.contentDocument.readyState === "complete" && f.contentDocument.body && f.clientHeight > 40);
+  }, 20000);
+  await sleep(700);
+  return all('[data-testid="card-frame"]').map(frameState);
+};
+await click('[data-act="ctheme"][data-v="light"]');
+const frames = [];
+frames.push(...(await settled("both light sides", ["question", "answer"], "light")));
+await click('[data-act="ctheme"][data-v="dark"]');
+frames.push(...(await settled("both night sides", ["question", "answer"], "night")));
+await click('[data-act="side"][data-v="front"]');
+frames.push(...(await settled("the night front", ["question"], "night")));
+await click('[data-act="cwidth"][data-v="phone"]');
+await click('[data-act="side"][data-v="back"]');
+const phone = await settled("the phone back", ["answer"], "night");
+frames.push(...phone);
+await click('[data-act="cwidth"][data-v="desk"]');
+await click('[data-act="side"][data-v="both"]');
+await click('[data-act="ctheme"][data-v="light"]');
+await settled("both light sides again", ["question", "answer"], "light");
+const card = { frames, phone, cssSha: data('[data-testid="card-preview"]').cssSha, backendCssSha: backend.css_sha256, sha: data('[data-testid="card-preview"]').sha, backendSha: backend.fields_sha256, document: backend.question.light };
 press("e");
-const front = await until("the front field", () => q('[data-field="front"]'));
+await until("the front field", () => q('[data-field="front"]'));
+// Refine: preview → a typed failure → Retry (preview only) → send → an advisory suggestion.
+await click('[data-act="refine"]');
+const strip = () => q('[data-testid="refine-strip"]');
+await until("the refinement preview", () => strip() && q('[data-act="refine-send"]:not([disabled])'), 20000);
+const refinePreview = data('[data-testid="refine-strip"]');
+await click('[data-act="refine-send"]');
+const refineFailure = await until("the refinement failure", () => q('[data-testid="refine-failure"]'), 30000);
+const refineFailed = { code: refineFailure.dataset.code, text: refineFailure.textContent };
+await click('[data-testid="refine-failure"] [data-act="refine-retry"]');
+await until("the preview after Retry", () => !q('[data-testid="refine-failure"]') && strip() && q('[data-act="refine-send"]:not([disabled])'), 20000);
+const refineRetried = data('[data-testid="refine-strip"]');
+await click('[data-act="refine-send"]');
+// The stub holds this reply. While it waits the draft is held: no Accept or Skip.
+await until("the send in flight", () => q('[data-act="refine-send"][disabled]'), 5000);
+const accepts = () => all('[data-act="accept"]').map((b) => b.disabled);
+const skips = () => all('[data-act="askip"]').map((b) => b.disabled);
+const sending = { accept: accepts(), skip: skips(), reason: q('[data-testid="refine-wait"]')?.textContent ?? null };
+// Closing the panel hides the request without dropping it; reopening shows it still waiting.
+await click('[data-act="refine-close"]');
+await until("the closed panel", () => !q('[data-testid="refine"]'));
+const closed = { accept: accepts(), skip: skips(), reason: q('[data-testid="refine-wait"]')?.textContent ?? null };
+await click('.esheet [data-act="refine"]');
+await until("the reopened panel", () => q('[data-testid="refine"]'));
+// Long enough for a fresh preview to load, if the window wrongly asked for one.
+await sleep(800);
+const resend = q('[data-act="refine-send"]');
+const reopened = {
+  send: resend ? { disabled: resend.disabled, text: resend.textContent } : null,
+  strip: data('[data-testid="refine-strip"]'),
+  suggestion: !!q('[data-testid="refine-suggestion"]'),
+  failure: !!q('[data-testid="refine-failure"]'),
+  focused: q('[data-testid="refine"]').contains(document.activeElement),
+  accept: accepts(),
+};
+// A second send for the same draft must not start while the first waits.
+if (resend && !resend.disabled) resend.click();
+const sug = await until("the suggestion", () => q('[data-testid="refine-suggestion"]'), 30000);
+const refineSettled = { at: Date.now(), accept: accepts(), skip: skips(), reason: !!q('[data-testid="refine-wait"]') };
+const suggestion = {
+  front: q('[data-testid="suggested-front"]').textContent,
+  back: q('[data-testid="suggested-back"]').textContent,
+  elements: sug.querySelectorAll("b, img, script").length,
+  injected: document.querySelectorAll('img[src="x"]').length,
+  title: document.title,
+  fieldsBefore: { front: q('[data-field="front"]').value, back: q('[data-field="back"]').value },
+};
+await click('[data-act="refine-use"]');
+await until("the suggestion in the fields", () => q('[data-field="front"]').value === suggestion.front && q('[data-field="back"]').value === suggestion.back);
+// The suggestion as it stands is the refined card, not a learner edit.
+await until("the used suggestion's preview", () => { const preview = q('[data-testid="card-preview"]'); return preview && preview.dataset.sha !== proposed.sha; });
+const used = {
+  preview: data('[data-testid="card-preview"]'),
+  draft: data('[data-testid="anki"]').draft,
+  notes: (await window.mygo.call("Study.Notes")).notes.length,
+  localNotes: all('[data-testid="note"]').length,
+  editing: !!q('[data-field="front"]'),
+};
+const front = q('[data-field="front"]');
 front.value = front.value + " smoke-edit";
 front.dispatchEvent(new Event("input", { bubbles: true }));
-await until("the edited preview", () => { const preview = q('[data-testid="card-preview"]'); return preview && preview.dataset.sha !== proposed.sha && preview.dataset.edited === "true"; });
+await until("the edited preview", () => { const preview = q('[data-testid="card-preview"]'); return preview && preview.dataset.sha !== used.preview.sha && preview.dataset.edited === "true"; });
 const edited = data('[data-testid="card-preview"]');
 await click("#acceptbtn2");
 await until("the accepted note", () => q('[data-testid="note"]') && q('[data-act="push"]'), 20000);
@@ -1001,7 +965,7 @@ await until("the second accepted note", () => q('[data-testid="note"][data-state
 await sleep(300);
 await click('[data-act="push"]');
 await until("a queued note", () => q('[data-testid="sync-counts"]')?.dataset.queued === "1", 30000);
-return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-counts"]'), notes: all('[data-testid="note"]').map((note) => note.dataset.state) };
+return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-counts"]'), notes: all('[data-testid="note"]').map((note) => note.dataset.state), card, refinePreview, refineFailed, refineRetried, sending, closed, reopened, refineSettled, suggestion, used };
 `),
       });
       if (!launched) return;
@@ -1029,7 +993,116 @@ return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-co
       s.check(stringField(field(value, "queued"), "queued") === "1", "anki: an unreachable Anki did not queue the note");
       const states = arrayField(value, "notes").map(String);
       s.check(states.includes("pushed") && states.includes("queued"), `anki: note states ${states.join(", ")}`);
+
+      // The card preview is the backend's documents, byte for byte, with the model stylesheet.
+      const card = field(value, "card");
+      const frames = arrayField(card, "frames");
+      s.check(frames.length === 6, `anki: ${frames.length} card frame(s) observed, want 6`);
+      for (const frame of frames) {
+        const where = `${String(stringField(frame, "side"))}/${String(stringField(frame, "theme"))}`;
+        s.check(field(frame, "same") === true, `anki: the ${where} frame's srcdoc is not the backend document for that side and theme`);
+        const night = stringField(frame, "theme") === "night";
+        s.check(
+          stringField(frame, "body") === (night ? "card card1 nightMode night_mode" : "card card1"),
+          `anki: the ${where} frame's body class is ${String(stringField(frame, "body"))}`,
+        );
+        const height = numberField(frame, "height") ?? 0;
+        s.check(
+          height > 40 && (numberField(frame, "scrollHeight") ?? Infinity) <= height,
+          `anki: the ${where} frame clips or scrolls (content ${String(numberField(frame, "scrollHeight"))} px, frame ${height} px)`,
+        );
+        s.check(
+          Math.abs(height - (numberField(frame, "contentHeight") ?? -100)) <= 1,
+          `anki: the ${where} frame is not sized to its card (document ${String(numberField(frame, "contentHeight"))} px, body ${String(numberField(frame, "bodyHeight"))} px, frame ${height} px, set ${String(stringField(frame, "styled"))}; ${String(stringField(frame, "layout"))})`,
+        );
+        s.check(
+          (numberField(frame, "scrollWidth") ?? Infinity) <= (numberField(frame, "width") ?? 0),
+          `anki: the ${where} frame scrolls sideways (content ${String(numberField(frame, "scrollWidth"))} px, frame ${String(numberField(frame, "width"))} px)`,
+        );
+        s.check(numberField(frame, "scripts") === 0, `anki: the ${where} frame contains a script`);
+      }
+      const phone = arrayField(card, "phone");
+      s.check(phone.length === 1 && (numberField(phone[0], "width") ?? Infinity) <= 300, `anki: the phone frame is ${String(numberField(phone[0], "width"))} px wide`);
+      s.check(stringField(card, "cssSha") === modelCSSSHA, "anki: the preview's css_sha256 is not the sha256 of `note model --json` css");
+      s.check(stringField(card, "backendCssSha") === modelCSSSHA, "anki: PreviewNote's css_sha256 is not the sha256 of `note model --json` css");
+      s.check((stringField(card, "document") ?? "").includes(`<style>${modelCSS}</style>`), "anki: the card document does not carry the `note model` stylesheet");
+      s.check(
+        stringField(card, "sha") !== undefined && stringField(card, "sha") === stringField(card, "backendSha"),
+        "anki: the preview's data-sha is not PreviewNote's fields_sha256",
+      );
+
+      // Refine: the preview is the body the provider received; failures are typed; the suggestion
+      // is text and only fills the editor; accepting records the learner's edit.
+      if (s.check(provider.received.length === 2, `anki: the provider received ${provider.received.length} refinement request(s), want 2`)) {
+        const [failedBody, refinedBody] = provider.received;
+        const refinePreview = field(value, "refinePreview");
+        s.check(failedBody.sha256 === stringField(refinePreview, "sha"), "anki: the refinement preview sha256 is not the sha256 of the body the provider received");
+        s.check(String(Buffer.byteLength(failedBody.raw)) === stringField(refinePreview, "bytes"), "anki: the refinement preview size is not the size of the body sent");
+        s.check(refinedBody.sha256 === stringField(field(value, "refineRetried"), "sha"), "anki: the preview shown after Retry is not the body the provider received");
+        s.check(failedBody.authorization === `Bearer ${key}`, "anki: the provider did not receive the credential");
+      }
+      // A refinement on its way holds the draft, survives closing the panel and is never sent twice.
+      const held = (what: string, state: unknown) => {
+        const accept = arrayField(state, "accept");
+        const skip = arrayField(state, "skip");
+        s.check(accept.length > 0 && accept.every((d) => d === true), `anki: Accept is enabled while a refinement waits (${what}: ${JSON.stringify(accept)})`);
+        s.check(skip.length > 0 && skip.every((d) => d === true), `anki: Skip is enabled while a refinement waits (${what}: ${JSON.stringify(skip)})`);
+        s.check((stringField(state, "reason") ?? "").trim() !== "", `anki: no reason is shown for the held Accept and Skip (${what})`);
+      };
+      held("sending", field(value, "sending"));
+      held("panel closed", field(value, "closed"));
+      const reopened = field(value, "reopened");
+      const resend = field(reopened, "send");
+      s.check(
+        resend !== undefined && resend !== null && field(resend, "disabled") === true && field(reopened, "suggestion") === false && field(reopened, "failure") === false,
+        `anki: the reopened panel does not show the waiting request (send ${JSON.stringify(resend)}, suggestion ${String(field(reopened, "suggestion"))})`,
+      );
+      s.check(
+        stringField(field(reopened, "strip"), "sha") === stringField(field(value, "refineRetried"), "sha"),
+        "anki: the reopened panel shows a fresh preview instead of the request on its way",
+      );
+      s.check(field(reopened, "focused") === true, "anki: focus is not in the reopened refinement panel");
+      const settled = field(value, "refineSettled");
+      s.check(
+        refineReleasedAt > 0 && (numberField(settled, "at") ?? 0) >= refineReleasedAt,
+        `anki: the suggestion was shown before the held reply was released (shown ${String(numberField(settled, "at"))}, released ${refineReleasedAt})`,
+      );
+      s.check(
+        arrayField(settled, "accept").every((d) => d === false) && arrayField(settled, "skip").every((d) => d === false) && field(settled, "reason") === false,
+        "anki: Accept or Skip stays held after the refinement settled",
+      );
+      s.check(
+        stringField(field(value, "refineFailed"), "code") === "invalid_response",
+        `anki: a non-JSON refinement shows failure code ${String(stringField(field(value, "refineFailed"), "code"))}`,
+      );
+      const suggestion = field(value, "suggestion");
+      s.check(stringField(suggestion, "front") === REFINED_FRONT, `anki: the suggested front is ${String(stringField(suggestion, "front"))}`);
+      s.check((stringField(suggestion, "back") ?? "").includes(HOSTILE_MARKUP), "anki: the suggestion's markup is not shown as literal text");
+      s.check(
+        numberField(suggestion, "elements") === 0 && numberField(suggestion, "injected") === 0 && stringField(suggestion, "title") !== "pwned",
+        "anki: the suggestion's markup became elements",
+      );
+      s.check(
+        stringField(field(suggestion, "fieldsBefore"), "front") !== REFINED_FRONT,
+        "anki: the suggestion filled the fields before the learner used it",
+      );
+      const used = field(value, "used");
+      s.check(stringField(field(used, "preview"), "edited") === "false", "anki: the card built from the unchanged suggestion is marked as a learner edit");
+      s.check(
+        numberField(used, "notes") === 0 && numberField(used, "localNotes") === 0 && stringField(used, "draft") === stringField(restored, "draft") && field(used, "editing") === true,
+        "anki: using the suggestion accepted the note or closed the draft",
+      );
+      const shown = await cli(s, ["note", "show"]);
+      const accepted = arrayField(shown.doc, "notes")
+        .map((item) => field(item, "note"))
+        .find((n) => (stringField(n, "front") ?? "").includes("smoke-edit"));
+      s.check(
+        accepted !== undefined && (stringField(accepted, "front") ?? "").startsWith(REFINED_FRONT) && stringField(accepted, "origin") === "edited",
+        `anki: the accepted note is front ${String(stringField(accepted, "front"))}, origin ${String(stringField(accepted, "origin"))}; want the edited suggestion, origin edited`,
+      );
+      s.check(fronts.length === 1 && fronts[0].includes(REFINED_FRONT), "anki: the pushed note does not carry the used suggestion");
     } finally {
+      provider.respond = () => chatReply("OK");
       stub.stop();
     }
   },
@@ -1109,7 +1182,9 @@ const resume: Scenario = {
 await today();
 press("Enter");
 await until("a practice item", () => q('[data-testid="practice-item"]'));
-await new Promise(() => {});
+// Wait for the kill. The pending promise stays reachable through window: WebKit fails a script whose
+// unsettled promise is garbage-collected ("Completion handler ... is no longer reachable").
+await new Promise((hold) => { window.__pqHold = hold; });
 `),
       // Kill one poll after the store holds the open presentation.
       killWhen: async () => {
@@ -1140,82 +1215,76 @@ return { item: data('[data-testid="practice-item"]') };
 };
 
 /** client-fresh and boot run first; the rest need a window that boots. */
-const SCENARIOS: Scenario[] = [clientFresh, boot, lifecycle, practice, hint, feedback, coach, assess, anki, settings, resume];
+const SCENARIOS: Scenario[] = [clientFresh, boot, lifecycle, practice, hint, feedback, coach, manual, assess, anki, settings, resume];
 
-export const desktopSmoke: Gate = {
-  id: "desktop-smoke",
-  title: "desktop smoke",
-  async run(ctx) {
-    const present = DESKTOP_SURFACES.filter((surface) => existsSync(resolve(ctx.root, surface)));
-    if (present.length === 0) return skip("no desktop surface yet");
-    if (!present.includes("cmd/passquest-desktop")) {
-      return fail([`desktop surface exists (${present.join(", ")}) but cmd/passquest-desktop is missing`]);
-    }
-    if (!hasGoMod(ctx)) return fail(["cmd/passquest-desktop exists but go.mod is missing"]);
+/**
+ * The desktop smoke over every scenario, or, for a self-test case whose failure is decided by one
+ * scenario, over the scenarios `only` names (kept in their usual order; client-fresh and boot always
+ * run first, as every later scenario needs a window that boots).
+ */
+export function makeDesktopSmokeGate(only?: readonly string[]): Gate {
+  const scenarios = only ? SCENARIOS.filter((scenario) => scenario === clientFresh || scenario === boot || only.includes(scenario.id)) : SCENARIOS;
+  return {
+    id: "desktop-smoke",
+    title: "desktop smoke",
+    run: (ctx) => runDesktopSmoke(ctx, scenarios),
+  };
+}
 
-    const temp = mkdtempSync(path.join(tmpdir(), "passquest-desktop-smoke-"));
-    const checks: string[] = [];
-    let assertions = 0;
-    const check: Check = (condition, message) => {
-      assertions++;
-      if (!condition) checks.push(message);
-      return condition;
-    };
-    const provider = startProviderStub();
-    try {
-      const binary = path.join(temp, executable("passquest-desktop"));
-      const build = await buildDesktop(ctx, binary);
-      if (!build.ok) return fail(build.failures);
-      const registry = path.join(temp, "registry.json");
-      writeFileSync(
-        registry,
-        JSON.stringify({
-          version: 1,
-          providers: [
-            {
-              id: STUB_PROVIDER,
-              name: "Smoke stub",
-              endpoint: provider.endpoint,
-              endpoint_shape: "openai-chat-completions",
-              credential_env: STUB_CREDENTIAL_ENV,
-              models: [{ id: STUB_MODEL.split("/")[1], default: true, capabilities: ["text.chat"] }],
-            },
-          ],
-        }),
-      );
-      const shared: Shared = { ctx, binary, cli: path.join(temp, executable("passquest")), registry, provider };
-      let ran = 0;
-      for (const scenario of SCENARIOS) {
-        const dir = path.join(temp, scenario.id);
-        const dataDir = path.join(dir, "data");
-        mkdirSync(dataDir, { recursive: true });
-        const before = checks.length;
-        await scenario.run({
-          shared,
-          id: scenario.id,
-          dir,
-          dataDir,
-          database: path.join(dataDir, "passquest.sqlite"),
-          service: `passquest-smoke-${process.pid}-${Date.now()}-${scenario.id}`,
-          check,
-        });
-        ran++;
-        if (scenario !== boot) continue;
-        if (checks.length > before) {
-          checks.push(`${SCENARIOS.length - ran} later scenario(s) not run: the window does not boot`);
-          return fail(checks);
-        }
-        // Later scenarios cross-check the window through a second process.
-        const cliBuild = await runGo(ctx, ["build", "-o", shared.cli, "./cmd/passquest"]);
-        if (cliBuild.code !== 0) return fail([...checks, "go build ./cmd/passquest failed", tail(`${cliBuild.stdout}${cliBuild.stderr}`)]);
-        const node = await run(executable("node"), ["--version"]);
-        if (node.code !== 0) return fail([...checks, `node is required for the desktop smoke gate: ${node.stderr || node.stdout}`]);
+export const desktopSmoke = makeDesktopSmokeGate();
+
+async function runDesktopSmoke(ctx: GateContext, scenarios: readonly Scenario[]): Promise<GateResult> {
+  const surface = desktopSurface(ctx);
+  if (surface) return surface;
+
+  const temp = mkdtempSync(path.join(tmpdir(), "passquest-desktop-smoke-"));
+  const checks: string[] = [];
+  let assertions = 0;
+  const check: Check = (condition, message) => {
+    assertions++;
+    if (!condition) checks.push(message);
+    return condition;
+  };
+  const provider = startProviderStub();
+  try {
+    const binary = path.join(temp, executable("passquest-desktop"));
+    const build = await buildDesktop(ctx, binary);
+    if (!build.ok) return fail(build.failures);
+    const registry = path.join(temp, "registry.json");
+    writeStubRegistry(registry, provider.endpoint);
+    const shared: Shared = { ctx, binary, cli: "", registry, provider };
+    let ran = 0;
+    for (const scenario of scenarios) {
+      const dir = path.join(temp, scenario.id);
+      const dataDir = path.join(dir, "data");
+      mkdirSync(dataDir, { recursive: true });
+      const before = checks.length;
+      await scenario.run({
+        shared,
+        id: scenario.id,
+        dir,
+        dataDir,
+        database: path.join(dataDir, "passquest.sqlite"),
+        service: `passquest-smoke-${process.pid}-${Date.now()}-${scenario.id}`,
+        check,
+      });
+      ran++;
+      if (scenario !== boot) continue;
+      if (checks.length > before) {
+        checks.push(`${scenarios.length - ran} later scenario(s) not run: the window does not boot`);
+        return fail(checks);
       }
-      if (checks.length > 0) return fail(checks);
-      return pass(`${assertions} assertions over ${SCENARIOS.length} scenarios`);
-    } finally {
-      provider.stop();
-      await removeTree(temp);
+      // Later scenarios cross-check the window through a second process.
+      const cliBuild = await buildCLI(ctx);
+      if ("failure" in cliBuild) return fail([...checks, "go build ./cmd/passquest failed", tail(cliBuild.failure)]);
+      shared.cli = cliBuild.binary;
+      const node = await run(executable("node"), ["--version"]);
+      if (node.code !== 0) return fail([...checks, `node is required for the desktop smoke gate: ${node.stderr || node.stdout}`]);
     }
-  },
-};
+    if (checks.length > 0) return fail(checks);
+    return pass(`${assertions} assertions over ${scenarios.length} scenarios`);
+  } finally {
+    provider.stop();
+    await removeTree(temp);
+  }
+}

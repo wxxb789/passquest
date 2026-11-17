@@ -120,6 +120,19 @@ export interface AssessmentItem {
   run_deadline_at: string;
 }
 
+/**
+ * AssessmentItemQuestion is one finished item's question for the report's
+ * annotation view: the stem and options, the label the learner chose (empty
+ * for a skip, a timeout or no answer) and the verified key.
+ */
+export interface AssessmentItemQuestion {
+  stem: string;
+  options: Option[];
+  selected: string;
+  key: string;
+  skills: string[];
+}
+
 /** AssessmentPool is the unseen-assessment pool. */
 export interface AssessmentPool {
   qualifying_items: number;
@@ -167,6 +180,12 @@ export interface AssessmentReportItem {
   scored: boolean;
   contamination_reasons?: string[];
   annotations: AssessmentAnnotations;
+  /**
+   * Question is the item as it was asked, with the learner's choice and the
+   * verified key. Like the annotations it appears only after the run; it is
+   * nil while they are withheld or when the item's content is unavailable.
+   */
+  question: AssessmentItemQuestion | null;
 }
 
 /**
@@ -307,6 +326,26 @@ export interface Capability {
   action?: string;
 }
 
+/**
+ * CoachCall is one recorded call: State "advisory" carries the reply text,
+ * State "failed" its Failure.
+ */
+export interface CoachCall {
+  call_id: number;
+  created_at: string;
+  mode: string;
+  provider: string;
+  model: string;
+  failover_from?: string;
+  state: string;
+  text: string;
+  advisory: boolean;
+  verified_answer: boolean;
+  source_text_shared: boolean;
+  latency_ms: number;
+  failure: CoachFailure | null;
+}
+
 /** CoachConsent is the payload scope for a private source. */
 export interface CoachConsent {
   private_source: boolean;
@@ -334,6 +373,16 @@ export interface CoachFailure {
   code: string;
   message: string;
   action?: string;
+}
+
+/**
+ * CoachHistory lists the advisory calls recorded for one attempt, oldest
+ * first. It never carries a credential or a request body.
+ */
+export interface CoachHistory {
+  attempt_id: number;
+  calls: CoachCall[];
+  limits: string[];
 }
 
 /** CoachMessage is one message of the exact request body. */
@@ -653,6 +702,15 @@ export interface NoteAccept {
   previous_revision: number;
 }
 
+/**
+ * NoteCardSide is one side of the card as complete documents for an
+ * <iframe srcdoc>: Light without and Night with Anki's night-mode classes.
+ */
+export interface NoteCardSide {
+  light: string;
+  night: string;
+}
+
 /** NoteDraft is a proposed note awaiting accept or skip. */
 export interface NoteDraft {
   id: number;
@@ -667,6 +725,11 @@ export interface NoteDraft {
   source: string;
   advisory: boolean;
   limits: string[];
+  /**
+   * Suggestion is a stored refinement the learner has not used. It stays
+   * advisory beside Fields and never fills them; nil when there is none.
+   */
+  suggestion?: NoteRefinement;
 }
 
 /** NoteFields are the learner-editable plain fields of a card. */
@@ -684,17 +747,30 @@ export interface NoteList {
 }
 
 /**
- * NotePreview is the card rendered with the real note model: HTML is the
- * rendered card, CSS the model stylesheet. The window shows it in a sandboxed
- * frame.
+ * NotePreview is the card rendered with the real note model. Question and
+ * Answer are the complete documents Anki would show, light and night: the
+ * same templates, the same stylesheet and the same body classes, so the
+ * window only places them in a sandboxed frame. HTML and CSS are the answer
+ * side's body and the model stylesheet on their own.
  */
 export interface NotePreview {
   draft_id: number;
   fields: NoteFields;
   source: string;
+  question: NoteCardSide;
+  answer: NoteCardSide;
   html: string;
   css: string;
+  /** FieldsSHA256 identifies the exact field payload a push would send. */
+  fields_sha256: string;
+  /**
+   * HTMLSHA256 is FieldsSHA256 under its earlier name, kept until the window
+   * reads fields_sha256; it never was a hash of the rendered HTML.
+   */
   html_sha256: string;
+  /** CSSSHA256 identifies the model stylesheet, ModelVersion its design. */
+  css_sha256: string;
+  model_version: number;
   deck: string;
   model: string;
   edited: boolean;
@@ -714,6 +790,13 @@ export interface NotePush {
   notes: NotePushItem[];
   error: Error | null;
   limits: string[];
+  /**
+   * ModelUpdated: an earlier Pass Quest card design in Anki was replaced in
+   * place. ModelCustomized: the note type was changed in Anki and left as
+   * it is; the notes were still pushed.
+   */
+  model_updated: boolean;
+  model_customized: boolean;
 }
 
 /** NotePushCounts summarises one push. */
@@ -737,6 +820,52 @@ export interface NotePushItem {
   code?: string;
   detail?: string;
   deck?: string;
+}
+
+/**
+ * NoteRefinePreview shows what an AI refinement of a draft would send before
+ * anything leaves the machine: who receives it, whether the endpoint is
+ * external, the verification and credential state, the consent covering this
+ * provider, the exact messages with their hash and size, and the budget slot.
+ * Messages are empty while consent withholds the source text.
+ */
+export interface NoteRefinePreview {
+  draft_id: number;
+  provider: string;
+  model: string;
+  endpoint: string;
+  external: boolean;
+  verified: boolean;
+  text_chat_state?: string;
+  action?: string;
+  credential: Credential;
+  consent: CoachConsent;
+  unanswered: boolean;
+  messages: CoachMessage[];
+  max_tokens: number;
+  request_sha256: string;
+  request_bytes: number;
+  budget: BudgetProvider;
+  limits: string[];
+}
+
+/**
+ * NoteRefinement is an advisory suggestion for a draft's front and back. It
+ * is never applied by itself: the learner copies what they keep into the
+ * fields and accepts them with AcceptNote. Tactic is the draft's own.
+ */
+export interface NoteRefinement {
+  state: string;
+  draft_id: number;
+  refinement_id: number;
+  suggestion: NoteFields;
+  provider: string;
+  model: string;
+  advisory: boolean;
+  request_sha256: string;
+  request_bytes: number;
+  latency_ms: number;
+  limits: string[];
 }
 
 /**
@@ -1022,6 +1151,10 @@ export const Study = {
   coachAsk(attemptID: number, mode: string): Promise<CoachReply> {
     return call("Study.CoachAsk", attemptID, mode);
   },
+  /** CoachHistory lists the coach calls recorded for an attempt, with each advisory reply's text. */
+  coachHistory(attemptID: number): Promise<CoachHistory> {
+    return call("Study.CoachHistory", attemptID);
+  },
   /** CoachPreview shows what a coach request would send; attemptID 0 is the latest attempt. */
   coachPreview(attemptID: number, mode: string): Promise<CoachPreview> {
     return call("Study.CoachPreview", attemptID, mode);
@@ -1065,6 +1198,14 @@ export const Study = {
   /** PushNotes pushes accepted notes to AnkiConnect; force keeps the local version of a conflict. */
   pushNotes(force: boolean): Promise<NotePush> {
     return call("Study.PushNotes", force);
+  },
+  /** RefineNote asks the active provider once for an advisory suggestion; it is never applied by itself. */
+  refineNote(draftID: number): Promise<NoteRefinement> {
+    return call("Study.RefineNote", draftID);
+  },
+  /** RefineNotePreview shows what an AI refinement of the draft would send; nothing is sent. */
+  refineNotePreview(draftID: number): Promise<NoteRefinePreview> {
+    return call("Study.RefineNotePreview", draftID);
   },
   /** ResumeAssessment resumes an interrupted run and presents its next item. */
   resumeAssessment(runID: number): Promise<AssessmentState> {

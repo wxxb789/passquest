@@ -1,6 +1,8 @@
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { executable, outputLines, run } from "../lib/process.ts";
+import { resolve } from "../lib/repo.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate } from "../lib/types.ts";
 
@@ -24,7 +26,8 @@ export const portablePaths: Gate = {
   id: "portable-paths",
   title: "portable paths",
   async run(ctx) {
-    const files = (await ctx.workingTreeFiles()).filter((file) => file.endsWith(".go"));
+    // The working-tree list is a snapshot shared by the run: a Go file removed since then is skipped.
+    const files = (await ctx.workingTreeFiles()).filter((file) => file.endsWith(".go") && existsSync(resolve(ctx.root, file)));
     if (files.length === 0) return fail(["no Go files in the working tree"]);
     const result = await run(executable("go"), ["run", TOOL, "-files"], {
       cwd: ctx.root,

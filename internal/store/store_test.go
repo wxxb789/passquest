@@ -58,6 +58,9 @@ func openSQLite(t *testing.T, path string) *sql.DB {
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
+	// Match Open: one connection, so fixture setup cannot contend with itself
+	// for the file lock while other tests run in parallel.
+	db.SetMaxOpenConns(1)
 	return db
 }
 
@@ -71,6 +74,7 @@ func mustAppend(t *testing.T, st *Store, rec attempt.Attempt) attempt.Attempt {
 }
 
 func TestOpenCreatesSchemaAndProtectsFiles(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "nested")
 	path := filepath.Join(dir, "attempts.sqlite")
 	st := mustOpen(t, path)
@@ -104,6 +108,7 @@ func TestOpenCreatesSchemaAndProtectsFiles(t *testing.T) {
 }
 
 func TestOpenPrivateTightensExistingDirectory(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		return
 	}
@@ -129,6 +134,7 @@ func TestOpenPrivateTightensExistingDirectory(t *testing.T) {
 }
 
 func TestAppendListAndReopen(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "attempts.sqlite")
 	st := mustOpen(t, path)
 
@@ -192,6 +198,7 @@ func TestAppendListAndReopen(t *testing.T) {
 }
 
 func TestNumberingSpansContentVersions(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "attempts.sqlite"))
 	first := mustAppend(t, st, sampleAttempt("q1"))
 	if first.AttemptNumber != 1 || first.PriorAttempts != 0 {
@@ -218,6 +225,7 @@ func TestNumberingSpansContentVersions(t *testing.T) {
 }
 
 func TestNumberingScopesToContent(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "attempts.sqlite"))
 
 	first := mustAppend(t, st, sampleAttempt("q1"))
@@ -253,6 +261,7 @@ func TestNumberingScopesToContent(t *testing.T) {
 }
 
 func TestAttemptsAreAppendOnly(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "attempts.sqlite"))
 	mustAppend(t, st, sampleAttempt("q1"))
 
@@ -278,6 +287,7 @@ func TestAttemptsAreAppendOnly(t *testing.T) {
 }
 
 func TestAppendRejectsInconsistentRecords(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "attempts.sqlite"))
 
 	tests := []struct {
@@ -314,6 +324,7 @@ func TestAppendRejectsInconsistentRecords(t *testing.T) {
 }
 
 func TestAppendPersistsAssistanceAndTactic(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "assistance.sqlite"))
 
 	assisted := sampleAttempt("q1")
@@ -375,6 +386,7 @@ func TestAppendPersistsAssistanceAndTactic(t *testing.T) {
 }
 
 func TestAppendPersistsSkillSnapshot(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "skills.sqlite"))
 
 	tagged := sampleAttempt("q1")
@@ -404,6 +416,7 @@ func TestAppendPersistsSkillSnapshot(t *testing.T) {
 }
 
 func TestAppendRejectsBadSkillSnapshot(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "bad-skills.sqlite"))
 	tests := []struct {
 		name   string
@@ -432,6 +445,7 @@ func TestAppendRejectsBadSkillSnapshot(t *testing.T) {
 }
 
 func TestMigrationFromVersionFiveAddsSkillSnapshot(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v5.sqlite")
 	db := openSQLite(t, path)
 	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5} {
@@ -496,6 +510,7 @@ func TestMigrationFromVersionFiveAddsSkillSnapshot(t *testing.T) {
 }
 
 func TestMigrationKeepsOlderDatabaseAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "legacy.sqlite")
 	db := openSQLite(t, path)
 	if _, err := db.Exec(`CREATE TABLE legacy_notes (body TEXT)`); err != nil {
@@ -546,6 +561,7 @@ func TestMigrationKeepsOlderDatabaseAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationAddsInsertGuardToVersionOne(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v1.sqlite")
 	db := openSQLite(t, path)
 	for _, stmt := range schemaV1 {
@@ -590,6 +606,7 @@ func TestMigrationAddsInsertGuardToVersionOne(t *testing.T) {
 }
 
 func TestMigrationFromVersionThreeAddsAssistanceColumns(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v3.sqlite")
 	db := openSQLite(t, path)
 	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3} {
@@ -646,6 +663,7 @@ func TestMigrationFromVersionThreeAddsAssistanceColumns(t *testing.T) {
 }
 
 func TestRecordExposureIsIdempotentAndAppendOnly(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "exposure.sqlite"))
 	at := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
 	exposure := Exposure{
@@ -702,6 +720,7 @@ func TestRecordExposureIsIdempotentAndAppendOnly(t *testing.T) {
 }
 
 func TestMigrationFromVersionFourAddsGuidedExposures(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v4.sqlite")
 	db := openSQLite(t, path)
 	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3, schemaV4} {
@@ -763,6 +782,7 @@ func TestMigrationFromVersionFourAddsGuidedExposures(t *testing.T) {
 }
 
 func TestOpenRejectsNewerSchema(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "future.sqlite")
 	db := openSQLite(t, path)
 	if _, err := db.Exec(`PRAGMA user_version = 99`); err != nil {
@@ -777,6 +797,7 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 }
 
 func TestOpenRejectsEmptyPath(t *testing.T) {
+	t.Parallel()
 	if _, err := Open("  "); err == nil || !strings.Contains(err.Error(), "empty database path") {
 		t.Fatalf("Open error = %v", err)
 	}
@@ -786,6 +807,7 @@ func TestOpenRejectsEmptyPath(t *testing.T) {
 // any host. A Windows drive path must not land in the URI authority, which is
 // what produced "invalid uri authority: C:..." on windows-latest.
 func TestSQLiteURIFormatsPathsForEveryOS(t *testing.T) {
+	t.Parallel()
 	const options = "?_pragma=busy_timeout%285000%29&_txlock=immediate"
 	tests := []struct {
 		name     string

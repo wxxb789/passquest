@@ -255,7 +255,11 @@ func (w *Workspace) AbandonAssessment(runID int64) (studio.AssessmentState, erro
 func (w *Workspace) AssessmentReport(runID int64) (studio.AssessmentReport, error) {
 	var view studio.AssessmentReport
 	err := w.withAssessmentStore(func(st *store.Store) error {
-		report, err := assessmentReport(st, runID)
+		material, err := loadAssessmentMaterial(st)
+		if err != nil {
+			return assessmentStudioError(err)
+		}
+		report, err := assessmentReportFrom(st, runID, material)
 		if err != nil {
 			return assessmentStudioError(err)
 		}
@@ -263,9 +267,69 @@ func (w *Workspace) AssessmentReport(runID int64) (studio.AssessmentReport, erro
 			return err
 		}
 		view.PassThreshold = studio.PassThresholdUnknown
-		return nil
+		return attachReportQuestions(st, runID, material, &view)
 	})
 	return view, err
+}
+
+// attachReportQuestions adds each item's question, the learner's choice and
+// the verified key to the report items whose annotations are open (after the
+// run), so the window can show them beside the annotations. Only an item the
+// learner was shown and that reached an outcome (answered or timed out) gets
+// one: a pending or unavailable item may be selected again as unseen. An item
+// whose stored content version no longer matches gets none, exactly as its
+// annotations are unavailable.
+func attachReportQuestions(st *store.Store, runID int64, material assessmentMaterial, view *studio.AssessmentReport) error {
+	_, items, _, err := st.AssessmentRun(runID)
+	if err != nil {
+		return err
+	}
+	attempts, err := st.AssessmentAttempts(runID)
+	if err != nil {
+		return err
+	}
+	units := make(map[string]assess.Unit, len(material.units))
+	for _, unit := range material.units {
+		units[unit.ContentID] = unit
+	}
+	byPosition := make(map[int]assess.Item, len(items))
+	for _, item := range items {
+		byPosition[item.Position] = item
+	}
+	for i := range view.Items {
+		entry := &view.Items[i]
+		if entry.Annotations.Withheld || !entry.Annotations.Available {
+			continue
+		}
+		item, ok := byPosition[entry.Position]
+		if !ok || !item.Finalized() || item.PresentedAt.IsZero() || entry.State == assess.StateUnavailable {
+			continue
+		}
+		unit, found := units[item.ContentID]
+		if !found || unit.Version != item.ContentVersion {
+			continue
+		}
+		for _, question := range unit.Questions {
+			if question.ID != item.QuestionID {
+				continue
+			}
+			selected := ""
+			for _, record := range attempts {
+				if record.ID == item.AttemptID {
+					selected = record.SelectedLabel
+				}
+			}
+			entry.Question = &studio.AssessmentItemQuestion{
+				Stem:     question.Stem,
+				Options:  studioOptions(question.Options),
+				Selected: selected,
+				Key:      question.Answer,
+				Skills:   append([]string{}, item.Skills...),
+			}
+			break
+		}
+	}
+	return nil
 }
 
 // AssessmentCompare is `assess compare`: like-for-like runs only.

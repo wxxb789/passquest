@@ -79,6 +79,10 @@ type Workspace struct {
 	// hostTutor, hostAnki and hostAgent are true when the default Node host
 	// transports are in use, so a missing Node is reported before the call.
 	hostTutor, hostAnki, hostAgent bool
+	// refining holds the drafts with a refinement in flight: one paid request per
+	// draft at a time, whatever the window's own state (a reload forgets it).
+	refining   map[int64]bool
+	refiningMu sync.Mutex
 }
 
 // OpenWorkspace validates the options, migrates the database once and

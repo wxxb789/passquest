@@ -1,7 +1,10 @@
 /* Reduced motion, shot mode, compact heights, narrow widths — ported verbatim from design/prototypes/c-stage.html (lines 919-987). Do not normalise values. */
 /* ---------- reduced motion + shot ---------- */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
+  /* Deviation from the prototype: no transitions at all. A 1 ms duration with the default transition-property
+     (all) turned every style change into a transition, and a page WebKit does not show never advances it,
+     so a card frame stayed at its old height (macOS CI). */
+  *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition: none !important; scroll-behavior: auto !important; }
 }
 html.shot *, html.shot *::before, html.shot *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }
 

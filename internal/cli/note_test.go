@@ -23,9 +23,13 @@ import (
 )
 
 type fakeAnkiTransport struct {
-	requests     []anki.HostRequest
-	actions      []string
-	models       []string
+	requests []anki.HostRequest
+	actions  []string
+	models   []string
+	// styles holds each model's stylesheet and card templates; noteModel,
+	// when set, is the model name notesInfo reports for every note.
+	styles       map[string]fakeAnkiModel
+	noteModel    string
 	notes        map[int64]map[string]string
 	decks        map[int64]string
 	cards        map[int64][]int64
@@ -49,9 +53,15 @@ type fakeAnkiTransport struct {
 	err          error
 }
 
+type fakeAnkiModel struct {
+	css       string
+	templates map[string]anki.CardTemplate
+}
+
 func newFakeAnki() *fakeAnkiTransport {
 	return &fakeAnkiTransport{
-		notes: map[int64]map[string]string{}, decks: map[int64]string{},
+		styles: map[string]fakeAnkiModel{},
+		notes:  map[int64]map[string]string{}, decks: map[int64]string{},
 		cards: map[int64][]int64{}, next: 101, nextCard: 501,
 	}
 }
@@ -92,7 +102,43 @@ func (f *fakeAnkiTransport) Call(_ context.Context, req anki.HostRequest) (anki.
 			raw, _ := json.Marshal(f.models)
 			result.Result = raw
 		case "createModel":
-			f.models = append(f.models, action.Params["modelName"].(string))
+			name := action.Params["modelName"].(string)
+			f.models = append(f.models, name)
+			model := fakeAnkiModel{css: action.Params["css"].(string), templates: map[string]anki.CardTemplate{}}
+			for _, template := range action.Params["cardTemplates"].([]map[string]string) {
+				model.templates[template["Name"]] = anki.CardTemplate{Front: template["Front"], Back: template["Back"]}
+			}
+			f.styles[name] = model
+			result.Result = json.RawMessage("null")
+		case "modelStyling", "modelTemplates":
+			model, ok := f.styles[action.Params["modelName"].(string)]
+			if !ok {
+				result.State = "error"
+				result.Error = "model was not found"
+				break
+			}
+			if action.Action == "modelStyling" {
+				result.Result, _ = json.Marshal(map[string]string{"css": model.css})
+			} else {
+				result.Result, _ = json.Marshal(model.templates)
+			}
+		case "updateModelStyling", "updateModelTemplates":
+			payload := action.Params["model"].(map[string]any)
+			name := payload["name"].(string)
+			model, ok := f.styles[name]
+			if !ok {
+				result.State = "error"
+				result.Error = "model was not found"
+				break
+			}
+			if action.Action == "updateModelStyling" {
+				model.css = payload["css"].(string)
+			} else {
+				for templateName, template := range payload["templates"].(map[string]map[string]string) {
+					model.templates[templateName] = anki.CardTemplate{Front: template["Front"], Back: template["Back"]}
+				}
+			}
+			f.styles[name] = model
 			result.Result = json.RawMessage("null")
 		case "addNote":
 			f.adds++
@@ -145,8 +191,12 @@ func (f *fakeAnkiTransport) Call(_ context.Context, req anki.HostRequest) (anki.
 				for name, value := range fields {
 					encoded[name] = map[string]any{"value": value, "order": 0}
 				}
+				modelName := note.ModelName
+				if f.noteModel != "" {
+					modelName = f.noteModel
+				}
 				rows = append(rows, map[string]any{
-					"noteId": id, "modelName": note.ModelName, "fields": encoded, "cards": f.cards[id],
+					"noteId": id, "modelName": modelName, "fields": encoded, "cards": f.cards[id],
 				})
 			}
 			if f.deleteAfterNotesInfo {
@@ -302,6 +352,7 @@ func notePending(t *testing.T, db string) []store.NoteOutboxEntry {
 }
 
 func TestNoteProposeConsentAcceptExport(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -431,6 +482,7 @@ func TestNoteProposeConsentAcceptExport(t *testing.T) {
 }
 
 func TestNoteUnansweredPreviewHidesTheKey(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -475,6 +527,7 @@ func TestNoteUnansweredPreviewHidesTheKey(t *testing.T) {
 }
 
 func TestNoteSkippedAttemptIsUnanswered(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -495,6 +548,7 @@ func TestNoteSkippedAttemptIsUnanswered(t *testing.T) {
 }
 
 func TestNotePushCreatesUpdatesConflictsAndQueues(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -662,6 +716,7 @@ func TestNotePushCreatesUpdatesConflictsAndQueues(t *testing.T) {
 }
 
 func TestNotePushChunksMoreThanFiftyActions(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	st, err := store.Open(db)
@@ -760,6 +815,7 @@ func reviseBulkNotes(t *testing.T, db string, clock *stepClock, targets []store.
 }
 
 func TestNotePushBatchesReadbackAboveFiftyNotes(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	targets := seedBulkNotes(t, db, clock, 51)
@@ -812,6 +868,7 @@ func TestNotePushBatchesReadbackAboveFiftyNotes(t *testing.T) {
 }
 
 func TestNotePushPersistsAcknowledgedBatchesBeforeTheNextCall(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	seedBulkNotes(t, db, clock, 51)
@@ -889,6 +946,7 @@ func TestNotePushPersistsAcknowledgedBatchesBeforeTheNextCall(t *testing.T) {
 }
 
 func TestNotePushRefusesRevokedConsentAndMissingHost(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -915,6 +973,7 @@ func TestNotePushRefusesRevokedConsentAndMissingHost(t *testing.T) {
 }
 
 func TestNoteRefineUsesProviderAndRecordsIt(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -976,6 +1035,7 @@ func TestNoteRefineUsesProviderAndRecordsIt(t *testing.T) {
 }
 
 func TestNoteRefineRefusesRestrictedSourceWithoutConsent(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1001,6 +1061,7 @@ func TestNoteRefineRefusesRestrictedSourceWithoutConsent(t *testing.T) {
 }
 
 func TestNoteRefineRequiresVerifiedTextChat(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1066,6 +1127,7 @@ func noteRefineProviderEnv(t *testing.T, db string, clock *stepClock, transport 
 }
 
 func TestNoteRefineRefusesAProviderScopedRevoke(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1095,6 +1157,7 @@ func TestNoteRefineRefusesAProviderScopedRevoke(t *testing.T) {
 }
 
 func TestNoteRefineUsesTheCurrentRegistryEndpoint(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1124,6 +1187,7 @@ func TestNoteRefineUsesTheCurrentRegistryEndpoint(t *testing.T) {
 }
 
 func TestNoteRefineRefusesAGrantForADifferentProvider(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1146,6 +1210,7 @@ func TestNoteRefineRefusesAGrantForADifferentProvider(t *testing.T) {
 }
 
 func TestNoteRefineRejectsAnAnswerRevealingResponse(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1201,6 +1266,7 @@ func TestNoteRefineRejectsAnAnswerRevealingResponse(t *testing.T) {
 }
 
 func TestNotePreviewIgnoresAStoredAnswerRevealingRefinement(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1218,7 +1284,11 @@ func TestNotePreviewIgnoresAStoredAnswerRevealingRefinement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetNoteDraftRefinement(draft.Draft.ID, 1, "hostile-model", "At 4 p.m.", "The library closes at 4 p.m. on Saturdays."); err != nil {
+	observed, _, err := st.NoteDraftByID(draft.Draft.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNoteDraftRefinement(observed, 1, "hostile-model", "At 4 p.m.", "The library closes at 4 p.m. on Saturdays."); err != nil {
 		t.Fatalf("store hostile refinement: %v", err)
 	}
 	st.Close()
@@ -1237,6 +1307,7 @@ func TestNotePreviewIgnoresAStoredAnswerRevealingRefinement(t *testing.T) {
 }
 
 func TestNoteRefineFailureKeepsDeterministicDraft(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1263,6 +1334,7 @@ func TestNoteRefineFailureKeepsDeterministicDraft(t *testing.T) {
 }
 
 func TestNoteProposeRefusals(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1287,6 +1359,7 @@ func TestNoteProposeRefusals(t *testing.T) {
 }
 
 func TestNoteModelDocument(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"note", "model", "--json"}, Options{
 		Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr,
@@ -1312,6 +1385,7 @@ func TestNoteModelDocument(t *testing.T) {
 }
 
 func TestNoteOutputsNeverClaimAPhonePush(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1347,6 +1421,7 @@ func TestNoteOutputsNeverClaimAPhonePush(t *testing.T) {
 }
 
 func TestNotePushEndpointMustBeLoopback(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1359,6 +1434,7 @@ func TestNotePushEndpointMustBeLoopback(t *testing.T) {
 }
 
 func TestNoteAcceptEditedFieldsAreValidated(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1374,6 +1450,7 @@ func TestNoteAcceptEditedFieldsAreValidated(t *testing.T) {
 }
 
 func TestNoteAcceptPreservesAcceptedEdits(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1431,6 +1508,7 @@ func TestNoteAcceptPreservesAcceptedEdits(t *testing.T) {
 }
 
 func TestNotePreviewWithholdsAcceptedTextAfterRevoke(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1452,6 +1530,7 @@ func TestNotePreviewWithholdsAcceptedTextAfterRevoke(t *testing.T) {
 }
 
 func TestNotePushKeepsAnAcknowledgedWriteInAPartialBatch(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1493,6 +1572,7 @@ func TestNotePushKeepsAnAcknowledgedWriteInAPartialBatch(t *testing.T) {
 }
 
 func TestNoteProposeRefusesContentChangedAfterTheAttempt(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1506,6 +1586,7 @@ func TestNoteProposeRefusesContentChangedAfterTheAttempt(t *testing.T) {
 }
 
 func TestNotePushReaddsANoteDeletedFromAnki(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1538,7 +1619,7 @@ func TestNotePushReaddsANoteDeletedFromAnki(t *testing.T) {
 	if item.AnkiNoteID != 102 {
 		t.Fatalf("readd item = %+v", item)
 	}
-	if got := strings.Join(ankiTransport.actions, ","); got != "version,createDeck,modelNames,notesInfo,addNote,notesInfo,cardsInfo" {
+	if got := strings.Join(ankiTransport.actions, ","); got != "version,createDeck,modelNames,modelStyling,modelTemplates,notesInfo,addNote,notesInfo,cardsInfo" {
 		t.Fatalf("readd actions = %s", got)
 	}
 	if ankiTransport.count("updateNoteFields") != 0 {
@@ -1625,6 +1706,7 @@ func TestNotePushReaddsANoteDeletedFromAnki(t *testing.T) {
 // from that card — never from the deleted note's, which would report a mismatch
 // for a card that is exactly where the push put it.
 func TestNotePushReaddsANoteDeletedAfterTheReadBack(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1661,7 +1743,7 @@ func TestNotePushReaddsANoteDeletedAfterTheReadBack(t *testing.T) {
 	if item.AnkiNoteID != 102 || item.State != store.AnkiStatePushed || item.Outcome != "ok" || item.Deck != "" {
 		t.Fatalf("readd item = %+v", item)
 	}
-	if got := strings.Join(ankiTransport.actions, ","); got != "version,createDeck,modelNames,notesInfo,updateNoteFields,addNote,notesInfo,cardsInfo" {
+	if got := strings.Join(ankiTransport.actions, ","); got != "version,createDeck,modelNames,modelStyling,modelTemplates,notesInfo,updateNoteFields,addNote,notesInfo,cardsInfo" {
 		t.Fatalf("readd actions = %s", got)
 	}
 	// The read is about the new note and its own card: the deleted note's id and
@@ -1697,6 +1779,7 @@ func TestNotePushReaddsANoteDeletedAfterTheReadBack(t *testing.T) {
 }
 
 func TestNoteExportRechecksConsent(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1727,6 +1810,7 @@ func TestNoteExportRechecksConsent(t *testing.T) {
 }
 
 func TestNoteExportNeedsGlobalConsentNotProviderScope(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1793,6 +1877,7 @@ func TestNoteExportNeedsGlobalConsentNotProviderScope(t *testing.T) {
 }
 
 func TestNotePreviewAndAcceptRefuseChangedDraftContent(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1808,6 +1893,7 @@ func TestNotePreviewAndAcceptRefuseChangedDraftContent(t *testing.T) {
 }
 
 func TestNoteDefaultDraftIsTheLatestOpenOne(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1852,6 +1938,7 @@ func TestNoteDefaultDraftIsTheLatestOpenOne(t *testing.T) {
 }
 
 func TestNotePushReportsShortResultBatches(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1885,6 +1972,7 @@ func TestNotePushReportsShortResultBatches(t *testing.T) {
 }
 
 func TestReadNoteDecks(t *testing.T) {
+	t.Parallel()
 	// 200 three-byte characters: over the bound in bytes, exactly at it in
 	// characters, which is the unit the schema and the docs state.
 	multibyteDeck := strings.Repeat("日", anki.MaxDeckNameChars)
@@ -1978,6 +2066,7 @@ func TestReadNoteDecks(t *testing.T) {
 }
 
 func TestNotePushReportsADeckMismatchAndKeepsTheNoteID(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -2149,6 +2238,7 @@ func TestNotePushReportsADeckMismatchAndKeepsTheNoteID(t *testing.T) {
 // revision re-pends the note, and accepting clears the recorded deck. The CLI
 // half here is the read-back path and what the two `note show` surfaces print.
 func TestNotePushRecordsNoDeckWhenTheReadCannotNameIt(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -2231,5 +2321,177 @@ func TestNotePushRecordsNoDeckWhenTheReadCannotNameIt(t *testing.T) {
 	if stored.AnkiState != store.AnkiStateDeckMismatch || stored.AnkiDeck != "" ||
 		stored.AnkiNoteID != 101 || stored.AnkiPushedRevision != 2 {
 		t.Fatalf("note after the unconfirmed read = %+v", stored)
+	}
+}
+
+// pushedNoteFixture accepts one note and pushes it through a fresh fake, so
+// the fake holds the model and the note a learner already has.
+func pushedNoteFixture(t *testing.T) (string, *stepClock, *fakeAnkiTransport) {
+	t.Helper()
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	readyNoteSource(t, db, clock)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
+	ankiTransport := newFakeAnki()
+	mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")
+	ankiTransport.resetActions()
+	return db, clock, ankiTransport
+}
+
+func notePushOf(t *testing.T, raw string) notePushDoc {
+	t.Helper()
+	doc := notePushDoc{}
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatalf("decode push: %v\n%s", err, raw)
+	}
+	return doc
+}
+
+// TestNotePushUpgradesAKnownEarlierModelOnce: a deck whose model is the
+// version 1 design is updated in place once, the note pushed under it is not
+// a conflict afterwards, and the next push only reads the model.
+func TestNotePushUpgradesAKnownEarlierModelOnce(t *testing.T) {
+	t.Parallel()
+	db, clock, ankiTransport := pushedNoteFixture(t)
+	css, front, back, ok := note.KnownModel(1)
+	if !ok {
+		t.Fatal("version 1 is not a known model")
+	}
+	ankiTransport.styles[note.ModelName] = fakeAnkiModel{css: css,
+		templates: map[string]anki.CardTemplate{anki.TemplateName: {Front: front, Back: back}}}
+
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sundays", "--json")
+	upgraded := notePushOf(t, mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json"))
+	if got := strings.Join(ankiTransport.actions, ","); got != "version,createDeck,modelNames,modelStyling,modelTemplates,"+
+		"updateModelTemplates,updateModelStyling,notesInfo,updateNoteFields,cardsInfo" {
+		t.Fatalf("upgrade actions = %s", got)
+	}
+	if upgraded.State != "pushed" || !upgraded.ModelUpdated || upgraded.ModelCustomized || upgraded.ModelCreated {
+		t.Fatalf("upgrade push = %+v", upgraded)
+	}
+	model := ankiTransport.styles[note.ModelName]
+	if model.css != note.ModelCSS || model.templates[anki.TemplateName] != (anki.CardTemplate{Front: note.FrontTemplate, Back: note.BackTemplate}) {
+		t.Fatalf("the model was not replaced by this build's design: %+v", model)
+	}
+
+	ankiTransport.resetActions()
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sunday", "--json")
+	again := notePushOf(t, mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json"))
+	if again.State != "pushed" || again.ModelUpdated || again.ModelCustomized ||
+		ankiTransport.count("updateModelStyling") != 0 || ankiTransport.count("updateModelTemplates") != 0 {
+		t.Fatalf("second push = %+v, actions = %v", again, ankiTransport.actions)
+	}
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sunday only", "--json")
+	human := mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push")
+	if strings.Contains(human, "Card design") {
+		t.Fatalf("a push over the current design mentions it:\n%s", human)
+	}
+}
+
+// TestNotePushUpgradesAHalfUpdatedModel: a deck whose stylesheet is already
+// version 2 while its template is still version 1 (an interrupted update) is
+// still Pass Quest's own design and is completed.
+func TestNotePushUpgradesAHalfUpdatedModel(t *testing.T) {
+	t.Parallel()
+	db, clock, ankiTransport := pushedNoteFixture(t)
+	_, front, back, _ := note.KnownModel(1)
+	ankiTransport.styles[note.ModelName] = fakeAnkiModel{css: note.ModelCSS + "\r\n",
+		templates: map[string]anki.CardTemplate{anki.TemplateName: {Front: front, Back: back}}}
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sundays", "--json")
+	pushed := notePushOf(t, mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json"))
+	if !pushed.ModelUpdated || ankiTransport.styles[note.ModelName].templates[anki.TemplateName].Front != note.FrontTemplate {
+		t.Fatalf("half-updated push = %+v, actions = %v", pushed, ankiTransport.actions)
+	}
+}
+
+// TestNotePushNeverOverwritesACustomisedModel: a stylesheet or template the
+// learner changed in Anki is reported, left alone, and the note still lands.
+func TestNotePushNeverOverwritesACustomisedModel(t *testing.T) {
+	t.Parallel()
+	for name, custom := range map[string]fakeAnkiModel{
+		"stylesheet": {css: note.ModelCSS + "\n.card { color: red; }",
+			templates: map[string]anki.CardTemplate{anki.TemplateName: {Front: note.FrontTemplate, Back: note.BackTemplate}}},
+		"template": {css: note.ModelCSS,
+			templates: map[string]anki.CardTemplate{anki.TemplateName: {Front: "{{Front}} hint", Back: note.BackTemplate}}},
+		"renamed template": {css: note.ModelCSS,
+			templates: map[string]anki.CardTemplate{"Card 1": {Front: note.FrontTemplate, Back: note.BackTemplate}}},
+		"second card type": {css: note.ModelCSS, templates: map[string]anki.CardTemplate{
+			anki.TemplateName: {Front: note.FrontTemplate, Back: note.BackTemplate},
+			"Reverse":         {Front: "{{Back}}", Back: "{{Front}}"},
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db, clock, ankiTransport := pushedNoteFixture(t)
+			ankiTransport.styles[note.ModelName] = custom
+			mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sundays", "--json")
+			pushed := notePushOf(t, mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json"))
+			if pushed.State != "pushed" || !pushed.ModelCustomized || pushed.ModelUpdated ||
+				ankiTransport.count("updateModelStyling") != 0 || ankiTransport.count("updateModelTemplates") != 0 ||
+				ankiTransport.count("updateNoteFields") != 1 {
+				t.Fatalf("customised push = %+v, actions = %v", pushed, ankiTransport.actions)
+			}
+			if got := ankiTransport.styles[note.ModelName]; got.css != custom.css || len(got.templates) != len(custom.templates) {
+				t.Fatalf("the customised model changed: %+v", got)
+			}
+			if ankiTransport.notes[101]["Front"] != "closes on Sundays" {
+				t.Fatalf("the note did not land: %v", ankiTransport.notes[101])
+			}
+			mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sunday", "--json")
+			human := mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push")
+			if !strings.Contains(human, "Card design: the note type was changed in Anki") {
+				t.Fatalf("human push does not state the customised model:\n%s", human)
+			}
+		})
+	}
+}
+
+// TestNotePushModelMismatchIsAConflict pins the conflict a note gets when Anki
+// reports it under another note type: nothing is written and the queue keeps
+// the note until the model matches again.
+func TestNotePushModelMismatchIsAConflict(t *testing.T) {
+	t.Parallel()
+	db, clock, ankiTransport := pushedNoteFixture(t)
+	ankiTransport.noteModel = "Basic"
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sundays", "--json")
+	code, _, errOut := runNoteCLI(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")
+	if code != 3 {
+		t.Fatalf("mismatch push exit = %d, stderr = %s", code, errOut)
+	}
+	conflict := notePushOf(t, errOut)
+	if conflict.State != "conflict" || len(conflict.Notes) != 1 || conflict.Notes[0].Code != "model_mismatch" ||
+		conflict.Notes[0].Detail != "Anki note uses model Basic" || conflict.Counts.Pending != 1 ||
+		conflict.Error == nil || conflict.Error.Code != "anki_conflict" {
+		t.Fatalf("model mismatch = %+v", conflict)
+	}
+	if ankiTransport.count("updateNoteFields") != 0 || ankiTransport.notes[101]["Front"] == "closes on Sundays" {
+		t.Fatalf("a model mismatch wrote the note: %v", ankiTransport.actions)
+	}
+	ankiTransport.noteModel = ""
+	resolved := notePushOf(t, mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json"))
+	if resolved.State != "pushed" || ankiTransport.notes[101]["Front"] != "closes on Sundays" {
+		t.Fatalf("the push after the model matched again = %+v", resolved)
+	}
+}
+
+// TestNotePushModelReadFailuresKeepTheQueue: an endpoint that cannot report
+// the model's design is an Anki error before any write.
+func TestNotePushModelReadFailuresKeepTheQueue(t *testing.T) {
+	t.Parallel()
+	db, clock, ankiTransport := pushedNoteFixture(t)
+	delete(ankiTransport.styles, note.ModelName)
+	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sundays", "--json")
+	code, _, errOut := runNoteCLI(t, db, clock, ankiTransport, nil, "", "note", "push", "--json")
+	if code != 3 || !strings.Contains(errOut, `"anki_error"`) || !strings.Contains(errOut, "modelStyling failed") {
+		t.Fatalf("model read failure = %d, %s", code, errOut)
+	}
+	if ankiTransport.count("updateNoteFields") != 0 || ankiTransport.count("notesInfo") != 0 {
+		t.Fatalf("a failed model read went on to write: %v", ankiTransport.actions)
+	}
+	ankiTransport.unreachable = true
+	ankiTransport.resetActions()
+	queued := notePushOf(t, mustNoteRun(t, db, clock, ankiTransport, nil, "", "note", "push", "--json"))
+	if queued.State != "queued" || queued.Counts.Pending != 1 {
+		t.Fatalf("unreachable push = %+v", queued)
 	}
 }

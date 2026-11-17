@@ -2,21 +2,19 @@
 // actions call the bound StudyApi and replace the cached data with whatever the core returns. The
 // window never fabricates a result: without a bound service every call resolves to `not_connected`.
 import { api, NOT_CONNECTED, onGoEvent, parseCallError, type StudyApi } from './api/client';
-import type { AssessmentState, CoachMode, Feedback, NoteFields, NoteRequest, PracticeRequest, StudioError } from './api/types';
+import type { AssessmentState, CoachMode, Feedback, NoteFields, NoteRefinement, NoteRequest, PracticeRequest, StudioError } from './api/types';
 import { hideMarkPop, lightSpan, markCountText, takeMark, passageHTML, practiceFoot } from './components/passage';
 import { labelForKey } from './components/options';
-import { COACH_MODES, errorTitle, SESSION_IDX, T } from './core/i18n';
-import { closeLayer, openLayer, render, renderLayer, renderOrb } from './core/render';
+import { COACH_MODES, errorTitle, nextStep, T } from './core/i18n';
+import { closeLayer, focusKey, openLayer, render, renderLayer, renderOrb } from './core/render';
 import { go, subAction, type Location } from './core/router';
 import { data, idle, ui, valueOf, type Loadable, type Route } from './core/state';
 import { savePref } from './core/prefs';
 import { toast } from './core/toast';
 import { activeRun, assessState, practiceItem } from './screens';
-import { previewHTML, ankiStatus, pushSummary } from './views/anki';
+import { previewHTML, ankiStatus, pushSummary, refineHold, refinePanelHTML } from './views/anki';
 import { opensItem } from './views/today';
 import { optionSpan } from './views/feedback';
-import { qcolHTML } from './views/practice';
-import { tickClocks } from './core/clock';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: StudioError };
 
@@ -24,8 +22,14 @@ const $ = <E extends Element = HTMLElement>(sel: string) => document.querySelect
 const reduced = () => ui.shot || matchMedia('(prefers-reduced-motion: reduce)').matches;
 const ready = <T>(value: T): Loadable<T> => ({ status: 'ready', value });
 
-/** A failure as one toast line: the localized title, the core's message and its next step. */
-const failureLine = (e: StudioError) => `${errorTitle(e.code)} · ${e.message}${e.action ? ' — ' + e.action : ''}`;
+/**
+ * A failure as one toast line in the window's words: the localized title and the localized next step.
+ * The core's English message and CLI step are not toast text (failure cards keep them as details).
+ */
+const failureLine = (e: StudioError) => {
+  const next = nextStep(e.code);
+  return next ? `${errorTitle(e.code)} · ${next}` : errorTitle(e.code);
+};
 
 async function call<T>(fn: (a: StudyApi) => Promise<T>): Promise<Result<T>> {
   const a = api();
@@ -100,15 +104,25 @@ async function loadPracticeResume(): Promise<void> {
   await load((a) => a.resumePractice(), (l) => (data.practice = l));
 }
 
-async function loadCoachPreview(): Promise<void> {
+/**
+ * The send preview of the current mode. `afterSend`: a reply just arrived; the preview is read again
+ * in place (no loading state) so the call strip shows the budget slot the send spent.
+ */
+let previewSeq = 0;
+
+async function loadCoachPreview(afterSend = false): Promise<void> {
   const fb = data.feedback;
   if (!fb) return;
   const mode = ui.coachMode;
-  if (data.coach.replies[mode]) return;
-  data.coach.preview = { status: 'loading' };
-  renderOrb();
+  // Every request (even one that stops here) supersedes reads still in flight: only the newest lands.
+  const seq = ++previewSeq;
+  if (data.coach.replies[mode] && !afterSend) return;
+  if (!afterSend) {
+    data.coach.preview = { status: 'loading' };
+    renderOrb();
+  }
   const r = await call((a) => a.coachPreview(fb.attempt_id, mode));
-  if (ui.coachMode !== mode || data.feedback !== fb) return;
+  if (seq !== previewSeq || ui.coachMode !== mode || data.feedback !== fb) return;
   data.coach.preview = r.ok ? ready(r.value) : { status: 'error', error: r.error };
   renderOrb();
 }
@@ -164,6 +178,14 @@ async function loadReport(): Promise<void> {
   ui.report.runId = id;
   const current = valueOf(data.report.report);
   if (!current || current.run.id !== id) await load((a) => a.assessmentReport(id), (l) => (data.report.report = l));
+  // By default the shown run is compared with the newest earlier completed run of the same shape
+  // (size, window, pool family), else with the newest earlier one, whose refusal says what differs.
+  if (ui.report.compareWith === null) {
+    const base = runs.find((r) => r.id === id);
+    const earlier = runs.filter((r) => r.id !== id && r.status === 'completed' && (!base || r.started_at < base.started_at));
+    const like = base ? earlier.find((r) => r.actual_size === base.actual_size && r.window_minutes === base.window_minutes && r.pool_family === base.pool_family) : undefined;
+    ui.report.compareWith = (like ?? earlier[0])?.id ?? null;
+  }
   if (ui.report.compareWith !== null) await loadCompare(ui.report.compareWith);
 }
 
@@ -174,7 +196,91 @@ async function loadCompare(other: number): Promise<void> {
   await load((a) => a.assessmentCompare(other, base), (l) => (data.report.compare = l));
 }
 
+/** The attempt's recorded coach calls; rendered in the coach sheet's history view. */
+async function loadCoachHistory(): Promise<void> {
+  const fb = data.feedback;
+  if (!fb) return;
+  data.coach.history = { status: 'loading' };
+  renderOrb();
+  const r = await call((a) => a.coachHistory(fb.attempt_id));
+  if (data.feedback !== fb) return;
+  data.coach.history = r.ok ? ready(r.value) : { status: 'error', error: r.error };
+  renderOrb();
+}
+
 const ankiFields = (): NoteFields | null => ui.anki.fields ?? data.anki.draft?.fields ?? null;
+
+/** The latest refinement-preview request: an older reply never overwrites what came after it. */
+let refinePreviewGen = 0;
+
+function resetRefine(): void {
+  refinePreviewGen++;
+  ui.anki.refine = false;
+  data.anki.refine = { preview: idle(), suggestion: null, failure: null, sending: false };
+}
+
+/**
+ * The refinement state for a draft: a stored suggestion the learner has not used comes back beside
+ * the draft's own fields, in the refinement panel, and fills nothing until "Use suggestion".
+ */
+function seedRefine(suggestion: NoteRefinement | null | undefined): void {
+  resetRefine();
+  if (!suggestion) return;
+  ui.anki.refine = true;
+  data.anki.refine.suggestion = suggestion;
+}
+
+/** The panel's next step after its content changed under the focus: the result, else the send. */
+const REFINE_NEXT = ['[data-act="refine-use"]', '[data-act="refine-retry"]', '[data-act="refine-send"]'];
+const focusable = (el: HTMLElement | null): el is HTMLElement => !!el && !(el as HTMLButtonElement).disabled;
+
+/**
+ * Re-renders only the refinement panel when it is on screen; otherwise the whole stage. Focus inside
+ * the panel stays inside it: on the same control when it is still there and enabled, else on the
+ * panel's next step, else on the panel itself (never on <body>).
+ */
+function refreshRefine(): void {
+  const panel = $('.es-refine');
+  const d = data.anki.draft;
+  if (!panel || !d || !ui.anki.refine) {
+    render(true, false);
+    return;
+  }
+  const inside = panel.contains(document.activeElement);
+  const fk = inside && document.activeElement !== panel ? focusKey(document.activeElement) : null;
+  panel.outerHTML = refinePanelHTML(d, data.anki.refine, ui.busy, valueOf(data.models) ?? null, valueOf(data.settings.consents) ?? null).value;
+  refreshHold();
+  if (!inside) return;
+  const fresh = $('.es-refine');
+  if (!fresh) return;
+  const same = fk ? fresh.querySelector<HTMLElement>(fk) : null;
+  const next = focusable(same) ? same : (REFINE_NEXT.map((s) => fresh.querySelector<HTMLElement>(s)).find(focusable) ?? fresh);
+  next.focus({ preventScroll: true });
+}
+
+/** Accept and Skip, outside the panel, follow a send starting and settling (refineHold). */
+function refreshHold(): void {
+  const r = data.anki.refine;
+  document.querySelectorAll<HTMLButtonElement>('#ankiscene [data-act="accept"], #ankiscene [data-act="askip"]').forEach((b) => (b.disabled = ui.busy || r.sending));
+  document.querySelectorAll<HTMLElement>('#ankiscene [data-hold]').forEach((el) => (el.innerHTML = refineHold(r).value));
+}
+
+/**
+ * What a refinement would send, from the core; nothing is sent. The consent ledger is read with it,
+ * so the panel can tell the every-provider grant notes need from a provider's own refusal.
+ */
+async function loadRefinePreview(): Promise<void> {
+  const d = data.anki.draft;
+  if (!d) return;
+  const gen = ++refinePreviewGen;
+  data.anki.refine.preview = { status: 'loading' };
+  refreshRefine();
+  const [r, ledger] = await Promise.all([call((a) => a.refineNotePreview(d.id)), call((a) => a.consents())]);
+  if (gen !== refinePreviewGen || data.anki.draft !== d || !ui.anki.refine) return;
+  if (ledger.ok) data.settings.consents = ready(ledger.value);
+  data.anki.refine.preview = r.ok ? ready(r.value) : { status: 'error', error: r.error };
+  refreshRefine();
+}
 
 async function loadPreview(): Promise<void> {
   const d = data.anki.draft;
@@ -198,14 +304,18 @@ async function restoreDraft(): Promise<void> {
   data.anki.preview = idle();
   ui.anki.fields = null;
   ui.anki.dirty = false;
+  seedRefine(r.value.suggestion);
 }
 
 async function loadAnki(): Promise<void> {
   if (data.services.status === 'idle') void loadServices();
+  if (data.models.status === 'idle') void loadModels();
   if (!data.anki.draft) await restoreDraft();
   await load((a) => a.notes(), (l) => (data.anki.notes = l), valueOf(data.anki.notes));
   if (data.anki.draft && data.anki.preview.status !== 'ready') await loadPreview();
 }
+
+const loadConsents = () => load((a) => a.consents(), (l) => (data.settings.consents = l), valueOf(data.settings.consents));
 
 async function loadSettings(): Promise<void> {
   const s = data.settings;
@@ -213,7 +323,7 @@ async function loadSettings(): Promise<void> {
     loadModels(),
     loadServices(),
     load((a) => a.budget(), (l) => (s.budget = l), valueOf(s.budget)),
-    load((a) => a.consents(), (l) => (s.consents = l), valueOf(s.consents)),
+    loadConsents(),
   ]);
   if (ui.layer?.startsWith('sheet:')) renderLayer(false);
 }
@@ -308,10 +418,14 @@ function navigate(route: Route): void {
 export function onRoute(loc: Location): void {
   // Any other way out (a link, history) still detaches, exactly as the leave dialog would.
   if (ui.route === 'assess' && loc.route !== 'assess' && ui.assess.attached) detachRun();
+  // A refinement preview is only true for the provider, consent and budget of the moment it was read:
+  // leaving the room drops it, so a return never shows (or sends from) a stale one. A suggestion
+  // already received stays: it sends nothing, and "Preview again" reads a fresh preview. A send in
+  // flight keeps the whole state, so its paid, stored reply lands in the panel the learner returns to
+  // (its preview cannot send again while it waits, nor after the reply or a failure).
+  if (ui.route === 'anki' && loc.route !== 'anki' && !data.anki.refine.sending) seedRefine(data.anki.refine.suggestion);
   ui.route = loc.route;
   ui.sub = loc.sub;
-  const idx = SESSION_IDX[loc.route];
-  if (idx !== undefined) ui.sessionAt = idx;
   ui.layer = null;
   hideMarkPop();
   const sa = subAction(loc);
@@ -334,7 +448,11 @@ export function onRoute(loc: Location): void {
 // ---------------------------------------------------------------- targeted updates
 
 function setChecked(v: string): void {
-  document.querySelectorAll<HTMLElement>('.opt').forEach((o) => o.setAttribute('aria-checked', String(o.dataset.v === v)));
+  document.querySelectorAll<HTMLElement>('.opt').forEach((o) => {
+    o.setAttribute('aria-checked', String(o.dataset.v === v));
+    // A long question scrolls its options: the one chosen by key comes into view.
+    if (o.dataset.v === v) o.scrollIntoView({ block: 'nearest' });
+  });
 }
 
 function syncPressed(act: string, v: string): void {
@@ -345,7 +463,7 @@ function refreshPreview(): void {
   const p = $('#preview');
   if (!p || !data.anki.draft) return;
   p.classList.toggle('phone', ui.anki.width === 'phone');
-  p.innerHTML = previewHTML(data.anki.preview, { ...ui.anki, busy: ui.busy, theme: ui.theme }, data.anki.draft).value;
+  p.innerHTML = previewHTML(data.anki.preview, { ...ui.anki, busy: ui.busy, theme: ui.theme, models: valueOf(data.models) ?? null, consents: valueOf(data.settings.consents) ?? null }, data.anki.draft).value;
 }
 
 function refreshAnkiChrome(): void {
@@ -420,7 +538,8 @@ async function startPractice(req: PracticeRequest): Promise<void> {
 }
 
 function resetCoach(): void {
-  data.coach = { preview: idle(), replies: {}, failed: null, failure: null, sending: false };
+  data.coach = { preview: idle(), replies: {}, failed: null, failure: null, sending: false, history: idle() };
+  ui.coachHistory = false;
 }
 
 async function answered(fbPromise: (a: StudyApi, token: string) => Promise<Feedback>): Promise<void> {
@@ -446,10 +565,13 @@ async function answered(fbPromise: (a: StudyApi, token: string) => Promise<Feedb
 async function propose(req: NoteRequest): Promise<void> {
   const d = await write((a) => a.proposeNote(req));
   if (!d) return;
+  const prev = data.anki.draft;
   data.anki.draft = d;
   data.anki.preview = idle();
   ui.anki.fields = null;
   ui.anki.dirty = false;
+  // Proposing the same note again returns the same draft: a refinement still on its way stays its own.
+  if (!(data.anki.refine.sending && prev?.id === d.id)) resetRefine();
   if (ui.route === 'anki') void loadAnki();
   else go('anki');
 }
@@ -467,6 +589,7 @@ function consentChanged(): void {
   if (ui.route === 'anki') {
     data.anki.preview = idle();
     void loadPreview();
+    if (ui.anki.refine && !data.anki.refine.suggestion) void loadRefinePreview();
   }
   render(true, false);
 }
@@ -592,13 +715,9 @@ export const ACT: Record<string, Act> = {
         return;
       }
       data.practice = ready(next);
-      document.body.dataset.room = next.can_count ? 'cool' : 'warm';
-      const q = $('#qcol');
-      if (q) {
-        q.classList.add('enter-hint');
-        q.innerHTML = qcolHTML(next, { sel: ui.practice.sel, marks: ui.practice.marks, busy: ui.busy }).value;
-        tickClocks();
-      }
+      // The hint opens in the drawer under the passage; the passage keeps its scroll.
+      render(true, false);
+      $('#stage')?.classList.add('enter-hint');
       ($('.opt[aria-checked="true"]') ?? $('.opt'))?.focus({ preventScroll: true });
     });
   },
@@ -631,6 +750,7 @@ export const ACT: Record<string, Act> = {
     const m = COACH_MODES.find(([k]) => k === v)?.[0];
     if (!m) return;
     ui.coachMode = m as CoachMode;
+    ui.coachHistory = false;
     data.coach.failed = null;
     data.coach.failure = null;
     data.coach.preview = idle();
@@ -649,6 +769,8 @@ export const ACT: Record<string, Act> = {
     void call((a) => a.coachAsk(fb.attempt_id, mode)).then((r) => {
       data.coach.sending = false;
       if (data.feedback !== fb) return;
+      // The call is recorded either way: the history is stale.
+      data.coach.history = idle();
       // Only an advisory reply is kept for the mode; a failure stays retryable (coach-retry).
       if (r.ok && r.value.state === 'advisory') data.coach.replies[mode] = r.value;
       else if (ui.coachMode === mode) {
@@ -657,7 +779,16 @@ export const ACT: Record<string, Act> = {
       }
       renderOrb();
       void loadToday();
+      // The call spent a budget slot: the strip reads the core's count again.
+      if (ui.coachMode === mode) void loadCoachPreview(true);
     });
+  },
+  'coach-history'() {
+    if (!data.feedback) return;
+    ui.coachHistory = !ui.coachHistory;
+    renderOrb();
+    $('[data-act="coach-history"]')?.focus({ preventScroll: true });
+    if (ui.coachHistory) void loadCoachHistory();
   },
   'coach-retry'() {
     if (data.coach.sending) return;
@@ -678,8 +809,10 @@ export const ACT: Record<string, Act> = {
   'consent-all-ask'(v) {
     if (!v) return;
     ui.anki.consentSource = v;
-    // The dialog lists the registry's providers the grant reaches; the load re-renders it in place.
+    // The dialog lists the registry's providers the grant reaches and names the source by its title
+    // and the providers keeping their own refusal (from a fresh ledger read); the loads re-render it in place.
     if (data.models.status === 'idle' || data.models.status === 'error') void loadModels();
+    void loadConsents();
     openLayer('consent-all');
   },
   'consent-all'(v) {
@@ -797,6 +930,12 @@ export const ACT: Record<string, Act> = {
     refreshPreview();
     syncPressed('ctheme', v);
   },
+  side(v) {
+    if (v !== 'both' && v !== 'front' && v !== 'back') return;
+    ui.anki.side = v;
+    refreshPreview();
+    syncPressed('side', v);
+  },
   cwidth(v) {
     if (v !== 'desk' && v !== 'phone') return;
     ui.anki.width = v;
@@ -809,11 +948,74 @@ export const ACT: Record<string, Act> = {
     render();
     if (ui.anki.editing) $('[data-field="front"]')?.focus();
     else $('[data-act="edit"]')?.focus();
+    // The sheet reopens with the refinement panel: what Send would do is read again, never reused.
+    if (ui.anki.editing && ui.anki.refine && !data.anki.refine.suggestion && !data.anki.refine.failure && !data.anki.refine.sending) void loadRefinePreview();
+  },
+  refine() {
+    if (!data.anki.draft) return;
+    ui.anki.editing = true;
+    const r = data.anki.refine;
+    // A send closed away while it waited comes back as it stands: pending, then its reply or failure,
+    // never a fresh preview that could pay for the same draft a second time.
+    const held = r.sending || !!r.suggestion || !!r.failure;
+    if (!ui.anki.refine && !held) data.anki.refine = { preview: idle(), suggestion: null, failure: null, sending: false };
+    ui.anki.refine = true;
+    render();
+    $('.es-refine [data-act="refine-close"]')?.focus({ preventScroll: true });
+    if (!held) void loadRefinePreview();
+  },
+  'refine-close'() {
+    // Closing hides a send in flight but keeps it: its paid reply lands in the panel when it reopens.
+    if (data.anki.refine.sending) ui.anki.refine = false;
+    else resetRefine();
+    render();
+    // The editor's own button: the room's one is hidden while the sheet is open.
+    $(ui.anki.editing ? '.esheet [data-act="refine"]' : '[data-act="refine"]')?.focus({ preventScroll: true });
+  },
+  'refine-send'() {
+    const d = data.anki.draft;
+    const r = data.anki.refine;
+    // Send only from a preview that is on screen and allows it.
+    if (!d || r.sending || r.suggestion || r.failure || r.preview.status !== 'ready' || !r.preview.value.consent.granted) return;
+    r.sending = true;
+    r.failure = null;
+    refreshRefine();
+    void call((a) => a.refineNote(d.id)).then((res) => {
+      r.sending = false;
+      // The budget moved whether or not the panel is still there to show the reply.
+      void loadToday();
+      // The same draft proposed again while this waited is still this draft.
+      if (data.anki.draft?.id !== d.id || data.anki.refine !== r) return;
+      if (res.ok) r.suggestion = res.value;
+      else r.failure = res.error;
+      // Away from the room the state waits; the return renders it.
+      if (ui.route === 'anki') refreshRefine();
+    });
+  },
+  'refine-retry'() {
+    const r = data.anki.refine;
+    if (r.sending) return;
+    // Retry only shows the preview again; the learner sends from it.
+    r.failure = null;
+    r.suggestion = null;
+    void loadRefinePreview();
+  },
+  'refine-use'() {
+    const s = data.anki.refine.suggestion;
+    const f = ankiFields();
+    if (!s || !f) return;
+    // Fills the editor only; accepting stays the learner's action and sends these full fields.
+    ui.anki.fields = { ...f, front: s.suggestion.front, back: s.suggestion.back };
+    ui.anki.dirty = true;
+    render();
+    $('[data-field="front"]')?.focus({ preventScroll: true });
+    void loadPreview();
   },
   accept() {
     const d = data.anki.draft;
     const f = ankiFields();
-    if (!d || !f) return;
+    // A refinement on its way holds the draft open (the buttons say so).
+    if (!d || !f || data.anki.refine.sending) return;
     void write((a) => a.acceptNote(d.id, f)).then((res) => {
       if (!res) return;
       data.anki.draft = null;
@@ -821,6 +1023,7 @@ export const ACT: Record<string, Act> = {
       ui.anki.fields = null;
       ui.anki.dirty = false;
       ui.anki.editing = false;
+      resetRefine();
       toast(T(`已接受 · 修订 ${res.note.revision} · 推送时写入 Anki`, `Accepted · revision ${res.note.revision} · written to Anki on push`));
       void loadAnki();
       void loadToday();
@@ -828,7 +1031,7 @@ export const ACT: Record<string, Act> = {
   },
   askip() {
     const d = data.anki.draft;
-    if (!d) return;
+    if (!d || data.anki.refine.sending) return;
     void writeOk((a) => a.skipNote(d.id)).then((ok) => {
       if (!ok) return;
       data.anki.draft = null;
@@ -836,6 +1039,7 @@ export const ACT: Record<string, Act> = {
       ui.anki.fields = null;
       ui.anki.dirty = false;
       ui.anki.editing = false;
+      resetRefine();
       toast(T('已跳过 · 不生成笔记', 'Skipped · no note'));
       render();
     });
@@ -866,11 +1070,7 @@ export const ACT: Record<string, Act> = {
     if (!v) return;
     void write((a) => a.testModel(v, '')).then((res) => {
       if (!res) return;
-      toast(
-        res.failure
-          ? `${T('测试未通过', 'Test failed')} · ${res.failure.message}${res.failure.action ? ' — ' + res.failure.action : ''}`
-          : T(`${res.provider_name} · ${res.model} 已验证`, `${res.provider_name} · ${res.model} verified`),
-      );
+      toast(res.failure ? `${T('测试未通过', 'Test failed')} · ${failureLine({ code: res.failure.code, message: res.failure.message, action: null })}` : T(`${res.provider_name} · ${res.model} 已验证`, `${res.provider_name} · ${res.model} verified`));
       void loadSettings();
     });
   },
@@ -926,6 +1126,7 @@ async function answerItem(label: string): Promise<void> {
 async function push(force: boolean): Promise<void> {
   const res = await write((a) => a.pushNotes(force));
   if (!res) return;
+  data.anki.lastPush = res;
   toast(pushSummary(res));
   closeLayer();
   await loadAnki();

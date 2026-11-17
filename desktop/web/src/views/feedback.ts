@@ -63,7 +63,7 @@ export function vFeedback(fb: Feedback, ev: string | null): Html {
           <span class="mk">${ic(right ? 'check' : 'x', 'l')}</span>
           <div><div class="w">${verdictText(fb.verdict)}</div>
           <div class="m">${fb.selected ? html`${T('你选了', 'You chose')} <b>${fb.selected.label}</b><span class="sep"></span>` : ''}${T('已核验答案', 'Verified key')} <b id="verified-key" data-testid="verified-key">${fb.key.label}</b></div></div>
-          <div class="q-r">${T(`第 ${fb.attempt_number} 次作答`, `Attempt ${fb.attempt_number}`)}<br><span class="id">${fb.question_id}</span></div>
+          <div class="q-r">${T(`第 ${fb.attempt_number} 次作答`, `Attempt ${fb.attempt_number}`)}</div>
         </div>
         <div class="f-chips">${conditionChip(fb.condition, fb.counted)}<span class="chip sm" data-testid="elapsed">${ic('clock', 'xs')}<span class="num">${mmss(fb.elapsed_ms / 1000)}</span></span><span class="chip ok sm">${ic('seal', 'xs')}${T('确定性评分', 'Deterministic grade')}</span>${
           fb.already_answered ? html`<span class="chip sm">${T('已记录过 · 未重复写入', 'Already recorded · not written again')}</span>` : ''
@@ -85,7 +85,7 @@ export function vFeedback(fb: Feedback, ev: string | null): Html {
       <div class="f-acts">
         <button class="btn ghost" data-act="propose-note">${ic('anki', 's')}${T('生成 Anki 笔记', 'Propose an Anki note')}<kbd>K</kbd></button>
         <span class="sp"></span>
-        <button class="btn primary" data-act="next">${T('下一题', 'Next')}<kbd>N</kbd></button>
+        <button class="btn primary" data-act="next" data-primary>${T('下一题', 'Next')}<kbd>N</kbd></button>
       </div>
     </article>
   </div>`;

@@ -3,10 +3,11 @@
 // where the presence comes from); keys entered here go to the OS credential store.
 import type { Budget, Consent, CredentialStatus, Model, ModelList, ModelProvider, Services } from '../api/types';
 import { html, type Html } from '../core/html';
-import { capabilityOf, failureTypeLabel, shortStamp, T } from '../core/i18n';
+import { capabilityOf, capName, failureTypeLabel, nextStep, shortStamp, T } from '../core/i18n';
 import type { Loadable } from '../core/state';
 import { sat, type Flag } from '../components/satellite';
 import { sheetWrap } from '../components/sheet';
+import { rawDetail } from '../components/failure';
 import { ic } from '../icons';
 import { unusableLine } from './coach';
 import { errorCard, loadingCard, retryButton } from './states';
@@ -47,25 +48,32 @@ function auth(p: ModelProvider, cred: CredentialStatus | undefined): Html {
 
 function primaryAction(p: ModelProvider, m: Model | undefined, busy: boolean): Html {
   const d = busy ? 'disabled' : '';
-  if (p.active && m?.active) return html`<span class="inuse">${ic('check', 'xs')}${T('使用中', 'In use')}</span>`;
+  if (p.active && m?.active && textChat(m)?.verified) return html`<span class="inuse">${ic('check', 'xs')}${T('使用中', 'In use')}</span>`;
   if (p.auth !== 'present') return html`<button class="btn ghost sm" data-act="cred" data-v="${p.id}">${T('添加密钥', 'Add key')}</button>`;
   if (!m) return html`<span class="muted">—</span>`;
   if (textChat(m)?.verified) return html`<button class="btn ghost sm" data-act="model-use" data-v="${p.id}/${m.id}" ${d}>${T('使用', 'Use')}</button>`;
-  return html`<button class="btn ghost sm" data-act="model-test" data-v="${p.id}/${m.id}" ${d}>${T('测试', 'Test')}</button>`;
+  return html`<button class="btn ghost sm" data-act="model-test" data-v="${p.id}/${m.id}" ${d}>${textChat(m)?.state === 'failed' ? T('重新测试', 'Test again') : T('测试', 'Test')}</button>`;
 }
 
+/** One model of an expanded row: its capability chips, then its own actions on a separate line. */
 function modelLine(p: ModelProvider, m: Model, busy: boolean): Html {
   const tc = textChat(m);
-  const c = capabilityOf(tc?.state ?? 'unsupported');
   const d = busy ? 'disabled' : '';
-  return html`<div class="capgrid" data-model="${p.id}/${m.id}"><span class="cg ${c[3]}"><code>${m.id}</code><span>${m.label ?? ''}${m.active ? html` · <b>${T('使用中', 'in use')}</b>` : ''}</span></span>
+  // "In use" is the selection; whether it can answer is the text-chat chip beside it.
+  const use = m.active
+    ? html`<span class="chip sm ${tc?.verified ? 'acc' : 'warm'}">${T('已选用', 'Selected')}</span>`
+    : tc?.verified
+      ? html`<button class="btn ghost sm" data-act="model-use" data-v="${p.id}/${m.id}" ${d}>${T('设为使用', 'Use this model')}</button>`
+      : '';
+  return html`<div class="rr-model" data-model="${p.id}/${m.id}">
+      <div class="capgrid"><span class="cg mdl"><code translate="no">${m.id}</code>${m.label && m.label !== m.id ? html`<span translate="no">${m.label}</span>` : ''}</span>
       ${m.capabilities.map((k) => {
         const s = capabilityOf(k.state);
-        return html`<span class="cg ${s[3]}"><code>${k.id}</code><span>${T(s[0], s[1])}${k.checked_at ? html` · <span class="num">${shortStamp(k.checked_at)}</span>` : ''}</span></span>`;
-      })}
-      <span class="acts-row">${m.active ? '' : html`<button class="btn ghost sm" data-act="model-use" data-v="${p.id}/${m.id}" ${d}>${T('设为使用', 'Use this model')}</button>`}<button class="btn ghost sm" data-act="model-test" data-v="${p.id}/${m.id}" ${d}>${T('测试（1 次外部调用）', 'Test (1 external call)')}</button>${
-        tc?.failure_type ? html`<span class="fine" style="margin:0">${T('上次失败', 'last failure')}: ${failureTypeLabel(tc.failure_type)}</span>` : ''
-      }</span></div>`;
+        return html`<span class="cg ${s[3]}" title="${k.id}"><b>${capName(k.id)}</b><span>${T(s[0], s[1])}${k.checked_at ? html` · <span class="num">${shortStamp(k.checked_at)}</span>` : ''}</span></span>`;
+      })}</div>
+      <div class="rr-acts">${use}<button class="btn ghost sm" data-act="model-test" data-v="${p.id}/${m.id}" ${d}>${T('测试（1 次外部调用）', 'Test (1 external call)')}</button>${
+        tc?.failure_type ? html`<span class="fine held" style="margin:0">${T('上次失败：', 'Last failure: ')}${failureTypeLabel(tc.failure_type)}</span>` : ''
+      }</div></div>`;
 }
 
 function row(p: ModelProvider, open: boolean, busy: boolean, s: Services | null): Html {
@@ -75,8 +83,8 @@ function row(p: ModelProvider, open: boolean, busy: boolean, s: Services | null)
   const cred = credentialOf(p, s);
   const d = busy ? 'disabled' : '';
   return html`<div class="rrow ${open ? 'open' : ''}" data-provider="${p.id}">
-      <span class="pv-name" title="${p.name}"><span class="mono-mk" aria-hidden="true">${monogram(p.name)}</span><span class="nm">${p.name}</span></span>
-      <span class="model ${m ? '' : 'none'}">${m?.id ?? T('没有模型', 'no model')}</span>
+      <span class="pv-name" title="${p.name}"><span class="mono-mk" aria-hidden="true">${monogram(p.name)}</span><span class="nm" translate="no">${p.name}</span></span>
+      ${m ? html`<span class="model" translate="no">${m.id}</span>` : html`<span class="model none">${T('没有模型', 'no model')}</span>`}
       <span class="cap ${c[3]}" data-capability="${tc?.state ?? 'unsupported'}">${ic(c[2], 's')}${T(c[0], c[1])}${tc?.checked_at ? html`<span class="t num">${shortStamp(tc.checked_at)}</span>` : ''}</span>
       ${auth(p, cred)}
       <span class="act">${primaryAction(p, m, busy)}</span>
@@ -85,13 +93,24 @@ function row(p: ModelProvider, open: boolean, busy: boolean, s: Services | null)
         open
           ? html`<div class="rr-more" style="grid-column:1 / -1">${p.models.map((x) => modelLine(p, x, busy))}
             <div class="sh-acts" style="margin:4px 0 0">
-              <span class="fine" style="margin:0">${T('环境变量', 'Environment variable')} <code>${p.credential_env}</code>${cred?.from === 'env' ? T('（已设置，优先于密钥库）', ' (set; it wins over the store)') : ''}</span>
-              <button class="btn ghost sm" data-act="cred" data-v="${p.id}">${p.auth === 'present' ? T('更换密钥', 'Replace key') : T('添加密钥', 'Add key')}</button>
+              <button class="btn ghost sm" data-act="cred" data-v="${p.id}" data-primary>${p.auth === 'present' ? T('更换密钥', 'Replace key') : T('添加密钥', 'Add key')}</button>
               ${cred?.from === 'store' ? html`<button class="btn quiet sm" data-act="cred-clear" data-v="${p.id}" ${d}>${T('移除密钥', 'Remove key')}</button>` : ''}
+              <span class="fine" style="margin:0">${
+                cred?.from === 'env'
+                  ? T('密钥来自环境变量，优先于密钥库', 'The key comes from an environment variable, which wins over the store')
+                  : T('也可以用环境变量提供密钥', 'An environment variable can provide the key too')
+              } <code translate="no">${p.credential_env}</code></span>
             </div></div>`
           : ''
       }
     </div>`;
+}
+
+/** The active provider's calls of its own daily limit (the same slot the coach shows); else the first provider's. */
+function budgetLine(b: Budget | null): Html {
+  const p = b ? (b.providers.find((x) => x.active) ?? b.providers[0]) : undefined;
+  if (!p) return html`<small>—</small>`;
+  return html`<span class="num">${p.calls} / ${p.limit}</span><small>${T('今日 · ', 'today · ')}<span translate="no">${p.label || p.provider}</span></small>`;
 }
 
 export function vSettings(d: SettingsData, u: SettingsUi): Html {
@@ -106,7 +125,7 @@ export function vSettings(d: SettingsData, u: SettingsUi): Html {
   // A source never decided has no recorded event; only a recorded "no" is a revocation.
   const revoked = c ? c.filter((x) => !x.granted && x.recorded_at).length : 0;
   const svcFlag: Flag = s ? (s.node_available ? 'ok' : 'bad') : '';
-  const unusable = unusableLine(reg);
+  const unusable = unusableLine(reg, true);
   return html`<div class="scene orbit solo" style="--obj-w:1000px" data-testid="settings">
     <section class="obj card reg rise" style="--i:0" aria-labelledby="reg-t">
       <div class="reg-h">
@@ -118,21 +137,21 @@ export function vSettings(d: SettingsData, u: SettingsUi): Html {
               ? T('凭据保存在系统密钥库，这里只显示有 / 无，从不显示密钥本身。', 'Credentials live in the OS secret store — shown only as present / missing, never displayed.')
               : T('本机没有可用的系统密钥库，只能使用环境变量。', 'No OS credential store here; only environment variables work.')
         }</p>
-        ${unusable ? html`<p class="held" data-testid="providers-unusable">${ic('info', 's')}${unusable}</p>` : ''}
+        ${unusable ? html`<p class="held" data-testid="providers-unusable">${ic('info', 's')}<span>${unusable}</span></p>` : ''}
       </div>
-      <div class="reg-cols" aria-hidden="true"><span><i>1</i>${T('提供方', 'Provider')}</span><span><i>2</i>${T('模型', 'Model')}</span><span><i>3</i>${T('能力', 'Capability')}<span class="id">text.chat</span></span><span><i>4</i>${T(
+      <div class="reg-cols" aria-hidden="true"><span><i>1</i>${T('提供方', 'Provider')}</span><span><i>2</i>${T('模型', 'Model')}</span><span><i>3</i>${T('能力 · ', 'Capability · ')}${capName('text.chat')}</span><span><i>4</i>${T(
         '授权',
         'Authorization',
       )}</span><span style="justify-self:end">${T('状态', 'State')}</span><span></span></div>
       <div class="reg-b">${reg.providers.map((p) => row(p, u.open === p.id, u.busy, s))}</div>
       <div class="reg-f">
-        <span>${ic('seal', 'xs')}${T('只有 text.chat 能被验证', 'Only text.chat is ever verified')}</span>
+        <span>${ic('seal', 'xs')}${T(`只有「${capName('text.chat')}」能力会被验证`, `Only ${capName('text.chat')} is ever verified`)}</span>
         <span>${ic('adv', 'xs')}${T('已声明 · 未验证：提供方声称支持，未经测试', 'Declared, not tested: claimed by the provider')}</span>
         <span>${ic('minus', 'xs')}${T('不支持', 'Unsupported')}</span>
       </div>
     </section>
     <div class="rail r">
-      ${sat('budget', 'pulse', T('每日调用预算', 'Daily call budget'), b ? html`<span class="num">${b.total_calls} / ${b.total_limit}</span><small>${T('今日 · UTC', 'today · UTC')}</small>` : html`<small>—</small>`, '', 1)}
+      ${sat('budget', 'pulse', T('每日调用预算', 'Daily call budget'), budgetLine(b), '', 1)}
       ${sat(
         'consent',
         'shield',
@@ -145,7 +164,7 @@ export function vSettings(d: SettingsData, u: SettingsUi): Html {
         'services',
         'server',
         T('本地服务', 'Local services'),
-        s ? html`Node<small>${s.node_available ? T('可用', 'available') : T('不可用', 'unavailable')}</small>` : html`<small>—</small>`,
+        s ? html`${T('助手宿主', 'Agent host')}<small>${s.node_available ? T('可用', 'available') : T('不可用', 'unavailable')}</small>` : html`<small>—</small>`,
         svcFlag,
         3,
       )}
@@ -177,9 +196,11 @@ function budgetSheet(b: Budget): Html {
 function consentSheet(c: Consent[], d: SettingsData, u: SettingsUi): Html {
   const providers = d.models.status === 'ready' ? d.models.value.providers : [];
   const name = (id: string | undefined) => (id ? (providers.find((p) => p.id === id)?.name ?? id) : T('所有提供方', 'every provider'));
+  const titles = new Map(c.filter((x) => x.title).map((x) => [x.source_id, x.title]));
+  const sourceTitle = (id: string) => titles.get(id) || T(`导入资料 ${d.sources.indexOf(id) + 1}`, `Imported source ${d.sources.indexOf(id) + 1}`);
   const dis = u.busy ? 'disabled' : '';
   const rows = c.map(
-    (x) => html`<div class="svc" data-testid="consent" data-source="${x.source_id}" data-provider="${x.provider ?? ''}" data-granted="${x.granted}"><span class="state-dot ${x.granted ? 'ok' : 'bad'}"></span><span>${x.source_id} → ${name(x.provider)} <span class="muted">${shortStamp(x.recorded_at)}${x.reviewer ? ` · ${x.reviewer}` : ''}</span></span><span class="st ${x.granted ? 'ok' : 'bad'}">${
+    (x) => html`<div class="svc" data-testid="consent" data-source="${x.source_id}" data-provider="${x.provider ?? ''}" data-granted="${x.granted}"><span class="state-dot ${x.granted ? 'ok' : 'bad'}"></span><span><span translate="no">${x.title || sourceTitle(x.source_id)}</span> → <span translate="no">${name(x.provider)}</span> <span class="muted">${shortStamp(x.recorded_at)}${x.reviewer ? ` · ${x.reviewer}` : ''}</span></span><span class="st ${x.granted ? 'ok' : 'bad'}">${
       x.granted ? T('已授予', 'granted') : x.recorded_at ? T('已撤回', 'revoked') : T('未授权', 'not granted')
     }${
       x.granted
@@ -194,7 +215,7 @@ function consentSheet(c: Consent[], d: SettingsData, u: SettingsUi): Html {
   const grantForm = d.sources.length
     ? html`<form class="pq-form confirm" id="consentform" data-form="consent"><h3>${T('授予前确认范围', 'Confirm the scope before granting')}</h3>
         <p class="fine">${T('授权后，这份私有导入资料的题干、选项、证据句等原文可以发给所选提供方；可以随时撤回。', 'Once granted, the stem, options and evidence text of this private import may be sent to the chosen provider; you can revoke it at any time.')}</p>
-        <label class="field"><span class="fl">${T('来源', 'Source')}</span><select name="source">${[...fresh, ...d.sources.filter((s) => known.has(s))].map((s) => html`<option value="${s}">${s}</option>`)}</select></label>
+        <label class="field"><span class="fl">${T('来源', 'Source')}</span><select name="source">${[...fresh, ...d.sources.filter((s) => known.has(s))].map((s) => html`<option value="${s}">${sourceTitle(s)}</option>`)}</select></label>
         <label class="field"><span class="fl">${T('提供方', 'Provider')}</span><select name="provider">${providers.map((p) => html`<option value="${p.id}">${p.name}</option>`)}</select></label>
         <div class="sh-acts" style="margin-top:8px"><button class="btn primary sm" data-act="consent-form" ${dis}>${T('确认授予', 'Grant')}</button></div></form>`
     : '';
@@ -216,7 +237,7 @@ function servicesSheet(s: Services): Html {
     html`<div class="svc" data-testid="svc-node" data-available="${s.node_available}"><span class="state-dot ${s.node_available ? 'ok' : 'bad'}"></span><span>${T('Agent 宿主', 'Agent host')} <span class="muted">(Node${
       s.node_path ? html` · <code>${s.node_path}</code>` : ''
     })</span></span><span class="st ${s.node_available ? 'ok' : 'bad'}">${s.node_available ? T('可用 · 按次启动', 'available · started per call') : T('不可用', 'unavailable')}</span></div>
-      ${s.node_available || !s.node_action ? '' : html`<p class="fine">${s.node_action}</p>`}
+      ${s.node_available ? '' : html`<div class="fine" data-testid="svc-node-next">${nextStep('node_unavailable')}${rawDetail({ code: 'node_unavailable', action: s.node_action })}</div>`}
       <div class="svc"><span class="state-dot off"></span><span>AnkiConnect <code class="muted">${s.anki_endpoint}</code></span><span class="st">${T('推送时才连接', 'contacted only on push')}</span></div>
       <div class="svc"><span class="state-dot ${s.search_configured ? 'ok' : 'off'}"></span><span>${T('搜索提供方', 'Search provider')} <code class="muted">${s.search_env}</code></span><span class="st">${
         s.search_configured ? T('已配置', 'configured') : T('未配置', 'not configured')

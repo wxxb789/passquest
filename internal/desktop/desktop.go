@@ -95,7 +95,7 @@ func Run() int {
 
 	mygo.App.WhenReady(func() {
 		openStudy(study, getenv)
-		win = mygo.NewWindow(mygo.WindowOptions{
+		options := mygo.WindowOptions{
 			URL:       startURL(frontend),
 			Title:     AppName,
 			Width:     1280,
@@ -104,7 +104,21 @@ func Run() int {
 			MinHeight: 600,
 			Hidden:    strings.TrimSpace(getenv(EnvHidden)) == "1",
 			StateKey:  "main",
-		})
+		}
+		if options.Hidden {
+			// A hidden window's page runs as a shown one's: web views
+			// throttle the timers of a page that can't be seen to once a
+			// second (WebKit also suspends its CSS animations), which a
+			// scripted run waiting on timers and transitions would measure.
+			options.Page.BackgroundThrottling = mygo.ThrottlingOff
+		}
+		smoke.sizeWindow(&options)
+		win = mygo.NewWindow(options)
+		if options.Hidden {
+			if err := layOutHidden(win); err != nil {
+				log.Printf("passquest-desktop: %v", err)
+			}
+		}
 		if smoke != nil {
 			smoke.attach(win.Page())
 		}

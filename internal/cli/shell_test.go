@@ -17,6 +17,7 @@ var testQuoter = commandQuoter{shell: shellChoice{Family: shellFamilySh, Source:
 // TestQuoteArgumentPerShell pins every shell family against every hostile path
 // shape. The forms are contract: a change here changes what a learner copies.
 func TestQuoteArgumentPerShell(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		in   string
@@ -51,6 +52,7 @@ func TestQuoteArgumentPerShell(t *testing.T) {
 // real `sh` parse and compares the argument the shell hands the program with the
 // original value. Pinning text proves the shape; this proves the paste.
 func TestShQuotingRoundTripsThroughSh(t *testing.T) {
+	t.Parallel()
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		return
@@ -84,6 +86,7 @@ func TestShQuotingRoundTripsThroughSh(t *testing.T) {
 }
 
 func TestDetectShell(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		goos  string
@@ -203,6 +206,7 @@ func runCLIWithEnv(t *testing.T, env map[string]string, args ...string) (int, st
 }
 
 func TestNextQuotesCommandsForTheDetectedShell(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "learner data")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -275,6 +279,7 @@ func TestNextQuotesCommandsForTheDetectedShell(t *testing.T) {
 }
 
 func TestNextWarnsAboutCmdPercentExpansion(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "100% data")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -301,6 +306,7 @@ func TestNextWarnsAboutCmdPercentExpansion(t *testing.T) {
 }
 
 func TestNextRejectsAnUnknownShellOverride(t *testing.T) {
+	t.Parallel()
 	env := map[string]string{shellOverrideEnv: "fish"}
 	code, out, errOut := runCLIWithEnv(t, env, "next", "--json", "--db", filepath.Join(t.TempDir(), "attempts.sqlite"))
 	if code != 2 {

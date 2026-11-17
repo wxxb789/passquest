@@ -84,6 +84,8 @@ export interface LaunchResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  /** When the process was seen to exit, ms since the epoch. */
+  exitedAt: number;
   /** Set when the app could not be started at all (no display, missing binary). */
   error?: string;
 }
@@ -92,8 +94,8 @@ export interface DesktopRun {
   /** The spawned process: the app itself, or `xvfb-run` when the launch is wrapped. */
   pid: number;
   wrapped: boolean;
-  /** Resolves the app's own pid (the wrapper's descendant when wrapped). */
-  appPid: () => Promise<number | null>;
+  /** Resolves the app's own pid (the wrapper's descendant when wrapped); null while not found yet. */
+  appPid: () => Promise<number | null | { error: string }>;
   /** The watchdog's kill: ends the whole process tree now; `result` then resolves. */
   kill: () => Promise<void>;
   result: Promise<LaunchResult>;
@@ -122,7 +124,7 @@ function failedLaunch(error: string): DesktopRun {
     wrapped: false,
     appPid: async () => null,
     kill: async () => {},
-    result: Promise.resolve({ code: -1, stdout: "", stderr: "", timedOut: false, error }),
+    result: Promise.resolve({ code: -1, stdout: "", stderr: "", timedOut: false, exitedAt: Date.now(), error }),
   };
 }
 
@@ -131,7 +133,7 @@ function failedLaunch(error: string): DesktopRun {
  * WEBVIEW2_USER_DATA_FOLDER unless `env` names one: WebView2 helpers can still
  * write to the profile shortly after the host exits, so a caller that waits for
  * them passes a folder it removes itself. On Linux without a display the launch
- * is wrapped in `xvfb-run -a`. Output goes to files, not pipes, so a webview child that
+ * is wrapped in `xvfb-run -a` on a 1920x1080 screen. Output goes to files, not pipes, so a webview child that
  * inherits the handles cannot keep the result pending after the app exits.
  */
 export function startDesktop(options: LaunchOptions): DesktopRun {
@@ -148,7 +150,9 @@ export function startDesktop(options: LaunchOptions): DesktopRun {
       rmSync(scratch, { recursive: true, force: true });
       return failedLaunch("no DISPLAY or WAYLAND_DISPLAY and xvfb-run is not installed (apt-get install xvfb)");
     }
-    cmd = [xvfb, "-a", ...cmd];
+    // xvfb-run's default screen (640x480x8) is smaller than the 1440x844
+    // viewport desktop-ux measures; a larger screen changes nothing else.
+    cmd = [xvfb, "-a", "-s", "-screen 0 1920x1080x24", ...cmd];
     wrapped = true;
   }
   const stdoutPath = path.join(scratch, "stdout.txt");
@@ -168,10 +172,10 @@ export function startDesktop(options: LaunchOptions): DesktopRun {
     return failedLaunch(error instanceof Error ? error.message : String(error));
   }
   const pid = proc.pid;
-  const appPid = async (): Promise<number | null> => {
+  const appPid = async (): Promise<number | null | { error: string }> => {
     if (!wrapped) return pid;
     const table = await listProcesses();
-    if ("error" in table) return null;
+    if ("error" in table) return table;
     const name = path.basename(options.binary);
     // argv[0] only: the wrapper's own shells carry the binary path as an argument.
     const app = descendants(table.items, pid).find((entry) => path.basename(entry.command.split(" ")[0]) === name);
@@ -188,6 +192,7 @@ export function startDesktop(options: LaunchOptions): DesktopRun {
       void kill();
     }, options.timeoutMs);
     const code = await proc.exited;
+    const exitedAt = Date.now();
     clearTimeout(watchdog);
     const read = (file: string) => {
       try {
@@ -199,7 +204,7 @@ export function startDesktop(options: LaunchOptions): DesktopRun {
     const stdout = read(stdoutPath);
     const stderr = read(stderrPath);
     await removeTree(scratch);
-    return { code, stdout, stderr, timedOut };
+    return { code, stdout, stderr, timedOut, exitedAt };
   })();
   return { pid, wrapped, appPid, kill, result };
 }
@@ -208,8 +213,13 @@ export function launchDesktop(options: LaunchOptions): Promise<LaunchResult> {
   return startDesktop(options).result;
 }
 
-export interface ProcessInfo {
+/** A process told apart from a later one that reuses its pid: creation time in ms since the epoch (NaN: unknown). */
+export interface ProcessIdentity {
   pid: number;
+  started: number;
+}
+
+export interface ProcessInfo extends ProcessIdentity {
   ppid: number;
   /** Executable name on Windows; the full argument string on POSIX. */
   command: string;
@@ -249,7 +259,9 @@ function stringOf(row: unknown, key: string): string {
 export async function listProcesses(): Promise<Probe<ProcessInfo>> {
   if (process.platform === "win32") {
     const result = await powershell(
-      "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress",
+      "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name," +
+        "@{n='Started';e={if ($_.CreationDate) { ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } else { $null }}}" +
+        " | ConvertTo-Json -Compress",
     );
     if (result.code !== 0) return { error: `Get-CimInstance Win32_Process exit ${result.code}: ${result.stderr.trim()}` };
     try {
@@ -258,59 +270,102 @@ export async function listProcesses(): Promise<Probe<ProcessInfo>> {
           pid: numberOf(row, "ProcessId"),
           ppid: numberOf(row, "ParentProcessId"),
           command: stringOf(row, "Name"),
+          // null (no creation time readable) becomes NaN: unknown, never "the epoch".
+          started: numberOf(row, "Started") || Number.NaN,
         })),
       };
     } catch (error) {
       return { error: `Win32_Process output is not JSON: ${error instanceof Error ? error.message : String(error)}` };
     }
   }
-  const result = await run("ps", ["-A", "-o", "pid=,ppid=,args="]);
+  // lstart is a five-field time in the C locale ("Mon Nov  6 10:00:00 2026"); args may hold spaces. TZ=UTC0 prints
+  // it in UTC: local wall-clock time repeats an hour when DST ends, so a child could look older than its parent.
+  const result = await run("ps", ["-A", "-o", "pid=,ppid=,lstart=,args="], { env: { LC_ALL: "C", TZ: "UTC0" } });
   if (result.code !== 0) return { error: `ps exit ${result.code}: ${result.stderr.trim()}` };
+  return parsePsTable(result.stdout);
+}
+
+/** A whole `ps` table. A line this parser does not understand fails the probe: skipping it would hide a process. */
+export function parsePsTable(stdout: string): Probe<ProcessInfo> {
   const items: ProcessInfo[] = [];
-  for (const line of result.stdout.split(/\r?\n/)) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-    if (match) items.push({ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] });
+  for (const line of stdout.split(/\r?\n/)) {
+    if (line.trim() === "") continue;
+    const entry = parsePsLine(line);
+    if (!entry) return { error: `ps line not understood: ${JSON.stringify(line.slice(0, 200))}` };
+    items.push(entry);
   }
+  if (items.length === 0) return { error: "ps listed no processes" };
   return { items };
 }
 
-/** Every transitive child of `root` in a process table snapshot. */
-export function descendants(table: ProcessInfo[], root: number): ProcessInfo[] {
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** One `ps -o pid=,ppid=,lstart=,args=` line in the C locale under TZ=UTC0; the start is UTC to the second. */
+export function parsePsLine(line: string): ProcessInfo | null {
+  const match = /^\s*(\d+)\s+(\d+)\s+[A-Z][a-z]{2}\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})(?:\s+(.*))?$/.exec(line);
+  if (!match) return null;
+  const [, pid, ppid, month, day, hour, minute, second, year, command = ""] = match;
+  const index = MONTHS.indexOf(month);
+  if (index < 0) return null;
+  const started = Date.UTC(Number(year), index, Number(day), Number(hour), Number(minute), Number(second));
+  return { pid: Number(pid), ppid: Number(ppid), command, started };
+}
+
+/** False only when both creation times are known and `child` was created before `parent`. */
+const createdSince = (child: ProcessIdentity, parent: ProcessIdentity): boolean => !(child.started < parent.started);
+
+/**
+ * Every transitive child of `root` in a process table snapshot. A parent id
+ * alone is no proof: Windows keeps a dead parent's id on its children and soon
+ * hands the id to a new process, so an entry is a child only if it was created
+ * no earlier than its parent. A bare pid takes its creation time from the
+ * table. `exitedAt` bounds the root's direct children after the root exited: a
+ * process that reused the root's pid later, and its children, are not the root's.
+ */
+export function descendants(table: ProcessInfo[], root: number | ProcessIdentity, exitedAt = Number.POSITIVE_INFINITY): ProcessInfo[] {
+  const top: ProcessIdentity =
+    typeof root === "number" ? (table.find((entry) => entry.pid === root) ?? { pid: root, started: Number.NaN }) : root;
   const found: ProcessInfo[] = [];
-  const frontier = [root];
-  const seen = new Set<number>([root]);
+  const frontier: ProcessIdentity[] = [top];
+  const seen = new Set<number>([top.pid]);
   while (frontier.length > 0) {
-    const parent = frontier.pop() as number;
+    const parent = frontier.pop() as ProcessIdentity;
     for (const entry of table) {
-      if (entry.ppid !== parent || seen.has(entry.pid)) continue;
+      if (entry.ppid !== parent.pid || seen.has(entry.pid) || !createdSince(entry, parent)) continue;
+      if (parent === top && entry.started > exitedAt) continue;
       seen.add(entry.pid);
       found.push(entry);
-      frontier.push(entry.pid);
+      frontier.push(entry);
     }
   }
   return found;
 }
 
 /**
- * Child processes of `pid`. Windows keeps a dead parent's id on its children,
- * so this also finds orphans after the app exited; POSIX reparents them, so a
- * caller that needs orphans there compares against a snapshot taken while the
- * app was running (see `stillRunning`).
+ * Child processes of `root` (see `descendants`). Windows keeps a dead parent's
+ * id on its children, so given the root's identity and exit time this also
+ * finds orphans after the app exited; POSIX reparents them, so a caller that
+ * needs orphans there compares against a snapshot taken while the app was
+ * running (see `stillRunning`).
  */
-export async function childProcesses(pid: number): Promise<Probe<ProcessInfo>> {
+export async function childProcesses(root: number | ProcessIdentity, exitedAt?: number): Promise<Probe<ProcessInfo>> {
   const table = await listProcesses();
   if ("error" in table) return table;
-  return { items: descendants(table.items, pid) };
+  return { items: descendants(table.items, root, exitedAt) };
 }
 
-/** The entries of an earlier snapshot that still run with the same pid and command. */
+/** One process seen twice: pid and command agree, and so do both creation times when known. */
+export function sameProcess(a: ProcessInfo, b: ProcessInfo): boolean {
+  const bothTimed = !Number.isNaN(a.started) && !Number.isNaN(b.started);
+  return a.pid === b.pid && a.command === b.command && (!bothTimed || a.started === b.started);
+}
+
+/** The entries of an earlier snapshot that are still the same running process. */
 export async function stillRunning(snapshot: ProcessInfo[]): Promise<Probe<ProcessInfo>> {
   if (snapshot.length === 0) return { items: [] };
   const table = await listProcesses();
   if ("error" in table) return table;
-  return {
-    items: snapshot.filter((old) => table.items.some((now) => now.pid === old.pid && now.command === old.command)),
-  };
+  return { items: snapshot.filter((old) => table.items.some((now) => sameProcess(now, old))) };
 }
 
 /** Listening TCP sockets owned by any of `pids`. */

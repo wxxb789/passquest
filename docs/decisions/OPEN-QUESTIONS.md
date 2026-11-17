@@ -1273,3 +1273,150 @@ Entry format:
 - Options considered: (A) route the CLI through the same workspace reconciler; (B) leave as is.
 - Default taken: (B) for this goal.
 - Revisit when: a follow-up fix confirms or refutes the CLI behaviour with a test.
+
+### Q-0011-16 — May a goal merge when the local gate fails only for a missing npm package?
+- Status: resolved
+- Resolution: (owner, 2026-11-15) yes. The development machine can reach only a corporate npm feed proxy that
+  publishes packages about seven days after the public registry, so the locked Pi Durable packages
+  (`@earendil-works/*@1.5.1`, 24 packages in all) are not yet installable there and `agent smoke` and
+  `provider smoke` fail locally with lines byte-identical to unmodified `main`. A goal may merge when every
+  other gate passes locally on the merged tree and CI passes all gates on ubuntu, macOS and Windows at the
+  same head, with the exception named in the merge commit. PR #24 (goal 0011) merged under this rule.
+- Context: the merge rule of Q-0000-01 / Q-0011-00 requires a local gate re-run; the registry is not
+  switchable on this network and the lock file must not be downgraded to make a local run pass.
+- Options considered: (A) merge on local-minus-environment plus CI; (B) wait for the feed; (C) obtain the
+  packages another way.
+- Default taken: none — the owner chose (A).
+- Revisit when: the feed carries the locked versions; then the local gate must be fully green again.
+
+### Q-0012-00 — Which design direction does goal 0012 refine?
+- Status: resolved
+- Resolution: (owner, 2026-11-14) "C · Stage" (`design/prototypes/c-stage.html`), chosen over "A · Folio" and
+  "B · Instrument" when the owner asked for the remaining goals to be completed in that design language.
+- Context: goal 0012 asked for the visual language to be refined with Opus and learner feedback rather than
+  frozen early; three self-contained prototypes were produced for the choice.
+- Options considered: (A) Folio; (B) Instrument; (C) Stage.
+- Default taken: none — the owner chose (C).
+- Revisit when: representative learner feedback contradicts the direction.
+
+### Q-0012-01 — How is visual and interaction quality gated?
+- Status: decided(default taken)
+- Context: the goal requires review "based on actual user flows and rendered screens, not aesthetic assertions
+  alone"; screenshots alone are not evidence under the harness rules.
+- Options considered: (A) a `desktop-ux` gate auditing the real window per route × theme × language × size,
+  with an allowlist that may only shrink; (B) screenshots reviewed by hand; (C) extend `desktop-smoke`.
+- Default taken: (A). Overflow, coverage, primary-action visibility, composited contrast, font-size floor,
+  focus and motion are measured in the page; every run first proves its probes on planted defects. At close the
+  allowlist holds only entries whose reason is exam content or a learner-entered value.
+- Revisit when: a check proves flaky across CI platforms, or the owner wants pixel-level screenshot diffs.
+
+### Q-0012-02 — How does an existing deck get the new card design?
+- Status: decided(default taken)
+- Context: the note model is created once and never updated (goal 0007); a new model name would turn every
+  pushed note into `model_mismatch` and need a schema change in Anki.
+- Options considered: (A) update styling and templates in place under the same model name, only when the deck
+  holds parts Pass Quest shipped; (B) a new model name and a note-type migration; (C) leave old decks.
+- Default taken: (A). The stylesheet, the front and the back are each compared with every version Pass Quest
+  shipped, after normalising line endings and surrounding whitespace (a client may store them differently); a
+  deck whose parts all match some shipped version — including one left half-updated by an interrupted update —
+  is upgraded, because overwriting it can only replace Pass Quest's own text. Any other difference is the
+  learner's customisation: it is reported as `model_customized` and never overwritten. Fields, field order, model
+  name and template name do not change, so conflict detection and the deck claim of goal 0014 are unaffected.
+- Revisit when: real Anki evidence shows a template update forces a full sync.
+
+### Q-0012-03 — Is there a free-text coach composer?
+- Status: decided(default taken)
+- Context: the prototype shows a reply box under the coach; the tutor domain accepts only a mode
+  (`explain`/`probe`/`micro_lesson`) per attempt.
+- Options considered: (A) no composer; (B) a composer mapped to a new tutor request kind.
+- Default taken: (A). A new request kind needs its own prompt, budget and consent contract.
+- Revisit when: a goal defines follow-up questions as a tutor capability.
+
+### Q-0012-04 — Does the card front show the tactic name?
+- Status: decided(default taken)
+- Context: the prototype card shows the tactic as an eyebrow on the front; on a recall card that names the
+  category of the answer before the learner tries.
+- Options considered: (A) tactic on the back only; (B) on the front.
+- Default taken: (A).
+- Revisit when: the owner prefers the cue on the front.
+
+### Q-0012-05 — Which window sizes are measured?
+- Status: decided(default taken)
+- Context: the brief targets 1440×900 and 1280×800; the development display (1536×864 DIP) caps a 1440-wide
+  content area at 844 px high, and the window size is otherwise restored from MyGo's window state.
+- Options considered: (A) 1280×800 and 1440×844 with a smoke-only content-size switch; (B) 1280×800 only.
+- Default taken: (A). The audit asserts the real viewport before measuring and fails rather than measuring a
+  different size.
+- Revisit when: CI or the owner's display can host 1440×900.
+
+### Q-0012-06 — May a test shorten the agent kill grace through a product seam?
+- Status: resolved
+- Resolution: (owner, 2026-11-17) (A) approved as test-efficiency plan item A8.
+- Context: `TestAgentCancelKeepsTerminalOffALiveHost` is the only coverage of the unconfirmed cancel path
+  (agent-smoke covers only the confirmed one) and waited the full hard-coded 6 s kill grace on every run.
+- Options considered: (A) one grace, `agentKillGrace()` = `agentHeartbeatWindow()` + 1 s (6 s in production),
+  carried by an unexported `Options.agentKillGrace` field that `withDefaults()` fills, so only a test in
+  `internal/cli` can shorten it; (B) a package variable; (C) keep the 6 s wait.
+- Default taken: none — the owner chose (A). The test sets 500 ms and keeps its five assertions; it also asserts
+  that `(Options{}).withDefaults()` yields 6 s, so the production value cannot drift unseen.
+- Revisit when: the cancel loop's grace is derived from anything other than the heartbeat window.
+
+### Q-0012-07 — May assess-smoke drop sections whose assertions a Go test already makes?
+- Status: resolved
+- Resolution: (owner, 2026-11-17) (A) approved as test-efficiency plan item A10.
+- Context: assess-smoke sections 9 (pool floor) and 6 (compare) repeated assertions that
+  `internal/cli/assess_test.go` makes more strictly; section 6 seeded 40 pages (about 127 process spawns) for
+  one read-only compare.
+- Options considered: (A) drop the duplicated sections after the Go test gains the one string it lacked;
+  (B) keep both.
+- Default taken: none — the owner chose (A). `TestAssessStartRefusesFloorAndShortfall` first gained the
+  "4 unseen content unit(s)" assertion, shown to fail when the message changes; it asserts exit 2, `pool_floor`,
+  "4 qualifying item(s)", "16 more" and that text. `TestAssessCompareRefusesUnlikeRuns` asserts
+  `incomparable_runs`, `window_minutes` and `compared` for two distinct like runs (the smoke compared a run with
+  itself; the compare has no same-id branch). Assess smoke went from 275 to 125 assertions. Section 1 (pool in
+  items and units) stays, against the plan: the `qualifying_items` and `question_count` wire keys are checked
+  nowhere else, because the Go test decodes them through the production structs. Section 1b stays as the plan
+  required. The dated `docs/evidence/0009-unseen-exam-assessment.md` record ("275 assertions over the nine
+  acceptance rows") is left as written; acceptance rows 6 and 9 are now carried by the two Go tests.
+- Revisit when: a Go test asserts the raw `"qualifying_items"` and `"question_count"` keys; section 1 may then go.
+
+### Q-0012-08 — How is the CI gate split into jobs?
+- Status: decided(default taken)
+- Context: one job per OS ran all 24 gates serially, so a failure cost the whole chain's wall time and a
+  re-run repeated every gate.
+- Options considered: (A) one job per OS × group, grouped by environment need; (B) one job per gate; (C) keep
+  one job per OS.
+- Default taken: (A): `core` (gates 1-21; Go, Bun, Node), `desktop` (desktop-smoke, desktop-ux; display,
+  webview, Secret Service) and `self-test` (it feeds the desktop gates broken trees, so it needs the same) on
+  ubuntu, macOS and Windows, fail-fast off, 20-minute timeout. Self-test is its own group so the desktop job is
+  not the bottleneck. The split was sized from earlier CI logs, not measured on the split pipeline. Every
+  `bun run gate` refuses to run unless `harness/lib/gate-groups.ts` finds every gate in exactly one group and
+  the matrix exactly `os` × `group` for those groups. The three jobs of one OS share setup-go's cache key, so
+  only the first to finish saves the build cache; this is disclosed, to be measured on the first split run.
+  The owner may rebalance the groups.
+- Revisit when: the first split CI run shows the desktop or self-test builds slower than before (then key the
+  cache per group), or the per-gate timings show one group as the bottleneck.
+
+### Q-0012-09 — Should the gate run independent gates in parallel in one process?
+- Status: decided(default taken)
+- Context: test-efficiency plan item A13 proposed overlapping go-test with the static and CLI smoke gates
+  before the desktop gates, conditional on 20 CI trials per OS.
+- Options considered: (A) defer; (B) a two-phase runner with `--serial` kept.
+- Default taken: (A). The CI split (Q-0012-08) already runs go-test and the desktop gates on separate runners;
+  what remains is overlap inside `core` on one 4-vCPU runner, where heartbeat and timing tests would contend
+  with the smokes — the flake source the plan named.
+- Revisit when: the per-gate timings on the split pipeline show `core` as the slowest group.
+
+### Q-0012-10 — Do the parallel store tests flake on SQLite locking?
+- Status: open
+- Context: plan item A9 runs `internal/cli` and `internal/store` top-level tests with `t.Parallel()`. One local
+  run failed `TestMigrationFromVersionSixAddsTutorTables` with `SQLITE_BUSY` after the 5 s busy timeout (1 of
+  22 store-package runs, root cause unconfirmed).
+- Options considered: (A) match production: the test helper `openSQLite` sets `SetMaxOpenConns(1)` as
+  `store.open` does; (B) make the `openSQLite` migration-fixture tests serial; (C) drop parallelism in the
+  store package.
+- Default taken: (A). It removes one fixture opening a second connection against its own file; it does not
+  prove that was the cause.
+- Evidence since (A): `go test ./internal/store -count=20` passed locally (2026-11-17), and the go-test gate passed
+  in the first split CI run on ubuntu, macOS and Windows.
+- Revisit when: go-test flakes on Windows CI; then take (B).

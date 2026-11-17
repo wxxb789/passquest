@@ -31,6 +31,7 @@ func noteContentFixture(marker string) NoteContent {
 }
 
 func TestAcceptNoteIsIdempotentAndKeepsHistory(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	target := noteTargetFixture()
 	content := noteContentFixture("one")
@@ -86,6 +87,7 @@ func TestAcceptNoteIsIdempotentAndKeepsHistory(t *testing.T) {
 }
 
 func TestNoteRevisionAndLedgerTablesAreAppendOnly(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	target := noteTargetFixture()
 	if _, err := st.AcceptNote(target, noteContentFixture("one"), time.Now()); err != nil {
@@ -112,6 +114,7 @@ func TestNoteRevisionAndLedgerTablesAreAppendOnly(t *testing.T) {
 }
 
 func TestNoteOutboxDrainsOnceAndKeepsPendingOnFailure(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	target := noteTargetFixture()
 	if _, err := st.AcceptNote(target, noteContentFixture("one"), time.Now()); err != nil {
@@ -154,6 +157,7 @@ func TestNoteOutboxDrainsOnceAndKeepsPendingOnFailure(t *testing.T) {
 }
 
 func TestNoteDraftSupersedesChangedInput(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	at := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
 	draft := NoteDraft{
@@ -196,6 +200,7 @@ func TestNoteDraftSupersedesChangedInput(t *testing.T) {
 }
 
 func TestNoteRefinementSharesTheDailyBudget(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	now := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
 	day := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
@@ -234,6 +239,7 @@ func TestNoteRefinementSharesTheDailyBudget(t *testing.T) {
 }
 
 func TestTutorReservationCountsFinalizedRefinements(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "shared-budget.sqlite"))
 	now := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
 	day := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
@@ -255,6 +261,7 @@ func TestTutorReservationCountsFinalizedRefinements(t *testing.T) {
 }
 
 func TestMigrationFromVersionNineKeepsAttempts(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v9.sqlite")
 	db := openSQLite(t, path)
 	for _, statements := range [][]string{
@@ -302,6 +309,7 @@ func TestMigrationFromVersionNineKeepsAttempts(t *testing.T) {
 }
 
 func TestMigrationFromVersionTenAddsNoteMark(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v10.sqlite")
 	db := openSQLite(t, path)
 	for _, statements := range [][]string{
@@ -342,6 +350,7 @@ func TestMigrationFromVersionTenAddsNoteMark(t *testing.T) {
 }
 
 func TestMigrationFromVersionElevenAddsAcceptedDraftFields(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v11.sqlite")
 	db := openSQLite(t, path)
 	for _, statements := range [][]string{
@@ -389,6 +398,7 @@ func TestMigrationFromVersionElevenAddsAcceptedDraftFields(t *testing.T) {
 }
 
 func TestNoteDraftRefinementClearsAcceptedContent(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	at := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
 	targetKey := "src-x-p001\x1fq1\x1fcloses"
@@ -407,7 +417,11 @@ func TestNoteDraftRefinementClearsAcceptedContent(t *testing.T) {
 	if _, err := st.AcceptDraftNote(draft.ID, target, content, at); err != nil {
 		t.Fatalf("accept draft: %v", err)
 	}
-	if err := st.SetNoteDraftRefinement(draft.ID, 1, "m", "refined front", "refined back"); err != nil {
+	observed, _, err := st.NoteDraftByID(draft.ID)
+	if err != nil {
+		t.Fatalf("read accepted draft: %v", err)
+	}
+	if err := st.SetNoteDraftRefinement(observed, 1, "m", "refined front", "refined back"); err != nil {
 		t.Fatalf("set refinement: %v", err)
 	}
 	stored, found, err := st.NoteDraftByID(draft.ID)
@@ -420,6 +434,7 @@ func TestNoteDraftRefinementClearsAcceptedContent(t *testing.T) {
 }
 
 func TestNoteCommandsDoNotChangeAttempts(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	mustAppend(t, st, sampleAttempt("q1"))
 	before, err := st.List()
@@ -451,6 +466,7 @@ func TestNoteCommandsDoNotChangeAttempts(t *testing.T) {
 }
 
 func TestNoteDraftStatusRejectsUnknownState(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	draft := NoteDraft{
 		TargetKey: "c\x1fq\x1f", ContentID: "c", QuestionID: "q", Origin: "deterministic",
@@ -468,6 +484,7 @@ func TestNoteDraftStatusRejectsUnknownState(t *testing.T) {
 }
 
 func TestMigrationFromVersionFifteenRecordsTheDeckReadBack(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v15.sqlite")
 	db := openSQLite(t, path)
 	for _, migration := range migrations {
@@ -576,6 +593,7 @@ func TestMigrationFromVersionFifteenRecordsTheDeckReadBack(t *testing.T) {
 // cannot name a deck records none, and an attempt that is not a deck read never
 // touches the name an earlier read recorded.
 func TestDeckReadWithoutADeckNameClearsTheRecordedDeck(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
 	target := noteTargetFixture()
@@ -666,6 +684,7 @@ func TestDeckReadWithoutADeckNameClearsTheRecordedDeck(t *testing.T) {
 }
 
 func TestDeckVerdictKeepsTheQueueAsTheWriteLeftIt(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "notes.sqlite"))
 	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
 	target := noteTargetFixture()

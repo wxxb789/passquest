@@ -85,6 +85,12 @@ var allowedActions = map[string]bool{
 	"updateNoteFields": true,
 	"notesInfo":        true,
 	"cardsInfo":        true,
+	// The model's stylesheet and templates are read, and replaced only when
+	// they are a known earlier Pass Quest version (Q-0012-02).
+	"modelStyling":         true,
+	"modelTemplates":       true,
+	"updateModelStyling":   true,
+	"updateModelTemplates": true,
 }
 
 var allowedResultStates = map[string]bool{"ok": true, "error": true, "unreachable": true}
@@ -224,6 +230,10 @@ func IsNotFoundError(message string) bool {
 	return strings.Contains(strings.ToLower(message), "not found")
 }
 
+// TemplateName is the name of the model's only card template. It is the key
+// updateModelTemplates addresses, so it never changes.
+const TemplateName = "PassQuest"
+
 // ModelParams is the createModel payload owned by the caller.
 type ModelParams struct {
 	Name          string
@@ -245,9 +255,55 @@ func CreateModelParams(model ModelParams) map[string]any {
 		"inOrderFields": append([]string(nil), model.Fields...),
 		"css":           model.CSS,
 		"cardTemplates": []map[string]string{
-			{"Name": "PassQuest", "Front": model.FrontTemplate, "Back": model.BackTemplate},
+			{"Name": TemplateName, "Front": model.FrontTemplate, "Back": model.BackTemplate},
 		},
 	}
+}
+
+// ModelNameParams builds the modelStyling and modelTemplates reads.
+func ModelNameParams(model string) map[string]any {
+	return map[string]any{"modelName": model}
+}
+
+// UpdateModelStylingParams builds the updateModelStyling action.
+func UpdateModelStylingParams(model, css string) map[string]any {
+	return map[string]any{"model": map[string]any{"name": model, "css": css}}
+}
+
+// UpdateModelTemplatesParams builds the updateModelTemplates action for the
+// model's one card template.
+func UpdateModelTemplatesParams(model, front, back string) map[string]any {
+	return map[string]any{"model": map[string]any{
+		"name":      model,
+		"templates": map[string]map[string]string{TemplateName: {"Front": front, "Back": back}},
+	}}
+}
+
+// CardTemplate is one card template as modelTemplates reports it.
+type CardTemplate struct {
+	Front string `json:"Front"`
+	Back  string `json:"Back"`
+}
+
+// DecodeModelStyling decodes a modelStyling result into the stylesheet.
+func DecodeModelStyling(raw json.RawMessage) (string, error) {
+	var styling struct {
+		CSS *string `json:"css"`
+	}
+	if err := json.Unmarshal(raw, &styling); err != nil || styling.CSS == nil {
+		return "", fmt.Errorf("anki: decode modelStyling: the result has no css string")
+	}
+	return *styling.CSS, nil
+}
+
+// DecodeModelTemplates decodes a modelTemplates result: template name to its
+// front and back.
+func DecodeModelTemplates(raw json.RawMessage) (map[string]CardTemplate, error) {
+	var templates map[string]CardTemplate
+	if err := json.Unmarshal(raw, &templates); err != nil || templates == nil {
+		return nil, fmt.Errorf("anki: decode modelTemplates: the result is not a template map")
+	}
+	return templates, nil
 }
 
 // AddNoteParams builds an addNote action with duplicate protection.

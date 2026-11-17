@@ -7,6 +7,7 @@ import type {
   AssessmentRun,
   AssessmentState,
   Budget,
+  CoachHistory,
   CoachMode,
   CoachPreview,
   CoachReply,
@@ -17,6 +18,9 @@ import type {
   NoteFields,
   NoteList,
   NotePreview,
+  NotePush,
+  NoteRefinePreview,
+  NoteRefinement,
   PracticeItem,
   Services,
   StudioError,
@@ -69,12 +73,12 @@ export const ui = {
   layer: null as Layer | null,
   /** Selector of the element to refocus when a layer closes. */
   ret: null as string | null,
-  /** Last visited step of the session walk. */
-  sessionAt: -1,
   /** A call is in flight; actions that write are ignored until it settles. */
   busy: false,
   coachOpen: true,
   coachMode: 'probe' as CoachMode,
+  /** The coach shows the attempt's call history instead of the mode's reply. */
+  coachHistory: false,
   practice: { sel: null as string | null, marks: [] as Mark[] },
   feedback: { ev: null as string | null },
   /**
@@ -87,7 +91,11 @@ export const ui = {
   anki: {
     card: null as Theme | null,
     width: 'desk' as 'desk' | 'phone',
+    /** Which card sides the preview shows (prototype `side`). */
+    side: 'both' as 'both' | 'front' | 'back',
     editing: false,
+    /** The editor shows the AI-refinement strip (preview → send → advisory suggestion). */
+    refine: false,
     /** Local edits of the draft's fields; null = unedited. */
     fields: null as NoteFields | null,
     dirty: false,
@@ -116,6 +124,7 @@ export const data = {
     failed: null as CoachReply | null,
     failure: null as StudioError | null,
     sending: false,
+    history: idle<CoachHistory>(),
   },
   assess: {
     state: idle<AssessmentState>(),
@@ -130,6 +139,15 @@ export const data = {
     draft: null as NoteDraft | null,
     preview: idle<NotePreview>(),
     notes: idle<NoteList>(),
+    /** The last push, for its card-design outcome (model_updated / model_customized). */
+    lastPush: null as NotePush | null,
+    refine: {
+      preview: idle<NoteRefinePreview>(),
+      /** The advisory suggestion; it only fills the editor when the learner uses it. */
+      suggestion: null as NoteRefinement | null,
+      failure: null as StudioError | null,
+      sending: false,
+    },
   },
   settings: {
     budget: idle<Budget>(),

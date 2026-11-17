@@ -61,6 +61,10 @@ type Options struct {
 	// from Now so a command that writes no timestamp into its protocol
 	// document does not consume a deterministic test clock reading.
 	PresentationNow func() time.Time
+	// agentKillGrace bounds how long cancel waits for a hard-killed host's
+	// heartbeat to go stale before reporting cancellation unconfirmed. It is
+	// unexported so only package tests can shorten it.
+	agentKillGrace time.Duration
 }
 
 func (o Options) withDefaults() Options {
@@ -102,6 +106,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.PresentationNow == nil {
 		o.PresentationNow = time.Now
+	}
+	if o.agentKillGrace == 0 {
+		o.agentKillGrace = agentKillGrace()
 	}
 	return o
 }

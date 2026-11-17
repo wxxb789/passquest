@@ -142,7 +142,8 @@ that cannot be attached because the content changed print as unavailable, not as
   `pressed` at or above 75%;
 - a contamination section, never averaged away;
 - the annotations of finalized items, with withheld and unavailable annotations labelled rather than
-  silently omitted;
+  silently omitted; an unavailable item's annotation carries only that label, never its evidence or
+  reasoning;
 - explicit unknowns: `pass threshold: unknown`, `real item count: unknown`, `real time limit:
   unknown`, `readiness probability: not computed`, `exam blueprint: not available`. No pass or fail
   verdict is printed.

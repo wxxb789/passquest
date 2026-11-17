@@ -77,12 +77,14 @@ function itemHTML(run: AssessmentRun, it: AssessmentItem, sel: string | null, bu
             `per item = ${run.window_minutes} min ÷ ${run.actual_size}`,
           )}<span hidden data-clock="until" data-t="${it.deadline_at}" data-notify="item:${it.run_id}:${it.position}"></span></div></div>
         </div>
-        <p class="q-stem exam" lang="en">${it.stem}</p>
-        ${optsHTML(it.options, sel, 'apick')}
+        <div class="q-scroll">
+          <p class="q-stem exam" lang="en">${it.stem}</p>
+          ${optsHTML(it.options, sel, 'apick')}
+        </div>
         <div class="q-foot">
           <button class="btn quiet" data-act="askip-item" ${busy ? 'disabled' : ''}>${T('跳过', 'Skip')}<kbd>S</kbd></button>
           <span class="sp"></span>
-          <button class="btn primary" data-act="anext" id="anext" ${sel && !busy ? '' : 'disabled'}>${T('确认并下一题', 'Confirm & next')}<kbd>Enter</kbd></button>
+          <button class="btn primary" data-act="anext" id="anext" data-primary ${sel && !busy ? '' : 'disabled'}>${T('确认并下一题', 'Confirm & next')}<kbd>Enter</kbd></button>
         </div>
       </article>
     </div>

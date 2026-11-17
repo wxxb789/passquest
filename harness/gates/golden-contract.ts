@@ -78,7 +78,10 @@ async function resolveBase(root: string): Promise<{ base: string | null; reason:
 
 /** Committed, staged and unstaged changes against the base, plus new files. */
 async function changedPaths(root: string, base: string): Promise<{ paths: ChangedPath[]; problem?: string }> {
-  const diff = await git(root, ["diff", "--name-status", "--no-renames", base, "--"]);
+  const [diff, untracked] = await Promise.all([
+    git(root, ["diff", "--name-status", "--no-renames", base, "--"]),
+    git(root, ["ls-files", "--others", "--exclude-standard", "-z"]),
+  ]);
   if (diff.code !== 0) {
     return { paths: [], problem: `git diff against ${base} failed: ${diff.stderr || diff.stdout}` };
   }
@@ -89,7 +92,6 @@ async function changedPaths(root: string, base: string): Promise<{ paths: Change
     if (fields.length < 2) continue;
     paths.push({ status: fields[0].charAt(0).toUpperCase(), path: fields[fields.length - 1] });
   }
-  const untracked = await git(root, ["ls-files", "--others", "--exclude-standard", "-z"]);
   if (untracked.code !== 0) {
     return { paths: [], problem: `git ls-files failed: ${untracked.stderr || untracked.stdout}` };
   }

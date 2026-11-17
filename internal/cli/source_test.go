@@ -97,6 +97,7 @@ func reviewedFixtureQuestion(t *testing.T, db string, clock *stepClock, sourceID
 }
 
 func TestImportInspectReviewAndPractice(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -230,6 +231,7 @@ func TestImportInspectReviewAndPractice(t *testing.T) {
 }
 
 func TestReimportAfterReviewKeepsStoredCounts(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -253,6 +255,7 @@ func TestReimportAfterReviewKeepsStoredCounts(t *testing.T) {
 }
 
 func TestQuestionFlagsMarkMissingEvidenceAfterCorrection(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -285,6 +288,7 @@ func TestQuestionFlagsMarkMissingEvidenceAfterCorrection(t *testing.T) {
 }
 
 func TestImportTitleFlag(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := decodeImport(t, mustRun(t, db, clock, "", "import", "--path", fixtureDir(t), "--title", "Fixture baseline", "--json"))
@@ -294,6 +298,7 @@ func TestImportTitleFlag(t *testing.T) {
 }
 
 func TestPageCorrectionResetsReviewAndKeepsProvenance(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -370,6 +375,7 @@ func TestPageCorrectionResetsReviewAndKeepsProvenance(t *testing.T) {
 }
 
 func TestQuestionEditResetsReviewAndDuplicateIsRejected(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -428,6 +434,7 @@ func TestQuestionEditResetsReviewAndDuplicateIsRejected(t *testing.T) {
 }
 
 func TestPracticeRendersMissingDistractorExplanation(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := decodeImport(t, mustRun(t, db, clock, "", "import", "--path", assessmentFixtureDir(t, 1), "--json"))
@@ -481,6 +488,7 @@ func TestPracticeRendersMissingDistractorExplanation(t *testing.T) {
 }
 
 func TestSourceCommandsRejectBadInput(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -543,6 +551,7 @@ func TestImportPDFWithoutLocalToolIsUsageError(t *testing.T) {
 }
 
 func TestImportedSourceSurvivesProcessRestart(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -580,6 +589,7 @@ func TestImportedSourceSurvivesProcessRestart(t *testing.T) {
 }
 
 func TestReportShowsMixedContentsTruthfully(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -646,6 +656,7 @@ func TestDefaultDatabaseDirectoryIsTightened(t *testing.T) {
 }
 
 func TestSourceProtocolGoldens(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	fixture := fixtureDir(t)
@@ -732,6 +743,7 @@ func hasString(values []string, want string) bool {
 }
 
 func TestReportMarksUnknownContentUnavailable(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sample, err := exam.Sample()
@@ -771,6 +783,7 @@ func TestReportMarksUnknownContentUnavailable(t *testing.T) {
 }
 
 func TestQuestionsHumanOutputLabelsTagsAsSkills(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)

@@ -13,8 +13,8 @@ p, li { text-wrap: pretty; }
 button, input, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
 button { cursor: pointer; background: none; border: 0; padding: 0; }
 a { color: inherit; text-decoration: none; }
-code, .mono { font-family: var(--f-mono); font-size: .88em; letter-spacing: 0; font-variant-ligatures: none; }
-.id { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0; color: var(--ink-3); font-weight: 400; font-variant-ligatures: none; }
+code, .mono { font-family: var(--f-mono); font-size: max(12px, .88em); letter-spacing: 0; font-variant-ligatures: none; }
+.id { font-family: var(--f-mono); font-size: 12px; letter-spacing: 0; color: var(--ink-3); font-weight: 400; font-variant-ligatures: none; }
 .nw { white-space: nowrap; }
 svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 svg.i.s { width: 15px; height: 15px; } svg.i.xs { width: 13px; height: 13px; stroke-width: 1.8; } svg.i.l { width: 22px; height: 22px; }
@@ -22,6 +22,23 @@ svg.i.s { width: 15px; height: 15px; } svg.i.xs { width: 13px; height: 13px; str
 ::selection { background: var(--acc-tint); }
 .exam { font-family: var(--f-read); letter-spacing: 0; font-variant-numeric: lining-nums proportional-nums; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* The stage is where focus lands after a route change (it is not a control: no ring). */
+#stage:focus { outline: none; }
+
+/* Scrollbars: every scroll container gets the stage's thin, quiet bar (WebKit uses the pseudo-elements). */
+* { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-button { display: none; }
+
+/* CJK line breaking: short UI lines keep their phrases whole and break at spaces and punctuation. */
+html[lang="zh-CN"] :is(.callstrip, .rmeta, .pending, .chip, .sat, .cond, .promise, .kv, .svc, .fine, .eyebrow, .reason, .q-note, .pv-lab, .an-top, .es-f, .reg-h p, .hmeta) {
+  word-break: keep-all; overflow-wrap: anywhere; line-break: strict; }
+/* A folded technical detail (the core's message and CLI step) under a failure line. */
+details.raw { margin-top: 6px; font-size: 12px; color: var(--ink-3); }
+details.raw summary { cursor: pointer; width: max-content; border-radius: 4px; }
+details.raw p { margin: 4px 0 0; overflow-wrap: anywhere; }
 
 /* ---------- atmosphere ---------- */
 .atmos {

@@ -22,6 +22,12 @@ import (
 func assessmentFixtureDir(t *testing.T, pages int) string {
 	t.Helper()
 	dir := t.TempDir()
+	writeAssessmentPages(t, dir, pages)
+	return dir
+}
+
+func writeAssessmentPages(t *testing.T, dir string, pages int) {
+	t.Helper()
 	pagesDir := filepath.Join(dir, "pages")
 	if err := os.MkdirAll(pagesDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -32,12 +38,94 @@ func assessmentFixtureDir(t *testing.T, pages int) string {
 			t.Fatal(err)
 		}
 	}
-	return dir
 }
 
+// assessmentSeeds caches one seeded database per fixture shape. The first
+// test that asks for a shape seeds it under the package cache directory; every
+// test then receives a byte copy of that closed database at its own path, so
+// each starts from the same initial state without repeating the seeding
+// transactions. TestMain removes the directory after m.Run returns; a panic or
+// a -timeout kill skips that and leaves a passquest-assess-seed-* directory in
+// the OS temp folder. Each run uses a fresh MkdirTemp name, so a leftover is
+// never reused as a stale cache.
+var assessmentSeeds struct {
+	mu      sync.Mutex
+	dir     string
+	entries map[[2]int]*assessmentSeed
+}
+
+type assessmentSeed struct {
+	mu       sync.Mutex
+	path     string
+	sourceID string
+}
+
+func removeAssessmentSeeds() {
+	assessmentSeeds.mu.Lock()
+	defer assessmentSeeds.mu.Unlock()
+	if assessmentSeeds.dir != "" {
+		_ = os.RemoveAll(assessmentSeeds.dir)
+	}
+}
+
+// seedAssessmentSource writes an assessment fixture of the given shape to db,
+// which must not exist yet, and returns the source id.
 func seedAssessmentSource(t *testing.T, db string, pages int, firstPageQuestions int) string {
 	t.Helper()
-	dir := assessmentFixtureDir(t, pages)
+	assessmentSeeds.mu.Lock()
+	if assessmentSeeds.dir == "" {
+		dir, err := os.MkdirTemp("", "passquest-assess-seed-")
+		if err != nil {
+			assessmentSeeds.mu.Unlock()
+			t.Fatal(err)
+		}
+		assessmentSeeds.dir = dir
+		assessmentSeeds.entries = map[[2]int]*assessmentSeed{}
+	}
+	key := [2]int{pages, firstPageQuestions}
+	seed := assessmentSeeds.entries[key]
+	if seed == nil {
+		seed = &assessmentSeed{}
+		assessmentSeeds.entries[key] = seed
+	}
+	cacheDir := filepath.Join(assessmentSeeds.dir, fmt.Sprintf("p%d-q%d", pages, firstPageQuestions))
+	assessmentSeeds.mu.Unlock()
+
+	seed.mu.Lock()
+	defer seed.mu.Unlock()
+	if seed.path == "" {
+		path := filepath.Join(cacheDir, "seed.sqlite")
+		// A failed earlier attempt may have left a partial cache; start over.
+		if err := os.RemoveAll(cacheDir); err != nil {
+			t.Fatal(err)
+		}
+		sourceID := seedAssessmentStore(t, path, cacheDir, pages, firstPageQuestions)
+		seed.path, seed.sourceID = path, sourceID
+	}
+	raw, err := os.ReadFile(seed.path)
+	if err != nil {
+		t.Fatalf("read seeded fixture: %v", err)
+	}
+	out, err := os.OpenFile(db, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatalf("seedAssessmentSource needs a fresh database path: %v", err)
+	}
+	if _, err := out.Write(raw); err != nil {
+		out.Close()
+		t.Fatalf("copy seeded fixture: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("copy seeded fixture: %v", err)
+	}
+	return seed.sourceID
+}
+
+// seedAssessmentStore imports a pages-long fixture from dir into the database
+// at db, reviews every page and gives page 1 firstPageQuestions reviewed
+// questions and every other page one.
+func seedAssessmentStore(t *testing.T, db, dir string, pages int, firstPageQuestions int) string {
+	t.Helper()
+	writeAssessmentPages(t, dir, pages)
 	src, err := source.ImportPath(dir, source.ImportOptions{Title: "assessment fixture", Now: goldenBase})
 	if err != nil {
 		t.Fatalf("import fixture: %v", err)
@@ -154,6 +242,7 @@ func activeAssessmentID(t *testing.T, db string) int64 {
 }
 
 func TestAssessNextSpendsRecommendedUnit(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	seedAssessmentSource(t, db, 4, 1)
@@ -196,6 +285,7 @@ func TestAssessNextSpendsRecommendedUnit(t *testing.T) {
 }
 
 func TestAssessPoolSpendsWholeContentUnit(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := seedAssessmentSource(t, db, 20, 4)
@@ -232,11 +322,12 @@ func TestAssessPoolSpendsWholeContentUnit(t *testing.T) {
 }
 
 func TestAssessStartRefusesFloorAndShortfall(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	seedAssessmentSource(t, db, 4, 1)
 	code, _, errOut := runCLI(t, db, clock, "", "assess", "start", "--size", "20", "--json")
-	if code != 2 || !strings.Contains(errOut, `"code": "pool_floor"`) || !strings.Contains(errOut, "4 qualifying item(s)") || !strings.Contains(errOut, "16 more") {
+	if code != 2 || !strings.Contains(errOut, `"code": "pool_floor"`) || !strings.Contains(errOut, "4 qualifying item(s)") || !strings.Contains(errOut, "4 unseen content unit(s)") || !strings.Contains(errOut, "16 more") {
 		t.Fatalf("pool floor = %d, %s", code, errOut)
 	}
 
@@ -254,6 +345,7 @@ func TestAssessStartRefusesFloorAndShortfall(t *testing.T) {
 }
 
 func TestAssessRunHidesAnnotationsAndReportsThem(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	seedAssessmentSource(t, db, 20, 1)
@@ -300,6 +392,7 @@ func TestAssessRunHidesAnnotationsAndReportsThem(t *testing.T) {
 }
 
 func TestAssessReportWithholdsAnnotationsUntilRunFinishes(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	seedAssessmentSource(t, db, 20, 1)
@@ -354,6 +447,7 @@ func TestAssessReportWithholdsAnnotationsUntilRunFinishes(t *testing.T) {
 }
 
 func TestAssessmentReportPrintsMissingOptionExplanation(t *testing.T) {
+	t.Parallel()
 	item := assess.ItemReport{
 		Position:   0,
 		ContentID:  "content-1",
@@ -388,6 +482,7 @@ func TestAssessmentReportPrintsMissingOptionExplanation(t *testing.T) {
 }
 
 func TestAssessAbandonedRunWithholdsUnfinalizedAnnotations(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	seedAssessmentSource(t, db, 20, 1)
@@ -432,6 +527,7 @@ func TestAssessAbandonedRunWithholdsUnfinalizedAnnotations(t *testing.T) {
 }
 
 func TestShowPageWithoutQuestionsSpendsItsUnit(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := seedAssessmentSource(t, db, 20, 0)
@@ -489,6 +585,7 @@ func TestShowPageWithoutQuestionsSpendsItsUnit(t *testing.T) {
 }
 
 func TestAssessRefusesCoachingWhileActive(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	seedAssessmentSource(t, db, 20, 1)
@@ -534,6 +631,7 @@ func (r *onceAdvanceReader) Read(p []byte) (int, error) {
 }
 
 func TestAssessForcedItemTimeout(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedAssessmentSource(t, db, 20, 1)
 	now := goldenBase
@@ -559,6 +657,7 @@ func TestAssessForcedItemTimeout(t *testing.T) {
 }
 
 func TestAssessRunWindowElapseRecordsOpenItemTimeout(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedAssessmentSource(t, db, 20, 1)
 	now := goldenBase
@@ -629,6 +728,7 @@ func (r *lineAdvanceReader) Read(p []byte) (int, error) {
 }
 
 func TestAssessResumeMarksResumedPortion(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	seedAssessmentSource(t, db, 20, 1)
@@ -658,6 +758,7 @@ func TestAssessResumeMarksResumedPortion(t *testing.T) {
 }
 
 func TestAssessContaminationFromShowDuringRun(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := seedAssessmentSource(t, db, 20, 1)
@@ -731,6 +832,7 @@ func (r *callbackReader) Read(p []byte) (int, error) {
 }
 
 func TestAssessCompareRefusesUnlikeRuns(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	seedAssessmentSource(t, db, 60, 1)

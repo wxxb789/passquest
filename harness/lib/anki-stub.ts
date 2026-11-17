@@ -6,6 +6,17 @@
  */
 import { stringField } from "./json.ts";
 
+export interface StubCardTemplate {
+  Front: string;
+  Back: string;
+}
+
+/** A note type's design as modelStyling and modelTemplates report it. */
+export interface StubModelDesign {
+  css: string;
+  templates: Record<string, StubCardTemplate>;
+}
+
 export interface StubAction {
   action: string;
   params: Record<string, unknown>;
@@ -17,6 +28,10 @@ export interface AnkiStub {
   notes: Map<number, Record<string, string>>;
   noteDecks: Map<number, string>;
   models: string[];
+  /** Each model's stylesheet and card templates, keyed by model name. */
+  modelDesigns: Map<string, StubModelDesign>;
+  /** When set, notesInfo and cardsInfo report every note under this note type. */
+  noteModelName: string | null;
   /** When set, addNote fails as an AnkiConnect duplicate. */
   duplicate: boolean;
   /** When set, added notes are filed in this deck instead of the requested one. */
@@ -49,6 +64,8 @@ export function startAnkiStub(): AnkiStub {
     notes: new Map(),
     noteDecks: new Map(),
     models: [],
+    modelDesigns: new Map(),
+    noteModelName: null,
     duplicate: false,
     misassigned: null,
     afterAction: null,
@@ -62,9 +79,48 @@ export function startAnkiStub(): AnkiStub {
         return { result: 1, error: null };
       case "modelNames":
         return { result: [...stub.models], error: null };
-      case "createModel":
-        stub.models.push(stringField(params, "modelName") ?? "");
+      case "createModel": {
+        const name = stringField(params, "modelName") ?? "";
+        stub.models.push(name);
+        const templates: Record<string, StubCardTemplate> = {};
+        for (const template of Array.isArray(params.cardTemplates) ? params.cardTemplates : []) {
+          const record = asRecord(template);
+          templates[stringField(record, "Name") ?? ""] = {
+            Front: stringField(record, "Front") ?? "",
+            Back: stringField(record, "Back") ?? "",
+          };
+        }
+        stub.modelDesigns.set(name, { css: stringField(params, "css") ?? "", templates });
         return { result: null, error: null };
+      }
+      case "modelStyling":
+      case "modelTemplates": {
+        const name = stringField(params, "modelName") ?? "";
+        const design = stub.modelDesigns.get(name);
+        if (!design) return { result: null, error: `model was not found: ${name}` };
+        return action === "modelStyling"
+          ? { result: { css: design.css }, error: null }
+          : { result: structuredClone(design.templates), error: null };
+      }
+      case "updateModelStyling":
+      case "updateModelTemplates": {
+        const model = asRecord(params.model);
+        const name = stringField(model, "name") ?? "";
+        const design = stub.modelDesigns.get(name);
+        if (!design) return { result: null, error: `model was not found: ${name}` };
+        if (action === "updateModelStyling") {
+          design.css = stringField(model, "css") ?? "";
+        } else {
+          for (const [templateName, template] of Object.entries(asRecord(model.templates))) {
+            const record = asRecord(template);
+            design.templates[templateName] = {
+              Front: stringField(record, "Front") ?? "",
+              Back: stringField(record, "Back") ?? "",
+            };
+          }
+        }
+        return { result: null, error: null };
+      }
       case "addNote": {
         if (stub.duplicate) return { result: null, error: "cannot create note because it is a duplicate" };
         const note = asRecord(params.note);
@@ -89,7 +145,7 @@ export function startAnkiStub(): AnkiStub {
           .filter((id) => stub.notes.has(id))
           .map((id) => ({
             noteId: id,
-            modelName: "PassQuest Note",
+            modelName: stub.noteModelName ?? "PassQuest Note",
             fields: Object.fromEntries(Object.entries(stub.notes.get(id)!).map(([name, value]) => [name, { value, order: 0 }])),
             cards: noteCards.get(id) ?? [],
           }));
@@ -100,7 +156,14 @@ export function startAnkiStub(): AnkiStub {
         const result = asked.flatMap((cardID) => {
           for (const [noteID, ids] of noteCards) {
             if (!ids.includes(cardID)) continue;
-            return [{ cardId: cardID, note: noteID, modelName: "PassQuest Note", deckName: stub.noteDecks.get(noteID) ?? "" }];
+            return [
+              {
+                cardId: cardID,
+                note: noteID,
+                modelName: stub.noteModelName ?? "PassQuest Note",
+                deckName: stub.noteDecks.get(noteID) ?? "",
+              },
+            ];
           }
           return [];
         });

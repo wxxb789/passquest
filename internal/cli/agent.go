@@ -605,10 +605,10 @@ func runAgentCancel(args []string, opt Options) int {
 		}
 		if !confirmed {
 			_ = agent.SignalKillPID(heartbeat.PID)
-			// The heartbeat is only stale after five seconds. A killed process
+			// The heartbeat is only stale after its window. A killed process
 			// must be given that window before cancellation is called
 			// unconfirmed.
-			killDeadline := time.Now().Add(6 * time.Second)
+			killDeadline := time.Now().Add(opt.agentKillGrace)
 			for time.Now().Before(killDeadline) {
 				time.Sleep(100 * time.Millisecond)
 				if _, still := agent.ProbeHeartbeat(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow()); !still.Live() {
@@ -1123,6 +1123,12 @@ func agentRecordedStore(opt Options, st *store.Store, run store.AgentRun, raw st
 // the grace period for a start/resume claim whose host has not written one yet.
 func agentHeartbeatWindow() time.Duration {
 	return time.Duration(agent.HeartbeatStaleMS) * time.Millisecond
+}
+
+// agentKillGrace is how long cancel waits after a hard kill: one heartbeat
+// window plus a second of margin for the last write to age out.
+func agentKillGrace() time.Duration {
+	return agentHeartbeatWindow() + time.Second
 }
 
 // agentHostClaimWait gives a start/resume claim younger than the heartbeat

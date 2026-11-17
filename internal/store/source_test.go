@@ -55,6 +55,7 @@ func questionForTest(t *testing.T, src source.Source) source.Question {
 }
 
 func TestImportSourceIsIdempotentAndLoadsPages(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "source.sqlite"))
 	src := testSource(t)
 
@@ -121,6 +122,7 @@ func TestImportSourceIsIdempotentAndLoadsPages(t *testing.T) {
 }
 
 func TestPageRevisionsAndEventsAreAppendOnly(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "source.sqlite"))
 	src := testSource(t)
 	if _, err := st.ImportSource(src); err != nil {
@@ -164,6 +166,7 @@ func TestPageRevisionsAndEventsAreAppendOnly(t *testing.T) {
 }
 
 func TestCorrectPageAppendsRevisionAndResetsReview(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "source.sqlite"))
 	src := testSource(t)
 	if _, err := st.ImportSource(src); err != nil {
@@ -216,6 +219,7 @@ func TestCorrectPageAppendsRevisionAndResetsReview(t *testing.T) {
 }
 
 func TestQuestionAddReviewEditKeepsAudit(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "source.sqlite"))
 	src := testSource(t)
 	if _, err := st.ImportSource(src); err != nil {
@@ -339,6 +343,7 @@ func TestQuestionAddReviewEditKeepsAudit(t *testing.T) {
 }
 
 func TestQuestionTagsRoundTrip(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "tags.sqlite"))
 	src := testSource(t)
 	if _, err := st.ImportSource(src); err != nil {
@@ -404,6 +409,7 @@ func TestQuestionTagsRoundTrip(t *testing.T) {
 }
 
 func TestMigrationFromVersionThreeDefaultsQuestionTags(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v3-tags.sqlite")
 	db := openSQLite(t, path)
 	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3} {
@@ -442,6 +448,7 @@ func TestMigrationFromVersionThreeDefaultsQuestionTags(t *testing.T) {
 }
 
 func TestMigrationFromVersionTwoKeepsAttemptsAndAddsSources(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v2.sqlite")
 	db := openSQLite(t, path)
 	for _, stmt := range schemaV1 {
@@ -506,6 +513,7 @@ func TestMigrationFromVersionTwoKeepsAttemptsAndAddsSources(t *testing.T) {
 }
 
 func TestImportSourceRejectsOutOfOrderPages(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "source.sqlite"))
 	src := testSource(t)
 	src.Pages[1].Number = 4
@@ -516,6 +524,7 @@ func TestImportSourceRejectsOutOfOrderPages(t *testing.T) {
 }
 
 func TestImportSourceRejectsReviewedPage(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "source.sqlite"))
 	src := testSource(t)
 	src.Pages[0].Review = source.Reviewed
@@ -527,6 +536,7 @@ func TestImportSourceRejectsReviewedPage(t *testing.T) {
 }
 
 func TestAddQuestionRejectsReviewedState(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "source.sqlite"))
 	src := testSource(t)
 	if _, err := st.ImportSource(src); err != nil {

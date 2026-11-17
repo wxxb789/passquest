@@ -11,6 +11,7 @@ import (
 )
 
 func TestMigrationFromVersionSixteenAddsWorkspaceTables(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v16.sqlite")
 	db := openSQLite(t, path)
 	for _, migration := range migrations {
@@ -68,6 +69,7 @@ func TestMigrationFromVersionSixteenAddsWorkspaceTables(t *testing.T) {
 }
 
 func TestLearnerSettingsSetReadAndClear(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "settings.sqlite"))
 	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
 	if _, found, err := st.LearnerSetting(LearnerSettingExamDate); err != nil || found {
@@ -103,6 +105,7 @@ func practiceRecord(t *testing.T, questionID string, started, answered time.Time
 }
 
 func TestPracticePresentationLifecycle(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "presentations.sqlite"))
 	base := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
 	first := PracticePresentation{Token: "token-0001", Kind: "sample", ContentID: "sample-0001", ContentVersion: "1", QuestionID: "q1", PresentedAt: base}
@@ -185,6 +188,7 @@ func TestPracticePresentationLifecycle(t *testing.T) {
 }
 
 func TestRecordPresentationOnceAndAssessmentRuns(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "once.sqlite"))
 	at := time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC)
 	for i, want := range []bool{true, false, false} {
