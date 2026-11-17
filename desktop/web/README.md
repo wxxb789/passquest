@@ -44,7 +44,8 @@ prototype's, so its CSS applies unchanged.
 
 ```text
 src/main.ts         error bar, delegated events, boot
-src/actions.ts      action table (data-act) and data loading through StudyApi
+src/actions.ts      ACT registry (data-act), routing and boot recovery
+src/controllers/    per-room controllers; service.ts is the only StudyApi call path (busy guard, failure toast)
 src/screens.ts      composes views + chrome + layers from state
 src/core/           state, i18n (T(zh, en)), html (escaping tag), router, render/layers/focus,
                     keyboard, clock (display-only), toast (textContent), prefs (theme + lang)
