@@ -77,9 +77,10 @@ testdata/               small, independently authored fixtures only
   increment per branch. Agent runs do **not** commit or push — the operator does.
 - Every gate you report carries its real exit code. A gate you did not run is missing work.
 - New capability ⇒ new machine check in the same increment. New checks are TypeScript gate modules
-  under `harness/gates/` sharing `harness/lib/`, with an input in `harness/gates/self-test.ts` that
-  must fail — never another `scripts/*.sh` or `scripts/*.py` one-off. `bun run gate` is the single
-  definition; `bash scripts/gate.sh` only execs it. See
+  under `harness/gates/` sharing `harness/lib/`, with an input that must fail — a case in
+  `harness/gates/self-test/<gate module>.cases.ts` listed in `brokenCases()` in
+  `harness/gates/self-test.ts` — never another `scripts/*.sh` or `scripts/*.py` one-off.
+  `bun run gate` is the single definition; `bash scripts/gate.sh` only execs it. See
   [`harness.md`](harness.md) and [`decisions/D-0001-bun-typescript-harness.md`](decisions/D-0001-bun-typescript-harness.md).
 
 ## Uncertainty protocol (binding)
