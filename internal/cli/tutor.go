@@ -1162,19 +1162,12 @@ type tutorLoadedContent struct {
 	SourceID string
 }
 
-// embeddedContents and embeddedContent are the CLI's names for the façade's
-// pure content lookups; they stay until C1 moves the remaining callers (find,
-// report, next) onto study directly.
-func embeddedContents() ([]exam.Exam, error) { return study.EmbeddedContents() }
-
-func embeddedContent(id string) (exam.Exam, bool, error) { return study.EmbeddedContent(id) }
-
 // loadTutorContent resolves the stored attempt's question from embedded
 // material or a reviewed page of an imported source. A missing or no-longer-
 // practiceable question is a state, not an error: the prompt builder discloses
 // that current content is unavailable.
 func loadTutorContent(st *store.Store, contentID, questionID string) (tutorLoadedContent, error) {
-	if content, found, err := embeddedContent(contentID); err != nil {
+	if content, found, err := study.EmbeddedContent(contentID); err != nil {
 		return tutorLoadedContent{}, err
 	} else if found {
 		return tutorEmbedded(content, questionID), nil
@@ -1192,7 +1185,7 @@ func loadTutorContent(st *store.Store, contentID, questionID string) (tutorLoade
 	if err != nil {
 		return tutorLoadedContent{}, err
 	}
-	page, found := findPage(src, pageNumber)
+	page, found := study.FindPage(src, pageNumber)
 	if !found {
 		return out, nil
 	}

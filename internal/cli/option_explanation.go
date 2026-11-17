@@ -8,16 +8,6 @@ import "strings"
 // data and JSON, and becomes this sentence only at presentation time.
 const missingOptionExplanation = "原书未提供该选项的解析。"
 
-// optionExplanation returns the authored explanation for label and whether one
-// exists. A blank entry counts as absent.
-func optionExplanation(reasoning map[string]string, label string) (string, bool) {
-	text := reasoning[label]
-	if strings.TrimSpace(text) == "" {
-		return "", false
-	}
-	return text, true
-}
-
 // optionReasoningWithText copies the explanations that carry text. JSON output
 // keeps this map and lists the other labels in option_reasoning_missing.
 func optionReasoningWithText(reasoning map[string]string) map[string]string {

@@ -12,6 +12,9 @@ import (
 	"github.com/wxxb789/passquest/internal/skill"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/practice"
+	"github.com/wxxb789/passquest/internal/tactic"
 )
 
 func runNext(args []string, opt Options) int {
@@ -87,6 +90,50 @@ func buildAdaptiveInput(st *store.Store, sourceID string) (adaptive.Input, []unc
 	return input, unclassified, catalog, nil
 }
 
+// nextPracticeRequest resolves the adaptive recommendation to the practice
+// request the desktop opens for a "next" start: the primary target, or the
+// follow-up when the primary is a lesson. The read is the CLI's own, and the
+// refusals keep the messages the desktop showed before the practice module
+// took over the display.
+func nextPracticeRequest(st *store.Store) (practice.Request, error) {
+	input, _, _, err := buildAdaptiveInput(st, "")
+	if err != nil {
+		return practice.Request{}, err
+	}
+	result := adaptive.Recommend(input)
+	if result.Recommendation == nil {
+		return practice.Request{}, refuse("no_recommendation", "no practiceable skill material is available")
+	}
+	target, followUp := nextTargetsOf(result.Recommendation)
+	if target != nil && target.kind == nextTargetLesson {
+		target = followUp
+	}
+	if target == nil {
+		return practice.Request{}, refuse("no_recommendation",
+			"the recommendation for %s is a lesson with no practice to open", result.Recommendation.Skill.ID)
+	}
+	request := practice.Request{Kind: practice.KindNext}
+	switch target.kind {
+	case nextTargetTactic:
+		if _, ok := tactic.Get(target.skillID); !ok {
+			return practice.Request{}, refuse("unknown_tactic", "tactic %q is not registered", target.skillID)
+		}
+		request.TacticID, request.Stage = target.skillID, stageGuided
+	default:
+		if _, ok := skill.Get(target.skillID); !ok {
+			return practice.Request{}, refuse("unknown_skill", "skill %q is not registered", target.skillID)
+		}
+		request.SkillID = target.skillID
+		if target.material != nil {
+			request.SourceID = target.material.SourceID
+			if target.includeQuestion {
+				request.QuestionID = target.material.QuestionID
+			}
+		}
+	}
+	return request, nil
+}
+
 // nextDatabaseArgument is the database selection repeated in generated
 // commands that open learner history. It is empty for the app-owned default
 // path, which a copied command resolves the same way, and non-empty for any
@@ -154,7 +201,7 @@ func buildNextCatalog(st *store.Store, sourceID string) (nextCatalog, error) {
 
 	addSources := func(sourceIDs []string) error {
 		for _, id := range sourceIDs {
-			src, questions, err := loadSourceBundle(st, id)
+			src, questions, err := study.LoadSourceBundle(st, id)
 			if err != nil {
 				return err
 			}
@@ -170,7 +217,7 @@ func buildNextCatalog(st *store.Store, sourceID string) (nextCatalog, error) {
 	}
 
 	embedded := func() error {
-		contents, err := embeddedContents()
+		contents, err := study.EmbeddedContents()
 		if err != nil {
 			return err
 		}

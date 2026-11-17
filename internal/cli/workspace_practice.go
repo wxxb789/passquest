@@ -1,9 +1,8 @@
 package cli
 
 import (
-	"errors"
+	"context"
 	"fmt"
-	"strings"
 
 	"github.com/wxxb789/passquest/internal/adaptive"
 	"github.com/wxxb789/passquest/internal/attempt"
@@ -12,57 +11,50 @@ import (
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/practice"
 	"github.com/wxxb789/passquest/internal/tactic"
 )
 
 // StartPractice selects local practice with the same rules as the matching
-// CLI command and displays it: the presentation is recorded now (Q-0011-08),
-// spending the unit exactly as `show` does, and a guided tactic walkthrough is
-// recorded as delivered. The returned token binds the answer to this display;
-// any other open item is closed as abandoned. An empty kind is sample
-// practice.
+// CLI command and displays it: the practice module records the presentation
+// now (Q-0011-08), spending the unit exactly as `show` does, and records a
+// guided tactic walkthrough as delivered. The returned token binds the answer
+// to this display; any other open item is closed as abandoned. An empty kind
+// is sample practice.
 func (w *Workspace) StartPractice(request studio.PracticeRequest) (studio.PracticeItem, error) {
 	if request.Kind == "" {
 		request.Kind = studio.PracticeSample
 	}
 	var item studio.PracticeItem
 	err := w.withStore(func(st *store.Store) error {
-		if err := w.guard(st, "practice"); err != nil {
-			return err
-		}
-		selection, err := w.selectPractice(st, request)
+		req := practiceRequestOf(request)
+		svc, err := study.Open(w.ports)
 		if err != nil {
 			return err
 		}
-		now := w.opt.Now()
-		p := store.PracticePresentation{
-			Token:          w.newToken(),
-			Kind:           request.Kind,
-			ContentID:      selection.Content.ID,
-			ContentVersion: selection.Content.Version,
-			QuestionID:     selection.Question.ID,
-			PresentedAt:    now,
+		defer svc.Close()
+		if request.Kind == studio.PracticeNext {
+			// The recommendation read still lives in this package (step C2
+			// moves it to internal/study/recommend), so the adapter resolves
+			// the target; the item keeps the "next" presentation kind. The
+			// resolution only reads, but Show's guard runs after it, so a
+			// failing resolution still reports assessment_active while a run is
+			// active: before this step the guard preceded the whole selection.
+			next, err := nextPracticeRequest(st)
+			if err != nil {
+				if guardErr := study.Guard(svc, "practice"); guardErr != nil {
+					return guardErr
+				}
+				return err
+			}
+			req = next
 		}
-		if selection.Page != nil {
-			p.SourceID, _, _ = source.ParseContentID(selection.Content.ID)
-		}
-		if selection.Tactic != nil {
-			p.TacticID, p.Stage = selection.Tactic.ID, selection.Tactic.Stage
-		}
-		if selection.Skill != nil {
-			p.SkillID = selection.Skill.Skill.ID
-		}
-		if err := st.OpenPracticePresentation(p, practiceSurface(selection)); err != nil {
-			return err
-		}
-		if err := recordGuidedExposure(st, selection.Tactic, selection.Content.ID, selection.Question.ID, now); err != nil {
-			return err
-		}
-		stored, err := st.PracticePresentationByToken(p.Token)
+		shown, err := practice.Show(context.Background(), svc, req, practice.HoldToken)
 		if err != nil {
 			return err
 		}
-		item, err = practiceItemOf(st, selection, stored)
+		item, err = practiceItemOf(st, shown)
 		return err
 	})
 	return item, err
@@ -74,15 +66,19 @@ func (w *Workspace) StartPractice(request studio.PracticeRequest) (studio.Practi
 func (w *Workspace) ResumePractice() (*studio.PracticeItem, error) {
 	var item *studio.PracticeItem
 	err := w.withStore(func(st *store.Store) error {
-		p, found, err := st.LatestOpenPracticePresentation()
-		if err != nil || !found {
-			return err
-		}
-		selection, err := presentedSelection(st, p)
+		svc, err := study.Open(w.ports)
 		if err != nil {
 			return err
 		}
-		view, err := practiceItemOf(st, selection, p)
+		defer svc.Close()
+		shown, err := practice.Open(context.Background(), svc)
+		if err != nil {
+			return err
+		}
+		if shown == nil {
+			return nil
+		}
+		view, err := practiceItemOf(st, *shown)
 		if err != nil {
 			return err
 		}
@@ -98,31 +94,16 @@ func (w *Workspace) ResumePractice() (*studio.PracticeItem, error) {
 func (w *Workspace) OpenHint(token string) (studio.PracticeItem, error) {
 	var item studio.PracticeItem
 	err := w.withStore(func(st *store.Store) error {
-		p, err := openPresentation(st, token)
+		svc, err := study.Open(w.ports)
 		if err != nil {
 			return err
 		}
-		selection, err := presentedSelection(st, p)
+		defer svc.Close()
+		shown, err := practice.Hint(context.Background(), svc, token)
 		if err != nil {
 			return err
 		}
-		lesson, ok := hintTactic(selection)
-		if !ok {
-			return refuse("hint_unavailable", "no authored walkthrough exists for question %s; the attempt stays as it is", selection.Question.ID)
-		}
-		now := w.opt.Now()
-		if p, err = st.MarkPracticeHint(token, now); err != nil {
-			return err
-		}
-		if err := st.RecordExposure(store.Exposure{
-			TacticID:   lesson.ID,
-			ContentID:  selection.Content.ID,
-			QuestionID: selection.Question.ID,
-			ExposedAt:  p.HintOpenedAt,
-		}); err != nil {
-			return err
-		}
-		item, err = practiceItemOf(st, selection, p)
+		item, err = practiceItemOf(st, shown)
 		return err
 	})
 	return item, err
@@ -143,288 +124,53 @@ func (w *Workspace) Skip(token string) (studio.Feedback, error) {
 
 func (w *Workspace) answer(token, label string, skip bool) (studio.Feedback, error) {
 	var feedback studio.Feedback
-	err := w.withStore(func(st *store.Store) error {
-		p, err := st.PracticePresentationByToken(token)
-		if errors.Is(err, store.ErrNotFound) {
-			return refuse("unknown_token", "practice item %q was never displayed", token)
-		}
+	err := w.locked(func(svc *study.Service) error {
+		graded, err := practice.Answer(context.Background(), svc, practice.Token(token), practice.Choice{Label: label, Skip: skip})
 		if err != nil {
 			return err
 		}
-		if !p.Open() {
-			feedback, err = storedFeedback(st, p)
-			return err
-		}
-		if err := w.guard(st, "practice"); err != nil {
-			return err
-		}
-		selection, err := presentedSelection(st, p)
-		if err != nil {
-			return err
-		}
-		chosen := attempt.Selection{Skip: true}
-		if !skip {
-			if chosen, err = attempt.ParseSelection(selection.Question, label); err != nil {
-				return refuse("invalid_answer", "%s", err.Error())
-			}
-		}
-		now := w.opt.Now()
-		if now.Before(p.PresentedAt) {
-			now = p.PresentedAt
-		}
-		record, err := buildPracticeAttempt(st, selection, chosen, w.opt.NewSession(), p.PresentedAt, now)
-		if err != nil {
-			return err
-		}
-		if !p.HintOpenedAt.IsZero() && record.Assistance != attempt.AssistanceAssisted {
-			if record.TacticID != "" {
-				record, err = record.WithTactic(record.TacticID, attempt.AssistanceAssisted)
-			} else {
-				record, err = record.WithAssistance(attempt.AssistanceAssisted)
-			}
-			if err != nil {
-				return err
-			}
-		}
-		stored, closed, err := st.AppendPracticeAttempt(token, record, now)
-		if errors.Is(err, store.ErrPracticeClosed) {
-			feedback, err = storedFeedback(st, closed)
-			return err
-		}
-		if err != nil {
-			return err
-		}
-		records, err := st.List()
-		if err != nil {
-			return err
-		}
-		feedback = feedbackOf(selection, stored, closed, records, false)
+		feedback = feedbackOf(graded.Item, graded.Attempt, graded.Feedback, graded.Records, graded.Replayed)
 		return nil
 	})
 	return feedback, err
 }
 
-func openPresentation(st *store.Store, token string) (store.PracticePresentation, error) {
-	p, err := st.PracticePresentationByToken(token)
-	if errors.Is(err, store.ErrNotFound) {
-		return p, refuse("unknown_token", "practice item %q was never displayed", token)
+// practiceRequestOf maps a studio practice request onto the practice module's
+// request. An unknown kind is passed through so the module refuses it with the
+// message the window showed before this step. A source request requires a
+// non-blank id: the window asks the learner to pick a source, so a blank one is
+// the form error it reported before this step (the CLI instead looks the id up
+// and fails as not-found).
+func practiceRequestOf(request studio.PracticeRequest) practice.Request {
+	req := practice.Request{
+		Kind:       practice.Kind(request.Kind),
+		SourceID:   request.SourceID,
+		Page:       request.Page,
+		QuestionID: request.QuestionID,
 	}
-	if err != nil {
-		return p, err
-	}
-	if !p.Open() {
-		return p, refuse("presentation_closed", "practice item %q was already %s", token, p.ClosedReason)
-	}
-	return p, nil
-}
-
-func storedFeedback(st *store.Store, p store.PracticePresentation) (studio.Feedback, error) {
-	if p.ClosedReason != store.PracticeClosedAnswered || p.AttemptID == 0 {
-		return studio.Feedback{}, refuse("presentation_closed", "practice item %q was %s without an answer", p.Token, p.ClosedReason)
-	}
-	record, err := tutorAttemptRecord(st, p.AttemptID)
-	if err != nil {
-		return studio.Feedback{}, err
-	}
-	selection, err := presentedSelection(st, p)
-	if err != nil {
-		return studio.Feedback{}, err
-	}
-	records, err := st.List()
-	if err != nil {
-		return studio.Feedback{}, err
-	}
-	return feedbackOf(selection, record, p, records, true), nil
-}
-
-// selectPractice applies the CLI selection rule for one request kind.
-func (w *Workspace) selectPractice(st *store.Store, request studio.PracticeRequest) (practiceSelection, error) {
 	switch request.Kind {
-	case studio.PracticeSample:
-		records, err := st.List()
-		if err != nil {
-			return practiceSelection{}, err
-		}
-		return selectSamplePractice(request.QuestionID, records)
-	case studio.PracticeSource:
-		if strings.TrimSpace(request.SourceID) == "" {
-			return practiceSelection{}, refuse("invalid_input", "source practice needs a source id")
-		}
-		records, err := st.List()
-		if err != nil {
-			return practiceSelection{}, err
-		}
-		return selectSourcePractice(st, request.SourceID, request.Page, request.QuestionID, records)
-	case studio.PracticeSkill:
-		lesson, ok := skill.Get(request.Skill)
-		if !ok {
-			return practiceSelection{}, refuse("unknown_skill", "skill %q is not registered; available: %s",
-				request.Skill, strings.Join(skill.Registered(), ", "))
-		}
-		return selectSkillPractice(st, lesson, request.SourceID, request.QuestionID)
 	case studio.PracticeTactic:
-		lesson, ok := tactic.Get(request.Tactic)
-		if !ok {
-			return practiceSelection{}, refuse("unknown_tactic", "tactic %q is not registered; available: %s",
-				request.Tactic, strings.Join(tactic.Registered(), ", "))
-		}
-		return selectTacticPractice(st, lesson, request.Stage, request.SourceID, request.QuestionID)
-	case studio.PracticeNext:
-		return selectNextPractice(st)
-	default:
-		return practiceSelection{}, refuse("invalid_input", "unknown practice kind %q; use next, skill, tactic, sample or source", request.Kind)
+		req.TacticID, req.Stage = request.Tactic, request.Stage
+	case studio.PracticeSkill:
+		req.SkillID = request.Skill
+	case studio.PracticeSource:
+		req.RequireSourceID = true
 	}
+	return req
 }
 
-// selectNextPractice opens the practice the adaptive recommendation names:
-// its primary target, or its follow-up when the primary is a lesson.
-func selectNextPractice(st *store.Store) (practiceSelection, error) {
-	input, _, _, err := buildAdaptiveInput(st, "")
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	result := adaptive.Recommend(input)
-	if result.Recommendation == nil {
-		return practiceSelection{}, refuse("no_recommendation", "no practiceable skill material is available")
-	}
-	target, followUp := nextTargetsOf(result.Recommendation)
-	if target != nil && target.kind == nextTargetLesson {
-		target = followUp
-	}
-	if target == nil {
-		return practiceSelection{}, refuse("no_recommendation",
-			"the recommendation for %s is a lesson with no practice to open", result.Recommendation.Skill.ID)
-	}
-	if target.kind == nextTargetTactic {
-		lesson, ok := tactic.Get(target.skillID)
-		if !ok {
-			return practiceSelection{}, refuse("unknown_tactic", "tactic %q is not registered", target.skillID)
-		}
-		return selectTacticPractice(st, lesson, stageGuided, "", "")
-	}
-	lesson, ok := skill.Get(target.skillID)
-	if !ok {
-		return practiceSelection{}, refuse("unknown_skill", "skill %q is not registered", target.skillID)
-	}
-	sourceID, questionID := "", ""
-	if target.material != nil {
-		sourceID = target.material.SourceID
-		if target.includeQuestion {
-			questionID = target.material.QuestionID
-		}
-	}
-	return selectSkillPractice(st, lesson, sourceID, questionID)
-}
-
-// presentedSelection rebuilds the selection a presentation displayed, from
-// the material its row names. Content that changed since the display is
-// refused rather than graded against a different version.
-func presentedSelection(st *store.Store, p store.PracticePresentation) (practiceSelection, error) {
-	var (
-		selection practiceSelection
-		err       error
-	)
-	switch {
-	case p.TacticID != "":
-		lesson, ok := tactic.Get(p.TacticID)
-		if !ok {
-			return practiceSelection{}, refuse("content_unavailable", "tactic %q is not registered in this build", p.TacticID)
-		}
-		var candidates []practiceCandidate
-		if candidates, err = tacticCandidates(st, lesson, p.SourceID); err == nil {
-			selection, err = presentedCandidate(candidates, p)
-			selection.Tactic = &tacticRun{ID: lesson.ID, Title: lesson.Title, Stage: p.Stage}
-			if p.Stage == stageGuided {
-				selection.Tactic.Guidance = guidanceFor(lesson)
-			}
-		}
-	case p.SkillID != "":
-		lesson, ok := skill.Get(p.SkillID)
-		if !ok {
-			return practiceSelection{}, refuse("content_unavailable", "skill %q is not registered in this build", p.SkillID)
-		}
-		var candidates []practiceCandidate
-		if candidates, err = skillCandidates(st, lesson, p.SourceID); err == nil {
-			if selection, err = presentedCandidate(candidates, p); err == nil {
-				var records []attempt.Attempt
-				if records, err = st.List(); err == nil {
-					assistance := attempt.AssistanceIndependent
-					var exposed bool
-					if exposed, err = st.Exposed(attempt.QuestionKey{ContentID: p.ContentID, QuestionID: p.QuestionID}); exposed {
-						assistance = attempt.AssistanceAssisted
-					}
-					selection.Skill = &skillRun{Skill: lesson, Assistance: assistance,
-						PassageExposure: passageExposureBefore(p.ContentID, records, 0)}
-				}
-			}
-		}
-	case p.SourceID != "":
-		_, page, _ := source.ParseContentID(p.ContentID)
-		selection, err = selectSourcePractice(st, p.SourceID, page, p.QuestionID, nil)
-	default:
-		selection, err = selectSamplePractice(p.QuestionID, nil)
-	}
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	if selection.Content.ID != p.ContentID || selection.Question.ID != p.QuestionID || selection.Content.Version != p.ContentVersion {
-		return practiceSelection{}, refuse("content_changed",
-			"question %s of %s changed after it was displayed; start practice again", p.QuestionID, p.ContentID)
-	}
-	return selection, nil
-}
-
-func presentedCandidate(candidates []practiceCandidate, p store.PracticePresentation) (practiceSelection, error) {
-	for _, c := range candidates {
-		if c.Content.ID == p.ContentID && c.Question.ID == p.QuestionID {
-			return practiceSelection{Content: c.Content, Question: c.Question, Number: c.Number, Page: c.Page, Review: c.Review}, nil
-		}
-	}
-	return practiceSelection{}, refuse("content_changed",
-		"question %s of %s is no longer practiceable; start practice again", p.QuestionID, p.ContentID)
-}
-
-// passageExposureBefore applies the skill-practice passage rule to the
-// records before attempt id before (0: all records).
-func passageExposureBefore(contentID string, records []attempt.Attempt, before int64) string {
-	for _, record := range records {
-		if before > 0 && record.ID >= before {
-			break
-		}
-		if record.ContentID == contentID {
-			return passageSeen
-		}
-	}
-	return passageFresh
-}
-
-// hintTactic is the authored walkthrough a hint shows: the tactic being
-// practiced, else the first registered tactic the question is tagged with.
-func hintTactic(selection practiceSelection) (tactic.Tactic, bool) {
-	if selection.Tactic != nil {
-		if lesson, ok := tactic.Get(selection.Tactic.ID); ok {
-			return lesson, true
-		}
-	}
-	for _, tag := range selection.Question.Tactics {
-		if lesson, ok := tactic.Get(tag); ok {
-			return lesson, true
-		}
-	}
-	return tactic.Tactic{}, false
-}
-
-// practiceItemOf renders a displayed selection. The condition is the one the
+// practiceItemOf renders a displayed item. The condition is the one the
 // recorded attempt will carry under adaptive.Classify, the rule Today's skill
 // evidence counts by: assisted when help was shown, a revisit after an earlier
 // attempt, a re-exposure on a passage that already has an attempt (whatever
 // the practice kind), otherwise independent.
-func practiceItemOf(st *store.Store, selection practiceSelection, p store.PracticePresentation) (studio.PracticeItem, error) {
+func practiceItemOf(st *store.Store, item practice.Item) (studio.PracticeItem, error) {
 	records, err := st.List()
 	if err != nil {
 		return studio.PracticeItem{}, err
 	}
-	key := attempt.QuestionKey{ContentID: selection.Content.ID, QuestionID: selection.Question.ID}
+	p := item.Presentation
+	key := attempt.QuestionKey{ContentID: item.Content.ID, QuestionID: item.Question.ID}
 	exposed, err := st.Exposed(key)
 	if err != nil {
 		return studio.PracticeItem{}, err
@@ -435,78 +181,76 @@ func practiceItemOf(st *store.Store, selection practiceSelection, p store.Practi
 			prior++
 		}
 	}
-	item := studio.PracticeItem{
+	view := studio.PracticeItem{
 		Token:          p.Token,
 		Kind:           p.Kind,
-		ContentID:      selection.Content.ID,
-		ContentVersion: selection.Content.Version,
-		QuestionID:     selection.Question.ID,
-		Passage:        passageOf(selection),
-		Stem:           selection.Question.Stem,
-		Options:        studioOptions(selection.Question.Options),
-		Glossary:       studioGlossary(selection.Question.Glossary),
-		Index:          selection.Number,
-		Count:          len(selection.Content.Questions),
+		ContentID:      item.Content.ID,
+		ContentVersion: item.Content.Version,
+		QuestionID:     item.Question.ID,
+		Passage:        passageOf(item),
+		Stem:           item.Question.Stem,
+		Options:        studioOptions(item.Question.Options),
+		Glossary:       studioGlossary(item.Question.Glossary),
+		Index:          item.Number,
+		Count:          len(item.Content.Questions),
 		PriorAttempts:  prior,
 		HintOpened:     !p.HintOpenedAt.IsZero(),
 		PresentedAt:    formatTime(p.PresentedAt),
-		Skills:         append([]string{}, selection.Question.Tactics...),
-		Notice:         selection.Content.Notice,
+		Skills:         append([]string{}, item.Question.Tactics...),
+		Notice:         item.Content.Notice,
 	}
-	if selection.Tactic != nil {
-		item.TacticID, item.Stage = selection.Tactic.ID, selection.Tactic.Stage
-		if selection.Tactic.Stage == stageGuided {
-			if lesson, ok := tactic.Get(selection.Tactic.ID); ok {
-				item.Guidance = hintOf(lesson)
-			}
+	if item.Tactic != nil {
+		view.TacticID, view.Stage = item.Tactic.ID, item.Tactic.Stage
+		if item.Tactic.Stage == practice.StageGuided && item.Tactic.Lesson != nil {
+			view.Guidance = hintOf(*item.Tactic.Lesson)
 		}
 	}
-	if selection.Skill != nil {
-		item.SkillID = selection.Skill.Skill.ID
+	if item.Skill != nil {
+		view.SkillID = item.Skill.Skill.ID
 	}
-	guided := selection.Tactic != nil && selection.Tactic.Stage == stageGuided
+	guided := item.Tactic != nil && item.Tactic.Stage == practice.StageGuided
 	assistance := attempt.AssistanceIndependent
-	if guided || exposed || item.HintOpened {
+	if guided || exposed || view.HintOpened {
 		assistance = attempt.AssistanceAssisted
 	}
-	firstOnContent := passageExposureBefore(selection.Content.ID, records, 0) == passageFresh
+	firstOnContent := practice.PassageExposureBefore(item.Content.ID, records, 0) == practice.PassageFresh
 	switch adaptive.Classify(prior+1, assistance, firstOnContent) {
 	case adaptive.ClassAssisted:
-		item.Condition, item.ConditionReason = studio.ConditionAssisted,
+		view.Condition, view.ConditionReason = studio.ConditionAssisted,
 			"a tactic walkthrough was shown for this question, so the attempt is assisted"
 		if guided {
-			item.ConditionReason = "the guided walkthrough is shown with this question, so the attempt is assisted"
+			view.ConditionReason = "the guided walkthrough is shown with this question, so the attempt is assisted"
 		}
 	case adaptive.ClassRevisit:
-		item.Condition, item.ConditionReason = studio.ConditionRevisit,
+		view.Condition, view.ConditionReason = studio.ConditionRevisit,
 			fmt.Sprintf("this question has %d earlier attempt(s); the answer and evidence were already shown", prior)
 	case adaptive.ClassReExposure:
-		item.Condition, item.ConditionReason = studio.ConditionReExposure,
+		view.Condition, view.ConditionReason = studio.ConditionReExposure,
 			"this passage was already seen, so the attempt is repeat exposure, not independent transfer"
 	default:
-		item.Condition, item.ConditionReason = studio.ConditionIndependent,
+		view.Condition, view.ConditionReason = studio.ConditionIndependent,
 			"first attempt with no help shown; it can count as independent evidence"
 	}
-	item.CanCount = item.Condition == studio.ConditionIndependent
-	if lesson, ok := hintTactic(selection); ok && !guided {
-		item.HintAvailable = true
-		if item.HintOpened {
-			item.Hint = hintOf(lesson)
+	view.CanCount = view.Condition == studio.ConditionIndependent
+	if lesson, ok := practice.HintTactic(item); ok && !guided {
+		view.HintAvailable = true
+		if view.HintOpened {
+			view.Hint = hintOf(lesson)
 		}
 	} else if !guided {
-		item.HintReason = "no authored walkthrough exists for this question"
+		view.HintReason = "no authored walkthrough exists for this question"
 	} else {
-		item.HintReason = "the guided walkthrough is already shown"
+		view.HintReason = "the guided walkthrough is already shown"
 	}
-	return item, nil
+	return view, nil
 }
 
 // feedbackOf is the verified grade of a recorded attempt with every option's
 // authored explanation and the evidence located in the passage.
-func feedbackOf(selection practiceSelection, record attempt.Attempt, p store.PracticePresentation, records []attempt.Attempt, already bool) studio.Feedback {
-	question := selection.Question
-	explained := attempt.Explain(question, record)
-	passage := passageOf(selection)
+func feedbackOf(item practice.Item, record attempt.Attempt, explained attempt.Feedback, records []attempt.Attempt, already bool) studio.Feedback {
+	question := item.Question
+	passage := passageOf(item)
+	p := item.Presentation
 	fb := studio.Feedback{
 		Token:           p.Token,
 		AttemptID:       record.ID,
@@ -530,7 +274,7 @@ func feedbackOf(selection practiceSelection, record attempt.Attempt, p store.Pra
 		fb.Selected = &studio.Option{Label: record.SelectedLabel, Text: record.SelectedText}
 	}
 	for _, option := range question.Options {
-		text, ok := optionExplanation(question.OptionReasoning, option.Label)
+		text, ok := study.OptionExplanation(question.OptionReasoning, option.Label)
 		fb.Options = append(fb.Options, studio.OptionExplanation{
 			Label:       option.Label,
 			Text:        option.Text,
@@ -544,7 +288,7 @@ func feedbackOf(selection practiceSelection, record attempt.Attempt, p store.Pra
 		fb.Evidence = studio.EvidenceSpan{Text: explained.Evidence, Located: true, Paragraph: span.Paragraph, Start: span.Start, End: span.End}
 	}
 	fb.Tactic = tacticLinkOf(record, question)
-	firstOnContent := passageExposureBefore(record.ContentID, records, record.ID) == passageFresh
+	firstOnContent := practice.PassageExposureBefore(record.ContentID, records, record.ID) == practice.PassageFresh
 	switch adaptive.Classify(record.AttemptNumber, record.Assistance, firstOnContent) {
 	case adaptive.ClassAssisted:
 		fb.Condition = studio.ConditionAssisted
@@ -597,8 +341,8 @@ func hintOf(lesson tactic.Tactic) *studio.Hint {
 }
 
 // passageOf splits the passage for display and labels its origin.
-func passageOf(selection practiceSelection) studio.Passage {
-	content := selection.Content
+func passageOf(item practice.Item) studio.Passage {
+	content := item.Content
 	label := studio.SourceLabel{
 		Kind:     studio.SourceFirstParty,
 		Reviewed: true,
@@ -606,11 +350,11 @@ func passageOf(selection practiceSelection) studio.Passage {
 		Rights:   content.Provenance.Rights,
 	}
 	switch {
-	case selection.Page != nil:
+	case item.Page != nil:
 		label.Kind = studio.SourceImported
 		label.SourceID, label.Page, _ = source.ParseContentID(content.ID)
-		label.Reviewed = selection.Page.Review == source.Reviewed &&
-			(selection.Review == nil || selection.Review.Review == source.Reviewed)
+		label.Reviewed = item.Page.Review == source.Reviewed &&
+			(item.Review == nil || item.Review.Review == source.Reviewed)
 	case isSampleContent(content.ID):
 		label.Kind = studio.SourceSample
 	}

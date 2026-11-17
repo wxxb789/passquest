@@ -12,6 +12,7 @@ import (
 	"github.com/wxxb789/passquest/internal/search"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
 )
 
 const (
@@ -368,7 +369,7 @@ func findExamSection(st *store.Store, cache map[string]string, sources map[strin
 		return section, nil
 	}
 	section := "unavailable"
-	if _, embedded, err := embeddedContent(contentID); err != nil {
+	if _, embedded, err := study.EmbeddedContent(contentID); err != nil {
 		return "", err
 	} else if embedded {
 		section = "embedded"
@@ -386,7 +387,7 @@ func findExamSection(st *store.Store, cache map[string]string, sources map[strin
 			}
 			sources[sourceID] = src
 		}
-		if page, ok := findPage(src, pageNumber); ok {
+		if page, ok := study.FindPage(src, pageNumber); ok {
 			if strings.TrimSpace(page.Section) == "" {
 				section = "unspecified"
 			} else {

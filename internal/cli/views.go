@@ -6,6 +6,7 @@ import (
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
+	"github.com/wxxb789/passquest/internal/study/practice"
 )
 
 func contentViewOf(content exam.Exam) contentView {
@@ -23,27 +24,27 @@ func contentViewOf(content exam.Exam) contentView {
 	}
 }
 
-func questionViewOf(selection practiceSelection) questionView {
+func questionViewOf(item practice.Item) questionView {
 	view := questionView{
-		ID:     selection.Question.ID,
-		Number: selection.Number + 1,
-		Total:  len(selection.Content.Questions),
+		ID:     item.Question.ID,
+		Number: item.Number + 1,
+		Total:  len(item.Content.Questions),
 		Passage: passageView{
-			Title: selection.Content.Passage.Title,
-			Text:  selection.Content.Passage.Text,
+			Title: item.Content.Passage.Title,
+			Text:  item.Content.Passage.Text,
 		},
-		Stem:     selection.Question.Stem,
-		Options:  optionViews(selection.Question.Options),
-		Glossary: glossaryViews(selection.Question.Glossary),
+		Stem:     item.Question.Stem,
+		Options:  optionViews(item.Question.Options),
+		Glossary: glossaryViews(item.Question.Glossary),
 	}
-	if selection.Page != nil && selection.Review != nil {
+	if item.Page != nil && item.Review != nil {
 		view.Review = &reviewView{
-			PageStatus:         string(selection.Page.Review),
-			PageReviewedBy:     selection.Page.ReviewedBy,
-			PageReviewedAt:     source.FormatTime(selection.Page.ReviewedAt),
-			QuestionStatus:     string(selection.Review.Review),
-			QuestionReviewedBy: selection.Review.ReviewedBy,
-			QuestionReviewedAt: source.FormatTime(selection.Review.ReviewedAt),
+			PageStatus:         string(item.Page.Review),
+			PageReviewedBy:     item.Page.ReviewedBy,
+			PageReviewedAt:     source.FormatTime(item.Page.ReviewedAt),
+			QuestionStatus:     string(item.Review.Review),
+			QuestionReviewedBy: item.Review.ReviewedBy,
+			QuestionReviewedAt: source.FormatTime(item.Review.ReviewedAt),
 		}
 	}
 	return view

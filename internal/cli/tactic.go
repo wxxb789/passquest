@@ -1,24 +1,23 @@
 package cli
 
 import (
-	"errors"
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/wxxb789/passquest/internal/attempt"
-	"github.com/wxxb789/passquest/internal/source"
-	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/practice"
 	"github.com/wxxb789/passquest/internal/tactic"
 )
 
-// Tactic stages are protocol values.
+// Tactic stages are protocol values: the practice module's values are the one
+// source of truth.
 const (
-	stageGuided      = "guided"
-	stageIndependent = "independent"
+	stageGuided      = practice.StageGuided
+	stageIndependent = practice.StageIndependent
 )
 
 // tacticRun is the CLI's view of one tactic attempt: the resolved stage plus
@@ -30,44 +29,39 @@ type tacticRun struct {
 	Guidance *guidanceView
 }
 
+// tacticRunOf maps a practice tactic run to the CLI's display view.
+func tacticRunOf(run *practice.TacticRun) *tacticRun {
+	if run == nil {
+		return nil
+	}
+	view := &tacticRun{ID: run.ID, Title: run.Title, Stage: run.Stage}
+	if run.Lesson != nil {
+		view.Guidance = guidanceFor(*run.Lesson)
+	}
+	return view
+}
+
 func (r tacticRun) assistance() attempt.Assistance {
-	if r.Stage == stageGuided {
+	if r.Stage == practice.StageGuided {
 		return attempt.AssistanceAssisted
 	}
 	return attempt.AssistanceIndependent
 }
 
-// deliveredGuidance returns the walkthrough delivered with the attempt. It is
-// nil for an independent stage, so an answered independent document carries no
-// guidance.
-func (r *tacticRun) deliveredGuidance() *guidanceView {
-	if r == nil {
+// deliveredGuidanceOf returns the walkthrough the answered document of a
+// tactic run delivers. It is nil for an independent stage, so an answered
+// independent document carries no guidance.
+func deliveredGuidanceOf(run *practice.TacticRun) *guidanceView {
+	if run == nil || run.Lesson == nil {
 		return nil
 	}
-	return r.Guidance
+	return guidanceFor(*run.Lesson)
 }
 
 // refuse builds the learner-fixable refusal the CLI prints as a usage error:
 // a study error whose code and message are the protocol's bytes.
 func refuse(code, format string, args ...any) *study.Error {
 	return study.Refuse(code, format, args...)
-}
-
-// recordGuidedExposure persists that the walkthrough is being delivered. The
-// pre-answer document and the interactive prompt show help before any answer,
-// so the question must stop qualifying as independent evidence even when the
-// learner never answers it. The answered document's assisted attempt already
-// carries the help for a one-shot answer.
-func recordGuidedExposure(st *store.Store, run *tacticRun, contentID, questionID string, at time.Time) error {
-	if run == nil || run.Stage != stageGuided {
-		return nil
-	}
-	return st.RecordExposure(store.Exposure{
-		TacticID:   run.ID,
-		ContentID:  contentID,
-		QuestionID: questionID,
-		ExposedAt:  at,
-	})
 }
 
 func runTactic(args []string, opt Options) int {
@@ -164,248 +158,33 @@ func runTacticPractice(args []string, opt Options) int {
 			fmt.Sprintf("tactic %q is not registered; available: %s", tacticID, strings.Join(tactic.Registered(), ", ")))
 	}
 
-	st, err := openDatabase(*dbFlag, opt)
+	svc, err := study.Open(opt.ports(*dbFlag))
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	defer st.Close()
-	selection, err := selectTacticPractice(st, lesson, *stageFlag, *sourceFlag, *questionFlag)
+	defer svc.Close()
+	item, err := practice.Show(context.Background(), svc, practice.Request{
+		Kind:       practice.KindTactic,
+		TacticID:   lesson.ID,
+		Stage:      *stageFlag,
+		SourceID:   *sourceFlag,
+		QuestionID: *questionFlag,
+	}, practiceHold(*jsonFlag, answerSet, *skipFlag))
 	if err != nil {
-		return tacticError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 
-	if *jsonFlag {
-		if !answerSet && !*skipFlag {
-			if err := recordGuidedExposure(st, selection.Tactic, selection.Content.ID, selection.Question.ID, opt.Now()); err != nil {
-				return internalError(opt, *jsonFlag, err)
-			}
-			return writeJSON(opt, awaitingDoc{
-				SchemaVersion: ProtocolVersion,
-				State:         "awaiting_answer",
-				Tactic:        tacticRunViewOf(selection.Tactic),
-				Guidance:      selection.Tactic.Guidance,
-				Content:       contentViewOf(selection.Content),
-				Question:      questionViewOf(selection),
-			})
-		}
-		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true)
-	}
-	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
-}
-
-// selectTacticPractice applies the tactic stage rule and picks the question a
-// `tactic practice` invocation would show. A guided selection carries the
-// walkthrough it delivers.
-func selectTacticPractice(st *store.Store, lesson tactic.Tactic, requestedStage, sourceID, questionID string) (practiceSelection, error) {
-	records, err := st.List()
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	exposures, err := st.ListExposures()
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	stage, err := resolveTacticStage(requestedStage, lesson.ID, records)
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	candidates, err := tacticCandidates(st, lesson, sourceID)
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	candidate, err := pickTacticCandidate(lesson, stage, questionID, candidates, records, exposures)
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	selection := practiceSelection{
-		Content:  candidate.Content,
-		Question: candidate.Question,
-		Number:   candidate.Number,
-		Page:     candidate.Page,
-		Review:   candidate.Review,
-		Tactic: &tacticRun{
-			ID:       lesson.ID,
-			Title:    lesson.Title,
-			Stage:    stage,
-			Guidance: nil,
-		},
-	}
-	if stage == stageGuided {
-		selection.Tactic.Guidance = guidanceFor(lesson)
-	}
-	return selection, nil
-}
-
-func tacticError(opt Options, jsonMode bool, err error) int {
-	var refusal *study.Error
-	if errors.As(err, &refusal) {
-		return usageError(opt, jsonMode, refusal.Code, refusal.Message)
-	}
-	switch {
-	case errors.Is(err, source.ErrInvalidInput),
-		errors.Is(err, source.ErrToolMissing),
-		errors.Is(err, source.ErrNotPracticeable),
-		errors.Is(err, store.ErrNotFound):
-		return sourceError(opt, jsonMode, err)
-	default:
-		return internalError(opt, jsonMode, err)
-	}
-}
-
-// resolveTacticStage applies the "after help" rule. An explicit stage is
-// honoured; otherwise the first attempt is guided and later attempts are
-// independent. Independent is refused until one guided attempt exists.
-func resolveTacticStage(requested, tacticID string, records []attempt.Attempt) (string, error) {
-	hasGuided := false
-	for _, record := range records {
-		if record.TacticID == tacticID && record.Assistance == attempt.AssistanceAssisted {
-			hasGuided = true
-			break
-		}
-	}
-	switch strings.TrimSpace(requested) {
-	case stageGuided:
-		return stageGuided, nil
-	case stageIndependent:
-		if !hasGuided {
-			return "", refuse("guided_required",
-				"complete a guided %s attempt before the independent question; the guided walkthrough is the help this stage follows", tacticID)
-		}
-		return stageIndependent, nil
-	case "":
-		if hasGuided {
-			return stageIndependent, nil
-		}
-		return stageGuided, nil
-	default:
-		return "", refuse("invalid_input", "unknown stage %q; use guided or independent", requested)
-	}
-}
-
-func tacticCandidates(st *store.Store, lesson tactic.Tactic, sourceID string) ([]practiceCandidate, error) {
-	if strings.TrimSpace(sourceID) == "" {
-		return exerciseCandidates(lesson)
-	}
-	return sourceCandidates(st, sourceID, lesson.ID)
-}
-
-func exerciseCandidates(lesson tactic.Tactic) ([]practiceCandidate, error) {
-	content, err := tactic.Exercise()
-	if err != nil {
-		return nil, err
-	}
-	tagged, err := tactic.Tagged(lesson.ID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]practiceCandidate, 0, len(tagged))
-	for _, taggedQuestion := range tagged {
-		question, number, ok := content.Question(taggedQuestion.ID)
-		if !ok {
-			return nil, fmt.Errorf("tagged exercise question %s is not in the exercise", taggedQuestion.ID)
-		}
-		out = append(out, practiceCandidate{
-			Content:  content,
-			Question: question,
-			Number:   number,
+	if *jsonFlag && !answerSet && !*skipFlag {
+		return writeJSON(opt, awaitingDoc{
+			SchemaVersion: ProtocolVersion,
+			State:         "awaiting_answer",
+			Tactic:        tacticRunViewOf(tacticRunOf(item.Tactic)),
+			Guidance:      deliveredGuidanceOf(item.Tactic),
+			Content:       contentViewOf(item.Content),
+			Question:      questionViewOf(item),
 		})
 	}
-	if len(out) == 0 {
-		return nil, refuse("not_practiceable", "the first-party exercise has no question tagged %q", lesson.ID)
-	}
-	return out, nil
-}
-
-func pickTacticCandidate(lesson tactic.Tactic, stage, questionID string, candidates []practiceCandidate, records []attempt.Attempt, exposures []store.Exposure) (practiceCandidate, error) {
-	prior := make(map[attempt.QuestionKey]int, len(records))
-	guided := make(map[attempt.QuestionKey]bool, len(records))
-	for _, record := range records {
-		prior[record.Key()]++
-		if record.TacticID == lesson.ID && record.Assistance == attempt.AssistanceAssisted {
-			guided[record.Key()] = true
-		}
-	}
-	exposed := make(map[attempt.QuestionKey]bool, len(exposures))
-	for _, exposure := range exposures {
-		if exposure.TacticID == lesson.ID {
-			exposed[exposure.Key()] = true
-		}
-	}
-
-	if strings.TrimSpace(questionID) != "" {
-		for _, candidate := range candidates {
-			if candidate.Question.ID == questionID {
-				if err := checkIndependent(stage, candidate, prior, guided, exposed); err != nil {
-					return practiceCandidate{}, err
-				}
-				return candidate, nil
-			}
-		}
-		return practiceCandidate{}, refuse("invalid_input",
-			"question %q is not a reviewed question tagged %q in this material", questionID, lesson.ID)
-	}
-
-	// A guided pre-answer request leaves a pending condition. The next guided
-	// request without --question resumes that exposed question instead of
-	// silently showing a different one.
-	if stage == stageGuided {
-		for _, candidate := range candidates {
-			if exposed[candidate.key()] && prior[candidate.key()] == 0 {
-				return candidate, nil
-			}
-		}
-	}
-
-	var fallback *practiceCandidate
-	for i := range candidates {
-		candidate := candidates[i]
-		if fallback == nil {
-			fallback = &candidate
-		}
-		if err := checkIndependent(stage, candidate, prior, guided, exposed); err != nil {
-			continue
-		}
-		if stage == stageGuided && prior[candidate.key()] > 0 {
-			continue
-		}
-		return candidate, nil
-	}
-	if stage == stageGuided && fallback != nil {
-		// A second guided run is allowed; the attempt is recorded as assisted and
-		// the existing repeat exposure remains visible.
-		return *fallback, nil
-	}
-	if stage == stageIndependent {
-		helped := 0
-		for _, candidate := range candidates {
-			if guided[candidate.key()] || exposed[candidate.key()] {
-				helped++
-			}
-		}
-		return practiceCandidate{}, refuse("not_practiceable",
-			"no unattempted question tagged %q remains distinct from the guided example (%d candidate(s), %d shown with guidance); add and review another tagged question, or repeat the guided example with --stage guided",
-			lesson.ID, len(candidates), helped)
-	}
-	return practiceCandidate{}, refuse("not_practiceable", "no practiceable question tagged %q", lesson.ID)
-}
-
-func checkIndependent(stage string, candidate practiceCandidate, prior map[attempt.QuestionKey]int, guided, exposed map[attempt.QuestionKey]bool) error {
-	if stage != stageIndependent {
-		return nil
-	}
-	key := candidate.key()
-	if guided[key] {
-		return refuse("invalid_input", "question %s was the guided example; choose a different question", candidate.Question.ID)
-	}
-	if exposed[key] {
-		return refuse("invalid_input",
-			"question %s was already shown with the guided walkthrough; choose a different question", candidate.Question.ID)
-	}
-	if prior[key] > 0 {
-		return refuse("not_practiceable",
-			"question %s already has %d earlier attempt(s); an independent attempt must be a first attempt", candidate.Question.ID, prior[key])
-	}
-	return nil
+	return answerItem(opt, svc, item, answerFlag, answerSet, *skipFlag, *jsonFlag)
 }
 
 func boundaryViewOf(boundary tactic.Boundary) boundaryView {

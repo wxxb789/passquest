@@ -11,6 +11,7 @@ import (
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
+	"github.com/wxxb789/passquest/internal/study"
 )
 
 type poolUnitView struct {
@@ -569,7 +570,7 @@ func writeAssessmentReport(w io.Writer, doc assessReportDoc, dbPath string) {
 		labels = append(labels, item.Annotations.OptionReasoningMissing...)
 		sort.Strings(labels)
 		for _, label := range labels {
-			text, ok := optionExplanation(item.Annotations.OptionReasoning, label)
+			text, ok := study.OptionExplanation(item.Annotations.OptionReasoning, label)
 			if !ok {
 				text = missingOptionExplanation
 			}

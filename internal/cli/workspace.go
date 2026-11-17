@@ -288,14 +288,6 @@ func (w *Workspace) unlocked(fn func(*study.Service) error) error {
 	return w.withService(fn)
 }
 
-// guard refuses command while an assessment run is active, with the CLI's
-// assessment_active code and message. It runs over its own service: the
-// caller's open store cannot cross the façade, and C1 moves this guard into
-// the practice module, where the service is already open.
-func (w *Workspace) guard(_ *store.Store, command string) error {
-	return w.withService(func(svc *study.Service) error { return study.Guard(svc, command) })
-}
-
 // workspaceError converts an orchestration error into a typed studio error
 // carrying the same code the CLI would print. A study refusal keeps its code;
 // a classified study error is matched on its wrapped sentinel with the
