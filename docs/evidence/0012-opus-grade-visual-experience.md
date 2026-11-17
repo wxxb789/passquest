@@ -21,7 +21,7 @@ macOS was not run locally; CI is its only evidence.
 | `harness self-test` | 46 cases (2 must pass) over 23/23 gates, four unit checks (the CI gate-group guard added) |
 | `note smoke` / `assess smoke` | 1367 / 125 assertions (275 before the pool-floor and compare sections moved to Go tests, Q-0012-07) |
 | `golden contract` | no golden changed against `cf66996` |
-| CI (ubuntu, macOS, Windows) | CI_RESULT |
+| CI (ubuntu, macOS, Windows) | 9/9 jobs passed on `037781e` (run 44033896830): ubuntu, macOS and Windows × `core`, `desktop`, `self-test`; slowest job Windows `core`, 7m0s |
 
 **Why gates fail locally.** As in goal 0011 (Q-0011-16): the npm feed this machine must use
 (`packagefeedproxy.microsoft.io`) still lacks the locked Pi Durable packages (`@earendil-works/*@1.5.1`,
