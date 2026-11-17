@@ -19,6 +19,7 @@ import (
 	"github.com/wxxb789/passquest/internal/skill"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -1128,7 +1129,7 @@ func agentHeartbeatWindow() time.Duration {
 // agentKillGrace is how long cancel waits after a hard kill: one heartbeat
 // window plus a second of margin for the last write to age out.
 func agentKillGrace() time.Duration {
-	return agentHeartbeatWindow() + time.Second
+	return study.DefaultKillGrace()
 }
 
 // agentHostClaimWait gives a start/resume claim younger than the heartbeat

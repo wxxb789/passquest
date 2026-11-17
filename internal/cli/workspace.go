@@ -20,6 +20,7 @@ import (
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -76,6 +77,9 @@ type Workspace struct {
 	credentialEnvs map[string]string
 	newToken       func() string
 	opt            Options
+	// ports is the completed process seam set; every direct call from C3b on
+	// opens its service through it.
+	ports study.Ports
 	// hostTutor, hostAnki and hostAgent are true when the default Node host
 	// transports are in use, so a missing Node is reported before the call.
 	hostTutor, hostAnki, hostAgent bool
@@ -151,6 +155,28 @@ func OpenWorkspace(options WorkspaceOptions) (*Workspace, error) {
 	if w.opt.AgentRunner == nil {
 		w.opt.AgentRunner = agent.HostRunner{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
 	}
+	// The desktop always opens a path the window resolved (its own default or
+	// the user's --db), never the app-owned private default of a bare CLI
+	// invocation, so PrivateDir stays false and Complete fills what
+	// withDefaults fills for every shimmed call: the run id over this clock,
+	// the host token and the cancel kill grace.
+	w.ports = study.Ports{
+		DBPath:          w.dbPath,
+		PrivateDir:      false,
+		Now:             w.opt.Now,
+		PresentationNow: w.opt.PresentationNow,
+		NewSession:      w.opt.NewSession,
+		NewToken:        w.newToken,
+		NewRunID:        w.opt.NewRunID,
+		NewHostToken:    w.opt.NewHostToken,
+		Getenv:          w.getenv,
+		Tutor:           w.opt.TutorTransport,
+		Anki:            w.opt.AnkiTransport,
+		Search:          w.opt.SearchTransport,
+		Agent:           w.opt.AgentRunner,
+		KillGrace:       w.opt.agentKillGrace,
+	}
+	study.Complete(&w.ports)
 	st, err := w.open()
 	if err != nil {
 		return nil, err
@@ -237,14 +263,44 @@ func (w *Workspace) withStore(fn func(st *store.Store) error) error {
 	return workspaceError(fn(st))
 }
 
+// withService opens one study service over the workspace ports, runs fn and
+// closes it; the error maps exactly like a direct store path.
+func (w *Workspace) withService(fn func(*study.Service) error) error {
+	svc, err := study.Open(w.ports)
+	if err != nil {
+		return workspaceError(err)
+	}
+	defer svc.Close()
+	return workspaceError(fn(svc))
+}
+
+// locked runs fn with a service opened for this call while holding the write
+// lock: the short local writes that used to run through w.run.
+func (w *Workspace) locked(fn func(*study.Service) error) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.withService(fn)
+}
+
+// unlocked runs fn with a service opened for this call without the write lock,
+// for the calls that wait on a host process (ask, test, push, resume).
+func (w *Workspace) unlocked(fn func(*study.Service) error) error {
+	return w.withService(fn)
+}
+
 // guard refuses command while an assessment run is active, with the CLI's
-// assessment_active code and message.
-func (w *Workspace) guard(st *store.Store, command string) error {
-	return activeAssessmentRefusal(st, w.opt.Now, command)
+// assessment_active code and message. It runs over its own service: the
+// caller's open store cannot cross the façade, and C1 moves this guard into
+// the practice module, where the service is already open.
+func (w *Workspace) guard(_ *store.Store, command string) error {
+	return w.withService(func(svc *study.Service) error { return study.Guard(svc, command) })
 }
 
 // workspaceError converts an orchestration error into a typed studio error
-// carrying the same code the CLI would print.
+// carrying the same code the CLI would print. A study refusal keeps its code;
+// a classified study error is matched on its wrapped sentinel with the
+// desktop's own table, because the direct practice and assessment paths never
+// saw the area code.
 func workspaceError(err error) error {
 	if err == nil {
 		return nil
@@ -253,23 +309,50 @@ func workspaceError(err error) error {
 	if errors.As(err, &typed) {
 		return withAction(typed)
 	}
-	var refusal tacticRefusal
+	var refusal *study.Error
 	if errors.As(err, &refusal) {
-		return withAction(&studio.Error{Code: refusal.code, Message: refusal.message})
+		if refusal.Err == nil {
+			return withAction(&studio.Error{Code: refusal.Code, Message: refusal.Message})
+		}
+		err = refusal.Err
 	}
-	switch {
-	case errors.Is(err, source.ErrNotPracticeable):
-		return &studio.Error{Code: "not_practiceable", Message: err.Error()}
-	case errors.Is(err, source.ErrInvalidInput), errors.Is(err, source.ErrToolMissing):
-		return &studio.Error{Code: "invalid_input", Message: err.Error()}
-	case errors.Is(err, store.ErrNotFound):
-		return &studio.Error{Code: "not_found", Message: err.Error()}
-	case errors.Is(err, store.ErrAssessmentRunState):
-		return &studio.Error{Code: "run_state", Message: err.Error()}
-	case errors.Is(err, store.ErrAssessmentWindowElapsed):
-		return &studio.Error{Code: "run_abandoned", Message: err.Error()}
+	if code, ok := desktopSentinelCode(err); ok {
+		return &studio.Error{Code: code, Message: err.Error()}
 	}
 	return &studio.Error{Code: "internal_error", Message: err.Error()}
+}
+
+// cliCoded maps an orchestration error to the studio error the window shows
+// for a call that ran through the CLI: a study error keeps its code, anything
+// else is internal_error with the error's message.
+func cliCoded(err error) error {
+	if err == nil {
+		return nil
+	}
+	var e *study.Error
+	if errors.As(err, &e) {
+		return withAction(&studio.Error{Code: e.Code, Message: e.Message})
+	}
+	return &studio.Error{Code: "internal_error", Message: err.Error()}
+}
+
+// desktopSentinelCode is the desktop's own table for the domain sentinels that
+// reach it. The ErrNotFound split from the CLI's per-area tables (not_found
+// here, invalid_input or unknown_run there) is behaviour.
+func desktopSentinelCode(err error) (string, bool) {
+	switch {
+	case errors.Is(err, source.ErrNotPracticeable):
+		return "not_practiceable", true
+	case errors.Is(err, source.ErrInvalidInput), errors.Is(err, source.ErrToolMissing):
+		return "invalid_input", true
+	case errors.Is(err, store.ErrNotFound):
+		return "not_found", true
+	case errors.Is(err, store.ErrAssessmentRunState):
+		return "run_state", true
+	case errors.Is(err, store.ErrAssessmentWindowElapsed):
+		return "run_abandoned", true
+	}
+	return "", false
 }
 
 // codeActions are the learner's next step for codes the window cannot fix by

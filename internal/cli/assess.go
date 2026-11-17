@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"os"
 	"strings"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
 )
 
 func runAssess(args []string, opt Options) int {
@@ -103,7 +103,7 @@ func runAssessStart(args []string, opt Options) int {
 	defer st.Close()
 	created, items, err := createAssessmentRun(opt, st, *sizeFlag, *minutesFlag)
 	if err != nil {
-		return refusalOrInternal(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	return runAssessmentLoop(opt, st, created, items, *jsonFlag)
 }
@@ -360,7 +360,7 @@ func compareAssessmentRuns(st *store.Store, first, second int64) (assessComparis
 
 func validateAssessmentFlags(size, minutes int, annotations string, opt Options, jsonMode bool) int {
 	if err := assessmentSettingsError(size, minutes, annotations); err != nil {
-		return refusalOrInternal(opt, jsonMode, err)
+		return fail(opt, jsonMode, err)
 	}
 	return 0
 }
@@ -399,10 +399,10 @@ func assessmentError(opt Options, jsonMode bool, err error) int {
 // assessmentErrorCode maps a refusal or an assessment store state error to
 // its usage code; ok is false for an internal error.
 func assessmentErrorCode(err error) (string, bool) {
-	var refusal tacticRefusal
+	var refusal *study.Error
 	switch {
 	case errors.As(err, &refusal):
-		return refusal.code, true
+		return refusal.Code, true
 	case errors.Is(err, store.ErrNotFound):
 		return "unknown_run", true
 	case errors.Is(err, store.ErrAssessmentRunState):
@@ -910,54 +910,10 @@ func recordNextPresentation(st *store.Store, rec *adaptive.Recommendation, at ti
 func guardAssessmentCommand(args []string, opt Options, command string) int {
 	jsonMode := jsonFlagRequested(args)
 	dbFlag := flagValue(args, "db")
-	path := databasePath(dbFlag, opt.Getenv)
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return 0
-	} else if err != nil {
-		return internalError(opt, jsonMode, err)
-	}
-	st, err := openDatabase(dbFlag, opt)
-	if err != nil {
-		return internalError(opt, jsonMode, err)
-	}
-	defer st.Close()
-	if err := activeAssessmentRefusal(st, opt.Now, command); err != nil {
-		return refusalOrInternal(opt, jsonMode, err)
+	if err := study.GuardPath(opt.ports(dbFlag), command); err != nil {
+		return fail(opt, jsonMode, err)
 	}
 	return 0
-}
-
-// refusalOrInternal writes a refusal as a usage error and anything else as an
-// internal error.
-func refusalOrInternal(opt Options, jsonMode bool, err error) int {
-	var refusal tacticRefusal
-	if errors.As(err, &refusal) {
-		return usageError(opt, jsonMode, refusal.code, refusal.message)
-	}
-	return internalError(opt, jsonMode, err)
-}
-
-// activeAssessmentRefusal refuses command with assessment_active while a run
-// is active. A run whose window has passed is recorded abandoned instead and
-// stops blocking. now is read only when a run is active.
-func activeAssessmentRefusal(st *store.Store, now func() time.Time, command string) error {
-	run, found, err := st.ActiveAssessmentRun()
-	if err != nil {
-		return err
-	}
-	if !found {
-		return nil
-	}
-	at := now()
-	if !at.Before(run.DeadlineAt) {
-		if _, err := st.AbandonAssessmentRun(run.ID, at, "window_elapsed"); err != nil && !errors.Is(err, store.ErrAssessmentRunState) {
-			return err
-		}
-		return nil
-	}
-	return refuse("assessment_active",
-		"%s is unavailable while assessment run %d is active (deadline %s); complete it, or record `passquest assess abandon %d`, before using coaching",
-		command, run.ID, run.DeadlineAt.UTC().Format(time.RFC3339), run.ID)
 }
 
 func flagValue(args []string, name string) string {

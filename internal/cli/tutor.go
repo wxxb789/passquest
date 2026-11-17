@@ -18,6 +18,7 @@ import (
 	"github.com/wxxb789/passquest/internal/skill"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -1161,35 +1162,12 @@ type tutorLoadedContent struct {
 	SourceID string
 }
 
-// embeddedContents lists every content authored in this build: the sample and
-// the skill practice passages, which already include the tactic exercise.
-// Returned values are shared and must not be mutated.
-func embeddedContents() ([]exam.Exam, error) {
-	sample, err := exam.Sample()
-	if err != nil {
-		return nil, err
-	}
-	contents, err := skill.PracticeContent()
-	if err != nil {
-		return nil, err
-	}
-	return append([]exam.Exam{sample}, contents...), nil
-}
+// embeddedContents and embeddedContent are the CLI's names for the façade's
+// pure content lookups; they stay until C1 moves the remaining callers (find,
+// report, next) onto study directly.
+func embeddedContents() ([]exam.Exam, error) { return study.EmbeddedContents() }
 
-// embeddedContent resolves an authored content id. found is false for a parsed
-// source page id, which the caller resolves from the store.
-func embeddedContent(id string) (exam.Exam, bool, error) {
-	contents, err := embeddedContents()
-	if err != nil {
-		return exam.Exam{}, false, err
-	}
-	for _, content := range contents {
-		if content.ID == id {
-			return content, true, nil
-		}
-	}
-	return exam.Exam{}, false, nil
-}
+func embeddedContent(id string) (exam.Exam, bool, error) { return study.EmbeddedContent(id) }
 
 // loadTutorContent resolves the stored attempt's question from embedded
 // material or a reviewed page of an imported source. A missing or no-longer-
@@ -1352,9 +1330,9 @@ func parsePositiveInt64(raw string) (int64, error) {
 }
 
 func tutorCommandError(opt Options, jsonMode bool, err error) int {
-	var refusal tacticRefusal
+	var refusal *study.Error
 	if errors.As(err, &refusal) {
-		return usageError(opt, jsonMode, refusal.code, refusal.message)
+		return usageError(opt, jsonMode, refusal.Code, refusal.Message)
 	}
 	return internalError(opt, jsonMode, err)
 }

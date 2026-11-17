@@ -11,6 +11,7 @@ import (
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/tactic"
 )
 
@@ -46,15 +47,10 @@ func (r *tacticRun) deliveredGuidance() *guidanceView {
 	return r.Guidance
 }
 
-type tacticRefusal struct {
-	code    string
-	message string
-}
-
-func (e tacticRefusal) Error() string { return e.message }
-
-func refuse(code, format string, args ...any) error {
-	return tacticRefusal{code: code, message: fmt.Sprintf(format, args...)}
+// refuse builds the learner-fixable refusal the CLI prints as a usage error:
+// a study error whose code and message are the protocol's bytes.
+func refuse(code, format string, args ...any) *study.Error {
+	return study.Refuse(code, format, args...)
 }
 
 // recordGuidedExposure persists that the walkthrough is being delivered. The
@@ -241,9 +237,9 @@ func selectTacticPractice(st *store.Store, lesson tactic.Tactic, requestedStage,
 }
 
 func tacticError(opt Options, jsonMode bool, err error) int {
-	var refusal tacticRefusal
+	var refusal *study.Error
 	if errors.As(err, &refusal) {
-		return usageError(opt, jsonMode, refusal.code, refusal.message)
+		return usageError(opt, jsonMode, refusal.Code, refusal.Message)
 	}
 	switch {
 	case errors.Is(err, source.ErrInvalidInput),

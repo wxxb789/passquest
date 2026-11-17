@@ -14,6 +14,7 @@ import (
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -874,9 +875,9 @@ func noteCommandError(opt Options, jsonMode bool, err error) int {
 // noteErrorCode maps a refusal or a note derivation error to its usage code;
 // ok is false for an internal error.
 func noteErrorCode(err error) (code, message string, ok bool) {
-	var refusal tacticRefusal
+	var refusal *study.Error
 	if errors.As(err, &refusal) {
-		return refusal.code, refusal.message, true
+		return refusal.Code, refusal.Message, true
 	}
 	switch {
 	case errors.Is(err, note.ErrLowValue):

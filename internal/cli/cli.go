@@ -23,6 +23,7 @@ import (
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/search"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -109,6 +110,29 @@ func (o Options) withDefaults() Options {
 		o.agentKillGrace = agentKillGrace()
 	}
 	return o
+}
+
+// ports is the composition root's port set for one command in the database
+// dbFlag selects: the process seams withDefaults filled, plus the
+// private-directory decision openDatabase makes.
+func (o Options) ports(dbFlag string) study.Ports {
+	p := study.Ports{
+		DBPath:          databasePath(dbFlag, o.Getenv),
+		PrivateDir:      privateDefault(dbFlag, o.Getenv),
+		Now:             o.Now,
+		PresentationNow: o.PresentationNow,
+		NewSession:      o.NewSession,
+		NewRunID:        o.NewRunID,
+		NewHostToken:    o.NewHostToken,
+		Getenv:          o.Getenv,
+		Tutor:           o.TutorTransport,
+		Anki:            o.AnkiTransport,
+		Search:          o.SearchTransport,
+		Agent:           o.AgentRunner,
+		KillGrace:       o.agentKillGrace,
+	}
+	study.Complete(&p)
+	return p
 }
 
 // Run executes one CLI invocation and returns the process exit code.
@@ -269,12 +293,18 @@ func databasePath(flagValue string, getenv func(string) string) string {
 	return defaultDatabasePath
 }
 
+// privateDefault reports whether the app-owned default state directory is in
+// use: neither --db nor PASSQUEST_DB selects a database.
+func privateDefault(flagValue string, getenv func(string) string) bool {
+	return strings.TrimSpace(flagValue) == "" && strings.TrimSpace(getenv("PASSQUEST_DB")) == ""
+}
+
 // openDatabase opens the resolved database path. The app-owned default state
 // directory is tightened to 0700; a directory chosen with --db or PASSQUEST_DB
 // is left to the user.
 func openDatabase(flagValue string, opt Options) (*store.Store, error) {
 	path := databasePath(flagValue, opt.Getenv)
-	if strings.TrimSpace(flagValue) == "" && strings.TrimSpace(opt.Getenv("PASSQUEST_DB")) == "" {
+	if privateDefault(flagValue, opt.Getenv) {
 		return store.OpenPrivate(path)
 	}
 	return store.Open(path)
