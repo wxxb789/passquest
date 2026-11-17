@@ -8,6 +8,7 @@ import (
 	"github.com/wxxb789/passquest/internal/note"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study/notes"
 )
 
 var noteLimits = []string{
@@ -243,7 +244,7 @@ func noteTargetViewOf(contentID, questionID, sourceID string, page int, attemptI
 	}
 }
 
-func noteDraftViewOf(e noteEffective) noteDraftView {
+func noteDraftViewOf(e notes.Effective) noteDraftView {
 	withheld := append([]string{}, e.Built.Withheld...)
 	return noteDraftView{
 		ID: e.Draft.ID,
@@ -263,7 +264,7 @@ func noteFieldsViewOf(f note.Fields) noteFieldsView {
 	return noteFieldsView{Front: f.Front, Back: f.Back, Tactic: f.Tactic, Source: f.Source}
 }
 
-func notePlainViewOf(e noteEffective) notePlainView {
+func notePlainViewOf(e notes.Effective) notePlainView {
 	return notePlainView{Front: e.Front, Back: e.Back, Tactic: e.Tactic, Source: e.Built.SourceLabel}
 }
 

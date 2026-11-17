@@ -1,17 +1,18 @@
 package cli
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/note"
-	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/notes"
 )
 
 // ProposeNote is `note propose`: a deterministic draft from a recorded
@@ -45,20 +46,21 @@ func (w *Workspace) ProposeNote(request studio.NoteRequest) (studio.NoteDraft, e
 // a refinement the learner has not used returned apart as its Suggestion.
 func (w *Workspace) OpenNoteDraft() (*studio.NoteDraft, error) {
 	var open *studio.NoteDraft
-	err := w.withStore(func(st *store.Store) error {
-		draft, err := noteDraftFor(st, 0)
-		if code, _, ok := noteErrorCode(err); ok && code == "no_draft" {
-			return nil
-		}
+	err := w.lockedNote(func(svc *study.Service) error {
+		draft, err := notes.Locate(context.Background(), svc, 0)
 		if err != nil {
-			return noteStudioError(err)
+			var refusal *study.Error
+			if errors.As(err, &refusal) && refusal.Code == "no_draft" {
+				return nil
+			}
+			return err
 		}
 		if draft.AcceptedFront != "" {
 			return nil
 		}
-		effective, err := noteEffectiveFor(st, draft)
+		effective, err := notes.Derive(context.Background(), svc, draft)
 		if err != nil {
-			return noteStudioError(err)
+			return err
 		}
 		view := noteWindowOf(effective)
 		restored, err := studioNoteDraft(noteDraftViewOf(view.base), notePlainViewOf(view.base), view.base.Advisory, noteLimits)
@@ -66,7 +68,7 @@ func (w *Workspace) OpenNoteDraft() (*studio.NoteDraft, error) {
 			return err
 		}
 		if view.suggestion != nil {
-			record, err := noteRefinementRecord(st, draft.RefinementID)
+			record, err := notes.RefinementRecord(context.Background(), svc, draft.RefinementID)
 			if err != nil {
 				return err
 			}
@@ -85,12 +87,12 @@ func (w *Workspace) OpenNoteDraft() (*studio.NoteDraft, error) {
 // the card only when the learner puts it in the fields. effective is what
 // `note accept` without edits would record.
 type noteWindow struct {
-	effective  noteEffective
-	base       noteEffective
+	effective  notes.Effective
+	base       notes.Effective
 	suggestion *studio.NoteFields
 }
 
-func noteWindowOf(effective noteEffective) noteWindow {
+func noteWindowOf(effective notes.Effective) noteWindow {
 	view := noteWindow{effective: effective, base: effective}
 	if effective.Draft.AcceptedFront != "" || effective.Origin != note.OriginRefined {
 		return view
@@ -98,27 +100,14 @@ func noteWindowOf(effective noteEffective) noteWindow {
 	own := effective.Draft
 	own.Origin = string(note.OriginDeterministic)
 	own.Model, own.RefinedFront, own.RefinedBack = "", "", ""
-	view.base = noteEffectiveOf(own, effective.Input, effective.Built)
+	view.base = notes.EffectiveOf(own, effective.Input, effective.Built)
 	view.base.Draft = effective.Draft
 	view.suggestion = &studio.NoteFields{Front: effective.Front, Back: effective.Back, Tactic: effective.Tactic}
 	return view
 }
 
-func noteFieldsOf(e noteEffective) studio.NoteFields {
+func noteFieldsOf(e notes.Effective) studio.NoteFields {
 	return studio.NoteFields{Front: e.Front, Back: e.Back, Tactic: e.Tactic}
-}
-
-func noteRefinementRecord(st *store.Store, id int64) (store.NoteRefinement, error) {
-	records, err := st.NoteRefinements()
-	if err != nil {
-		return store.NoteRefinement{}, err
-	}
-	for _, record := range records {
-		if record.ID == id {
-			return record, nil
-		}
-	}
-	return store.NoteRefinement{}, fmt.Errorf("note refinement #%d is not recorded", id)
 }
 
 func studioNoteRefinement(draftID int64, record store.NoteRefinement, suggestion studio.NoteFields) studio.NoteRefinement {
@@ -164,8 +153,8 @@ func studioNoteDraft(view noteDraftView, plain notePlainView, advisory bool, lim
 // push sends to Anki.
 func (w *Workspace) PreviewNote(draftID int64, fields studio.NoteFields) (studio.NotePreview, error) {
 	var preview studio.NotePreview
-	err := w.withStore(func(st *store.Store) error {
-		view, edited, err := noteEdit(st, draftID, fields)
+	err := w.lockedNote(func(svc *study.Service) error {
+		view, edited, err := noteEdit(svc, draftID, fields)
 		if err != nil {
 			return err
 		}
@@ -209,95 +198,14 @@ func (w *Workspace) PreviewNote(draftID int64, fields studio.NoteFields) (studio
 // source text, because that text must not be shown as if it would be sent.
 func (w *Workspace) RefineNotePreview(draftID int64) (studio.NoteRefinePreview, error) {
 	var preview studio.NoteRefinePreview
-	err := w.invoke(func(st *store.Store, opt Options) int {
-		draft, err := noteDraftFor(st, draftID)
+	if err := w.codedCall(func(svc *study.Service) error {
+		resolved, err := notes.RefinePreview(context.Background(), svc, draftID)
 		if err != nil {
-			return noteCommandError(opt, true, err)
+			return err
 		}
-		input, err := noteInputFromDraft(st, draft)
-		if err != nil {
-			return noteCommandError(opt, true, err)
-		}
-		built, err := note.Build(input)
-		if err != nil {
-			return noteCommandError(opt, true, err)
-		}
-		cfg, configured, err := st.TutorConfig()
-		if err != nil {
-			return internalError(opt, true, err)
-		}
-		if !configured {
-			return usageError(opt, true, "not_configured",
-				"no tutor provider is configured; run passquest tutor config --endpoint URL --model NAME, or omit --refine")
-		}
-		cfg, _, _, code := resolveActive(cfg, opt, true)
-		if code != 0 {
-			return code
-		}
-		request, err := note.BuildRefineRequest(cfg, built, noteRefineMaterial(input, built))
-		if err != nil {
-			return usageError(opt, true, "invalid_config", err.Error())
-		}
-		providerID := strings.TrimSpace(cfg.Provider)
-		view := tutorProviderViewOf(cfg, opt)
-		preview = studio.NoteRefinePreview{
-			DraftID:    draft.ID,
-			Provider:   providerID,
-			Model:      cfg.Model,
-			Endpoint:   cfg.Endpoint,
-			External:   !loopbackEndpoint(cfg.Endpoint),
-			Verified:   true,
-			Credential: studio.Credential{Env: view.CredentialEnv, Present: view.CredentialPresent},
-			Unanswered: built.Unanswered,
-			Messages:   []studio.CoachMessage{},
-			MaxTokens:  request.Chat.MaxTokens,
-			Limits:     noteLimits,
-		}
-		if providerID != "" {
-			index, err := loadVerificationIndex(st)
-			if err != nil {
-				return internalError(opt, true, err)
-			}
-			state := capabilityView(provider.CapTextChat, true, index.forModel(providerID, cfg.Model))
-			preview.TextChatState = renderCapability(state)
-			preview.Verified = state.Verified
-			if !state.Verified {
-				preview.Action = fmt.Sprintf("passquest model test %s/%s", providerID, cfg.Model)
-			}
-		}
-		// The note's own text needs the global decision (built.Withheld); the
-		// provider needs the consent that covers it, exactly as noteRefine checks.
-		consent := studio.CoachConsent{
-			PrivateSource: input.Target.Restricted,
-			SourceID:      input.Target.SourceID,
-			Required:      input.Target.Restricted && input.Target.SourceID != "",
-			Withheld:      append([]string{}, built.Withheld...),
-		}
-		consent.Granted = !consent.Required
-		if consent.Required && len(built.Withheld) == 0 {
-			event, ok, err := st.TutorConsent(input.Target.SourceID, providerID)
-			if err != nil {
-				return internalError(opt, true, err)
-			}
-			consent.Granted = ok && event.Granted
-		}
-		if consent.Granted {
-			consent.SourceTextShared = consent.PrivateSource
-			for _, message := range request.Chat.Messages {
-				preview.Messages = append(preview.Messages, studio.CoachMessage{Role: message.Role, Content: message.Content})
-			}
-			preview.RequestSHA256, preview.RequestBytes = note.RequestIdentity(request.Body)
-		} else {
-			for _, field := range []string{"front", "back", "passage", "question_stem", "evidence"} {
-				if !slices.Contains(consent.Withheld, field) {
-					consent.Withheld = append(consent.Withheld, field)
-				}
-			}
-		}
-		preview.Consent = consent
-		return 0
-	})
-	if err != nil {
+		preview = studioNoteRefinePreviewOf(resolved)
+		return nil
+	}); err != nil {
 		return studio.NoteRefinePreview{}, err
 	}
 	budget, err := w.Budget()
@@ -308,14 +216,56 @@ func (w *Workspace) RefineNotePreview(draftID int64) (studio.NoteRefinePreview, 
 	return preview, nil
 }
 
+// studioNoteRefinePreviewOf renders one resolved refinement request the way
+// the shimmed preview decoded it: the verification state as its rendered
+// sentence, the message list always a list, and the request identity only when
+// consent covers the source.
+func studioNoteRefinePreviewOf(resolved notes.Preview) studio.NoteRefinePreview {
+	preview := studio.NoteRefinePreview{
+		DraftID:    resolved.DraftID,
+		Provider:   resolved.ProviderID,
+		Model:      resolved.Config.Model,
+		Endpoint:   resolved.Config.Endpoint,
+		External:   !loopbackEndpoint(resolved.Config.Endpoint),
+		Verified:   true,
+		Credential: studio.Credential{Env: resolved.CredentialEnv, Present: resolved.CredentialPresent},
+		Unanswered: resolved.Unanswered,
+		Messages:   []studio.CoachMessage{},
+		MaxTokens:  resolved.MaxTokens,
+		Limits:     noteLimits,
+	}
+	if resolved.HasCapability {
+		state := capabilityViewOf(resolved.Capability)
+		preview.TextChatState = renderCapability(state)
+		preview.Verified = state.Verified
+		if !state.Verified {
+			preview.Action = fmt.Sprintf("passquest model test %s/%s", resolved.ProviderID, resolved.Config.Model)
+		}
+	}
+	consent := studio.CoachConsent{
+		PrivateSource:    resolved.Consent.Private,
+		SourceID:         resolved.Consent.SourceID,
+		Required:         resolved.Consent.Required,
+		Granted:          resolved.Consent.Granted,
+		SourceTextShared: resolved.Consent.SourceTextShared,
+		Withheld:         append([]string{}, resolved.Consent.Withheld...),
+	}
+	for _, message := range resolved.Messages {
+		preview.Messages = append(preview.Messages, studio.CoachMessage{Role: message.Role, Content: message.Content})
+	}
+	preview.RequestSHA256, preview.RequestBytes = resolved.RequestSHA256, resolved.RequestBytes
+	preview.Consent = consent
+	return preview
+}
+
 // RefineNote asks the active provider once for a better front and back,
-// through the same path as `note propose --refine` (noteRefine): the active
-// pair must be verified, the credential present and the consent must cover
-// the provider; a budget slot is reserved, and a provider failure is recorded
-// and returned with its typed code. The suggestion is advisory and is never
-// applied by the window: the learner copies what they keep into the fields and
-// accepts them with AcceptNote, which records a refined note only for the
-// suggestion's own fields.
+// through the same path as `note propose --refine`: the active pair must be
+// verified, the credential present and the consent must cover the provider; a
+// budget slot is reserved, and a provider failure is recorded and returned
+// with its typed code. The suggestion is advisory and is never applied by the
+// window: the learner copies what they keep into the fields and accepts them
+// with AcceptNote, which records a refined note only for the suggestion's own
+// fields.
 func (w *Workspace) RefineNote(draftID int64) (studio.NoteRefinement, error) {
 	if err := w.requireNode(w.hostTutor); err != nil {
 		return studio.NoteRefinement{}, err
@@ -326,97 +276,82 @@ func (w *Workspace) RefineNote(draftID int64) (studio.NoteRefinement, error) {
 	}
 	defer w.stopRefining(draftID)
 	var refinement studio.NoteRefinement
-	err := w.invoke(func(st *store.Store, opt Options) int {
-		draft, err := noteDraftFor(st, draftID)
+	if err := w.codedCall(func(svc *study.Service) error {
+		refined, err := notes.Refine(context.Background(), svc, draftID)
 		if err != nil {
-			return noteCommandError(opt, true, err)
+			return err
 		}
-		input, err := noteInputFromDraft(st, draft)
-		if err != nil {
-			return noteCommandError(opt, true, err)
+		if refined.Failure != nil {
+			return study.Refuse(refined.Failure.Code, "%s", refined.Failure.Message)
 		}
-		built, err := note.Build(input)
-		if err != nil {
-			return noteCommandError(opt, true, err)
-		}
-		if len(built.Withheld) > 0 {
-			return usageError(opt, true, "consent_required", noteConsentMessage(draft))
-		}
-		refined, view, code := noteRefine(st, draft, input, built, opt, true)
-		if code != 0 {
-			return code
-		}
-		record, err := noteRefinementRecord(st, view.ID)
-		if err != nil {
-			return internalError(opt, true, err)
-		}
-		refinement = studioNoteRefinement(refined.ID, record,
-			studio.NoteFields{Front: refined.RefinedFront, Back: refined.RefinedBack, Tactic: built.Tactic})
-		return 0
-	})
-	return refinement, err
+		refinement = studioNoteRefinement(refined.Draft.ID, refined.Record,
+			studio.NoteFields{Front: refined.Draft.RefinedFront, Back: refined.Draft.RefinedBack, Tactic: refined.Built.Tactic})
+		return nil
+	}); err != nil {
+		return studio.NoteRefinement{}, err
+	}
+	return refinement, nil
 }
 
-// invoke runs fn as one in-process command on a store opened for the call:
-// fn reports refusals exactly as the CLI does with --json, and a non-zero exit
-// becomes the studio error with the same code. It does not hold the write
-// lock, so fn may wait on a host process, as `tutor ask` does.
-func (w *Workspace) invoke(fn func(st *store.Store, opt Options) int) error {
-	st, err := w.open()
+// lockedNote runs fn with one study service opened for this call while holding
+// the write lock, mapping its error the way the three note-window methods
+// mapped it before the notes table moved behind the seam.
+func (w *Workspace) lockedNote(fn func(svc *study.Service) error) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	svc, err := study.Open(w.ports)
 	if err != nil {
-		return err
+		return noteWindowError(err)
 	}
-	defer st.Close()
-	var stdout, stderr bytes.Buffer
-	opt := w.opt
-	opt.Stdout = &stdout
-	opt.Stderr = &stderr
-	if code := fn(st, opt); code != 0 {
-		return commandResult{code: code, stdout: stdout.Bytes(), stderr: stderr.Bytes()}.err()
+	defer svc.Close()
+	return noteWindowError(fn(svc))
+}
+
+// noteWindowError maps a note-window call's error: a study refusal — or a note
+// sentinel the notes module already classified — becomes the studio error with
+// its code, and anything else (a raw store error) keeps the direct-path
+// mapping. This is the one place the window still honours the notes area's own
+// codes instead of the desktop's sentinel table.
+func noteWindowError(err error) error {
+	if err == nil {
+		return nil
 	}
-	return nil
+	var e *study.Error
+	if errors.As(err, &e) {
+		return withAction(&studio.Error{Code: e.Code, Message: e.Message})
+	}
+	return workspaceError(err)
 }
 
 // noteEdit loads a draft as the window edits it and applies sanitised edits
 // over the draft's own fields: an emptied field keeps the draft's own value,
 // never an unused suggestion.
-func noteEdit(st *store.Store, draftID int64, fields studio.NoteFields) (noteWindow, studio.NoteFields, error) {
-	draft, err := noteDraftFor(st, draftID)
+func noteEdit(svc *study.Service, draftID int64, fields studio.NoteFields) (noteWindow, studio.NoteFields, error) {
+	effective, err := notes.Draft(context.Background(), svc, draftID)
 	if err != nil {
-		return noteWindow{}, studio.NoteFields{}, noteStudioError(err)
-	}
-	effective, err := noteEffectiveFor(st, draft)
-	if err != nil {
-		return noteWindow{}, studio.NoteFields{}, noteStudioError(err)
+		return noteWindow{}, studio.NoteFields{}, err
 	}
 	if len(effective.Built.Withheld) > 0 {
-		return noteWindow{}, studio.NoteFields{}, refuse("consent_required", "%s", noteConsentMessage(draft))
+		return noteWindow{}, studio.NoteFields{}, study.Refuse("consent_required", "%s", notes.ConsentMessage(effective.Draft))
 	}
 	view := noteWindowOf(effective)
 	edited := noteFieldsOf(view.base)
 	if strings.TrimSpace(fields.Front) != "" {
 		if edited.Front, err = note.SanitizeFront(fields.Front); err != nil {
-			return noteWindow{}, studio.NoteFields{}, refuse("invalid_front", "%s", err.Error())
+			return noteWindow{}, studio.NoteFields{}, study.Refuse("invalid_front", "%s", err.Error())
 		}
 	}
 	if strings.TrimSpace(fields.Back) != "" {
 		if edited.Back, err = note.SanitizeBack(fields.Back); err != nil {
-			return noteWindow{}, studio.NoteFields{}, refuse("invalid_back", "%s", err.Error())
+			return noteWindow{}, studio.NoteFields{}, study.Refuse("invalid_back", "%s", err.Error())
 		}
 	}
 	if strings.TrimSpace(fields.Tactic) != "" {
 		if edited.Tactic, err = note.SanitizeTactic(fields.Tactic); err != nil {
-			return noteWindow{}, studio.NoteFields{}, refuse("invalid_tactic", "%s", err.Error())
+			return noteWindow{}, studio.NoteFields{}, study.Refuse("invalid_tactic", "%s", err.Error())
 		}
 	}
 	return view, edited, nil
-}
-
-func noteStudioError(err error) error {
-	if code, message, ok := noteErrorCode(err); ok {
-		return refuse(code, "%s", message)
-	}
-	return err
 }
 
 // AcceptNote records the learner's fields as `note accept` records them. The
@@ -424,9 +359,9 @@ func noteStudioError(err error) error {
 // origin, the unused suggestion's own fields are a refined note, and anything
 // else is an edited one.
 func (w *Workspace) AcceptNote(draftID int64, fields studio.NoteFields) (studio.NoteAccept, error) {
-	var doc noteAcceptDoc
-	err := w.withStore(func(st *store.Store) error {
-		view, edited, err := noteEdit(st, draftID, fields)
+	var settled notes.Settled
+	err := w.lockedNote(func(svc *study.Service) error {
+		view, edited, err := noteEdit(svc, draftID, fields)
 		if err != nil {
 			return err
 		}
@@ -438,18 +373,21 @@ func (w *Workspace) AcceptNote(draftID int64, fields studio.NoteFields) (studio.
 		default:
 			recorded, origin = view.effective, note.OriginEdited
 		}
-		doc, err = noteAcceptRecord(st, recorded, edited.Front, edited.Back, edited.Tactic, origin, w.opt.Now())
+		settled, err = notes.Settle(context.Background(), svc, notes.SettleInput{
+			DraftID: recorded.Draft.ID, Action: notes.Accept, Effective: recorded,
+			Front: edited.Front, Back: edited.Back, Tactic: edited.Tactic, Origin: origin,
+		})
 		return err
 	})
 	if err != nil {
 		return studio.NoteAccept{}, err
 	}
 	return studio.NoteAccept{
-		State:            doc.State,
-		Note:             studioNote(doc.Note),
-		Created:          doc.Created,
-		Changed:          doc.Changed,
-		PreviousRevision: doc.PreviousRevision,
+		State:            settled.State,
+		Note:             studioNote(noteViewOf(settled.Note)),
+		Created:          settled.Created,
+		Changed:          settled.Changed,
+		PreviousRevision: settled.Previous,
 	}, nil
 }
 

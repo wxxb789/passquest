@@ -54,30 +54,6 @@ func activeProvider(cfg tutor.Config, registry provider.Registry) (provider.Prov
 	return p, m, cfg, true, nil
 }
 
-// resolveActive loads the registry, resolves the active registry provider and
-// refreshes the endpoint from registry data. It refuses a pair that does not
-// declare text.chat, which every text surface requires. A legacy configuration
-// (no provider) passes through with active=false.
-func resolveActive(cfg tutor.Config, opt Options, jsonMode bool) (tutor.Config, provider.Registry, bool, int) {
-	registry, _, err := provider.Load(opt.Getenv)
-	if err != nil {
-		return cfg, provider.Registry{}, false, usageError(opt, jsonMode, "invalid_registry", err.Error())
-	}
-	providerID := strings.TrimSpace(cfg.Provider)
-	if providerID == "" {
-		return cfg, registry, false, 0
-	}
-	_, model, refreshed, _, err := activeProvider(cfg, registry)
-	if err != nil {
-		return cfg, registry, false, usageError(opt, jsonMode, "unknown_model", err.Error())
-	}
-	if !model.Has(provider.CapTextChat) {
-		return cfg, registry, false, usageError(opt, jsonMode, "capability_not_declared",
-			fmt.Sprintf("%s/%s does not declare text.chat", providerID, cfg.Model))
-	}
-	return refreshed, registry, true, 0
-}
-
 // requireVerifiedTextChat refuses a registry pair whose text.chat has no
 // verified evidence. The legacy hand-configured path needs no verification.
 func requireVerifiedTextChat(st *store.Store, registry provider.Registry, opt Options, providerID, modelID string, jsonMode bool) int {
@@ -113,35 +89,6 @@ func requireVerifiedTextChat(st *store.Store, registry provider.Registry, opt Op
 func credentialState(opt Options, providerID string) (string, bool) {
 	env, _, present := provider.CredentialValue(opt.Getenv, providerID)
 	return env, present
-}
-
-// verificationIndex groups the latest verification per provider, model and
-// capability. A model's evidence is never applied to a sibling.
-type verificationIndex map[modelRef]map[provider.Capability]store.ProviderVerification
-
-type modelRef struct {
-	provider string
-	model    string
-}
-
-func loadVerificationIndex(st *store.Store) (verificationIndex, error) {
-	all, err := st.ProviderVerifications()
-	if err != nil {
-		return nil, err
-	}
-	index := verificationIndex{}
-	for _, event := range all {
-		ref := modelRef{provider: event.Provider, model: event.Model}
-		if index[ref] == nil {
-			index[ref] = map[provider.Capability]store.ProviderVerification{}
-		}
-		index[ref][provider.Capability(event.Capability)] = event
-	}
-	return index, nil
-}
-
-func (index verificationIndex) forModel(providerID, modelID string) map[provider.Capability]store.ProviderVerification {
-	return index[modelRef{provider: providerID, model: modelID}]
 }
 
 func runModelList(args []string, opt Options) int {

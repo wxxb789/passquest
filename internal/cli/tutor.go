@@ -10,9 +10,6 @@ import (
 	"time"
 
 	"github.com/wxxb789/passquest/internal/attempt"
-	"github.com/wxxb789/passquest/internal/exam"
-	"github.com/wxxb789/passquest/internal/source"
-	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/coach"
 	"github.com/wxxb789/passquest/internal/tutor"
@@ -264,29 +261,6 @@ func writeFailoverLine(w io.Writer, view *tutorFailoverView) {
 		return
 	}
 	fmt.Fprintf(w, "failover refused: %s → %s (reason: %s)\n", view.FromProvider, target, view.Refusal)
-}
-
-func tutorMessage(value, key string) string {
-	value = strings.ReplaceAll(value, key, "[redacted]")
-	value = strings.Map(func(r rune) rune {
-		switch r {
-		case '\n', '\r', '\t':
-			return r
-		}
-		if (r < 0x20) || (r >= 0x7f && r <= 0x9f) {
-			return ' '
-		}
-		return r
-	}, value)
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "no detail"
-	}
-	runes := []rune(value)
-	if len(runes) > 500 {
-		value = string(runes[:500]) + "…"
-	}
-	return value
 }
 
 func writeTutorAdvisory(w io.Writer, doc tutorAdvisoryDoc, record attempt.Attempt, dbPath string) {
@@ -612,92 +586,8 @@ func writeTutorConsents(w io.Writer, doc tutorConsentsDoc) {
 	}
 }
 
-// tutorAttemptRecord is the CLI's copy of coach's attempt lookup: `note
-// refine` and `note preview` still read the attempt here, and it leaves this
-// package with them (C5a). It refuses with the same code and message coach
-// uses.
-func tutorAttemptRecord(st *store.Store, id int64) (attempt.Attempt, error) {
-	records, err := st.List()
-	if err != nil {
-		return attempt.Attempt{}, err
-	}
-	if id < 0 {
-		return attempt.Attempt{}, refuse("invalid_input", "--attempt must be positive or 0 for the latest attempt")
-	}
-	if len(records) == 0 {
-		return attempt.Attempt{}, refuse("no_attempts", "no attempt is recorded; run passquest practice first")
-	}
-	if id == 0 {
-		return records[len(records)-1], nil
-	}
-	for _, record := range records {
-		if record.ID == id {
-			return record, nil
-		}
-	}
-	return attempt.Attempt{}, refuse("unknown_attempt", "attempt #%d is not recorded", id)
-}
-
-type tutorLoadedContent struct {
-	Found    bool
-	Content  exam.Exam
-	Question exam.Question
-	Private  bool
-	SourceID string
-}
-
-// loadTutorContent resolves the stored attempt's question from embedded
-// material or a reviewed page of an imported source. A missing or no-longer-
-// practiceable question is a state, not an error: the prompt builder discloses
-// that current content is unavailable. Its remaining callers are the note
-// paths, and it leaves this package with them (C5a).
-func loadTutorContent(st *store.Store, contentID, questionID string) (tutorLoadedContent, error) {
-	if content, found, err := study.EmbeddedContent(contentID); err != nil {
-		return tutorLoadedContent{}, err
-	} else if found {
-		return tutorEmbedded(content, questionID), nil
-	}
-
-	sourceID, pageNumber, ok := source.ParseContentID(contentID)
-	if !ok {
-		return tutorLoadedContent{Private: strings.HasPrefix(contentID, "src-")}, nil
-	}
-	out := tutorLoadedContent{Private: true, SourceID: sourceID}
-	src, err := st.Source(sourceID)
-	if errors.Is(err, store.ErrNotFound) {
-		return out, nil
-	}
-	if err != nil {
-		return tutorLoadedContent{}, err
-	}
-	page, found := study.FindPage(src, pageNumber)
-	if !found {
-		return out, nil
-	}
-	questions, err := st.Questions(sourceID)
-	if err != nil {
-		return tutorLoadedContent{}, err
-	}
-	content, _, err := source.BuildPracticeExam(src, page, questions)
-	if err != nil {
-		return out, nil
-	}
-	loaded := tutorEmbedded(content, questionID)
-	loaded.Private = true
-	loaded.SourceID = sourceID
-	return loaded, nil
-}
-
-func tutorEmbedded(content exam.Exam, questionID string) tutorLoadedContent {
-	question, _, ok := content.Question(questionID)
-	if !ok {
-		return tutorLoadedContent{}
-	}
-	return tutorLoadedContent{Found: true, Content: content, Question: question}
-}
-
-// tutorDayStart stays in the CLI for its remaining callers: the note
-// refinement path and its test. It leaves with them (C5a).
+// tutorDayStart stays for its one remaining caller, note_refine_test.go: the
+// note refinement path itself now uses the kernel's UTC-day start.
 func tutorDayStart(now time.Time) time.Time {
 	year, month, day := now.UTC().Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
