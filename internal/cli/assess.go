@@ -883,47 +883,6 @@ func assessmentRunLimitations() []string {
 	}
 }
 
-// recordSourceQuestionPresentations appends one exposure per question a source
-// inspection command will print. A page selected with --page narrows the set;
-// a whole-source listing spends every unit whose question stem is shown.
-//
-// An explicitly displayed page also gets one page-level row with an empty
-// question_id, independent of the questions currently authored on it: the
-// passage itself is the exposure, so a page with no questions still spends its
-// unit and a question added there later cannot enter the pool unseen. The
-// per-question rows stay for the stems actually printed. Both kinds are rows in
-// the append-only content_presentations table, and the pool counts one spend per
-// content unit.
-func recordSourceQuestionPresentations(opt Options, st *store.Store, sourceID string, questions []source.Question, page *source.Page, pageFilter int, surface string) int {
-	at := opt.PresentationNow()
-	entries := make([]store.Presentation, 0, len(questions)+1)
-	if page != nil {
-		entries = append(entries, store.Presentation{
-			ContentID: source.ContentID(sourceID, page.Number),
-			Surface:   surface,
-			At:        at,
-		})
-	}
-	for _, q := range questions {
-		if page != nil && q.Page != page.Number {
-			continue
-		}
-		if pageFilter != 0 && q.Page != pageFilter {
-			continue
-		}
-		entries = append(entries, store.Presentation{
-			ContentID:  source.ContentID(sourceID, q.Page),
-			QuestionID: q.ID,
-			Surface:    surface,
-			At:         at,
-		})
-	}
-	if err := st.RecordPresentations(entries); err != nil {
-		return internalError(opt, false, err)
-	}
-	return 0
-}
-
 // recordNextPresentation spends the unit named by the recommendation. `next`
 // prints a command rather than a stem, but the contract explicitly lists it as
 // a presentation surface; this is the conservative reading. It is idempotent

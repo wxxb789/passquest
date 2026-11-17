@@ -265,3 +265,12 @@ above are from the run on the final tree, which is the one reported.
   several decks are covered at the `readNoteDecks` level, not against a live endpoint.
 - Windows and macOS run the same gate modules in CI; the deck check itself is platform-independent and
   has no owner-machine evidence beyond the finding recorded in `Q-0014-01`.
+
+## Later file moves (2026-11-17)
+
+The rows above are as recorded. A behaviour-neutral split (PR #26) later moved the `internal/cli` tests they
+cite out of `note_test.go`, with names and bodies unchanged: the fake Anki transport is in
+`internal/cli/note_anki_fake_test.go`; `TestReadNoteDecks`, the mismatch/revise/move scenario
+(`TestNotePushReportsADeckMismatchAndKeepsTheNoteID`), the unconfirmed read
+(`TestNotePushRecordsNoDeckWhenTheReadCannotNameIt`) and both readd tests are in
+`internal/cli/note_push_deck_test.go`. `internal/store/note_test.go` was not moved.
