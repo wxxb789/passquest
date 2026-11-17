@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/note"
@@ -18,24 +17,38 @@ import (
 // ProposeNote is `note propose`: a deterministic draft from a recorded
 // attempt, or from a passage mark on a reviewed question.
 func (w *Workspace) ProposeNote(request studio.NoteRequest) (studio.NoteDraft, error) {
-	args := []string{"note", "propose"}
-	if request.AttemptID != 0 {
-		args = append(args, "--attempt", strconv.FormatInt(request.AttemptID, 10))
+	// The command's flag checks ran before its store opened; reproduce them,
+	// in order, so an invalid request still refuses without opening a store.
+	if (request.ContentID == "") != (request.QuestionID == "") {
+		return studio.NoteDraft{}, cliCoded(study.Refuse("invalid_input", "--content and --question must be given together"))
 	}
-	if request.ContentID != "" || request.QuestionID != "" {
-		args = append(args, "--content="+request.ContentID, "--question="+request.QuestionID)
+	if request.ContentID != "" && request.AttemptID != 0 {
+		return studio.NoteDraft{}, cliCoded(study.Refuse("invalid_input", "--attempt cannot be combined with --content/--question"))
 	}
-	if strings.TrimSpace(request.Mark) != "" {
-		args = append(args, "--mark="+request.Mark)
+	mark := note.NormalizeMark(request.Mark)
+	if mark != "" && !note.ValidMark(mark) {
+		return studio.NoteDraft{}, cliCoded(study.Refuse("invalid_mark",
+			"--mark must be 1..%d characters of ordinary text", note.MaxMarkRunes))
 	}
+	if request.ContentID != "" && mark == "" {
+		return studio.NoteDraft{}, cliCoded(study.Refuse("invalid_input",
+			"a question without a stored attempt needs --mark naming the word or pattern worth keeping"))
+	}
+	var effective notes.Effective
 	w.mu.Lock()
-	result := w.run(args...)
+	err := w.codedCall(func(svc *study.Service) error {
+		var err error
+		effective, _, err = notes.Propose(context.Background(), svc, notes.ProposeInput{
+			AttemptID: request.AttemptID, ContentID: request.ContentID, QuestionID: request.QuestionID,
+			Mark: request.Mark,
+		})
+		return err
+	})
 	w.mu.Unlock()
-	var doc noteDraftDoc
-	if err := result.decode(&doc); err != nil {
+	if err != nil {
 		return studio.NoteDraft{}, err
 	}
-	return studioNoteDraft(doc.Draft, doc.Plain, doc.Advisory, doc.Limits)
+	return studioNoteDraft(noteDraftViewOf(effective), notePlainViewOf(effective), effective.Advisory, noteLimits)
 }
 
 // OpenNoteDraft is the draft `note preview` resolves without --draft (the
@@ -394,21 +407,28 @@ func (w *Workspace) AcceptNote(draftID int64, fields studio.NoteFields) (studio.
 // SkipNote is `note skip`: the draft is closed and no note is written.
 func (w *Workspace) SkipNote(draftID int64) error {
 	w.mu.Lock()
-	result := w.run("note", "skip", "--draft", strconv.FormatInt(draftID, 10))
-	w.mu.Unlock()
-	var doc noteSkipDoc
-	return result.decode(&doc)
+	defer w.mu.Unlock()
+	return w.codedCall(func(svc *study.Service) error {
+		_, err := notes.Settle(context.Background(), svc, notes.SettleInput{DraftID: draftID, Action: notes.Skip})
+		return err
+	})
 }
 
 // Notes lists every local note with its Anki state.
 func (w *Workspace) Notes() (studio.NoteList, error) {
-	var doc noteShowDoc
-	if err := w.run("note", "show").decode(&doc); err != nil {
+	var list studio.NoteList
+	if err := w.codedCall(func(svc *study.Service) error {
+		listed, err := notes.List(context.Background(), svc, "")
+		if err != nil {
+			return err
+		}
+		list = studio.NoteList{Notes: []studio.Note{}, Limits: noteLimits}
+		for _, item := range listed {
+			list.Notes = append(list.Notes, studioNote(noteViewOf(item.Note)))
+		}
+		return nil
+	}); err != nil {
 		return studio.NoteList{}, err
-	}
-	list := studio.NoteList{Notes: []studio.Note{}, Limits: doc.Limits}
-	for _, item := range doc.Notes {
-		list.Notes = append(list.Notes, studioNote(item.Note))
 	}
 	err := w.withStore(func(st *store.Store) error {
 		var err error

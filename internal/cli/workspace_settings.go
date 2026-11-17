@@ -145,9 +145,10 @@ func (w *Workspace) Budget() (studio.Budget, error) {
 }
 
 // codedCall opens one study service over the workspace ports, runs fn and maps
-// the error the way the shimmed CLI call mapped it. These four methods used to
-// run through w.run; the command's error document carried the study refusal
-// unchanged and everything else as internal_error, which is cliCoded.
+// the error the way the shimmed CLI call mapped it. These four methods and the
+// note methods that came off the shim in C5b used to run through w.run; the
+// command's error document carried the study refusal unchanged and everything
+// else as internal_error, which is cliCoded.
 func (w *Workspace) codedCall(fn func(svc *study.Service) error) error {
 	svc, err := study.Open(w.ports)
 	if err != nil {
