@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { startAnkiStub } from "../lib/anki-stub.ts";
-import { runGo } from "../lib/go.ts";
+import { buildCLI } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
 import { fail, pass } from "../lib/types.ts";
@@ -77,9 +77,8 @@ export const noteSmoke: Gate = {
   id: "note-smoke",
   title: "note smoke",
   async run(ctx: GateContext) {
-    const binaryName = process.platform === "win32" ? "passquest.exe" : "passquest";
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-note-smoke-"));
-    const binary = path.join(temp, binaryName);
+    let binary = "";
     const db = path.join(temp, "note.sqlite");
     const checks: string[] = [];
     const outputs: string[] = [];
@@ -115,10 +114,11 @@ export const noteSmoke: Gate = {
     const actionNames = (from: number) => actions.slice(from).map((item) => item.action);
 
     try {
-      const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
-      if (build.code !== 0) {
-        return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
+      const build = await buildCLI(ctx);
+      if ("failure" in build) {
+        return fail(["go build ./cmd/passquest failed", build.failure]);
       }
+      binary = build.binary;
 
       const importResult = await callJSON([
         "import",

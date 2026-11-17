@@ -1,4 +1,4 @@
-import { readBytes } from "../lib/repo.ts";
+import { readEach } from "../lib/repo.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
@@ -42,19 +42,13 @@ function isText(bytes: Buffer): boolean {
   return !bytes.includes(0);
 }
 
-function scanFile(root: string, file: string): string[] {
+function scanFile(file: string, bytes: Buffer | null): string[] {
   const problems: string[] = [];
   const pathProblem = forbiddenPath(file);
   if (pathProblem) problems.push(`${file}: ${pathProblem} is tracked`);
   if (envFile(file)) problems.push(`${file}: tracked environment file`);
 
-  let bytes: Buffer;
-  try {
-    bytes = readBytes(root, file);
-  } catch {
-    return problems;
-  }
-  if (!isText(bytes)) return problems;
+  if (bytes === null || !isText(bytes)) return problems;
   const extension = file.slice(file.lastIndexOf("."));
   const lines = bytes.toString("utf8").split(/\r?\n/);
   for (let index = 0; index < lines.length; index++) {
@@ -73,11 +67,8 @@ function scanFile(root: string, file: string): string[] {
 }
 
 export async function scanFiles(root: string, files: string[]): Promise<string[]> {
-  const problems: string[] = [];
-  for (const file of files) {
-    problems.push(...scanFile(root, file));
-  }
-  return problems;
+  const contents = await readEach(root, files);
+  return files.flatMap((file, index) => scanFile(file, contents[index]));
 }
 
 export const secrets: Gate = {

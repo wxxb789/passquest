@@ -37,11 +37,14 @@ export const typecheck: Gate = {
     if (projects.length > 0 && !existsSync(tsc)) {
       return fail(["typescript is not installed; run bun install (bun.lock is committed)", ...problems]);
     }
-    for (const project of projects) {
-      const result = await run(process.execPath, [tsc, "--noEmit", "--project", resolve(ctx.root, project)], {
-        cwd: ctx.root,
-      });
-      if (result.code !== 0) problems.push(`${project}:`, ...outputLines(result));
+    // The projects are independent; check them concurrently and report in declaration order.
+    const results = await Promise.all(
+      projects.map((project) =>
+        run(process.execPath, [tsc, "--noEmit", "--project", resolve(ctx.root, project)], { cwd: ctx.root }),
+      ),
+    );
+    for (const [index, result] of results.entries()) {
+      if (result.code !== 0) problems.push(`${projects[index]}:`, ...outputLines(result));
     }
     if (problems.length > 0) return fail(problems);
     return pass(`0 type errors in ${projects.join(", ")}`);

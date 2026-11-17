@@ -205,6 +205,7 @@ func normalizeAgentTemp(value any, temp string) any {
 // Windows document shape on every OS: the temp path arrives JSON-escaped and
 // uses backslashes, but the golden stores <tmp>/agent.sqlite.
 func TestNormalizedAgentJSONHandlesWindowsTemp(t *testing.T) {
+	t.Parallel()
 	temp := `C:\Users\runneradmin\AppData\Local\Temp\TestAgent\001` // portable-paths: allow the win32 temp path is the fixture shape under test, never resolved
 	raw := `{"run":{"store":"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\TestAgent\\001\\agent.sqlite"}}`
 	got := string(normalizedAgentJSON(t, raw, temp))
@@ -214,6 +215,7 @@ func TestNormalizedAgentJSONHandlesWindowsTemp(t *testing.T) {
 }
 
 func TestAgentStartRequiresProvider(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	runner := &agentFakeRunner{}
 	code, stdout, stderr := runAgentTest(t, agentTestOptions(t, nil, runner, nil, agentTestKey), "",
@@ -227,6 +229,7 @@ func TestAgentStartRequiresProvider(t *testing.T) {
 }
 
 func TestAgentStartMissingCredentialRecordsNeedsAction(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	configureAgentProvider(t, db)
 	runner := &agentFakeRunner{}
@@ -264,6 +267,7 @@ func TestAgentStartMissingCredentialRecordsNeedsAction(t *testing.T) {
 }
 
 func TestAgentStartCompletesRecordsStepsAndKeepsAttempts(t *testing.T) {
+	t.Parallel()
 	temp := t.TempDir()
 	db := filepath.Join(temp, "app.sqlite")
 	configureAgentProvider(t, db)
@@ -302,6 +306,7 @@ func TestAgentStartCompletesRecordsStepsAndKeepsAttempts(t *testing.T) {
 }
 
 func TestAgentStatusAndShowGoldenDocuments(t *testing.T) {
+	t.Parallel()
 	temp := t.TempDir()
 	db := filepath.Join(temp, "app.sqlite")
 	configureAgentProvider(t, db)
@@ -780,6 +785,7 @@ func TestAgentResumeRefusesLiveHost(t *testing.T) {
 }
 
 func TestAgentResumeStoreOverrideGuards(t *testing.T) {
+	t.Parallel()
 	temp := t.TempDir()
 	db := filepath.Join(temp, "app.sqlite")
 	configureAgentProvider(t, db)
@@ -811,6 +817,11 @@ func TestAgentResumeStoreOverrideGuards(t *testing.T) {
 }
 
 func TestAgentCancelKeepsTerminalOffALiveHost(t *testing.T) {
+	// Production waits one heartbeat window plus a second after a hard kill;
+	// this test shortens only its own wait below.
+	if got := (Options{}).withDefaults().agentKillGrace; got != 6*time.Second {
+		t.Fatalf("production agent kill grace = %v, want 6s", got)
+	}
 	temp := t.TempDir()
 	db := filepath.Join(temp, "app.sqlite")
 	configureAgentProvider(t, db)
@@ -865,6 +876,9 @@ func TestAgentCancelKeepsTerminalOffALiveHost(t *testing.T) {
 	<-ready
 	opt := agentTestOptions(t, nil, &agentFakeRunner{}, nil, agentTestKey)
 	opt.Now = time.Now
+	// The heartbeat never goes stale here, so the full production grace would
+	// only add wall time to the same unconfirmed outcome.
+	opt.agentKillGrace = 500 * time.Millisecond
 	code, stdout, stderr := runAgentTest(t, opt, "",
 		"agent", "cancel", runID, "--db", db, "--wait-seconds", "1", "--json")
 	if code != 1 || stdout != "" {
@@ -971,6 +985,7 @@ func TestAgentShowReportsTrailStateNotLiveState(t *testing.T) {
 }
 
 func TestAgentLatestTokenFailsClosedOnAReadError(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	st, err := store.Open(db)
 	if err != nil {
@@ -1010,6 +1025,7 @@ func TestAgentResumeRefusesUnconsummatedCancellation(t *testing.T) {
 }
 
 func TestAgentRecordStepValidationAndDuplicate(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	st, err := store.Open(db)
 	if err != nil {
@@ -1078,6 +1094,7 @@ func TestAgentRecordStepValidationAndDuplicate(t *testing.T) {
 }
 
 func TestAgentShowReportsReconciliation(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	st, err := store.Open(db)
 	if err != nil {
@@ -1107,6 +1124,7 @@ func TestAgentShowReportsReconciliation(t *testing.T) {
 }
 
 func TestAgentTranscriptFromCopiedStore(t *testing.T) {
+	t.Parallel()
 	temp := t.TempDir()
 	storePath := filepath.Join(temp, "copy-agent.sqlite")
 	if err := os.WriteFile(storePath, []byte("fixture"), 0o600); err != nil {
@@ -1146,6 +1164,7 @@ func TestAgentTranscriptFromCopiedStore(t *testing.T) {
 }
 
 func TestAgentHumanWriters(t *testing.T) {
+	t.Parallel()
 	temp := t.TempDir()
 	db := filepath.Join(temp, "app.sqlite")
 	configureAgentProvider(t, db)

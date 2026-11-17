@@ -352,6 +352,7 @@ func notePending(t *testing.T, db string) []store.NoteOutboxEntry {
 }
 
 func TestNoteProposeConsentAcceptExport(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -481,6 +482,7 @@ func TestNoteProposeConsentAcceptExport(t *testing.T) {
 }
 
 func TestNoteUnansweredPreviewHidesTheKey(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -525,6 +527,7 @@ func TestNoteUnansweredPreviewHidesTheKey(t *testing.T) {
 }
 
 func TestNoteSkippedAttemptIsUnanswered(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -545,6 +548,7 @@ func TestNoteSkippedAttemptIsUnanswered(t *testing.T) {
 }
 
 func TestNotePushCreatesUpdatesConflictsAndQueues(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -712,6 +716,7 @@ func TestNotePushCreatesUpdatesConflictsAndQueues(t *testing.T) {
 }
 
 func TestNotePushChunksMoreThanFiftyActions(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	st, err := store.Open(db)
@@ -810,6 +815,7 @@ func reviseBulkNotes(t *testing.T, db string, clock *stepClock, targets []store.
 }
 
 func TestNotePushBatchesReadbackAboveFiftyNotes(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	targets := seedBulkNotes(t, db, clock, 51)
@@ -862,6 +868,7 @@ func TestNotePushBatchesReadbackAboveFiftyNotes(t *testing.T) {
 }
 
 func TestNotePushPersistsAcknowledgedBatchesBeforeTheNextCall(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	seedBulkNotes(t, db, clock, 51)
@@ -939,6 +946,7 @@ func TestNotePushPersistsAcknowledgedBatchesBeforeTheNextCall(t *testing.T) {
 }
 
 func TestNotePushRefusesRevokedConsentAndMissingHost(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -965,6 +973,7 @@ func TestNotePushRefusesRevokedConsentAndMissingHost(t *testing.T) {
 }
 
 func TestNoteRefineUsesProviderAndRecordsIt(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1026,6 +1035,7 @@ func TestNoteRefineUsesProviderAndRecordsIt(t *testing.T) {
 }
 
 func TestNoteRefineRefusesRestrictedSourceWithoutConsent(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1051,6 +1061,7 @@ func TestNoteRefineRefusesRestrictedSourceWithoutConsent(t *testing.T) {
 }
 
 func TestNoteRefineRequiresVerifiedTextChat(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1116,6 +1127,7 @@ func noteRefineProviderEnv(t *testing.T, db string, clock *stepClock, transport 
 }
 
 func TestNoteRefineRefusesAProviderScopedRevoke(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1145,6 +1157,7 @@ func TestNoteRefineRefusesAProviderScopedRevoke(t *testing.T) {
 }
 
 func TestNoteRefineUsesTheCurrentRegistryEndpoint(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1174,6 +1187,7 @@ func TestNoteRefineUsesTheCurrentRegistryEndpoint(t *testing.T) {
 }
 
 func TestNoteRefineRefusesAGrantForADifferentProvider(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1196,6 +1210,7 @@ func TestNoteRefineRefusesAGrantForADifferentProvider(t *testing.T) {
 }
 
 func TestNoteRefineRejectsAnAnswerRevealingResponse(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1251,6 +1266,7 @@ func TestNoteRefineRejectsAnAnswerRevealingResponse(t *testing.T) {
 }
 
 func TestNotePreviewIgnoresAStoredAnswerRevealingRefinement(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1291,6 +1307,7 @@ func TestNotePreviewIgnoresAStoredAnswerRevealingRefinement(t *testing.T) {
 }
 
 func TestNoteRefineFailureKeepsDeterministicDraft(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1317,6 +1334,7 @@ func TestNoteRefineFailureKeepsDeterministicDraft(t *testing.T) {
 }
 
 func TestNoteProposeRefusals(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1341,6 +1359,7 @@ func TestNoteProposeRefusals(t *testing.T) {
 }
 
 func TestNoteModelDocument(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"note", "model", "--json"}, Options{
 		Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr,
@@ -1366,6 +1385,7 @@ func TestNoteModelDocument(t *testing.T) {
 }
 
 func TestNoteOutputsNeverClaimAPhonePush(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1401,6 +1421,7 @@ func TestNoteOutputsNeverClaimAPhonePush(t *testing.T) {
 }
 
 func TestNotePushEndpointMustBeLoopback(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1413,6 +1434,7 @@ func TestNotePushEndpointMustBeLoopback(t *testing.T) {
 }
 
 func TestNoteAcceptEditedFieldsAreValidated(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1428,6 +1450,7 @@ func TestNoteAcceptEditedFieldsAreValidated(t *testing.T) {
 }
 
 func TestNoteAcceptPreservesAcceptedEdits(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1485,6 +1508,7 @@ func TestNoteAcceptPreservesAcceptedEdits(t *testing.T) {
 }
 
 func TestNotePreviewWithholdsAcceptedTextAfterRevoke(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1506,6 +1530,7 @@ func TestNotePreviewWithholdsAcceptedTextAfterRevoke(t *testing.T) {
 }
 
 func TestNotePushKeepsAnAcknowledgedWriteInAPartialBatch(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1547,6 +1572,7 @@ func TestNotePushKeepsAnAcknowledgedWriteInAPartialBatch(t *testing.T) {
 }
 
 func TestNoteProposeRefusesContentChangedAfterTheAttempt(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := noteSourceFixture(t, db, clock)
@@ -1560,6 +1586,7 @@ func TestNoteProposeRefusesContentChangedAfterTheAttempt(t *testing.T) {
 }
 
 func TestNotePushReaddsANoteDeletedFromAnki(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1679,6 +1706,7 @@ func TestNotePushReaddsANoteDeletedFromAnki(t *testing.T) {
 // from that card — never from the deleted note's, which would report a mismatch
 // for a card that is exactly where the push put it.
 func TestNotePushReaddsANoteDeletedAfterTheReadBack(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1751,6 +1779,7 @@ func TestNotePushReaddsANoteDeletedAfterTheReadBack(t *testing.T) {
 }
 
 func TestNoteExportRechecksConsent(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1781,6 +1810,7 @@ func TestNoteExportRechecksConsent(t *testing.T) {
 }
 
 func TestNoteExportNeedsGlobalConsentNotProviderScope(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1847,6 +1877,7 @@ func TestNoteExportNeedsGlobalConsentNotProviderScope(t *testing.T) {
 }
 
 func TestNotePreviewAndAcceptRefuseChangedDraftContent(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1862,6 +1893,7 @@ func TestNotePreviewAndAcceptRefuseChangedDraftContent(t *testing.T) {
 }
 
 func TestNoteDefaultDraftIsTheLatestOpenOne(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := readyNoteSource(t, db, clock)
@@ -1906,6 +1938,7 @@ func TestNoteDefaultDraftIsTheLatestOpenOne(t *testing.T) {
 }
 
 func TestNotePushReportsShortResultBatches(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -1939,6 +1972,7 @@ func TestNotePushReportsShortResultBatches(t *testing.T) {
 }
 
 func TestReadNoteDecks(t *testing.T) {
+	t.Parallel()
 	// 200 three-byte characters: over the bound in bytes, exactly at it in
 	// characters, which is the unit the schema and the docs state.
 	multibyteDeck := strings.Repeat("日", anki.MaxDeckNameChars)
@@ -2032,6 +2066,7 @@ func TestReadNoteDecks(t *testing.T) {
 }
 
 func TestNotePushReportsADeckMismatchAndKeepsTheNoteID(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -2203,6 +2238,7 @@ func TestNotePushReportsADeckMismatchAndKeepsTheNoteID(t *testing.T) {
 // revision re-pends the note, and accepting clears the recorded deck. The CLI
 // half here is the read-back path and what the two `note show` surfaces print.
 func TestNotePushRecordsNoDeckWhenTheReadCannotNameIt(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	readyNoteSource(t, db, clock)
@@ -2316,6 +2352,7 @@ func notePushOf(t *testing.T, raw string) notePushDoc {
 // version 1 design is updated in place once, the note pushed under it is not
 // a conflict afterwards, and the next push only reads the model.
 func TestNotePushUpgradesAKnownEarlierModelOnce(t *testing.T) {
+	t.Parallel()
 	db, clock, ankiTransport := pushedNoteFixture(t)
 	css, front, back, ok := note.KnownModel(1)
 	if !ok {
@@ -2356,6 +2393,7 @@ func TestNotePushUpgradesAKnownEarlierModelOnce(t *testing.T) {
 // version 2 while its template is still version 1 (an interrupted update) is
 // still Pass Quest's own design and is completed.
 func TestNotePushUpgradesAHalfUpdatedModel(t *testing.T) {
+	t.Parallel()
 	db, clock, ankiTransport := pushedNoteFixture(t)
 	_, front, back, _ := note.KnownModel(1)
 	ankiTransport.styles[note.ModelName] = fakeAnkiModel{css: note.ModelCSS + "\r\n",
@@ -2370,6 +2408,7 @@ func TestNotePushUpgradesAHalfUpdatedModel(t *testing.T) {
 // TestNotePushNeverOverwritesACustomisedModel: a stylesheet or template the
 // learner changed in Anki is reported, left alone, and the note still lands.
 func TestNotePushNeverOverwritesACustomisedModel(t *testing.T) {
+	t.Parallel()
 	for name, custom := range map[string]fakeAnkiModel{
 		"stylesheet": {css: note.ModelCSS + "\n.card { color: red; }",
 			templates: map[string]anki.CardTemplate{anki.TemplateName: {Front: note.FrontTemplate, Back: note.BackTemplate}}},
@@ -2411,6 +2450,7 @@ func TestNotePushNeverOverwritesACustomisedModel(t *testing.T) {
 // reports it under another note type: nothing is written and the queue keeps
 // the note until the model matches again.
 func TestNotePushModelMismatchIsAConflict(t *testing.T) {
+	t.Parallel()
 	db, clock, ankiTransport := pushedNoteFixture(t)
 	ankiTransport.noteModel = "Basic"
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sundays", "--json")
@@ -2437,6 +2477,7 @@ func TestNotePushModelMismatchIsAConflict(t *testing.T) {
 // TestNotePushModelReadFailuresKeepTheQueue: an endpoint that cannot report
 // the model's design is an Anki error before any write.
 func TestNotePushModelReadFailuresKeepTheQueue(t *testing.T) {
+	t.Parallel()
 	db, clock, ankiTransport := pushedNoteFixture(t)
 	delete(ankiTransport.styles, note.ModelName)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--front", "closes on Sundays", "--json")

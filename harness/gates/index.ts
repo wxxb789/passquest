@@ -51,3 +51,15 @@ export const gates: Gate[] = [
   desktopUx,
   selfTest,
 ];
+
+/**
+ * The CI jobs: `bun run gate --group <name>` runs one group, in `gates` order. Every gate belongs to
+ * exactly one group, and the workflow matrix lists exactly these names (both checked by
+ * `groupProblems`), so no gate can drop out of CI. `core` needs Go, Bun and Node; `desktop` and
+ * `self-test` also need a display and a Secret Service, since self-test feeds the desktop gates too.
+ */
+export const gateGroups: Record<string, readonly Gate[]> = {
+  core: gates.filter((gate) => gate !== desktopSmoke && gate !== desktopUx && gate !== selfTest),
+  desktop: [desktopSmoke, desktopUx],
+  "self-test": [selfTest],
+};

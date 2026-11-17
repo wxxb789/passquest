@@ -5,6 +5,7 @@ import path from "node:path";
 import { BASELINE, EXPECTED_NATIVE, EXPECTED_PAGES, nonSpaceChars } from "../lib/baseline.ts";
 import { descendants, parsePsLine, parsePsTable, sameProcess } from "../lib/desktop.ts";
 import type { ProcessInfo } from "../lib/desktop.ts";
+import { groupProblems, workflowGroups } from "../lib/gate-groups.ts";
 import { executable, run } from "../lib/process.ts";
 import { context, resolve, workingTreeFiles } from "../lib/repo.ts";
 import { fail, pass } from "../lib/types.ts";
@@ -15,7 +16,7 @@ import { agentSmoke } from "./agent-smoke.ts";
 import { assessSmoke } from "./assess-smoke.ts";
 import { baseline } from "./baseline.ts";
 import { desktopSmoke } from "./desktop-smoke.ts";
-import { coverageProblems, desktopUx, UX_SIZES, UX_STATES } from "./desktop-ux.ts";
+import { coverageProblems, desktopUx, makeDesktopUxGate, UX_SIZES, UX_STATES } from "./desktop-ux.ts";
 import type { Audited } from "./desktop-ux.ts";
 import { docsLinks } from "./docs-links.ts";
 import { findSmoke } from "./find-smoke.ts";
@@ -218,6 +219,48 @@ export function uxCoverageProblem(): string | null {
   const skipped = coverageProblems(full.filter((entry) => !(entry.size === sizes[1] && entry.state === "hint-gate")), sizes);
   if (!skipped.some((line) => line.includes(`${sizes[1]} hint-gate was not audited`))) {
     return `desktop-ux coverage: a skipped hint gate is not reported (${skipped.join("; ") || "no problem"})`;
+  }
+  return null;
+}
+
+/**
+ * The CI gate-group guard (harness/lib/gate-groups.ts) accepts the real workflow and refuses a workflow
+ * or a grouping that would leave a gate out of some CI job: an `exclude`, a missing runner, a gate step
+ * without its group, a matrix missing a group, a gate in no group and a gate in two.
+ */
+export function gateGroupProblem(gates: readonly Gate[], groups: Record<string, readonly Gate[]>, root: string): string | null {
+  const real = path.join(root, ".github", "workflows", "gate.yml");
+  const listed = workflowGroups(real);
+  if (typeof listed === "string") return `gate groups: the real workflow is refused: ${listed}`;
+  const clean = groupProblems(gates, groups, listed);
+  if (clean.length > 0) return `gate groups: the real workflow reports ${clean.join("; ")}`;
+  const text = readFileSync(real, "utf8");
+  const broken: [string, string][] = [
+    ["an exclude", text.replace(/\n(\s+)group: \[([^\]]*)\]\n/, "\n$1group: [$2]\n$1exclude: [{ os: windows-latest, group: desktop }]\n")],
+    ["a missing runner", text.replace(", windows-latest]", "]")],
+    ["a gate step without its group", text.replace('bun run gate --group "$GATE_GROUP"', "bun run gate")],
+  ];
+  const dir = mkdtempSync(path.join(tmpdir(), "passquest-gate-groups-"));
+  try {
+    for (const [name, workflow] of broken) {
+      if (workflow === text) return `gate groups: the ${name} fixture did not change the workflow`;
+      const file = path.join(dir, "gate.yml");
+      writeFileSync(file, workflow);
+      if (typeof workflowGroups(file) !== "string") return `gate groups: a workflow with ${name} is accepted`;
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const [first, ...rest] = Object.keys(groups);
+  if (!first || rest.length === 0) return `gate groups: expected several groups, got ${Object.keys(groups).join(", ")}`;
+  const gate = groups[first]![0]!;
+  const refused: [string, string[], string][] = [
+    ["a matrix missing a group", groupProblems(gates, groups, listed.filter((name) => name !== first)), `group ${first} 0 times`],
+    ["a gate in no group", groupProblems(gates, { ...groups, [first]: groups[first]!.filter((member) => member !== gate) }, listed), `gate ${gate.id} is in 0 groups`],
+    ["a gate in two groups", groupProblems(gates, { ...groups, [rest[0]!]: [...groups[rest[0]!]!, gate] }, listed), `gate ${gate.id} is in 2 groups`],
+  ];
+  for (const [name, problems, expected] of refused) {
+    if (!problems.some((line) => line.includes(expected))) return `gate groups: ${name} is not reported (${problems.join("; ") || "no problem"})`;
   }
   return null;
 }
@@ -982,7 +1025,9 @@ func main() {
           : `desktop-smoke: did not report the missing attempt: ${failures.slice(0, 3).join("; ")}`,
     },
     {
-      gate: desktopUx,
+      // Both findings are on Today at the first size: the probes, the motion launch and Today's part still
+      // run; the whole matrix and its coverage check run in the desktop-ux gate itself.
+      gate: makeDesktopUxGate({ sizes: [UX_SIZES[0]], parts: ["one"] }),
       label: "a stylesheet that removes focus outlines and paints Today's title in its background colour",
       files: {},
       prepare: hideFocusAndTitle,
@@ -1043,6 +1088,16 @@ function passCases(): PassCase[] {
   ];
 }
 
+let fixtures = 0;
+
+/**
+ * A new fixture root, never the path of an earlier one in this process: gates cache what they build per
+ * root (buildCLI), so a root that reused a removed fixture's path would run that fixture's binary.
+ */
+function fixtureRoot(): string {
+  return mkdtempSync(path.join(tmpdir(), `passquest-selftest-${process.pid}-${++fixtures}-`));
+}
+
 async function prepareFixture(
   root: string,
   testCase: { files: Record<string, string>; prepare?: (root: string) => Promise<string | null> },
@@ -1056,7 +1111,7 @@ async function prepareFixture(
 }
 
 async function runPassCase(testCase: PassCase): Promise<string | null> {
-  const root = mkdtempSync(path.join(tmpdir(), "passquest-selftest-"));
+  const root = fixtureRoot();
   try {
     const preparation = await prepareFixture(root, testCase);
     if (preparation) return `${testCase.gate.id}: fixture on ${testCase.label}: ${preparation}`;
@@ -1073,7 +1128,7 @@ async function runPassCase(testCase: PassCase): Promise<string | null> {
 }
 
 async function runCase(testCase: BrokenCase): Promise<string | null> {
-  const root = mkdtempSync(path.join(tmpdir(), "passquest-selftest-"));
+  const root = fixtureRoot();
   try {
     const preparation = await prepareFixture(root, testCase);
     if (preparation) return `${testCase.gate.id}: fixture on ${testCase.label}: ${preparation}`;
@@ -1095,17 +1150,17 @@ async function runCase(testCase: BrokenCase): Promise<string | null> {
 export const selfTest: Gate = {
   id: "harness-self-test",
   title: "harness self-test",
-  async run() {
+  async run(ctx) {
     // Static import cannot work: index.ts builds `gates` from `selfTest` at module
     // evaluation, so the cycle would read `selfTest` before initialization when
     // this module is the entry point. The list is only needed here, at run time.
-    const { gates } = await import("./index.ts");
+    const { gates, gateGroups } = await import("./index.ts");
     const cases = brokenCases();
     const accepted = passCases();
     const problems: string[] = [];
     const discovery = await workingTreeDiscoveryProblem();
     if (discovery) problems.push(discovery);
-    for (const unit of [processTreeProblem, pageScriptEscapeProblem, uxCoverageProblem]) {
+    for (const unit of [processTreeProblem, pageScriptEscapeProblem, uxCoverageProblem, () => gateGroupProblem(gates, gateGroups, ctx.root)]) {
       const problem = unit();
       if (problem) problems.push(problem);
     }

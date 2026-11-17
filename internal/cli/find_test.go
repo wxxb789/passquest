@@ -110,6 +110,7 @@ func decodeFindFailure(t *testing.T, raw string) findFailureDoc {
 }
 
 func TestFindNothingToFindDoesNotCallTheProvider(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	adapter := &fakeSearchAdapter{}
@@ -135,6 +136,7 @@ func TestFindNothingToFindDoesNotCallTheProvider(t *testing.T) {
 }
 
 func TestFindNoProviderReportsWithoutCallingTheAdapter(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedFindAttempts(t, db)
 	clock := &stepClock{base: goldenBase}
@@ -176,6 +178,7 @@ func TestFindNoProviderReportsWithoutCallingTheAdapter(t *testing.T) {
 }
 
 func TestFindStoresClassifiedCandidatesWithProvenance(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedFindAttempts(t, db)
 	clock := &stepClock{base: goldenBase}
@@ -284,6 +287,7 @@ func TestFindStoresClassifiedCandidatesWithProvenance(t *testing.T) {
 }
 
 func TestFindHumanOutputSanitizesProviderMetadata(t *testing.T) {
+	t.Parallel()
 	doc := findDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         "found",
@@ -362,6 +366,7 @@ func TestFindHumanOutputSanitizesProviderMetadata(t *testing.T) {
 }
 
 func TestFindReportsEmptyAndAllLinkOnlyHonestly(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		items      []search.Item
@@ -409,6 +414,7 @@ func storeFindQuery(db string, id int64) (store.FindQuery, []store.FindCandidate
 }
 
 func TestFindProviderFailuresAreExplicitAndStored(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		failure    *search.ProviderError
@@ -452,6 +458,7 @@ func TestFindProviderFailuresAreExplicitAndStored(t *testing.T) {
 }
 
 func TestFindMissingHostReleasesTheBudgetSlot(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedFindAttempts(t, db)
 	clock := &stepClock{base: goldenBase}
@@ -486,6 +493,7 @@ func TestFindMissingHostReleasesTheBudgetSlot(t *testing.T) {
 }
 
 func TestFindBudgetRefusesTheSecondQueryOfTheDay(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedFindAttempts(t, db)
 	clock := &stepClock{base: goldenBase}
@@ -520,6 +528,7 @@ func TestFindBudgetRefusesTheSecondQueryOfTheDay(t *testing.T) {
 }
 
 func TestFindCandidateBudgetRefusesInsteadOfTruncating(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedFindAttempts(t, db)
 	clock := &stepClock{base: goldenBase}
@@ -551,6 +560,7 @@ func TestFindCandidateBudgetRefusesInsteadOfTruncating(t *testing.T) {
 }
 
 func TestFindCandidateBudgetAcceptsExactlyTheLimit(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedFindAttempts(t, db)
 	clock := &stepClock{base: goldenBase}
@@ -578,6 +588,7 @@ func TestFindCandidateBudgetAcceptsExactlyTheLimit(t *testing.T) {
 }
 
 func TestFindInvalidEndpointDoesNotReserveOrCall(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedFindAttempts(t, db)
 	clock := &stepClock{base: goldenBase}
@@ -600,6 +611,7 @@ func TestFindInvalidEndpointDoesNotReserveOrCall(t *testing.T) {
 }
 
 func TestFindRejectsAnOverLongEndpointHostBeforeReserving(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedFindAttempts(t, db)
 	clock := &stepClock{base: goldenBase}
@@ -632,6 +644,7 @@ func TestFindRejectsAnOverLongEndpointHostBeforeReserving(t *testing.T) {
 }
 
 func TestFindInjectionDoesNotChangeEvidenceOrNextExercise(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedFindAttempts(t, db)
 	clock := &stepClock{base: goldenBase}
@@ -676,6 +689,7 @@ func TestFindInjectionDoesNotChangeEvidenceOrNextExercise(t *testing.T) {
 }
 
 func TestFindHistoryAndShowRejectUnknownQuery(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	code, out, errOut := runFindCLI(t, db, clock, nil, nil, "find", "show", "99", "--json")
@@ -699,6 +713,7 @@ func TestFindHistoryAndShowRejectUnknownQuery(t *testing.T) {
 }
 
 func TestFindStoredQueryBoundsAttemptIDs(t *testing.T) {
+	t.Parallel()
 	ids := make([]int64, 205)
 	for index := range ids {
 		ids[index] = int64(index + 1)
@@ -737,6 +752,7 @@ func TestFindStoredQueryBoundsAttemptIDs(t *testing.T) {
 }
 
 func TestGoldenFindNoProviderJSON(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedFindAttempts(t, db)
 	clock := &stepClock{base: goldenBase}
@@ -748,6 +764,7 @@ func TestGoldenFindNoProviderJSON(t *testing.T) {
 }
 
 func TestGoldenFindFoundJSON(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	seedFindAttempts(t, db)
 	clock := &stepClock{base: goldenBase}

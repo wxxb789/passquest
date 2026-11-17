@@ -70,6 +70,7 @@ func taggedQuestionFile(t *testing.T, tacticID string) string {
 }
 
 func TestTacticLessonSurfacesWhyWhenAndBoundary(t *testing.T) {
+	t.Parallel()
 	clock := &stepClock{base: goldenBase}
 
 	var list tacticListDoc
@@ -119,6 +120,7 @@ func TestTacticLessonSurfacesWhyWhenAndBoundary(t *testing.T) {
 }
 
 func TestTacticGuidedThenIndependentKeepsAssistanceSeparate(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -250,6 +252,7 @@ func assertTacticAwaitingHidesKey(t *testing.T, raw string) {
 }
 
 func TestTacticIndependentRequiresGuided(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	code, out, errOut := runCLI(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--stage", "independent", "--json")
@@ -266,6 +269,7 @@ func TestTacticIndependentRequiresGuided(t *testing.T) {
 }
 
 func TestTacticExplicitQuestionRules(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -303,6 +307,7 @@ func TestTacticExplicitQuestionRules(t *testing.T) {
 }
 
 func TestTacticGuidedAwaitingBlocksIndependentUse(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -345,6 +350,7 @@ func TestTacticGuidedAwaitingBlocksIndependentUse(t *testing.T) {
 }
 
 func TestOrdinaryPracticeAfterGuidedExposureIsAssisted(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	fixture := fixtureDir(t)
@@ -379,6 +385,7 @@ func TestOrdinaryPracticeAfterGuidedExposureIsAssisted(t *testing.T) {
 }
 
 func TestTacticHumanPromptRecordsExposureOnQuit(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -401,6 +408,7 @@ func TestTacticHumanPromptRecordsExposureOnQuit(t *testing.T) {
 }
 
 func TestTacticHumanOutputShowsHelpAndCondition(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -433,6 +441,7 @@ func TestTacticHumanOutputShowsHelpAndCondition(t *testing.T) {
 }
 
 func TestTacticSourcePracticeKeepsProvenance(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	fixture := fixtureDir(t)
@@ -499,6 +508,7 @@ func TestTacticSourcePracticeKeepsProvenance(t *testing.T) {
 }
 
 func TestTacticSourceRefusesUntaggedMaterial(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	fixture := fixtureDir(t)
@@ -521,6 +531,7 @@ func TestTacticSourceRefusesUntaggedMaterial(t *testing.T) {
 }
 
 func TestTacticSourceRejectsPreviouslyAttemptedIndependentQuestion(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	fixture := fixtureDir(t)
@@ -563,6 +574,7 @@ func TestTacticSourceRejectsPreviouslyAttemptedIndependentQuestion(t *testing.T)
 }
 
 func TestTacticGuidedRerunUsesFirstExample(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -593,6 +605,7 @@ func TestTacticGuidedRerunUsesFirstExample(t *testing.T) {
 }
 
 func TestTacticSkipRecordsSkippedAttempt(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -632,6 +645,7 @@ func TestTacticSkipRecordsSkippedAttempt(t *testing.T) {
 }
 
 func TestTacticRejectsBadInput(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	cases := []struct {
@@ -663,6 +677,7 @@ func TestTacticRejectsBadInput(t *testing.T) {
 }
 
 func TestTacticProtocolGoldens(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	check := func(name, raw string) {

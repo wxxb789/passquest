@@ -74,6 +74,7 @@ func decodeModelList(t *testing.T, raw string) modelListDoc {
 }
 
 func TestModelListSeparatesProviderModelCapabilityAndAuthorization(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	registry := modelRegistryFile(t, modelProvider("alpha", "https://alpha.example.com/v1/chat/completions"))
@@ -105,6 +106,7 @@ func TestModelListSeparatesProviderModelCapabilityAndAuthorization(t *testing.T)
 }
 
 func TestModelUseLeavesPracticeStateByteIdentical(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	registry := modelRegistryFile(t, modelProvider("alpha", "https://alpha.example.com/v1/chat/completions"))
@@ -143,6 +145,7 @@ func TestModelUseLeavesPracticeStateByteIdentical(t *testing.T) {
 }
 
 func TestModelTestRecordsVerifiedAndTypedFailure(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	registry := modelRegistryFile(t, modelProvider("alpha", "https://alpha.example.com/v1/chat/completions"))
@@ -187,6 +190,7 @@ func TestModelTestRecordsVerifiedAndTypedFailure(t *testing.T) {
 }
 
 func TestModelTestNoCredentialIsRecordedWithoutACall(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	registry := modelRegistryFile(t, modelProvider("alpha", "https://alpha.example.com/v1/chat/completions"))
@@ -209,6 +213,7 @@ func TestModelTestNoCredentialIsRecordedWithoutACall(t *testing.T) {
 }
 
 func TestModelTestBudgetRefusesEachProviderAtItsOwnLimit(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	registry := modelRegistryFile(t,
@@ -253,6 +258,7 @@ func TestModelTestBudgetRefusesEachProviderAtItsOwnLimit(t *testing.T) {
 }
 
 func TestModelBudgetCountsLegacyAllowanceWithoutUsageBranch(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorResponse("Focus on the Saturday sentence.")}
@@ -312,6 +318,7 @@ func TestModelBudgetCountsLegacyAllowanceWithoutUsageBranch(t *testing.T) {
 }
 
 func TestModelTestTransportFailureIsEndpointUnreachable(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	registry := modelRegistryFile(t, modelProvider("alpha", "https://alpha.example.com/v1/chat/completions"))
@@ -339,6 +346,7 @@ func TestModelTestTransportFailureIsEndpointUnreachable(t *testing.T) {
 }
 
 func TestModelListRendersDeclaredOptionalCapabilitiesAsUnverified(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	providerDoc := modelProvider("alpha", "https://alpha.example.com/v1/chat/completions")
@@ -371,6 +379,7 @@ func TestModelListRendersDeclaredOptionalCapabilitiesAsUnverified(t *testing.T) 
 }
 
 func TestModelTestTimestampUsesTheClock(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	base := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
 	clock := &stepClock{base: base}
@@ -395,6 +404,7 @@ func TestModelTestTimestampUsesTheClock(t *testing.T) {
 }
 
 func TestModelListKeepsVerificationPerModel(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	providerDoc := modelProvider("alpha", "https://alpha.example.com/v1/chat/completions")

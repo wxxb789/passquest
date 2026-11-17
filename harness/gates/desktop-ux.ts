@@ -20,7 +20,7 @@ import {
   writeStubRegistry,
 } from "../lib/desktop-page.ts";
 import type { Check } from "../lib/desktop-page.ts";
-import { runGo } from "../lib/go.ts";
+import { buildCLI } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
 import { resolve } from "../lib/repo.ts";
@@ -156,9 +156,12 @@ const MODES = [["light", "zh"], ["light", "en"], ["dark", "zh"], ["dark", "en"]]
 const results = [];
 const focus = [];
 let checked = 0;
-const setMode = async (theme, lang) => {
+const applyMode = (theme, lang) => {
   if (document.documentElement.dataset.theme !== theme) q('[data-act="theme"]').click();
   if (document.documentElement.lang !== (lang === "zh" ? "zh-CN" : "en")) q('[data-act="lang"][data-v="' + lang + '"]').click();
+};
+const setMode = async (theme, lang) => {
+  applyMode(theme, lang);
   await sleep(120);
 };
 const loading = () => q('#stage [aria-busy="true"]');
@@ -183,7 +186,7 @@ const each = async (state, withPrimary) => {
     const audit = UX.audit(state);
     const issues = withPrimary ? audit.issues.concat(UX.primary()) : audit.issues;
     const html = document.documentElement;
-    results.push({ state, mode: theme + "-" + lang, shown: html.dataset.theme + "-" + (html.lang === "en" ? "en" : html.lang === "zh-CN" ? "zh" : html.lang), issues });
+    results.push({ state, mode: theme + "-" + lang, shown: html.dataset.theme + "-" + (html.lang === "en" ? "en" : html.lang === "zh-CN" ? "zh" : html.lang), issues, ms: audit.ms });
   }
   await setMode("light", "zh");
 };
@@ -215,7 +218,8 @@ const closeDialog = async (name, openerPath) => {
 };
 let opener = null;
 let back = null;
-await setMode("light", "zh");
+// No settle here: each part waits for its first state, and each() settles every mode before it audits.
+applyMode("light", "zh");
 `;
 
 /** The short lines of the long card's Back (anki-long). */
@@ -567,16 +571,32 @@ export interface UxRun {
   allowed: number;
   staleEntries: string[];
   audits: number;
+  /** Milliseconds the in-page audits took, summed over every audit. */
+  auditMs: number;
   states: number;
   focusChecks: number;
   probes: number;
   seconds: number;
 }
 
-/** Runs the audit; the gate and a findings dump share it. */
-export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
+/** The audited launches: PART_ONE, PART_TWO, PART_LONG and PART_MANY. */
+export type UxPart = "one" | "two" | "long" | "many";
+
+/**
+ * A subset of the audit matrix, for the harness self-test only: the prepare and motion launches and the
+ * probes still run, the coverage check does not (the subset is incomplete by design).
+ */
+export interface UxScope {
+  sizes: ReadonlyArray<readonly [number, number]>;
+  parts: UxPart[];
+}
+
+/** Runs the audit (the whole matrix unless `scope` narrows it) for the desktop-ux gate and its scoped self-test variant. */
+export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<UxRun> {
   const started = Date.now();
-  const out: UxRun = { problems: [], findings: [], allowed: 0, staleEntries: [], audits: 0, states: 0, focusChecks: 0, probes: 0, seconds: 0 };
+  const sizes = scope?.sizes ?? UX_SIZES;
+  const parts: UxPart[] = scope?.parts ?? ["one", "two", "long", "many"];
+  const out: UxRun = { problems: [], findings: [], allowed: 0, staleEntries: [], audits: 0, auditMs: 0, states: 0, focusChecks: 0, probes: 0, seconds: 0 };
   const done = () => ({ ...out, seconds: Math.round((Date.now() - started) / 1000) });
   const check: Check = (condition, message) => {
     if (!condition) out.problems.push(message);
@@ -599,9 +619,12 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
       out.problems.push(...build.failures);
       return done();
     }
-    const cli = path.join(temp, executable("passquest"));
-    const cliBuild = await runGo(ctx, ["build", "-o", cli, "./cmd/passquest"]);
-    if (!check(cliBuild.code === 0, `go build ./cmd/passquest failed\n${tail(`${cliBuild.stdout}${cliBuild.stderr}`)}`)) return done();
+    const cliBuild = await buildCLI(ctx);
+    if ("failure" in cliBuild) {
+      check(false, `go build ./cmd/passquest failed\n${tail(cliBuild.failure)}`);
+      return done();
+    }
+    const cli = cliBuild.binary;
     const node = await run(executable("node"), ["--version"]);
     if (!check(node.code === 0, `node is required for the coach state: ${node.stderr || node.stdout}`)) return done();
 
@@ -621,33 +644,6 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
       const result = await call(args);
       if (!check(result.code === 0, `seed: passquest ${args.join(" ")} exit = ${result.code}: ${tail(result.stderr, 4)}`)) return done();
     }
-    // The long question's own database: one reviewed page with one long question tagged with the
-    // scoring skill; after its guided walkthrough and one skill attempt the recommendation opens it.
-    const longTemplate = path.join(temp, "long-template");
-    const longData = path.join(longTemplate, "data");
-    mkdirSync(longData, { recursive: true });
-    const longCall = (args: string[]) => cliJson(cli, path.join(longData, "passquest.sqlite"), ctx.root, args, {});
-    if (!(await seedReviewedSource(longCall, check, path.join(longTemplate, "source"), 1, 1, true))) return done();
-    for (const args of [["tactic", "practice", SKILL, "--stage", "guided", "--answer", "A"], ["skill", "practice", SKILL, "--answer", "A"]]) {
-      const result = await longCall(args);
-      if (!check(result.code === 0, `seed: passquest ${args.join(" ")} exit = ${result.code}: ${tail(result.stderr, 4)}`)) return done();
-    }
-
-    // The many-item source's own database: a page of MANY_ITEMS long questions and a page of one under a
-    // long title, and a note drafted from one attempt.
-    const manyTemplate = path.join(temp, "many-template");
-    const manyData = path.join(manyTemplate, "data");
-    mkdirSync(manyData, { recursive: true });
-    const manyCall = (args: string[]) => cliJson(cli, path.join(manyData, "passquest.sqlite"), ctx.root, args, {});
-    const manySource = await seedReviewedSource(manyCall, check, path.join(manyTemplate, "source"), 2, MANY_ITEMS, true, LONG_TITLE);
-    if (!manySource) return done();
-    // The note's attempt is on page 2: a practised passage leaves the pool, and page 1 keeps all its items.
-    const practiced = await manyCall(["practice", "--source", manySource, "--page", "2", "--question", "p02-q1", "--answer", "A"]);
-    const attempt = numberField(field(practiced.doc, "attempt"), "id");
-    if (!check(practiced.code === 0 && attempt !== undefined, `seed: passquest practice p02-q1 exit = ${practiced.code}: ${tail(practiced.stderr, 4)}`)) return done();
-    const proposed = await manyCall(["note", "propose", "--attempt", String(attempt)]);
-    if (!check(proposed.code === 0, `seed: passquest note propose exit = ${proposed.code}: ${tail(proposed.stderr, 4)}`)) return done();
-
     let launches = 0;
     const launch = async (label: string, dataDir: string, size: readonly [number, number], body: string) => {
       const dir = path.join(temp, label);
@@ -715,11 +711,47 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
       out.findings.push(toFinding(issue, `reduced:${String(stringField(issue, "at"))}`, "light-zh", size0));
     }
 
+    // The long and many sources are seeded after the motion launch, and only for the parts that read
+    // them: a run whose first launches fail spends no seeding on them.
+    // The long question's own database: one reviewed page with one long question tagged with the
+    // scoring skill; after its guided walkthrough and one skill attempt the recommendation opens it.
+    const longTemplate = path.join(temp, "long-template");
+    const longData = path.join(longTemplate, "data");
+    if (parts.includes("long")) {
+      mkdirSync(longData, { recursive: true });
+      const longCall = (args: string[]) => cliJson(cli, path.join(longData, "passquest.sqlite"), ctx.root, args, {});
+      if (!(await seedReviewedSource(longCall, check, path.join(longTemplate, "source"), 1, 1, true))) return done();
+      for (const args of [["tactic", "practice", SKILL, "--stage", "guided", "--answer", "A"], ["skill", "practice", SKILL, "--answer", "A"]]) {
+        const result = await longCall(args);
+        if (!check(result.code === 0, `seed: passquest ${args.join(" ")} exit = ${result.code}: ${tail(result.stderr, 4)}`)) return done();
+      }
+    }
+
+    // The many-item source's own database: a page of MANY_ITEMS long questions and a page of one under a
+    // long title, and a note drafted from one attempt.
+    const manyTemplate = path.join(temp, "many-template");
+    const manyData = path.join(manyTemplate, "data");
+    if (parts.includes("many")) {
+      mkdirSync(manyData, { recursive: true });
+      const manyCall = (args: string[]) => cliJson(cli, path.join(manyData, "passquest.sqlite"), ctx.root, args, {});
+      const manySource = await seedReviewedSource(manyCall, check, path.join(manyTemplate, "source"), 2, MANY_ITEMS, true, LONG_TITLE);
+      if (!manySource) return done();
+      // The note's attempt is on page 2: a practised passage leaves the pool, and page 1 keeps all its items.
+      const practiced = await manyCall(["practice", "--source", manySource, "--page", "2", "--question", "p02-q1", "--answer", "A"]);
+      const attempt = numberField(field(practiced.doc, "attempt"), "id");
+      if (!check(practiced.code === 0 && attempt !== undefined, `seed: passquest practice p02-q1 exit = ${practiced.code}: ${tail(practiced.stderr, 4)}`)) return done();
+      const proposed = await manyCall(["note", "propose", "--attempt", String(attempt)]);
+      if (!check(proposed.code === 0, `seed: passquest note propose exit = ${proposed.code}: ${tail(proposed.stderr, 4)}`)) return done();
+    }
+
     const states = new Set<string>();
     const audited: Audited[] = [];
-    for (const size of UX_SIZES) {
+    const audits = ([["one", PART_ONE, templateData], ["two", PART_TWO, templateData], ["long", PART_LONG, longData], ["many", PART_MANY, manyData]] as const).filter(
+      ([part]) => parts.includes(part),
+    );
+    for (const size of sizes) {
       const sizeName = `${size[0]}x${size[1]}`;
-      for (const [part, body, from] of [["one", PART_ONE, templateData], ["two", PART_TWO, templateData], ["long", PART_LONG, longData], ["many", PART_MANY, manyData]] as const) {
+      for (const [part, body, from] of audits) {
         const label = `audit-${sizeName}-${part}`;
         const value = await launch(label, copyTemplate(label, from), size, `${DRIVE}\n${body}`);
         if (value === null) return done();
@@ -729,6 +761,7 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
           states.add(state);
           audited.push({ size: sizeName, state, mode });
           out.audits++;
+          out.auditMs += numberField(result, "ms") ?? 0;
           check(stringField(result, "shown") === mode, `${label}: ${state} was audited as ${String(stringField(result, "shown"))}, not ${mode}`);
           for (const issue of arrayField(result, "issues")) out.findings.push(toFinding(issue, state, mode, sizeName));
         }
@@ -739,7 +772,7 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
       }
     }
     out.states = states.size;
-    out.problems.push(...coverageProblems(audited, UX_SIZES.map((size) => `${size[0]}x${size[1]}`)));
+    if (!scope) out.problems.push(...coverageProblems(audited, UX_SIZES.map((size) => `${size[0]}x${size[1]}`)));
 
     const used = new Set<number>();
     out.findings = out.findings.filter((finding) => {
@@ -751,7 +784,8 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
       out.allowed++;
       return false;
     });
-    out.staleEntries = allow.entries.filter((_, index) => !used.has(index)).map((entry) => `${entry.check} ${entry.element}`);
+    // A scoped run sees only part of the matrix, so an entry it does not use may match elsewhere.
+    if (!scope) out.staleEntries = allow.entries.filter((_, index) => !used.has(index)).map((entry) => `${entry.check} ${entry.element}`);
     return done();
   } finally {
     provider.stop();
@@ -760,26 +794,31 @@ export async function runDesktopUx(ctx: GateContext): Promise<UxRun> {
   }
 }
 
-export const desktopUx: Gate = {
-  id: "desktop-ux",
-  title: "desktop ux",
-  async run(ctx) {
-    const surface = desktopSurface(ctx);
-    if (surface) return surface;
-    const result = await runDesktopUx(ctx);
-    if (result.problems.length > 0) return fail(result.problems, `${result.seconds}s`);
-    const counts = new Map<string, number>();
-    for (const finding of result.findings) counts.set(finding.check, (counts.get(finding.check) ?? 0) + 1);
-    const lines = findingLines(result.findings);
-    const failures = [
-      ...(result.findings.length > 0
-        ? [`${result.findings.length} finding(s), ${lines.length} distinct: ${[...counts].map(([name, count]) => `${name} ${count}`).join(", ")}`]
-        : []),
-      ...lines,
-      ...result.staleEntries.map((entry) => `${ALLOWLIST}: entry matches nothing (remove it): ${entry}`),
-    ];
-    const detail = `${result.audits} audits over ${result.states} states × ${MODES.length} modes × ${UX_SIZES.length} sizes, ${result.probes} probes, ${result.focusChecks} focus checks, ${result.allowed} allowed, ${result.seconds}s`;
-    if (failures.length > 0) return fail(failures, detail);
-    return pass(detail);
-  },
-};
+/** The desktop-ux gate; `scope` narrows the matrix for the harness self-test, index.ts runs the whole one. */
+export function makeDesktopUxGate(scope?: UxScope): Gate {
+  return {
+    id: "desktop-ux",
+    title: "desktop ux",
+    async run(ctx) {
+      const surface = desktopSurface(ctx);
+      if (surface) return surface;
+      const result = await runDesktopUx(ctx, scope);
+      if (result.problems.length > 0) return fail(result.problems, `${result.seconds}s`);
+      const counts = new Map<string, number>();
+      for (const finding of result.findings) counts.set(finding.check, (counts.get(finding.check) ?? 0) + 1);
+      const lines = findingLines(result.findings);
+      const failures = [
+        ...(result.findings.length > 0
+          ? [`${result.findings.length} finding(s), ${lines.length} distinct: ${[...counts].map(([name, count]) => `${name} ${count}`).join(", ")}`]
+          : []),
+        ...lines,
+        ...result.staleEntries.map((entry) => `${ALLOWLIST}: entry matches nothing (remove it): ${entry}`),
+      ];
+      const detail = `${result.audits} audits over ${result.states} states × ${MODES.length} modes × ${(scope?.sizes ?? UX_SIZES).length} sizes, ${result.probes} probes, ${result.focusChecks} focus checks, ${result.allowed} allowed, ${result.auditMs} ms in audits, ${result.seconds}s`;
+      if (failures.length > 0) return fail(failures, detail);
+      return pass(detail);
+    },
+  };
+}
+
+export const desktopUx: Gate = makeDesktopUxGate();

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import { readText, resolve } from "./repo.ts";
+import { readEach, resolve } from "./repo.ts";
 
 const LINK = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 
@@ -21,14 +21,15 @@ export async function checkMarkdownLinks(root: string, tracked: string[]): Promi
   const markdown = tracked.filter((file) => file.endsWith(".md"));
   let checked = 0;
   const broken: string[] = [];
-  for (const file of markdown) {
-    let text: string;
-    try {
-      text = readText(root, file);
-    } catch {
-      broken.push(`${file}: unreadable`);
+  const contents = await readEach(root, markdown);
+  for (const [index, file] of markdown.entries()) {
+    const bytes = contents[index];
+    if (bytes === null) {
+      // The list is a snapshot taken once per run: a file removed since then is not a failure.
+      if (existsSync(resolve(root, file))) broken.push(`${file}: unreadable`);
       continue;
     }
+    const text = bytes.toString("utf8");
     const directory = path.dirname(resolve(root, file));
     for (const match of text.matchAll(LINK)) {
       let target = decode(match[1]).split("#", 1)[0];

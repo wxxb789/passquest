@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { runGo } from "../lib/go.ts";
+import { buildCLI } from "../lib/go.ts";
 import { arrayField, checkKeyHiding, field, numberField, stringField } from "../lib/json.ts";
 import { run } from "../lib/process.ts";
 import { resolve } from "../lib/repo.ts";
@@ -18,7 +18,7 @@ export const importSmoke: Gate = {
     if (!existsSync(resolve(ctx.root, "cmd/passquest"))) return fail(["cmd/passquest is missing"]);
 
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-import-smoke-"));
-    const binary = path.join(temp, process.platform === "win32" ? "passquest.exe" : "passquest");
+    let binary = "";
     const db = path.join(temp, "smoke.sqlite");
     const checks: string[] = [];
     let assertions = 0;
@@ -32,10 +32,11 @@ export const importSmoke: Gate = {
     const parse = (raw: string): unknown => JSON.parse(raw);
 
     try {
-      const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
-      if (build.code !== 0) {
-        return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
+      const build = await buildCLI(ctx);
+      if ("failure" in build) {
+        return fail(["go build ./cmd/passquest failed", build.failure]);
       }
+      binary = build.binary;
 
       const importedResult = await call(["import", "--json", "--path", fixture]);
       if (importedResult.code !== 0) {

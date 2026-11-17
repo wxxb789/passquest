@@ -7,6 +7,8 @@
  *
  * Findings are `{ check, el, ...detail }`, where `el` is a short element path.
  * Checks:
+ * - page-error: the app's error bar (#errbar, an uncaught error or rejection) is showing; its text is
+ *   the detail
  * - layout: page-h-overflow, text-clipped-x, text-clipped-y, text-cut-by-ancestor,
  *   outside-viewport-x, interactive-covered, interactive-not-hit, interactive-offscreen,
  *   scroll-without-content (a scroll container that scrolls although its content and end padding
@@ -456,6 +458,8 @@ const UX = (() => {
     const lang = document.documentElement.lang;
     const de = document.documentElement;
     if (de.scrollWidth > de.clientWidth + 1) add("page-h-overflow", de, { sw: de.scrollWidth, cw: de.clientWidth });
+    const errbar = document.getElementById("errbar");
+    if (errbar) add("page-error", errbar, { text: errbar.textContent });
 
     // What the state must show as it opens (the consent and budget a call strip names before a send):
     // measured before the pass scrolls anything into view.
@@ -776,6 +780,13 @@ const UX = (() => {
     document.head.append(st);
     host.append(box);
     document.body.append(wide, tall);
+    // An error bar as the app draws it, unless the page already shows its own (that one stays).
+    const planted = document.getElementById("errbar") ? null : document.createElement("div");
+    if (planted) {
+      planted.id = "errbar";
+      planted.textContent = "JS error: QA planted";
+      document.documentElement.append(planted);
+    }
     const mirror = document.getElementById("qa-fv");
     if (mirror) mirror.remove(); // mirror the probe's own focus rule too
     emulateReducedMotion();
@@ -787,6 +798,7 @@ const UX = (() => {
     // The id itself, not a longer id it starts (#qa-low is not #qa-low-fold).
     const fired = (check, id) => found.some((i) => i.check === check && i.el.split("#" + id).slice(1).some((rest) => !/^[-_a-zA-Z0-9]/.test(rest)));
     const result = {
+      "page-error": found.some((i) => i.check === "page-error" && /QA planted|JS error/.test(i.text)),
       "text-clipped-x": fired("text-clipped-x", "qa-clip"),
       "outside-viewport-x": fired("outside-viewport-x", "qa-wide"),
       "contrast-fail": fired("contrast-fail", "qa-low"),
@@ -809,6 +821,7 @@ const UX = (() => {
     box.remove();
     wide.remove();
     tall.remove();
+    if (planted) planted.remove();
     st.remove();
     const stale = document.getElementById("qa-fv");
     if (stale) stale.remove();

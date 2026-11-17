@@ -1348,3 +1348,73 @@ Entry format:
 - Default taken: (A). The audit asserts the real viewport before measuring and fails rather than measuring a
   different size.
 - Revisit when: CI or the owner's display can host 1440×900.
+
+### Q-0012-06 — May a test shorten the agent kill grace through a product seam?
+- Status: resolved
+- Resolution: (owner, 2026-11-17) (A) approved as test-efficiency plan item A8.
+- Context: `TestAgentCancelKeepsTerminalOffALiveHost` is the only coverage of the unconfirmed cancel path
+  (agent-smoke covers only the confirmed one) and waited the full hard-coded 6 s kill grace on every run.
+- Options considered: (A) one grace, `agentKillGrace()` = `agentHeartbeatWindow()` + 1 s (6 s in production),
+  carried by an unexported `Options.agentKillGrace` field that `withDefaults()` fills, so only a test in
+  `internal/cli` can shorten it; (B) a package variable; (C) keep the 6 s wait.
+- Default taken: none — the owner chose (A). The test sets 500 ms and keeps its five assertions; it also asserts
+  that `(Options{}).withDefaults()` yields 6 s, so the production value cannot drift unseen.
+- Revisit when: the cancel loop's grace is derived from anything other than the heartbeat window.
+
+### Q-0012-07 — May assess-smoke drop sections whose assertions a Go test already makes?
+- Status: resolved
+- Resolution: (owner, 2026-11-17) (A) approved as test-efficiency plan item A10.
+- Context: assess-smoke sections 9 (pool floor) and 6 (compare) repeated assertions that
+  `internal/cli/assess_test.go` makes more strictly; section 6 seeded 40 pages (about 127 process spawns) for
+  one read-only compare.
+- Options considered: (A) drop the duplicated sections after the Go test gains the one string it lacked;
+  (B) keep both.
+- Default taken: none — the owner chose (A). `TestAssessStartRefusesFloorAndShortfall` first gained the
+  "4 unseen content unit(s)" assertion, shown to fail when the message changes; it asserts exit 2, `pool_floor`,
+  "4 qualifying item(s)", "16 more" and that text. `TestAssessCompareRefusesUnlikeRuns` asserts
+  `incomparable_runs`, `window_minutes` and `compared` for two distinct like runs (the smoke compared a run with
+  itself; the compare has no same-id branch). Assess smoke went from 275 to 125 assertions. Section 1 (pool in
+  items and units) stays, against the plan: the `qualifying_items` and `question_count` wire keys are checked
+  nowhere else, because the Go test decodes them through the production structs. Section 1b stays as the plan
+  required. The dated `docs/evidence/0009-unseen-exam-assessment.md` record ("275 assertions over the nine
+  acceptance rows") is left as written; acceptance rows 6 and 9 are now carried by the two Go tests.
+- Revisit when: a Go test asserts the raw `"qualifying_items"` and `"question_count"` keys; section 1 may then go.
+
+### Q-0012-08 — How is the CI gate split into jobs?
+- Status: decided(default taken)
+- Context: one job per OS ran all 24 gates serially, so a failure cost the whole chain's wall time and a
+  re-run repeated every gate.
+- Options considered: (A) one job per OS × group, grouped by environment need; (B) one job per gate; (C) keep
+  one job per OS.
+- Default taken: (A): `core` (gates 1-21; Go, Bun, Node), `desktop` (desktop-smoke, desktop-ux; display,
+  webview, Secret Service) and `self-test` (it feeds the desktop gates broken trees, so it needs the same) on
+  ubuntu, macOS and Windows, fail-fast off, 20-minute timeout. Self-test is its own group so the desktop job is
+  not the bottleneck. The split was sized from earlier CI logs, not measured on the split pipeline. Every
+  `bun run gate` refuses to run unless `harness/lib/gate-groups.ts` finds every gate in exactly one group and
+  the matrix exactly `os` × `group` for those groups. The three jobs of one OS share setup-go's cache key, so
+  only the first to finish saves the build cache; this is disclosed, to be measured on the first split run.
+  The owner may rebalance the groups.
+- Revisit when: the first split CI run shows the desktop or self-test builds slower than before (then key the
+  cache per group), or the per-gate timings show one group as the bottleneck.
+
+### Q-0012-09 — Should the gate run independent gates in parallel in one process?
+- Status: decided(default taken)
+- Context: test-efficiency plan item A13 proposed overlapping go-test with the static and CLI smoke gates
+  before the desktop gates, conditional on 20 CI trials per OS.
+- Options considered: (A) defer; (B) a two-phase runner with `--serial` kept.
+- Default taken: (A). The CI split (Q-0012-08) already runs go-test and the desktop gates on separate runners;
+  what remains is overlap inside `core` on one 4-vCPU runner, where heartbeat and timing tests would contend
+  with the smokes — the flake source the plan named.
+- Revisit when: the per-gate timings on the split pipeline show `core` as the slowest group.
+
+### Q-0012-10 — Do the parallel store tests flake on SQLite locking?
+- Status: open
+- Context: plan item A9 runs `internal/cli` and `internal/store` top-level tests with `t.Parallel()`. One local
+  run failed `TestMigrationFromVersionSixAddsTutorTables` with `SQLITE_BUSY` after the 5 s busy timeout (1 of
+  22 store-package runs, root cause unconfirmed).
+- Options considered: (A) match production: the test helper `openSQLite` sets `SetMaxOpenConns(1)` as
+  `store.open` does; (B) make the `openSQLite` migration-fixture tests serial; (C) drop parallelism in the
+  store package.
+- Default taken: (A). It removes one fixture opening a second connection against its own file; it does not
+  prove that was the cause.
+- Revisit when: go-test flakes on Windows CI; then take (B).

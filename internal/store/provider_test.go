@@ -7,6 +7,7 @@ import (
 )
 
 func TestProviderBudgetIsCountedPerProvider(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "provider-budget.sqlite"))
 	day := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
 	at := day.Add(9 * time.Hour)
@@ -36,6 +37,7 @@ func TestProviderBudgetIsCountedPerProvider(t *testing.T) {
 }
 
 func TestProviderVerificationLatestWins(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "verification.sqlite"))
 	at := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
 	if _, err := st.AppendProviderVerification(ProviderVerification{
@@ -61,6 +63,7 @@ func TestProviderVerificationLatestWins(t *testing.T) {
 }
 
 func TestProviderConsentOverridesOnlyItsOwnProvider(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "provider-consent.sqlite"))
 	at := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
 	if _, err := st.AppendTutorConsent(TutorConsentEvent{
@@ -85,6 +88,7 @@ func TestProviderConsentOverridesOnlyItsOwnProvider(t *testing.T) {
 }
 
 func TestProviderFailoverEventsAreAppendOnly(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "failover.sqlite"))
 	at := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
 	if _, err := st.AppendProviderFailover(ProviderFailover{
@@ -110,6 +114,7 @@ func TestProviderFailoverEventsAreAppendOnly(t *testing.T) {
 }
 
 func TestMigrationFromVersionFourteenAddsProviderColumns(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v14.sqlite")
 	db := openSQLite(t, path)
 	for _, migration := range migrations {

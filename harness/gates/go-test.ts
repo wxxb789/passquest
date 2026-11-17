@@ -8,6 +8,7 @@ interface TestEvent {
   Package?: string;
   Test?: string;
   Output?: string;
+  Elapsed?: number;
 }
 
 // The failure line alone ("pkg/Test: failed") forces a second CI round-trip to
@@ -24,6 +25,31 @@ function failureOutput(events: TestEvent[], pkg: string, test: string): string[]
     }
   }
   return lines.slice(-TEST_OUTPUT_TAIL).map((line) => `  ${line}`);
+}
+
+// The CI log has no per-package timing otherwise: name where a slow run spent its time.
+const SLOWEST_PACKAGES = 3;
+const SLOWEST_TESTS = 5;
+
+/** "slowest packages: <pkg> 12.3s, ...; slowest tests: <pkg>/<Test> 4.5s, ..." from the finished events. */
+function slowest(events: TestEvent[]): string | undefined {
+  const packages: Array<[string, number]> = [];
+  const tests: Array<[string, number]> = [];
+  for (const event of events) {
+    if ((event.Action !== "pass" && event.Action !== "fail") || !event.Package || event.Elapsed === undefined) continue;
+    if (!event.Test) packages.push([event.Package, event.Elapsed]);
+    else if (!event.Test.includes("/")) tests.push([`${event.Package}/${event.Test}`, event.Elapsed]);
+  }
+  const top = (entries: Array<[string, number]>, count: number) =>
+    [...entries]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, count)
+      .map(([name, seconds]) => `${name} ${seconds.toFixed(1)}s`)
+      .join(", ");
+  const parts: string[] = [];
+  if (packages.length > 0) parts.push(`slowest packages: ${top(packages, SLOWEST_PACKAGES)}`);
+  if (tests.length > 0) parts.push(`slowest tests: ${top(tests, SLOWEST_TESTS)}`);
+  return parts.length > 0 ? parts.join("; ") : undefined;
 }
 
 function parseEvents(stdout: string): TestEvent[] {
@@ -49,6 +75,7 @@ export const goTest: Gate = {
     // when every test is skipped, so a skipped contract test would pass silently.
     const result = await runGo(ctx, ["test", "./...", "-count=1", "-json"]);
     const events = parseEvents(result.stdout);
+    const timing = slowest(events);
     const packages = new Set<string>();
     const skipped: string[] = [];
     let tests = 0;
@@ -71,14 +98,15 @@ export const goTest: Gate = {
           failures.push(`${name}: failed`);
           failures.push(...failureOutput(events, pkg, test));
         }
-        return fail(failures);
+        return fail(failures, timing);
       }
       const output = events.map((event) => event.Output ?? "").join("").trim();
-      return fail(output ? output.split(/\r?\n/).filter((line) => line.trim() !== "") : outputLines(result));
+      return fail(output ? output.split(/\r?\n/).filter((line) => line.trim() !== "") : outputLines(result), timing);
     }
     if (skipped.length > 0) {
-      return fail(skipped.map((name) => `${name}: skipped test`));
+      return fail(skipped.map((name) => `${name}: skipped test`), timing);
     }
-    return pass(`${packages.size} packages, ${tests} tests, 0 skipped`);
+    const counts = `${packages.size} packages, ${tests} tests, 0 skipped`;
+    return pass(timing ? `${counts}; ${timing}` : counts);
   },
 };

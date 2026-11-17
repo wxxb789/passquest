@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 
 import { BASELINE, EXPECTED_NATIVE, EXPECTED_OCR, EXPECTED_PAGES, decodeUTF8, nonSpaceChars } from "../lib/baseline.ts";
-import { readBytes, readText, resolve } from "../lib/repo.ts";
+import { readEach, readText, resolve } from "../lib/repo.ts";
 import { fail, pass, skip } from "../lib/types.ts";
 import type { Gate } from "../lib/types.ts";
 
@@ -54,7 +54,8 @@ export const baseline: Gate = {
     }
     const sources: Record<string, number> = {};
     const seen = new Set<number>();
-    for (const row of rows) {
+    const pages = await readEach(ctx.root, rows.map((row) => pageFile(row.page)));
+    for (const [rowIndex, row] of rows.entries()) {
       if (seen.has(row.page)) problems.push(`manifest page ${row.page} appears twice`);
       seen.add(row.page);
       sources[row.source] = (sources[row.source] ?? 0) + 1;
@@ -63,7 +64,11 @@ export const baseline: Gate = {
         problems.push(`${pagePath}: missing`);
         continue;
       }
-      const bytes = readBytes(ctx.root, pagePath);
+      const bytes = pages[rowIndex];
+      if (bytes === null) {
+        problems.push(`${pagePath}: unreadable`);
+        continue;
+      }
       const text = decodeUTF8(bytes);
       if (text === null) {
         problems.push(`${pagePath}: not valid UTF-8`);
@@ -114,16 +119,14 @@ export const baseline: Gate = {
       problems.push(`${readme}: does not state that the text is unreviewed`);
     }
 
-    for (const file of await ctx.workingTreeFiles()) {
-      const isFixture = file.endsWith("_test.go") || /(^|\/)testdata\//.test(file);
-      if (!isFixture) continue;
-      let text: string;
-      try {
-        text = readBytes(ctx.root, file).toString("utf8");
-      } catch {
-        continue;
-      }
-      if (text.includes("data/baselines")) {
+    const fixtures = (await ctx.workingTreeFiles()).filter(
+      (file) => file.endsWith("_test.go") || /(^|\/)testdata\//.test(file),
+    );
+    const fixtureContents = await readEach(ctx.root, fixtures);
+    for (const [index, file] of fixtures.entries()) {
+      const bytes = fixtureContents[index];
+      if (bytes === null) continue;
+      if (bytes.toString("utf8").includes("data/baselines")) {
         problems.push(`${file}: test or fixture references the unreviewed baseline`);
       }
     }

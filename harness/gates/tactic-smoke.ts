@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { runGo } from "../lib/go.ts";
+import { buildCLI } from "../lib/go.ts";
 import { arrayField, checkKeyHiding, field, numberField, stringField } from "../lib/json.ts";
 import { run } from "../lib/process.ts";
 import { fail, pass } from "../lib/types.ts";
@@ -12,10 +12,9 @@ export const tacticSmoke: Gate = {
   id: "tactic-smoke",
   title: "tactic smoke",
   async run(ctx: GateContext) {
-    const binaryName = process.platform === "win32" ? "passquest.exe" : "passquest";
 
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-tactic-smoke-"));
-    const binary = path.join(temp, binaryName);
+    let binary = "";
     const db = path.join(temp, "smoke.sqlite");
     const checks: string[] = [];
     let assertions = 0;
@@ -29,10 +28,11 @@ export const tacticSmoke: Gate = {
     const parse = (raw: string): unknown => JSON.parse(raw);
 
     try {
-      const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
-      if (build.code !== 0) {
-        return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
+      const build = await buildCLI(ctx);
+      if ("failure" in build) {
+        return fail(["go build ./cmd/passquest failed", build.failure]);
       }
+      binary = build.binary;
 
       const listResult = await call(["tactic", "list", "--json"]);
       if (!check(listResult.code === 0, `tactic list exit = ${listResult.code}`)) return fail(checks);

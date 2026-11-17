@@ -16,12 +16,14 @@ func goldenNoteDB(t *testing.T) (string, *stepClock, string) {
 }
 
 func TestGoldenNoteDraftJSON(t *testing.T) {
+	t.Parallel()
 	db, clock, _ := goldenNoteDB(t)
 	out := mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	checkGolden(t, filepath.Join("testdata", "note-draft.golden.json"), []byte(out))
 }
 
 func TestGoldenNotePreviewJSON(t *testing.T) {
+	t.Parallel()
 	db, clock, _ := goldenNoteDB(t)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	out := mustNoteRun(t, db, clock, nil, nil, "", "note", "preview", "--json")
@@ -29,6 +31,7 @@ func TestGoldenNotePreviewJSON(t *testing.T) {
 }
 
 func TestGoldenNoteAcceptJSON(t *testing.T) {
+	t.Parallel()
 	db, clock, _ := goldenNoteDB(t)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	out := mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
@@ -36,6 +39,7 @@ func TestGoldenNoteAcceptJSON(t *testing.T) {
 }
 
 func TestGoldenNoteShowJSON(t *testing.T) {
+	t.Parallel()
 	db, clock, _ := goldenNoteDB(t)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
@@ -45,6 +49,7 @@ func TestGoldenNoteShowJSON(t *testing.T) {
 }
 
 func TestGoldenNotePushJSON(t *testing.T) {
+	t.Parallel()
 	db, clock, _ := goldenNoteDB(t)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
@@ -56,6 +61,7 @@ func TestGoldenNotePushJSON(t *testing.T) {
 // TestGoldenNotePushDeckMismatchJSON pins the mismatch document: the endpoint
 // accepts the write and files the card in another deck.
 func TestGoldenNotePushDeckMismatchJSON(t *testing.T) {
+	t.Parallel()
 	db, clock, _ := goldenNoteDB(t)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
@@ -72,6 +78,7 @@ func TestGoldenNotePushDeckMismatchJSON(t *testing.T) {
 // mismatch: the note keeps its Anki id, records the deck it reached and names
 // the deck the push asked for.
 func TestGoldenNoteShowDeckMismatchJSON(t *testing.T) {
+	t.Parallel()
 	db, clock, _ := goldenNoteDB(t)
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "propose", "--attempt", "1", "--json")
 	mustNoteRun(t, db, clock, nil, nil, "", "note", "accept", "--json")
@@ -87,6 +94,7 @@ func TestGoldenNoteShowDeckMismatchJSON(t *testing.T) {
 // TestNodeGoldenDocumentsAreValidJSON keeps a broken golden from being read as
 // a protocol change.
 func TestNoteGoldenDocumentsAreValidJSON(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{
 		"note-draft.golden.json", "note-preview.golden.json", "note-accept.golden.json",
 		"note-show.golden.json", "note-push.golden.json",

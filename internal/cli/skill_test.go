@@ -142,6 +142,7 @@ func slowVocabClock(t *testing.T, db string) *sequenceClock {
 }
 
 func TestSkillLessons(t *testing.T) {
+	t.Parallel()
 	clock := &stepClock{base: goldenBase}
 	var list skillListDoc
 	if err := json.Unmarshal([]byte(mustRunNoDB(t, clock, "skill", "list", "--json")), &list); err != nil {
@@ -196,6 +197,7 @@ func TestSkillLessons(t *testing.T) {
 }
 
 func TestSkillPracticeHidesKeyAndSnapshotsSkill(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -236,6 +238,7 @@ func TestSkillPracticeHidesKeyAndSnapshotsSkill(t *testing.T) {
 }
 
 func TestSkillPracticeSecondPassageAndRepeat(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	mustRun(t, db, clock, "", "skill", "practice", "vocabulary-in-context", "--answer", "A", "--json")
@@ -267,6 +270,7 @@ func TestSkillPracticeSecondPassageAndRepeat(t *testing.T) {
 }
 
 func TestSkillPracticeScoringRequiresGuidedAttempt(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -296,6 +300,7 @@ func TestSkillPracticeScoringRequiresGuidedAttempt(t *testing.T) {
 }
 
 func TestNextSendsUnGuidedScoringToTacticWalkthrough(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -334,6 +339,7 @@ func TestNextSendsUnGuidedScoringToTacticWalkthrough(t *testing.T) {
 }
 
 func TestSkillPracticeSkipsGuidedExposure(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -355,6 +361,7 @@ func TestSkillPracticeSkipsGuidedExposure(t *testing.T) {
 }
 
 func TestSkillPracticeAssistedFreshPreambleIsTruthful(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -378,6 +385,7 @@ func TestSkillPracticeAssistedFreshPreambleIsTruthful(t *testing.T) {
 }
 
 func TestSkillPracticeSourcePath(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -439,6 +447,7 @@ func TestSkillPracticeSourcePath(t *testing.T) {
 }
 
 func TestNextIncludesImportedSourceWithoutScope(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -461,6 +470,7 @@ func TestNextIncludesImportedSourceWithoutScope(t *testing.T) {
 }
 
 func TestSkillPracticeRejectsBadInput(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -493,6 +503,7 @@ func TestSkillPracticeRejectsBadInput(t *testing.T) {
 }
 
 func TestNextNoEvidence(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	doc := decodeNext(t, mustRun(t, db, clock, "", "next", "--json"))
@@ -537,6 +548,7 @@ func TestNextNoEvidence(t *testing.T) {
 }
 
 func TestNextPassageExposureAndHints(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
@@ -560,6 +572,7 @@ func TestNextPassageExposureAndHints(t *testing.T) {
 }
 
 func TestNextTimeChangesAction(t *testing.T) {
+	t.Parallel()
 	base := goldenBase
 	fast := &sequenceClock{times: []time.Time{base, base.Add(time.Second), base.Add(2 * time.Second), base.Add(3 * time.Second)}}
 	fastDB := newDB(t)
@@ -593,6 +606,7 @@ func TestNextTimeChangesAction(t *testing.T) {
 }
 
 func TestNextExhaustedScoringYieldsToLanguage(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
@@ -615,6 +629,7 @@ func TestNextExhaustedScoringYieldsToLanguage(t *testing.T) {
 }
 
 func TestNextExhaustedWeakYieldsToFreshMaterial(t *testing.T) {
+	t.Parallel()
 	seedScoring := func(t *testing.T, db string, clock *stepClock) {
 		t.Helper()
 		mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
@@ -682,6 +697,7 @@ func TestNextExhaustedWeakYieldsToFreshMaterial(t *testing.T) {
 }
 
 func TestNextReviewCommandWhenEverySkillIsExhausted(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	mustRun(t, db, clock, "", "tactic", "practice", "not-except-polarity", "--answer", "D", "--json")
@@ -712,6 +728,7 @@ func TestNextReviewCommandWhenEverySkillIsExhausted(t *testing.T) {
 }
 
 func TestNextCommandPreservesSelectedDatabase(t *testing.T) {
+	t.Parallel()
 	db := filepath.Join(t.TempDir(), "learner data", "attempts.sqlite")
 	if err := os.MkdirAll(filepath.Dir(db), 0o700); err != nil {
 		t.Fatal(err)
@@ -750,6 +767,7 @@ func TestNextCommandOmitsDefaultDatabase(t *testing.T) {
 }
 
 func TestNextRevisitsAndSkips(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	mustRun(t, db, clock, "", "skill", "practice", "vocabulary-in-context", "--answer", "A", "--json")
@@ -781,6 +799,7 @@ func TestNextRevisitsAndSkips(t *testing.T) {
 }
 
 func TestNextUnclassifiedAttempt(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	mustRun(t, db, clock, "", "practice", "--question", "q1", "--answer", "B", "--json")
@@ -798,6 +817,7 @@ func TestNextUnclassifiedAttempt(t *testing.T) {
 }
 
 func TestNextRecordClassification(t *testing.T) {
+	t.Parallel()
 	key := attempt.QuestionKey{ContentID: "content", QuestionID: "q1"}
 	record := attempt.Attempt{ID: 7, ContentID: key.ContentID, QuestionID: key.QuestionID, AttemptNumber: 1}
 	tests := []struct {
@@ -873,6 +893,7 @@ func runChildCLI(t *testing.T, args ...string) string {
 }
 
 func TestNextRecordedEmptySnapshotDoesNotRegroupAfterTagEdit(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	imported := importFixture(t, db, clock)
@@ -917,6 +938,7 @@ func TestNextRecordedEmptySnapshotDoesNotRegroupAfterTagEdit(t *testing.T) {
 }
 
 func TestNextReopenRecalculatesWithoutRewriting(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	mustRun(t, db, clock, "", "skill", "practice", "vocabulary-in-context", "--answer", "A", "--json")
@@ -934,18 +956,21 @@ func TestNextReopenRecalculatesWithoutRewriting(t *testing.T) {
 }
 
 func TestGoldenSkillList(t *testing.T) {
+	t.Parallel()
 	clock := &stepClock{base: goldenBase}
 	out := mustRunNoDB(t, clock, "skill", "list", "--json")
 	checkGolden(t, filepath.Join("testdata", "skill-list.golden.json"), []byte(out))
 }
 
 func TestGoldenSkillShow(t *testing.T) {
+	t.Parallel()
 	clock := &stepClock{base: goldenBase}
 	out := mustRunNoDB(t, clock, "skill", "show", "vocabulary-in-context", "--json")
 	checkGolden(t, filepath.Join("testdata", "skill-show.golden.json"), []byte(out))
 }
 
 func TestGoldenSkillAwaiting(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	out := mustRun(t, db, clock, "", "skill", "practice", "vocabulary-in-context", "--json")
@@ -953,6 +978,7 @@ func TestGoldenSkillAwaiting(t *testing.T) {
 }
 
 func TestGoldenSkillAnswered(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	out := mustRun(t, db, clock, "", "skill", "practice", "vocabulary-in-context", "--answer", "A", "--json")

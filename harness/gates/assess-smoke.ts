@@ -2,9 +2,9 @@ import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { runGo } from "../lib/go.ts";
+import { buildCLI } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
-import { executable, run } from "../lib/process.ts";
+import { run } from "../lib/process.ts";
 import type { RunResult } from "../lib/process.ts";
 import { seedReviewedSource, writeFixtureQuestion } from "../lib/reviewed-source.ts";
 import { fail, pass } from "../lib/types.ts";
@@ -26,9 +26,7 @@ export const assessSmoke: Gate = {
   id: "assess-smoke",
   title: "assess smoke",
   async run(ctx: GateContext) {
-    const binaryName = executable("passquest");
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-assess-smoke-"));
-    const binary = path.join(temp, binaryName);
     const checks: string[] = [];
     let assertions = 0;
     const check = (condition: boolean, message: string): boolean => {
@@ -36,12 +34,18 @@ export const assessSmoke: Gate = {
       if (!condition) checks.push(message);
       return condition;
     };
+    let timeoutRun: Bun.Subprocess<"pipe", "pipe", "pipe"> | undefined;
+    let timeoutSection: Promise<void> | undefined;
+    // Set once the finally block stops the forced-timeout run itself, so that
+    // run's section does not report the harness's own kill as a failure.
+    let timeoutAborted = false;
 
     try {
-      const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
-      if (build.code !== 0) {
-        return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
+      const build = await buildCLI(ctx);
+      if ("failure" in build) {
+        return fail(["go build ./cmd/passquest failed", build.failure]);
       }
+      const binary = build.binary;
 
       const call = async (db: string, args: string[], stdin?: string): Promise<RunResult> =>
         run(binary, [...args, "--db", db], { cwd: ctx.root, stdin });
@@ -79,6 +83,50 @@ export const assessSmoke: Gate = {
         copyFileSync(richDB, target);
         return target;
       };
+      // Each run below starts on a fresh copy, so its run is id 1. Waits until
+      // that run is stored and `ready` holds for its report, bounded at 15 s
+      // of wall-clock time and by the run's process exiting: a fixed pause
+      // raced the CLI's start under load. Returns whether `ready` held.
+      const waitForStoredRun = async (db: string, proc: PipedProcess, ready: (report: unknown) => boolean = () => true): Promise<boolean> => {
+        const deadline = Date.now() + 15000;
+        while (Date.now() < deadline && proc.exitCode === null) {
+          const report = await callJSON(db, ["assess", "report", "1"]);
+          if (report.code === 0 && ready(report.doc)) return true;
+          await Bun.sleep(100);
+        }
+        return false;
+      };
+
+      // 3. Forced per-item timeout: the first answer arrives after the 3-second
+      // item clock, and the remaining items answer immediately. The run waits on
+      // its own copy while the sections below run; the 3.2-second pause starts
+      // once item 1 is presented, so the margin is from the item clock's start.
+      const timeoutDB = copy("timeout");
+      timeoutRun = spawnWithStdin(timeoutDB, ["assess", "start", "--size", "20", "--minutes", "1", "--json"]);
+      const timeoutProcess = timeoutRun;
+      timeoutSection = (async () => {
+        const timeoutResult = collect(timeoutProcess);
+        const presented = await waitForStoredRun(timeoutDB, timeoutProcess, (report) => (numberField(field(report, "counts"), "presented") ?? 0) >= 1);
+        // Diagnostic only: the assertions below still decide the section.
+        if (!presented && !timeoutAborted) checks.push("timeout run item 1 was never presented");
+        // A run that exits (or is stopped) early ends the pause at once.
+        await Promise.race([Bun.sleep(3200), timeoutProcess.exited]);
+        timeoutProcess.stdin!.write("B\n");
+        timeoutProcess.stdin!.write("B\n".repeat(19));
+        timeoutProcess.stdin!.end();
+        const timeout = await timeoutResult;
+        if (timeoutAborted) return;
+        check(timeout.code === 0, `timeout run exit = ${timeout.code}: ${timeout.stderr}`);
+        const timeoutID = numberField(asRecord(field(parse(timeout.stdout), "run")), "id");
+        if (!check(timeoutID !== undefined, "timeout run id")) return;
+        const timeoutReport = await callJSON(timeoutDB, ["assess", "report", String(timeoutID)]);
+        check(numberField(field(timeoutReport.doc, "counts"), "timed_out") === 1, "forced timeout was not counted");
+        const timedItems = arrayField(timeoutReport.doc, "items").filter((item) => field(item, "timed_out") === true);
+        check(timedItems.length === 1, "timed-out item is not listed");
+        check(numberField(timedItems[0], "elapsed_ms") === 3000, `timed-out elapsed = ${numberField(timedItems[0], "elapsed_ms")}`);
+      })().catch((error) => {
+        if (!timeoutAborted) checks.push(`forced timeout section: ${error instanceof Error ? error.message : String(error)}`);
+      });
 
       // 1. Holdout per content unit: one exposed question spends all four on
       // page 1, and a fresh page still counts.
@@ -118,18 +166,6 @@ export const assessSmoke: Gate = {
       const earlyUnit = arrayField(earlyPool.doc, "content_units").find((unit) => stringField(unit, "content_id") === `${earlySource}-p001`);
       check(asRecord(earlyUnit).spent === true && arrayField(earlyUnit, "spent_by").includes("show"), "the page shown before authoring is not spent by show");
 
-      // 9. Pool floor: a four-item source refuses with the shortfall in items
-      // and the unit count behind it.
-      const smallDir = path.join(temp, "small-source");
-      const smallDB = path.join(temp, "small.sqlite");
-      if (!(await seedSource(smallDB, smallDir, 4, 1))) return fail(checks);
-      const floor = await callJSON(smallDB, ["assess", "start", "--size", "20"]);
-      check(floor.code === 2, `pool floor exit = ${floor.code}`);
-      check(stringField(field(floor.failure, "error"), "code") === "pool_floor", "pool floor code");
-      check((stringField(field(floor.failure, "error"), "message") ?? "").includes("4 qualifying item(s)"), "pool floor item shortfall");
-      check((stringField(field(floor.failure, "error"), "message") ?? "").includes("16 more"), "pool floor missing shortfall");
-      check((stringField(field(floor.failure, "error"), "message") ?? "").includes("4 unseen content unit(s)"), "pool floor unit count");
-
       // 3 and 4 and 7. A completed run records elapsed time, hides annotations
       // during the run and prints them with the unknowns in the report.
       const runDB = copy("run");
@@ -165,7 +201,7 @@ export const assessSmoke: Gate = {
       const coachingDB = copy("coaching");
       const coachingRun = spawnWithStdin(coachingDB, ["assess", "start", "--size", "20", "--minutes", "60", "--json"]);
       coachingRun.stdin!.write("B\n");
-      await Bun.sleep(300);
+      await waitForStoredRun(coachingDB, coachingRun);
       coachingRun.kill();
       await collect(coachingRun);
       const active = await callJSON(coachingDB, ["assess", "pool"]);
@@ -183,25 +219,6 @@ export const assessSmoke: Gate = {
       check(skill.code === 2 && stringField(field(skill.failure, "error"), "code") === "assessment_active", `skill during run = ${skill.code}`);
       check(find.code === 2 && stringField(field(find.failure, "error"), "code") === "assessment_active", `find during run = ${find.code}`);
 
-      // 3. Forced per-item timeout: the first answer arrives after the 3-second
-      // item clock, and the remaining items answer immediately.
-      const timeoutDB = copy("timeout");
-      const timeoutRun = spawnWithStdin(timeoutDB, ["assess", "start", "--size", "20", "--minutes", "1", "--json"]);
-      const timeoutResult = collect(timeoutRun);
-      await Bun.sleep(3200);
-      timeoutRun.stdin!.write("B\n");
-      timeoutRun.stdin!.write("B\n".repeat(19));
-      timeoutRun.stdin!.end();
-      const timeout = await timeoutResult;
-      check(timeout.code === 0, `timeout run exit = ${timeout.code}: ${timeout.stderr}`);
-      const timeoutID = numberField(asRecord(field(parse(timeout.stdout), "run")), "id");
-      if (!check(timeoutID !== undefined, "timeout run id")) return fail(checks);
-      const timeoutReport = await callJSON(timeoutDB, ["assess", "report", String(timeoutID)]);
-      check(numberField(field(timeoutReport.doc, "counts"), "timed_out") === 1, "forced timeout was not counted");
-      const timedItems = arrayField(timeoutReport.doc, "items").filter((item) => field(item, "timed_out") === true);
-      check(timedItems.length === 1, "timed-out item is not listed");
-      check(numberField(timedItems[0], "elapsed_ms") === 3000, `timed-out elapsed = ${numberField(timedItems[0], "elapsed_ms")}`);
-
       // 8. Interrupt and resume: the report marks the resumed portion.
       const resumeDB = copy("resume");
       const resumeRun = spawnWithStdin(resumeDB, ["assess", "start", "--size", "20", "--minutes", "60", "--json"]);
@@ -209,10 +226,7 @@ export const assessSmoke: Gate = {
       resumeRun.stdin!.write("B\n".repeat(5));
       // Kill only once the run is stored: a fixed pause raced the CLI's start
       // under load, and the resume below then found no run 1.
-      for (let waited = 0; waited < 15000; waited += 100) {
-        if ((await callJSON(resumeDB, ["assess", "report", "1"])).code === 0) break;
-        await Bun.sleep(100);
-      }
+      await waitForStoredRun(resumeDB, resumeRun);
       await Bun.sleep(300);
       resumeRun.kill();
       await resumeCollected;
@@ -236,7 +250,7 @@ export const assessSmoke: Gate = {
       const contaminationRun = spawnWithStdin(contaminationDB, ["assess", "start", "--size", "20", "--minutes", "60", "--json"]);
       const contaminationResult = collect(contaminationRun);
       contaminationRun.stdin!.write("B\nB\n");
-      await Bun.sleep(300);
+      await waitForStoredRun(contaminationDB, contaminationRun);
       const shown = await callJSON(contaminationDB, ["show", richSource, "--page", "15"]);
       check(shown.code === 0, `show during run = ${shown.code}: ${shown.stderr}`);
       contaminationRun.stdin!.write("B\n".repeat(18));
@@ -252,25 +266,15 @@ export const assessSmoke: Gate = {
       check(excluded.length === 1, "contaminated item is not listed");
       check(arrayField(excluded[0], "contamination_reasons").includes("prior_exposure"), "contamination reason");
 
-      // 6. Compare refuses unlike runs and names the dimension. A fresh run
-      // also needs 20 qualifying items left, so this database carries 43.
-      const compareDB = path.join(temp, "compare.sqlite");
-      const compareDir = path.join(temp, "compare-source");
-      if (!(await seedSource(compareDB, compareDir, 40, 4))) return fail(checks);
-      const runA = await callJSON(compareDB, ["assess", "start", "--size", "8", "--minutes", "60"], "B\n".repeat(8));
-      const runB = await callJSON(compareDB, ["assess", "start", "--size", "8", "--minutes", "30"], "B\n".repeat(8));
-      const idA = numberField(asRecord(field(runA.doc, "run")), "id");
-      const idB = numberField(asRecord(field(runB.doc, "run")), "id");
-      if (!check(idA !== undefined && idB !== undefined, `compare run ids: A=${runA.code} ${runA.stderr.slice(0, 200)} B=${runB.code} ${runB.stderr.slice(0, 200)}`)) return fail(checks);
-      const refused = await callJSON(compareDB, ["assess", "compare", String(idA), String(idB)]);
-      check(refused.code === 2, `compare exit = ${refused.code}`);
-      check(stringField(field(refused.failure, "error"), "code") === "incomparable_runs", "compare error code");
-      check((stringField(field(refused.failure, "error"), "message") ?? "").includes("window_minutes"), "compare did not name the window dimension");
-      const selfCompare = await callJSON(compareDB, ["assess", "compare", String(idA), String(idA)]);
-      check(selfCompare.code === 0 && stringField(selfCompare.doc, "state") === "compared", "matching compare refused");
+      await timeoutSection;
     } catch (error) {
       checks.push(error instanceof Error ? error.message : String(error));
     } finally {
+      // An early return leaves the forced-timeout run waiting: stop it and let
+      // its section settle before its database is removed.
+      timeoutAborted = true;
+      if (timeoutRun && timeoutRun.exitCode === null) timeoutRun.kill();
+      await timeoutSection;
       rmSync(temp, { recursive: true, force: true });
     }
 

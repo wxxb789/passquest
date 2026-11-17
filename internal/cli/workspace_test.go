@@ -187,6 +187,7 @@ func countSpends(t *testing.T, db, surface string) int {
 }
 
 func TestWorkspaceTodayIsStructuredAndSpendsOncePerUnit(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	first, err := f.w.Today()
 	mustNoErr(t, err)
@@ -240,6 +241,7 @@ func TestWorkspaceTodayIsStructuredAndSpendsOncePerUnit(t *testing.T) {
 }
 
 func TestWorkspacePracticeRecordsElapsedAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q1"})
 	mustNoErr(t, err)
@@ -326,6 +328,7 @@ func TestWorkspacePracticeRecordsElapsedAndIsIdempotent(t *testing.T) {
 }
 
 func TestWorkspaceHintMakesTacticAttemptAssisted(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	guided, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeTactic, Tactic: "not-except-polarity"})
 	mustNoErr(t, err)
@@ -367,6 +370,7 @@ func TestWorkspaceHintMakesTacticAttemptAssisted(t *testing.T) {
 // The desktop opens the workspace without a session minter; answering must
 // still record the attempt under a fresh session.
 func TestWorkspaceAnswerWithDefaultSession(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, func(o *WorkspaceOptions) { o.NewSession = nil })
 	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample})
 	mustNoErr(t, err)
@@ -378,6 +382,7 @@ func TestWorkspaceAnswerWithDefaultSession(t *testing.T) {
 }
 
 func TestWorkspaceResumesPracticeAfterReopen(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	if none, err := f.w.ResumePractice(); err != nil || none != nil {
 		t.Fatalf("resume on empty = %+v, %v", none, err)
@@ -416,8 +421,10 @@ func TestWorkspaceResumesPracticeAfterReopen(t *testing.T) {
 }
 
 func TestWorkspaceAssessmentStepFlow(t *testing.T) {
-	f := newWSFixture(t, nil)
-	seedAssessmentSource(t, f.db, 22, 1)
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	pool, err := f.w.AssessmentPool()
 	mustNoErr(t, err)
 	if !pool.FloorMet || pool.QualifyingItems != 22 {
@@ -525,8 +532,10 @@ func TestWorkspaceAssessmentStepFlow(t *testing.T) {
 }
 
 func TestWorkspaceAssessmentWindowElapseAbandons(t *testing.T) {
-	f := newWSFixture(t, nil)
-	seedAssessmentSource(t, f.db, 22, 1)
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(2, 1)
 	mustNoErr(t, err)
 	f.clock.Advance(2 * time.Minute)
@@ -574,8 +583,10 @@ func TestWorkspaceAssessmentWindowElapseAbandons(t *testing.T) {
 // passed must close the run under the CLI loop's rule, so the item that was
 // on screen is recorded as timed out, not silently dropped from the report.
 func TestWorkspaceTodayAfterElapsedRunTimesOutPresentedItem(t *testing.T) {
-	f := newWSFixture(t, nil)
-	seedAssessmentSource(t, f.db, 22, 1)
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(2, 1)
 	mustNoErr(t, err)
 	if state.Item == nil || state.Item.Position != 0 {
@@ -602,6 +613,7 @@ func TestWorkspaceTodayAfterElapsedRunTimesOutPresentedItem(t *testing.T) {
 }
 
 func TestWorkspaceCredentialStoreLayering(t *testing.T) {
+	t.Parallel()
 	creds := newMemCredentials()
 	const storeKey = "store-key-0123456789-not-real"
 	const envKey = "env-key-9876543210-not-real"
@@ -701,6 +713,7 @@ func TestWorkspaceCredentialStoreLayering(t *testing.T) {
 }
 
 func TestWorkspaceCoachPreviewAndFailure(t *testing.T) {
+	t.Parallel()
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
 	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
 	registry := modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
@@ -759,6 +772,7 @@ func TestWorkspaceCoachPreviewAndFailure(t *testing.T) {
 }
 
 func TestWorkspaceNotesFlow(t *testing.T) {
+	t.Parallel()
 	anki := newFakeAnki()
 	f := newWSFixture(t, func(o *WorkspaceOptions) { o.AnkiTransport = anki })
 	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
@@ -835,6 +849,7 @@ func TestWorkspaceNotesFlow(t *testing.T) {
 }
 
 func TestWorkspaceBriefWithoutRun(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	status, err := f.w.BriefStatus()
 	mustNoErr(t, err)
@@ -844,8 +859,10 @@ func TestWorkspaceBriefWithoutRun(t *testing.T) {
 }
 
 func TestWorkspaceTodaySpendsNothingDuringAnActiveRun(t *testing.T) {
-	f := newWSFixture(t, nil)
-	seedAssessmentSource(t, f.db, 22, 1)
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(2, 30)
 	mustNoErr(t, err)
 	// The window renders Today on boot and on leaving a run; that must not
@@ -868,6 +885,7 @@ func TestWorkspaceTodaySpendsNothingDuringAnActiveRun(t *testing.T) {
 }
 
 func TestWorkspaceCanCountAgreesWithAdaptiveEvidence(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	first, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q1"})
 	mustNoErr(t, err)
@@ -892,6 +910,7 @@ func TestWorkspaceCanCountAgreesWithAdaptiveEvidence(t *testing.T) {
 }
 
 func TestWorkspaceEmptyPracticeKindIsSample(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	item, err := f.w.StartPractice(studio.PracticeRequest{})
 	mustNoErr(t, err)
@@ -903,6 +922,7 @@ func TestWorkspaceEmptyPracticeKindIsSample(t *testing.T) {
 // Q-0011-03: an environment variable still wins over a stored key, including
 // the custom provider's legacy fallback that provider.CredentialValue reads.
 func TestWorkspaceLegacyCustomCredentialBeatsStoredKey(t *testing.T) {
+	t.Parallel()
 	creds := newMemCredentials()
 	const storeKey = "store-key-0123456789-not-real"
 	const legacyKey = "legacy-key-9876543210-not-real"
@@ -927,6 +947,7 @@ func TestWorkspaceLegacyCustomCredentialBeatsStoredKey(t *testing.T) {
 }
 
 func TestLoopbackEndpointParsesTheHost(t *testing.T) {
+	t.Parallel()
 	for endpoint, want := range map[string]bool{
 		"http://127.0.0.1:11434/v1/chat/completions":        true,
 		"http://localhost:8080/v1/chat/completions":         true,
@@ -947,6 +968,7 @@ func TestLoopbackEndpointParsesTheHost(t *testing.T) {
 // note package's rendering of the same fields with the model stylesheet, in
 // Anki's DOM, for both sides and both themes.
 func TestWorkspaceNotePreviewIsTheDeckCard(t *testing.T) {
+	t.Parallel()
 	f := newWSFixture(t, nil)
 	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
 	mustNoErr(t, err)
@@ -993,6 +1015,7 @@ func TestWorkspaceNotePreviewIsTheDeckCard(t *testing.T) {
 // note propose --refine's; the suggestion is advisory and only accept applies
 // it.
 func TestWorkspaceRefineNote(t *testing.T) {
+	t.Parallel()
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
 	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
 	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
@@ -1117,6 +1140,7 @@ func TestWorkspaceRefineNote(t *testing.T) {
 // TestWorkspaceRefineNoteRespectsConsent: a private source's draft shows no
 // source text before the grant and the refinement refuses before any call.
 func TestWorkspaceRefineNoteRespectsConsent(t *testing.T) {
+	t.Parallel()
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
 	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
 	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
@@ -1171,6 +1195,7 @@ func TestWorkspaceRefineNoteRespectsConsent(t *testing.T) {
 // TestWorkspaceCoachHistory lists an attempt's calls with each advisory
 // reply's text and each failure's code, and nothing that was sent.
 func TestWorkspaceCoachHistory(t *testing.T) {
+	t.Parallel()
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
 	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
 	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
@@ -1233,8 +1258,10 @@ func TestWorkspaceCoachHistory(t *testing.T) {
 // shown and that reached an outcome. An active run shows none; an abandoned
 // run shows the answered item and not the pending one.
 func TestWorkspaceAssessmentReportWithholdsQuestions(t *testing.T) {
-	f := newWSFixture(t, nil)
-	seedAssessmentSource(t, f.db, 22, 1)
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(3, 30)
 	mustNoErr(t, err)
 	runID := state.Run.ID
@@ -1269,8 +1296,10 @@ func TestWorkspaceAssessmentReportWithholdsQuestions(t *testing.T) {
 // unseen again. When its content loads again at the same version, the report
 // must still not show its question, key or annotations.
 func TestWorkspaceAssessmentReportHidesUnseenUnavailableItems(t *testing.T) {
-	f := newWSFixture(t, nil)
-	seedAssessmentSource(t, f.db, 22, 1)
+	t.Parallel()
+	// Seed before the workspace opens: the seed is copied to a fresh path, and
+	// opening an already migrated database is a no-op.
+	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(2, 30)
 	mustNoErr(t, err)
 	runID := state.Run.ID
@@ -1414,6 +1443,7 @@ func TestWorkspaceRefinementDoesNotUndoAnAccept(t *testing.T) {
 }
 
 func TestWorkspaceRefinementStaysAdvisory(t *testing.T) {
+	t.Parallel()
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
 	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
 	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))

@@ -58,6 +58,7 @@ func appendTutorCall(t *testing.T, st *Store, call TutorCall) (TutorCall, error)
 }
 
 func TestMigrationFromVersionSixAddsTutorTables(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "v6.sqlite")
 	db := openSQLite(t, path)
 	for _, statements := range [][]string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6} {
@@ -138,6 +139,7 @@ func TestMigrationFromVersionSixAddsTutorTables(t *testing.T) {
 }
 
 func TestTutorConfigRoundTripAndUpdate(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "config.sqlite"))
 	if _, configured, err := st.TutorConfig(); err != nil || configured {
 		t.Fatalf("empty TutorConfig = configured %v, err %v", configured, err)
@@ -173,6 +175,7 @@ func TestTutorConfigRoundTripAndUpdate(t *testing.T) {
 }
 
 func TestTutorConsentLatestWinsAndIsAppendOnly(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "consent.sqlite"))
 	base := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
 	grant, err := st.AppendTutorConsent(TutorConsentEvent{SourceID: "src-a", Granted: true, Reviewer: "owner", At: base})
@@ -219,6 +222,7 @@ func TestTutorConsentLatestWinsAndIsAppendOnly(t *testing.T) {
 }
 
 func TestTutorCallRoundTripAndAppendOnly(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "calls.sqlite"))
 	first, err := appendTutorCall(t, st, sampleTutorCall())
 	if err != nil {
@@ -274,6 +278,7 @@ func TestTutorCallRoundTripAndAppendOnly(t *testing.T) {
 }
 
 func TestTutorCallCountSinceUsesTheDayBoundary(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "budget.sqlite"))
 	early := sampleTutorCall()
 	early.CreatedAt = time.Date(2026, 11, 9, 23, 59, 59, 0, time.UTC)
@@ -297,6 +302,7 @@ func TestTutorCallCountSinceUsesTheDayBoundary(t *testing.T) {
 }
 
 func TestTutorReservationCountsInFlightCallsAndFinalizeReplacesIt(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "reserve.sqlite"))
 	day := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
 	at := day.Add(9 * time.Hour)
@@ -388,6 +394,7 @@ func TestTutorReservationsAreAtomicAcrossHandles(t *testing.T) {
 }
 
 func TestFinalizeTutorCallRejectsMalformedRecords(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, filepath.Join(t.TempDir(), "invalid.sqlite"))
 	reservation, _, err := st.ReserveTutorCall("",
 		time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC), sampleTutorCall().CreatedAt, 200)

@@ -175,6 +175,7 @@ func importTutorSource(t *testing.T, db string, clock *stepClock) string {
 }
 
 func TestTutorConfigInspectSaveAndPartialUpdate(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{}
@@ -224,6 +225,7 @@ func TestTutorConfigInspectSaveAndPartialUpdate(t *testing.T) {
 }
 
 func TestTutorConfigWhitespaceCredentialIsAbsent(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{}
@@ -260,6 +262,7 @@ func TestTutorConfigWhitespaceCredentialIsAbsent(t *testing.T) {
 }
 
 func TestTutorConfigRejectsCredentialInEndpoint(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{}
@@ -274,6 +277,7 @@ func TestTutorConfigRejectsCredentialInEndpoint(t *testing.T) {
 }
 
 func TestTutorPreviewFirstParty(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{}
@@ -312,6 +316,7 @@ func TestTutorPreviewFirstParty(t *testing.T) {
 }
 
 func TestTutorAskSuccessPreservesAttemptsAndNeverStoresKey(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorResponse("Focus on the sentence that gives the Saturday closing time.")}
@@ -370,6 +375,7 @@ func TestTutorAskSuccessPreservesAttemptsAndNeverStoresKey(t *testing.T) {
 }
 
 func TestTutorCredentialIsRedactedFromProviderText(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorResponse("The provider echoed " + fakeTutorKey + " in its text.")}
@@ -394,6 +400,7 @@ func TestTutorCredentialIsRedactedFromProviderText(t *testing.T) {
 }
 
 func TestTutorCredentialIsRedactedFromProviderError(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorError("provider_error", "The provider echoed "+fakeTutorKey+" in its error.")}
@@ -421,6 +428,7 @@ func TestTutorCredentialIsRedactedFromProviderError(t *testing.T) {
 }
 
 func TestTutorPreV6AttemptFallsBackToCurrentTags(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{}
@@ -458,6 +466,7 @@ func TestTutorPreV6AttemptFallsBackToCurrentTags(t *testing.T) {
 }
 
 func TestTutorPrivateSourceConsentRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorResponse("Use the notice sentence as evidence.")}
@@ -535,6 +544,7 @@ func TestTutorPrivateSourceConsentRoundTrip(t *testing.T) {
 }
 
 func TestTutorConsentValidation(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{}
@@ -555,6 +565,7 @@ func TestTutorConsentValidation(t *testing.T) {
 }
 
 func TestTutorProviderFailureIsRecordedAndPracticeStillWorks(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorError("provider_error", "provider returned HTTP 500")}
@@ -588,6 +599,7 @@ func TestTutorProviderFailureIsRecordedAndPracticeStillWorks(t *testing.T) {
 }
 
 func TestTutorTransportFailureIsAgentUnavailable(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{err: errors.New("spawn node: not found")}
@@ -608,6 +620,7 @@ func TestTutorTransportFailureIsAgentUnavailable(t *testing.T) {
 }
 
 func TestTutorTerminalControlResponseIsRecorded(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorResponse("\x1b[31mnot advice\x1b[0m")}
@@ -628,6 +641,7 @@ func TestTutorTerminalControlResponseIsRecorded(t *testing.T) {
 }
 
 func TestTutorInvalidResponseIsRecorded(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: tutor.HostResponse{
@@ -650,6 +664,7 @@ func TestTutorInvalidResponseIsRecorded(t *testing.T) {
 }
 
 func TestTutorAskRequiresCredentialAndBudget(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorResponse("Short advice.")}
@@ -734,6 +749,7 @@ func TestTutorAskReservesTheBudgetBeforeContactingTheProvider(t *testing.T) {
 }
 
 func TestTutorUsageErrors(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{}
@@ -767,6 +783,7 @@ func TestTutorUsageErrors(t *testing.T) {
 }
 
 func TestTutorMissingNodeLeavesPracticeWorking(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	practiceSample(t, db, clock)
@@ -816,6 +833,7 @@ func TestTutorMissingNodeLeavesPracticeWorking(t *testing.T) {
 }
 
 func TestTutorGoldenDocuments(t *testing.T) {
+	t.Parallel()
 	t.Run("config", func(t *testing.T) {
 		db := newDB(t)
 		clock := &stepClock{base: goldenBase}
@@ -882,6 +900,7 @@ func TestTutorGoldenDocuments(t *testing.T) {
 }
 
 func TestTutorShowFailedCallHasNoSuggestion(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorError("auth_failed", "provider rejected the credential")}
@@ -905,6 +924,7 @@ func TestTutorShowFailedCallHasNoSuggestion(t *testing.T) {
 }
 
 func TestTutorHistoryLabelsWithheldPrivateSource(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorError("provider_error", "down")}
@@ -937,6 +957,7 @@ func tutorLine(t *testing.T, text, needle string) string {
 // the four reachable content states, including whether stored option texts
 // were included or withheld.
 func TestWriteTutorPrivacyContentSummary(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		context tutorContextView
@@ -1004,6 +1025,7 @@ func TestWriteTutorPrivacyContentSummary(t *testing.T) {
 }
 
 func TestTutorHumanPreviewMatchesItsChat(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{}
@@ -1043,6 +1065,7 @@ func TestTutorHumanPreviewMatchesItsChat(t *testing.T) {
 // credentials, advisory status, consent state and history provenance. The JSON
 // tests do not protect these strings.
 func TestTutorHumanOutputStatesAuthorityAndScope(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorResponse("Read the sentence with the closing time.")}
@@ -1140,6 +1163,7 @@ func TestTutorHumanOutputStatesAuthorityAndScope(t *testing.T) {
 }
 
 func TestTutorMissingNodeRecordsNoSharedPrivateText(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	sourceID := importTutorSource(t, db, clock)
@@ -1190,6 +1214,7 @@ func TestTutorMissingNodeRecordsNoSharedPrivateText(t *testing.T) {
 }
 
 func TestTutorDailyCountCountsFailures(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorError("provider_error", "down")}
@@ -1208,6 +1233,7 @@ func TestTutorDailyCountCountsFailures(t *testing.T) {
 }
 
 func TestTutorHistoryAttemptFilter(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorResponse("Advice.")}
@@ -1225,6 +1251,7 @@ func TestTutorHistoryAttemptFilter(t *testing.T) {
 }
 
 func TestTutorHistoryEmptyState(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	raw := mustTutorRun(t, db, clock, &fakeTutorTransport{}, true, "tutor", "history", "--json")
@@ -1238,6 +1265,7 @@ func TestTutorHistoryEmptyState(t *testing.T) {
 }
 
 func TestTutorStoreCallRecordShape(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	transport := &fakeTutorTransport{response: fixedTutorResponse("Advice.")}

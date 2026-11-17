@@ -23,7 +23,7 @@ import {
   writeStubRegistry,
 } from "../lib/desktop-page.ts";
 import type { Check, Launched, ProviderStub } from "../lib/desktop-page.ts";
-import { runGo } from "../lib/go.ts";
+import { buildCLI } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
 import type { RunResult } from "../lib/process.ts";
@@ -1237,7 +1237,7 @@ export const desktopSmoke: Gate = {
       if (!build.ok) return fail(build.failures);
       const registry = path.join(temp, "registry.json");
       writeStubRegistry(registry, provider.endpoint);
-      const shared: Shared = { ctx, binary, cli: path.join(temp, executable("passquest")), registry, provider };
+      const shared: Shared = { ctx, binary, cli: "", registry, provider };
       let ran = 0;
       for (const scenario of SCENARIOS) {
         const dir = path.join(temp, scenario.id);
@@ -1260,8 +1260,9 @@ export const desktopSmoke: Gate = {
           return fail(checks);
         }
         // Later scenarios cross-check the window through a second process.
-        const cliBuild = await runGo(ctx, ["build", "-o", shared.cli, "./cmd/passquest"]);
-        if (cliBuild.code !== 0) return fail([...checks, "go build ./cmd/passquest failed", tail(`${cliBuild.stdout}${cliBuild.stderr}`)]);
+        const cliBuild = await buildCLI(ctx);
+        if ("failure" in cliBuild) return fail([...checks, "go build ./cmd/passquest failed", tail(cliBuild.failure)]);
+        shared.cli = cliBuild.binary;
         const node = await run(executable("node"), ["--version"]);
         if (node.code !== 0) return fail([...checks, `node is required for the desktop smoke gate: ${node.stderr || node.stdout}`]);
       }

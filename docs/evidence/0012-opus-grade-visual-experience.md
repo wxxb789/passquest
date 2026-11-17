@@ -15,11 +15,11 @@ macOS was not run locally; CI is its only evidence.
 | Command | Result |
 |---|---|
 | `bun run gate` (final tree, Windows, landscape display) | 22 passed, 2 failed, 0 skipped. Failed: `agent smoke`, `provider smoke` — see below |
-| `go test` gate | 22 packages, 862 tests, 0 skipped (831 at goal 0011) |
+| `go test` gate | 22 packages, 863 tests, 0 skipped (831 at goal 0011); `internal/cli` and `internal/store` tests now run in parallel (Q-0012-10), test-name set unchanged, `-count=3` passed |
 | `desktop smoke` | 349 assertions over 12 scenarios (Windows); the 11-scenario version (328 assertions) also passed in WSL Ubuntu 24.04 under `xvfb-run` (327 there: the Windows-only Credential Manager check does not run) |
-| `desktop ux` | 168 audits over 21 states × 4 modes × 2 sizes, 18 probes, 66 focus checks, 0 allowed (Windows); the 13-state version also passed in WSL Ubuntu 24.04 under `xvfb-run` |
-| `harness self-test` | 46 cases (2 must pass) over 23/23 gates |
-| `note smoke` / `assess smoke` | 1367 / 275 assertions |
+| `desktop ux` | 168 audits over 21 states × 4 modes × 2 sizes, 19 probes (the new one plants the app's error bar, `page-error`), 66 focus checks, 0 allowed (Windows); the 13-state version also passed in WSL Ubuntu 24.04 under `xvfb-run` |
+| `harness self-test` | 46 cases (2 must pass) over 23/23 gates, four unit checks (the CI gate-group guard added) |
+| `note smoke` / `assess smoke` | 1367 / 125 assertions (275 before the pool-floor and compare sections moved to Go tests, Q-0012-07) |
 | `golden contract` | no golden changed against `cf66996` |
 | CI (ubuntu, macOS, Windows) | CI_RESULT |
 

@@ -2,7 +2,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { runGo } from "../lib/go.ts";
+import { buildCLI } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
 import { sseText, sseTool } from "../lib/sse.ts";
@@ -122,9 +122,8 @@ export const providerSmoke: Gate = {
   id: "provider-smoke",
   title: "provider smoke",
   async run(ctx: GateContext) {
-    const binaryName = executable("passquest");
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-provider-smoke-"));
-    const binary = path.join(temp, binaryName);
+    let binary = "";
     const checks: string[] = [];
     const seenOutputs: string[] = [];
     let assertions = 0;
@@ -221,10 +220,11 @@ export const providerSmoke: Gate = {
     };
 
     try {
-      const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
-      if (build.code !== 0) {
-        return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
+      const build = await buildCLI(ctx);
+      if ("failure" in build) {
+        return fail(["go build ./cmd/passquest failed", build.failure]);
       }
+      binary = build.binary;
 
       // 1. Registry drives list and separate axes.
       const db = path.join(temp, "main.sqlite");

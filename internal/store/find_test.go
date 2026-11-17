@@ -48,6 +48,7 @@ func findCandidateFixture(classification string) FindCandidate {
 }
 
 func TestMigrationFromVersionTwelveAddsFindTables(t *testing.T) {
+	t.Parallel()
 	path := t.TempDir() + "/v12.sqlite"
 	db := openSQLite(t, path)
 	for _, statements := range [][]string{
@@ -108,6 +109,7 @@ func TestMigrationFromVersionTwelveAddsFindTables(t *testing.T) {
 }
 
 func TestFindReservationEnforcesDailyQuota(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, t.TempDir()+"/find.sqlite")
 	day := "2026-11-11"
 	at := time.Date(2026, 11, 11, 8, 0, 0, 0, time.UTC)
@@ -134,6 +136,7 @@ func TestFindReservationEnforcesDailyQuota(t *testing.T) {
 }
 
 func TestAppendFindQueryStoresCandidatesAndReleasesReservation(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, t.TempDir()+"/find.sqlite")
 	day := "2026-11-11"
 	reservation, _, ok, err := st.ReserveFindQuery(day, 5, time.Date(2026, 11, 11, 8, 0, 0, 0, time.UTC))
@@ -186,6 +189,7 @@ func TestAppendFindQueryStoresCandidatesAndReleasesReservation(t *testing.T) {
 }
 
 func TestAppendFindQueryRejectsIncoherentRows(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, t.TempDir()+"/find.sqlite")
 	day := "2026-11-11"
 	cases := []struct {
@@ -224,6 +228,7 @@ func TestAppendFindQueryRejectsIncoherentRows(t *testing.T) {
 }
 
 func TestFindQueryUsageCountsReservationsAndDaysAreSeparate(t *testing.T) {
+	t.Parallel()
 	st := mustOpen(t, t.TempDir()+"/find.sqlite")
 	at := time.Date(2026, 11, 11, 8, 0, 0, 0, time.UTC)
 	if _, _, ok, err := st.ReserveFindQuery("2026-11-11", 5, at); err != nil || !ok {

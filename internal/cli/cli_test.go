@@ -26,7 +26,9 @@ func TestMain(m *testing.M) {
 	if os.Getenv("PASSQUEST_TEST_RUN_MAIN") == "1" {
 		os.Exit(Run(os.Args[1:], Options{}))
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	removeAssessmentSeeds()
+	os.Exit(code)
 }
 
 var goldenBase = time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
@@ -106,6 +108,7 @@ func seedFourAttempts(t *testing.T, db string, clock *stepClock) []answeredDoc {
 }
 
 func TestAwaitingJSONHidesTheKey(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	code, out, errOut := runCLI(t, db, clock, "", "practice", "--json", "--question", "q1")
@@ -172,6 +175,7 @@ func collectKeys(v any, out map[string]bool) {
 }
 
 func TestHumanPromptDoesNotRevealTheKey(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	code, out, errOut := runCLI(t, db, clock, "", "practice", "--question", "q1")
@@ -211,6 +215,7 @@ func TestHumanPromptDoesNotRevealTheKey(t *testing.T) {
 }
 
 func TestCorrectIncorrectSkipAndRepeat(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	docs := seedFourAttempts(t, db, clock)
@@ -299,6 +304,7 @@ func TestCorrectIncorrectSkipAndRepeat(t *testing.T) {
 }
 
 func TestHumanFeedbackAndReport(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -336,6 +342,7 @@ func TestHumanFeedbackAndReport(t *testing.T) {
 }
 
 func TestReportRepeatedIncorrectAndSkipped(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	for _, args := range [][]string{
@@ -366,6 +373,7 @@ func TestReportRepeatedIncorrectAndSkipped(t *testing.T) {
 }
 
 func TestInvalidInputRecordsNothing(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -406,6 +414,7 @@ func TestInvalidInputRecordsNothing(t *testing.T) {
 }
 
 func TestJSONUsageErrorsUseJSON(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	tests := []struct {
@@ -442,6 +451,7 @@ func TestJSONUsageErrorsUseJSON(t *testing.T) {
 }
 
 func TestInteractiveInput(t *testing.T) {
+	t.Parallel()
 	t.Run("lowercase answer", func(t *testing.T) {
 		db := newDB(t)
 		clock := &stepClock{base: goldenBase}
@@ -479,6 +489,7 @@ func TestInteractiveInput(t *testing.T) {
 }
 
 func TestInvalidInputThenEOF(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	out := mustRun(t, db, clock, "X", "practice", "--question", "q1")
@@ -498,6 +509,7 @@ func TestInvalidInputThenEOF(t *testing.T) {
 }
 
 func TestCLIFailurePaths(t *testing.T) {
+	t.Parallel()
 	newOptions := func(stdout, stderr *bytes.Buffer) Options {
 		return Options{
 			Stdout:     stdout,
@@ -571,6 +583,7 @@ func TestCLIFailurePaths(t *testing.T) {
 }
 
 func TestReportEmpty(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	doc := decodeReport(t, mustRun(t, db, clock, "", "report", "--json"))
@@ -596,6 +609,7 @@ func TestReportEmpty(t *testing.T) {
 }
 
 func TestDefaultQuestionSelection(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 
@@ -625,6 +639,7 @@ func TestDefaultQuestionSelection(t *testing.T) {
 }
 
 func TestDatabasePath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		flag string
@@ -646,6 +661,7 @@ func TestDatabasePath(t *testing.T) {
 }
 
 func TestReportKeepsHistoricalQuestionRows(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	st, err := store.Open(db)
 	if err != nil {
@@ -687,6 +703,7 @@ func TestReportKeepsHistoricalQuestionRows(t *testing.T) {
 }
 
 func TestReportScopesQuestionRowsByContent(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	st, err := store.Open(db)
 	if err != nil {
@@ -771,6 +788,7 @@ func TestReportScopesQuestionRowsByContent(t *testing.T) {
 }
 
 func TestVersionAndHelp(t *testing.T) {
+	t.Parallel()
 	var stdout, stderr bytes.Buffer
 	opt := Options{Stdout: &stdout, Stderr: &stderr, Now: time.Now, Getenv: func(string) string { return "" }}
 	if code := Run([]string{"version"}, opt); code != 0 {
@@ -791,6 +809,7 @@ func TestVersionAndHelp(t *testing.T) {
 }
 
 func TestProcessReopenSeesStoredEvidence(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	runChild := func(args ...string) (string, string) {
 		t.Helper()
@@ -828,12 +847,14 @@ func TestProcessReopenSeesStoredEvidence(t *testing.T) {
 }
 
 func TestGoldenAwaitingJSON(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	out := mustRun(t, db, &stepClock{base: goldenBase}, "", "practice", "--json", "--question", "q1")
 	checkGolden(t, filepath.Join("testdata", "awaiting.golden.json"), []byte(out))
 }
 
 func TestGoldenReportJSON(t *testing.T) {
+	t.Parallel()
 	db := newDB(t)
 	clock := &stepClock{base: goldenBase}
 	seedFourAttempts(t, db, clock)

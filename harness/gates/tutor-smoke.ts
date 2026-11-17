@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { runGo } from "../lib/go.ts";
+import { buildCLI } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
 import { fail, pass } from "../lib/types.ts";
@@ -54,9 +54,8 @@ export const tutorSmoke: Gate = {
   id: "tutor-smoke",
   title: "tutor smoke",
   async run(ctx: GateContext) {
-    const binaryName = process.platform === "win32" ? "passquest.exe" : "passquest";
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-tutor-smoke-"));
-    const binary = path.join(temp, binaryName);
+    let binary = "";
     const checks: string[] = [];
     const seenOutputs: string[] = [];
     let assertions = 0;
@@ -139,10 +138,11 @@ export const tutorSmoke: Gate = {
     const endpoint = `http://127.0.0.1:${server.port}/v1/chat/completions`;
 
     try {
-      const build = await runGo(ctx, ["build", "-o", binary, "./cmd/passquest"]);
-      if (build.code !== 0) {
-        return fail(["go build ./cmd/passquest failed", `${build.stdout}${build.stderr}`.trim()]);
+      const build = await buildCLI(ctx);
+      if ("failure" in build) {
+        return fail(["go build ./cmd/passquest failed", build.failure]);
       }
+      binary = build.binary;
 
       const host = async (request: object): Promise<unknown> => {
         const result = await run(executable("node"), [hostPath], {
