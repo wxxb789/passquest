@@ -1,14 +1,17 @@
 package cli
 
 import (
-	"encoding/json"
+	"context"
+	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/coach"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -20,37 +23,63 @@ const consentReviewer = "desktop"
 // messages with their hash and size, the source consent state and the budget
 // slot. Nothing is sent.
 func (w *Workspace) CoachPreview(attemptID int64, mode string) (studio.CoachPreview, error) {
-	var doc tutorPreviewDoc
-	if err := w.run("tutor", "preview", "--attempt", strconv.FormatInt(attemptID, 10), "--mode", mode).decode(&doc); err != nil {
+	if err := study.GuardPath(w.ports, "tutor"); err != nil {
+		return studio.CoachPreview{}, cliCoded(err)
+	}
+	parsed, err := coach.ParseMode(mode)
+	if err != nil {
+		return studio.CoachPreview{}, cliCoded(err)
+	}
+	var preview studio.CoachPreview
+	if err := w.codedCall(func(svc *study.Service) error {
+		prepared, err := coach.Preview(context.Background(), svc, coach.Request{AttemptID: attemptID, Mode: parsed})
+		if err != nil {
+			return err
+		}
+		preview = studioCoachPreviewOf(prepared)
+		return nil
+	}); err != nil {
 		return studio.CoachPreview{}, err
-	}
-	preview := studio.CoachPreview{
-		AttemptID:     doc.Attempt.ID,
-		Mode:          doc.Mode,
-		Provider:      doc.Provider.Provider,
-		Model:         doc.Provider.Model,
-		Endpoint:      doc.Provider.Endpoint,
-		External:      !loopbackEndpoint(doc.Provider.Endpoint),
-		Verified:      doc.Provider.Provider == "" || doc.Provider.TextChatAction == "",
-		TextChatState: doc.Provider.TextChatState,
-		Action:        doc.Provider.TextChatAction,
-		Credential:    studio.Credential{Env: doc.Provider.CredentialEnv, Present: doc.Provider.CredentialPresent},
-		Consent:       coachConsentOf(doc.Context),
-		Messages:      make([]studio.CoachMessage, 0, len(doc.Chat.Messages)),
-		MaxTokens:     doc.Chat.MaxTokens,
-		RequestSHA256: doc.RequestSHA256,
-		RequestBytes:  doc.RequestBytes,
-		Limits:        doc.Limits,
-	}
-	for _, message := range doc.Chat.Messages {
-		preview.Messages = append(preview.Messages, studio.CoachMessage{Role: message.Role, Content: message.Content})
 	}
 	budget, err := w.Budget()
 	if err != nil {
 		return studio.CoachPreview{}, err
 	}
-	preview.Budget = budgetSlot(budget, doc.Provider.Provider)
+	preview.Budget = budgetSlot(budget, preview.Provider)
 	return preview, nil
+}
+
+// studioCoachPreviewOf renders one resolved advisory request the way the
+// shimmed `tutor preview` document decoded: same fields, same rendering of the
+// text.chat evidence, and an empty message list stays an empty list.
+func studioCoachPreviewOf(prepared coach.Prepared) studio.CoachPreview {
+	preview := studio.CoachPreview{
+		AttemptID:     prepared.Attempt.ID,
+		Mode:          string(prepared.Mode),
+		Provider:      prepared.Config.Provider,
+		Model:         prepared.Config.Model,
+		Endpoint:      prepared.Config.Endpoint,
+		External:      !loopbackEndpoint(prepared.Config.Endpoint),
+		Credential:    studio.Credential{Env: prepared.CredentialEnv, Present: prepared.CredentialPresent},
+		Consent:       coachConsentOf(prepared.Preview.Context),
+		Messages:      make([]studio.CoachMessage, 0, len(prepared.Preview.Request.Chat.Messages)),
+		MaxTokens:     prepared.Preview.Request.Chat.MaxTokens,
+		RequestSHA256: prepared.Preview.RequestSHA,
+		RequestBytes:  prepared.Preview.RequestBytes,
+		Limits:        tutorLimits,
+	}
+	for _, message := range prepared.Preview.Request.Chat.Messages {
+		preview.Messages = append(preview.Messages, studio.CoachMessage{Role: message.Role, Content: message.Content})
+	}
+	if prepared.TextChat != nil {
+		state := capabilityViewOf(*prepared.TextChat)
+		preview.TextChatState = renderCapability(state)
+		if !state.Verified {
+			preview.Action = fmt.Sprintf("passquest model test %s/%s", strings.TrimSpace(prepared.Config.Provider), prepared.Config.Model)
+		}
+	}
+	preview.Verified = prepared.Config.Provider == "" || preview.Action == ""
+	return preview
 }
 
 // budgetSlot is the budget row a call to providerID draws on; the
@@ -76,15 +105,25 @@ func (w *Workspace) CoachHistory(attemptID int64) (studio.CoachHistory, error) {
 	if attemptID <= 0 {
 		return studio.CoachHistory{}, &studio.Error{Code: "invalid_input", Message: "an attempt id is required"}
 	}
-	var doc tutorHistoryDoc
-	if err := w.run("tutor", "history", "--attempt", strconv.FormatInt(attemptID, 10)).decode(&doc); err != nil {
+	if err := study.GuardPath(w.ports, "tutor"); err != nil {
+		return studio.CoachHistory{}, cliCoded(err)
+	}
+	var calls []store.TutorCall
+	if err := w.codedCall(func(svc *study.Service) error {
+		history, err := coach.History(context.Background(), svc, coach.HistoryQuery{AttemptID: attemptID})
+		if err != nil {
+			return err
+		}
+		calls = history.Calls
+		return nil
+	}); err != nil {
 		return studio.CoachHistory{}, err
 	}
-	history := studio.CoachHistory{AttemptID: attemptID, Calls: []studio.CoachCall{}, Limits: doc.Limits}
-	for _, call := range doc.Calls {
+	history := studio.CoachHistory{AttemptID: attemptID, Calls: []studio.CoachCall{}, Limits: tutorLimits}
+	for _, call := range calls {
 		item := studio.CoachCall{
 			CallID:           call.ID,
-			CreatedAt:        call.CreatedAt,
+			CreatedAt:        call.CreatedAt.UTC().Format(time.RFC3339Nano),
 			Mode:             call.Mode,
 			Provider:         call.Provider,
 			Model:            call.Model,
@@ -95,13 +134,23 @@ func (w *Workspace) CoachHistory(attemptID int64) (studio.CoachHistory, error) {
 			LatencyMS:        call.LatencyMS,
 		}
 		if call.Status == "ok" {
-			var shown tutorShowDoc
-			if err := w.run("tutor", "show", strconv.FormatInt(call.ID, 10)).decode(&shown); err != nil {
+			// Each reply's text is its own `tutor show`: its own guard and its
+			// own store open, exactly as the shimmed read had.
+			if err := study.GuardPath(w.ports, "tutor"); err != nil {
+				return studio.CoachHistory{}, cliCoded(err)
+			}
+			var shown coach.Shown
+			if err := w.codedCall(func(svc *study.Service) error {
+				read, err := coach.Call(context.Background(), svc, call.ID)
+				if err != nil {
+					return err
+				}
+				shown = read
+				return nil
+			}); err != nil {
 				return studio.CoachHistory{}, err
 			}
-			if shown.Suggestion != nil {
-				item.Text = shown.Suggestion.Text
-			}
+			item.Text = shown.Call.OutputText
 		} else {
 			item.State = "failed"
 			item.Failure = &studio.CoachFailure{Code: call.ErrorCode, Message: call.ErrorMessage, Action: codeActions[call.ErrorCode]}
@@ -119,32 +168,38 @@ func (w *Workspace) CoachAsk(attemptID int64, mode string) (studio.CoachReply, e
 	if err := w.requireNode(w.hostTutor); err != nil {
 		return studio.CoachReply{}, err
 	}
-	result := w.run("tutor", "ask", "--attempt", strconv.FormatInt(attemptID, 10), "--mode", mode)
-	if result.code == 0 {
-		var doc tutorAdvisoryDoc
-		if err := result.decode(&doc); err != nil {
-			return studio.CoachReply{}, err
-		}
-		reply := coachReplyOf(doc.Call, doc.Failover, doc.Limits)
+	if err := study.GuardPath(w.ports, "tutor"); err != nil {
+		return studio.CoachReply{}, cliCoded(err)
+	}
+	parsed, err := coach.ParseMode(mode)
+	if err != nil {
+		return studio.CoachReply{}, cliCoded(err)
+	}
+	var out coach.Outcome
+	if err := w.codedCall(func(svc *study.Service) error {
+		result, err := coach.Ask(context.Background(), svc, coach.Request{AttemptID: attemptID, Mode: parsed})
+		out = result
+		return err
+	}); err != nil {
+		return studio.CoachReply{}, err
+	}
+	if out.Failure == nil {
+		reply := coachReplyOf(out.Call, out.Failover, tutorLimits)
 		reply.State = "advisory"
-		reply.Text = doc.Suggestion.Text
+		reply.Text = out.Text
 		reply.Advisory = true
 		reply.VerifiedAnswer = false
-		reply.Consent = coachConsentOf(doc.Context)
+		reply.Consent = coachConsentOf(out.Prepared.Preview.Context)
 		return reply, nil
 	}
-	var failure tutorFailureDoc
-	if result.code == 3 && json.Unmarshal(result.stderr, &failure) == nil && failure.State == "failed" {
-		reply := coachReplyOf(failure.Call, failure.Failover, failure.Limits)
-		reply.State = "failed"
-		reply.Advisory = true
-		reply.Failure = &studio.CoachFailure{Code: failure.Error.Code, Message: failure.Error.Message, Action: failure.Action}
-		return reply, nil
-	}
-	return studio.CoachReply{}, result.err()
+	reply := coachReplyOf(out.Call, out.Failover, tutorLimits)
+	reply.State = "failed"
+	reply.Advisory = true
+	reply.Failure = &studio.CoachFailure{Code: out.Call.ErrorCode, Message: out.Call.ErrorMessage, Action: out.Failure.Action}
+	return reply, nil
 }
 
-func coachReplyOf(call tutorCallView, failover *tutorFailoverView, limits []string) studio.CoachReply {
+func coachReplyOf(call store.TutorCall, failover *coach.Failover, limits []string) studio.CoachReply {
 	reply := studio.CoachReply{
 		CallID:        call.ID,
 		AttemptID:     call.AttemptID,
@@ -172,7 +227,7 @@ func coachReplyOf(call tutorCallView, failover *tutorFailoverView, limits []stri
 	return reply
 }
 
-func coachConsentOf(context tutorContextView) studio.CoachConsent {
+func coachConsentOf(context tutor.Context) studio.CoachConsent {
 	return studio.CoachConsent{
 		PrivateSource:    context.PrivateSource,
 		SourceID:         context.SourceID,
@@ -210,27 +265,39 @@ func (w *Workspace) consent(command, sourceID, providerID string) (studio.Consen
 	if strings.TrimSpace(sourceID) == "" || strings.HasPrefix(sourceID, "-") {
 		return studio.Consent{}, &studio.Error{Code: "invalid_input", Message: "a source id is required"}
 	}
-	args := []string{"tutor", command, "--reviewer", consentReviewer}
-	if strings.TrimSpace(providerID) != "" {
-		args = append(args, "--provider="+providerID)
+	// The recorded decision was a locked run of `tutor consent|revoke`; the
+	// title read below is the separate locked store segment it had.
+	var consented coach.Consented
+	record := func() error {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if err := study.GuardPath(w.ports, "tutor"); err != nil {
+			return cliCoded(err)
+		}
+		return w.codedCall(func(svc *study.Service) error {
+			result, err := coach.Consent(context.Background(), svc, coach.ConsentChange{
+				SourceID: sourceID,
+				Provider: strings.TrimSpace(providerID),
+				Granted:  command == "consent",
+				Reviewer: consentReviewer,
+			})
+			consented = result
+			return err
+		})
 	}
-	args = append(args, sourceID)
-	w.mu.Lock()
-	result := w.run(args...)
-	w.mu.Unlock()
-	var doc tutorConsentDoc
-	if err := result.decode(&doc); err != nil {
+	if err := record(); err != nil {
 		return studio.Consent{}, err
 	}
+	event := consented.Event
 	consent := studio.Consent{
-		SourceID:   doc.SourceID,
-		Provider:   doc.Provider,
-		Granted:    doc.Granted,
-		RecordedAt: doc.RecordedAt,
-		Reviewer:   doc.Reviewer,
+		SourceID:   event.SourceID,
+		Provider:   event.Provider,
+		Granted:    event.Granted,
+		RecordedAt: event.At.UTC().Format(time.RFC3339Nano),
+		Reviewer:   event.Reviewer,
 	}
 	if err := w.withStore(func(st *store.Store) error {
-		src, err := st.SourceMeta(doc.SourceID)
+		src, err := st.SourceMeta(event.SourceID)
 		if err == nil {
 			consent.Title = src.Title
 		}
@@ -243,15 +310,39 @@ func (w *Workspace) consent(command, sourceID, providerID string) (studio.Consen
 
 // Consents is the consent ledger's latest decision per source and provider.
 func (w *Workspace) Consents() ([]studio.Consent, error) {
-	var doc tutorConsentsDoc
-	if err := w.run("tutor", "consents").decode(&doc); err != nil {
-		return nil, err
+	if err := study.GuardPath(w.ports, "tutor"); err != nil {
+		return nil, cliCoded(err)
 	}
 	consents := []studio.Consent{}
-	if err := convertJSON(doc.Sources, &consents); err != nil {
-		return nil, workspaceError(err)
+	if err := w.codedCall(func(svc *study.Service) error {
+		entries, err := coach.Consents(context.Background(), svc)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			consents = append(consents, studioConsentOf(entry))
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return consents, nil
+}
+
+// studioConsentOf renders one ledger row the way the shimmed `tutor consents`
+// document decoded: a row without a recorded decision carries no timestamp.
+func studioConsentOf(entry coach.ConsentEntry) studio.Consent {
+	consent := studio.Consent{
+		SourceID: entry.SourceID,
+		Provider: entry.Provider,
+		Title:    entry.Title,
+		Granted:  entry.Granted,
+		Reviewer: entry.Reviewer,
+	}
+	if entry.RecordedAt != nil {
+		consent.RecordedAt = entry.RecordedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return consent
 }
 
 // credentialProviders lists every registry provider id.
