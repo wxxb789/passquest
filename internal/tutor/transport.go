@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/wxxb789/passquest/internal/hostpaths"
 	"github.com/wxxb789/passquest/internal/hostproc"
 )
 
@@ -25,6 +26,9 @@ type HostTransport struct {
 	Environ    func() []string
 	Getwd      func() (string, error)
 	Executable func() (string, error)
+	// Resources is the packaged resources directory; empty in a source
+	// checkout, where the lookups stay exactly as they were.
+	Resources string
 }
 
 func (t HostTransport) getenv(key string) string {
@@ -84,63 +88,25 @@ func (t HostTransport) executable() (string, error) {
 	return os.Executable()
 }
 
-// ResolveHost finds agent/tutor-host.mjs. An explicit PASSQUEST_TUTOR_HOST is
-// authoritative; otherwise the working directory, then the executable's
-// directory, then its parent are checked. The returned path is absolute.
-func ResolveHost(getenv func(string) string, getwd func() (string, error), executablePath func() (string, error)) (string, error) {
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	if value := strings.TrimSpace(getenv(HostEnv)); value != "" {
-		path, err := filepath.Abs(value)
-		if err != nil {
-			return "", fmt.Errorf("tutor: resolve %s: %w", HostEnv, err)
-		}
-		if err := requireFile(path); err != nil {
-			return "", err
-		}
-		return path, nil
-	}
-
-	var candidates []string
-	if getwd == nil {
-		getwd = os.Getwd
-	}
-	if cwd, err := getwd(); err == nil {
-		candidates = append(candidates, filepath.Join(cwd, "agent", "tutor-host.mjs"))
-	}
-	if executablePath == nil {
-		executablePath = os.Executable
-	}
-	if exe, err := executablePath(); err == nil {
-		dir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(dir, "agent", "tutor-host.mjs"),
-			filepath.Join(dir, "..", "agent", "tutor-host.mjs"),
-		)
-	}
-	for _, candidate := range candidates {
-		absolute, err := filepath.Abs(candidate)
-		if err != nil {
-			continue
-		}
-		if requireFile(absolute) == nil {
-			return absolute, nil
-		}
-	}
-	return "", fmt.Errorf("tutor: agent host not found; set %s to agent/tutor-host.mjs (looked in %s)",
-		HostEnv, strings.Join(candidates, ", "))
+// tutorHost is how the shared resolver names the tutor host.
+var tutorHost = hostpaths.Host{
+	Prefix: "tutor",
+	Noun:   "agent host",
+	Env:    HostEnv,
+	Script: "tutor-host.mjs",
 }
 
-func requireFile(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("tutor: agent host %s: %w", path, err)
-	}
-	if info.IsDir() {
-		return fmt.Errorf("tutor: agent host %s is a directory", path)
-	}
-	return nil
+// ResolveHost finds agent/tutor-host.mjs. An explicit PASSQUEST_TUTOR_HOST is
+// authoritative; otherwise the packaged resources directory, the working
+// directory, then the executable's directory, then its parent are checked.
+// The returned path is absolute.
+func ResolveHost(getenv func(string) string, getwd func() (string, error), executablePath func() (string, error)) (string, error) {
+	return hostpaths.ResolveHost(tutorHost, hostpaths.Source{Getenv: getenv, Getwd: getwd, Executable: executablePath})
+}
+
+// source is the lookup input shared by host and Node resolution.
+func (t HostTransport) source() hostpaths.Source {
+	return hostpaths.Source{Getenv: t.Getenv, Getwd: t.Getwd, Executable: t.Executable, Resources: t.Resources}
 }
 
 // Call validates the request, runs the host with the inherited environment and
@@ -150,14 +116,11 @@ func (t HostTransport) Call(ctx context.Context, req HostRequest) (HostResponse,
 	if err := validateRequest(req); err != nil {
 		return HostResponse{}, err
 	}
-	host, err := ResolveHost(t.Getenv, t.Getwd, t.Executable)
+	host, err := hostpaths.ResolveHost(tutorHost, t.source())
 	if err != nil {
 		return HostResponse{}, err
 	}
-	node := strings.TrimSpace(t.getenv(NodeEnv))
-	if node == "" {
-		node = "node"
-	}
+	node := hostpaths.ResolveNode(t.source(), runtime.GOOS)
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return HostResponse{}, fmt.Errorf("tutor: encode host request: %w", err)

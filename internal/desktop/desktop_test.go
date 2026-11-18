@@ -194,6 +194,19 @@ func TestCallError(t *testing.T) {
 	}
 }
 
+// A development build keeps the checkout's lookups; a production build
+// passes MyGo's resources directory so the packaged hosts and runtime win.
+func TestResourceDirFollowsBuildMode(t *testing.T) {
+	t.Setenv("MYGO_ENV", "")
+	if got := resourceDir(); got != "" {
+		t.Fatalf("resourceDir in development = %q; want none", got)
+	}
+	t.Setenv("MYGO_ENV", "production")
+	if got := resourceDir(); got == "" {
+		t.Fatal("a production build passed no resources directory")
+	}
+}
+
 func openTestStudy(t *testing.T, events func(BriefEvent)) *Study {
 	t.Helper()
 	study := newStudy(events)

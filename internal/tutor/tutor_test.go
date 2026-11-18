@@ -752,6 +752,43 @@ func TestHostTransportRejectsBodyThatIsNotTheChat(t *testing.T) {
 	}
 }
 
+// The transport resolves the host through the shared resolver: the packaged
+// resources directory is a candidate before the source checkout's.
+func TestHostTransportLooksInPackagedResources(t *testing.T) {
+	resources := t.TempDir()
+	transport := HostTransport{
+		Getenv:  func(string) string { return "" },
+		Environ: func() []string { return nil },
+		Getwd:   func() (string, error) { return t.TempDir(), nil },
+		Executable: func() (string, error) {
+			return filepath.Join(t.TempDir(), "passquest"), nil
+		},
+		Resources: resources,
+	}
+	chat := Chat{
+		Model:     "m",
+		Messages:  []Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u"}},
+		MaxTokens: 350,
+	}
+	encoded, err := json.Marshal(chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := HostRequest{
+		ProtocolVersion:  ProtocolVersion,
+		Endpoint:         "https://example.com/v1",
+		TimeoutMS:        30000,
+		MaxResponseChars: 100,
+		Chat:             chat,
+		Body:             string(encoded),
+	}
+	_, err = transport.Call(context.Background(), req)
+	want := filepath.Join(resources, "agent", "tutor-host.mjs")
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v; want a lookup in %s", err, want)
+	}
+}
+
 func TestAgentUnavailableIsADocumentedCode(t *testing.T) {
 	if !ValidHostErrorCode("agent_unavailable") {
 		t.Fatal("agent_unavailable is not documented")

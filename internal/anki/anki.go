@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/wxxb789/passquest/internal/hostpaths"
 )
 
 // ProtocolVersion is the local host document version.
@@ -36,7 +38,7 @@ const MaxDeckNameChars = 200
 const (
 	EndpointEnv = "PASSQUEST_ANKI_ENDPOINT"
 	HostEnv     = "PASSQUEST_ANKI_HOST"
-	NodeEnv     = "PASSQUEST_NODE"
+	NodeEnv     = hostpaths.NodeEnv
 )
 
 // Action is one AnkiConnect request. Params is a JSON object.

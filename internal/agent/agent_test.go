@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -560,6 +561,29 @@ func TestHostResponseValidation(t *testing.T) {
 	response.State = "unknown"
 	if err := ValidateHostResponse(response, request); err == nil {
 		t.Fatal("unknown state accepted")
+	}
+}
+
+// The runner resolves the host through the shared resolver: the packaged
+// resources directory is a candidate before the source checkout's.
+func TestHostRunnerLooksInPackagedResources(t *testing.T) {
+	resources := t.TempDir()
+	runner := HostRunner{
+		Getenv:  func(string) string { return "" },
+		Environ: func() []string { return nil },
+		Getwd:   func() (string, error) { return t.TempDir(), nil },
+		Executable: func() (string, error) {
+			return filepath.Join(t.TempDir(), "passquest"), nil
+		},
+		Resources: resources,
+	}
+	request := HostRequest{ProtocolVersion: ProtocolVersion, Mode: ModeStatus,
+		RunID: "run-20261110T100000Z-aaaaaaaa", StorePath: filepath.Join(t.TempDir(), "store"), CredentialEnv: CredentialEnv}
+	_, err := runner.Run(context.Background(), request)
+	want := filepath.Join(resources, "agent", "durable-host.mjs")
+	var unavailable *UnavailableError
+	if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v; want an unavailable host naming %s", err, want)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -252,6 +253,32 @@ func TestHostTransportReportsAStartFailureAsUnsent(t *testing.T) {
 	}
 	if failure.Code != "search_unavailable" || failure.RequestSent {
 		t.Fatalf("failure = %+v; a process that never started cannot have posted", failure)
+	}
+}
+
+// The transport resolves the host through the shared resolver: the packaged
+// resources directory is a candidate before the source checkout's.
+func TestHostTransportLooksInPackagedResources(t *testing.T) {
+	resources := t.TempDir()
+	transport := HostTransport{
+		Getenv:  func(string) string { return "" },
+		Environ: func() []string { return nil },
+		Getwd:   func() (string, error) { return t.TempDir(), nil },
+		Executable: func() (string, error) {
+			return filepath.Join(t.TempDir(), "passquest"), nil
+		},
+		Resources: resources,
+	}
+	_, err := transport.Search(context.Background(), Request{
+		Endpoint:  "https://api.example.com/search",
+		Query:     "vocabulary in context",
+		Limit:     5,
+		TimeoutMS: 5000,
+	})
+	want := filepath.Join(resources, "agent", "search-host.mjs")
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) || !strings.Contains(providerErr.Message, want) {
+		t.Fatalf("error = %v; want a search_unavailable naming %s", err, want)
 	}
 }
 

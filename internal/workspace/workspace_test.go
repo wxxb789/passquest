@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -277,6 +278,36 @@ func TestWorkspaceCredentialStoreLayering(t *testing.T) {
 	noStore := newWSFixture(t, nil)
 	if _, err := noStore.w.SetCredential("openai", storeKey); studioCode(err) != "credential_store_unavailable" {
 		t.Fatalf("set without a store = %v", err)
+	}
+}
+
+// A Node runtime the package carries under resources/node is the runtime
+// Services and the host pre-check report, exactly as a PATH node is.
+func TestWorkspacePackagedNodeCountsAsPresent(t *testing.T) {
+	t.Parallel()
+	resources := t.TempDir()
+	name := filepath.Join("node", "bin", "node")
+	if runtime.GOOS == "windows" {
+		name = filepath.Join("node", "node.exe")
+	}
+	packaged := filepath.Join(resources, name)
+	if err := os.MkdirAll(filepath.Dir(packaged), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packaged, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f := newWSFixture(t, func(o *Options) { o.Resources = resources })
+	services, err := f.w.Services()
+	mustNoErr(t, err)
+	if !services.NodeAvailable || services.NodePath != packaged || services.NodeAction != "" {
+		t.Fatalf("services node = available %v, path %q, action %q; want the packaged node %s",
+			services.NodeAvailable, services.NodePath, services.NodeAction, packaged)
+	}
+	path, err := f.w.nodePath()
+	mustNoErr(t, err)
+	if path != packaged {
+		t.Fatalf("nodePath = %q; want the packaged node %s", path, packaged)
 	}
 }
 

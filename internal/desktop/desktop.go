@@ -149,6 +149,7 @@ func openStudy(study *Study, getenv func(string) string) {
 		err = study.open(workspace.Options{
 			DBPath:      where.Database,
 			Credentials: newCredentialStore(mygo.Secrets.Service(secretService(getenv))),
+			Resources:   resourceDir(),
 		})
 	}
 	if err != nil {
@@ -157,6 +158,20 @@ func openStudy(study *Study, getenv func(string) string) {
 		study.mu.Unlock()
 		log.Printf("passquest-desktop: open workspace: %v", err)
 	}
+}
+
+// resourceDir is the directory the packaged app carries its files in
+// (mygo.PathResources): the bundled agent hosts and Node runtime live there.
+// A development build keeps the source checkout's lookups, so it passes none.
+func resourceDir() string {
+	if mygo.IsDev() {
+		return ""
+	}
+	dir, err := mygo.App.Path(mygo.PathResources)
+	if err != nil {
+		return ""
+	}
+	return dir
 }
 
 // frontendFS is the page's file system, rooted at web/.
