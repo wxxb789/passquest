@@ -16,7 +16,8 @@ Today the desktop app runs only from a source checkout: a developer builds it wi
 ## Owner decisions (2026-11-18)
 
 - **Platforms:** Windows, macOS and Linux. A platform may be claimed as supported only if the project's CI builds its package and runs the installed package on that platform's runner. Anything else is described as untested.
-- **Packaging:** unsigned installers, with no certificates: a Windows installer (MSI or NSIS), a macOS `.dmg` and a Linux AppImage. The optional Node agent host is bundled. The "unknown publisher" or Gatekeeper warning each OS shows is documented, together with the learner's way past it.
+- **Packaging:** unsigned installers, with no certificates: a Windows installer (MSI or NSIS), a macOS `.dmg` and a Linux AppImage. The "unknown publisher" or Gatekeeper warning each OS shows is documented, together with the learner's way past it. MyGo, the desktop framework, builds the Windows NSIS installer and the `.dmg` but no AppImage, so the owner chose (2026-11-18) to build the AppImage with an extra tool. WebKitGTK and GTK stay system prerequisites of the Linux package, documented, because an AppImage cannot reasonably bundle them.
+- **Node runtime:** bundled (owner, 2026-11-18). Each package carries a pinned Node runtime with the agent hosts and their production dependencies, so coach, durable brief, search and Anki work right after install with no Node installed. `PASSQUEST_NODE` still overrides the bundled runtime.
 - **Upgrades:** forward-only data compatibility. A newer build opens a database written by an older build and keeps every accepted learner record and every Anki note identity. Downgrade is not supported. Goal 0015 adds the in-app update check; this goal does not contact the network.
 
 ## Done when
