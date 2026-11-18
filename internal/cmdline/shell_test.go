@@ -164,7 +164,7 @@ func TestDetectShell(t *testing.T) {
 			got, err := DetectShell(func(key string) string { return tt.env[key] }, tt.goos)
 			if tt.error {
 				if err == nil {
-					t.Fatalf("detectShell(%v) = %+v, want an error", tt.env, got)
+					t.Fatalf("DetectShell(%v) = %+v, want an error", tt.env, got)
 				}
 				if !strings.Contains(err.Error(), "must be sh, cmd or powershell") {
 					t.Fatalf("error = %v, want the accepted values", err)
@@ -172,10 +172,10 @@ func TestDetectShell(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("detectShell(%v) error: %v", tt.env, err)
+				t.Fatalf("DetectShell(%v) error: %v", tt.env, err)
 			}
 			if got != tt.want {
-				t.Fatalf("detectShell(%v) = %+v, want %+v", tt.env, got, tt.want)
+				t.Fatalf("DetectShell(%v) = %+v, want %+v", tt.env, got, tt.want)
 			}
 		})
 	}

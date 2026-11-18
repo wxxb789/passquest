@@ -183,8 +183,7 @@ type BudgetProvider struct {
 }
 
 // BudgetOf turns the day's recorded calls into the per-provider budget both
-// adapters render: today's cli.buildBudgetView, minus its store and clock
-// reads.
+// adapters render; the caller reads the store and the clock.
 func BudgetOf(cfg tutor.Config, registry provider.Registry, activeID string, counts []store.ProviderCallCount) Budget {
 	limit := cfg.DailyCalls
 	if limit <= 0 {

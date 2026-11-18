@@ -1,5 +1,5 @@
 // Package desktop is the Pass Quest window: a MyGo app whose page calls the
-// bound Study service, which forwards to one cli.Workspace. It opens no
+// bound Study service, which forwards to one workspace.Workspace. It opens no
 // network listener: MyGo's single-instance lock is a Unix-domain socket and
 // the smoke hook reads and writes files.
 package desktop

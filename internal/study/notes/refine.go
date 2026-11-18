@@ -170,9 +170,9 @@ func RefinePreview(ctx context.Context, s *study.Service, draftID int64) (Previe
 	return preview, nil
 }
 
-// refine is today's noteRefine: one explicit provider refinement that records
-// its exact request identity. It returns the updated draft and the recorded
-// row, or the recorded failure whose slot stays spent.
+// refine is one explicit provider refinement that records its exact request
+// identity. It returns the updated draft and the recorded row, or the
+// recorded failure whose slot stays spent.
 func refine(ctx context.Context, s *study.Service, draft store.NoteDraft, input note.Input, deterministic note.Draft) (store.NoteDraft, store.NoteRefinement, *Failure, error) {
 	st := kernel.Store(s)
 	p := kernel.P(s)

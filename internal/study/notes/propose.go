@@ -67,8 +67,8 @@ func Propose(ctx context.Context, s *study.Service, in ProposeInput) (Effective,
 	return EffectiveOf(refined, input, built), &Refinement{Draft: refined, Built: built, Record: record}, nil
 }
 
-// proposeInput is today's noteProposeInput: the derivation input for one
-// proposal, from a reviewed question or a recorded attempt.
+// proposeInput is the derivation input for one proposal, from a reviewed
+// question or a recorded attempt.
 func proposeInput(s *study.Service, attemptFlag int64, contentFlag, questionFlag, mark string) (note.Input, error) {
 	if contentFlag != "" {
 		loaded, err := loadContent(s, contentFlag, questionFlag)

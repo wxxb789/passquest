@@ -50,10 +50,12 @@ Binding project conventions. Read this before writing code for any goal.
 ```text
 cmd/passquest/          CLI entry point (the pre-0011 access surface)
 internal/<domain>/      Go packages by domain truth, not by layer
-internal/study/         orchestration per learner workflow (practice, recommend, models, coach,
-                        notes, outbox, assessment and the shared kernel), imported by both adapters
+internal/study/         orchestration per learner workflow (practice, recommend, models, coach, notes,
+                        outbox, assessment, brief and the shared kernel), imported by both adapters
 internal/cli/           Go adapter for the CLI surface
 internal/workspace/     Go adapter for the desktop Workspace surface
+internal/cmdline/       shared by both adapters: shell detection/quoting and the generated command
+                        builders
 agent/                  Node/TypeScript tutor, search, AnkiConnect and Pi Durable hosts (`docs/agent.md`)
 data/baselines/         owner-directed public parsed text (unreviewed; see its README)
 data/private/, data/local/, local-data/, .passquest/   never committed
@@ -68,7 +70,14 @@ testdata/               small, independently authored fixtures only
 
 `internal/study/<workflow>/` orchestrates one learner workflow each and is cut by workflow, not by
 layer; `internal/cli/` and `internal/workspace/` adapt that orchestration to the two delivery
-surfaces over one contract. They are the only layer-shaped packages in the tree.
+surfaces over one contract. They are the only layer-shaped packages in the tree; `internal/cmdline/`
+is the shell-quoting and command-builder package both adapters share. The local-only gate
+(`BOUNDARIES` in `harness/gates/local-only.ts`) enforces this layout over direct imports only:
+`internal/study` may not import `internal/cli`, `internal/studio`, `internal/workspace` or
+`internal/desktop`; `internal/workspace` and `internal/desktop` may not import `internal/cli`;
+`internal/cli` may not import `internal/workspace`, `internal/desktop` or `internal/studio`; and
+`internal/cmdline` may not import `internal/cli`, `internal/studio`, `internal/workspace`,
+`internal/desktop` or `internal/store`.
 
 ## Working rules
 

@@ -273,7 +273,7 @@ func (w *Workspace) withService(fn func(*study.Service) error) error {
 }
 
 // locked runs fn with a service opened for this call while holding the write
-// lock: the short local writes that used to run through w.run.
+// lock: the short local writes that need no host round trip.
 func (w *Workspace) locked(fn func(*study.Service) error) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()

@@ -50,9 +50,9 @@ type Settled struct {
 	Previous    int
 }
 
-// Settle writes or closes one draft: today's noteAcceptRecord and the
-// `note skip` write. The fields of an accept are recorded as the caller
-// resolved them, and the timestamp is one clock read.
+// Settle writes or closes one draft: the accept write and the `note skip`
+// write. The fields of an accept are recorded as the caller resolved them,
+// and the timestamp is one clock read.
 func Settle(ctx context.Context, s *study.Service, in SettleInput) (Settled, error) {
 	_ = ctx
 	st := kernel.Store(s)

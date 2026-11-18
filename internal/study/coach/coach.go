@@ -24,10 +24,10 @@ import (
 // when no provider is saved.
 const notConfigured = "no tutor provider is configured; run passquest tutor config --endpoint URL --model NAME"
 
-// ParseMode is today's tutorMode as a pure function: the mode a preview or call
-// works on, or the invalid_mode refusal. Both adapters call it after the group
-// guard and before study.Open, as the CLI does today, so an assessment guard
-// still wins over an invalid mode.
+// ParseMode is a pure function that gives the mode a preview or call works on,
+// or the invalid_mode refusal. Both adapters call it after the group guard and
+// before study.Open, as the CLI does today, so an assessment guard still wins
+// over an invalid mode.
 func ParseMode(raw string) (tutor.Mode, error) {
 	mode := tutor.Mode(strings.TrimSpace(raw))
 	if !mode.Valid() {
@@ -142,8 +142,8 @@ func Consent(ctx context.Context, s *study.Service, change ConsentChange) (Conse
 	return Consented{Event: event, SourceID: src.ID, Title: src.Title}, nil
 }
 
-// attemptRecord is today's tutorAttemptRecord: the stored attempt one entry
-// point works on, or a refusal naming the attempt.
+// attemptRecord is the stored attempt one entry point works on, or a refusal
+// naming the attempt.
 func attemptRecord(s *study.Service, id int64) (attempt.Attempt, error) {
 	records, err := kernel.Store(s).List()
 	if err != nil {

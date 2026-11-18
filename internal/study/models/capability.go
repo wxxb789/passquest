@@ -19,8 +19,8 @@ type CapabilityState struct {
 	Action      string
 }
 
-// CapabilityStateOf is today's cli.capabilityView: the state a capability is
-// shown as, from its declaration and the latest recorded verification.
+// CapabilityStateOf is the state a capability is shown as, from its
+// declaration and the latest recorded verification.
 func CapabilityStateOf(capability provider.Capability, declared bool, verifications map[provider.Capability]store.ProviderVerification) CapabilityState {
 	state := CapabilityState{ID: string(capability), Declared: declared, State: "unsupported"}
 	if !declared {

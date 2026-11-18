@@ -71,8 +71,7 @@ func Derive(ctx context.Context, s *study.Service, draft store.NoteDraft) (Effec
 	return draftOf(s, draft)
 }
 
-// locate is today's noteDraftFor: the draft one entry point works on, or a
-// refusal naming it.
+// locate is the draft one entry point works on, or a refusal naming it.
 func locate(s *study.Service, id int64) (store.NoteDraft, error) {
 	st := kernel.Store(s)
 	if id > 0 {
@@ -98,8 +97,7 @@ func locate(s *study.Service, id int64) (store.NoteDraft, error) {
 	return draft, nil
 }
 
-// draftOf is today's noteEffectiveFor: the effective content of an already
-// loaded draft.
+// draftOf is the effective content of an already loaded draft.
 func draftOf(s *study.Service, draft store.NoteDraft) (Effective, error) {
 	input, err := inputFromDraft(s, draft)
 	if err != nil {
@@ -112,8 +110,8 @@ func draftOf(s *study.Service, draft store.NoteDraft) (Effective, error) {
 	return EffectiveOf(draft, input, built), nil
 }
 
-// inputFromDraft is today's noteInputFromDraft: the derivation input the draft
-// points at, with the consent the note text needs.
+// inputFromDraft is the derivation input the draft points at, with the consent
+// the note text needs.
 func inputFromDraft(s *study.Service, draft store.NoteDraft) (note.Input, error) {
 	loaded, err := loadContent(s, draft.ContentID, draft.QuestionID)
 	if err != nil {

@@ -16,8 +16,8 @@ import (
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
-// storedConfig is today's cli.configuredTutor: the saved provider
-// configuration, filled with the defaults an empty database has not saved yet.
+// storedConfig is the saved provider configuration, filled with the defaults
+// an empty database has not saved yet.
 func storedConfig(s *study.Service) (tutor.Config, bool, error) {
 	cfg, configured, err := kernel.Store(s).TutorConfig()
 	if err != nil {

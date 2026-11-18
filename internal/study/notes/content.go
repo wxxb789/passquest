@@ -70,8 +70,8 @@ func embeddedContent(content exam.Exam, questionID string) loadedContent {
 	return loadedContent{Found: true, Content: content, Question: question}
 }
 
-// attemptRecord is today's tutorAttemptRecord: the stored attempt one entry
-// point works on, or a refusal naming the attempt.
+// attemptRecord is the stored attempt one entry point works on, or a refusal
+// naming the attempt.
 func attemptRecord(s *study.Service, id int64) (attempt.Attempt, error) {
 	records, err := kernel.Store(s).List()
 	if err != nil {
