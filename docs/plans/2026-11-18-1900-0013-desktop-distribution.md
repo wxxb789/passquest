@@ -87,7 +87,12 @@ The scan fails on any of:
 - a SQLite file;
 - the internal-only source marker;
 - the baseline text;
-- `.env` or any key pattern the secrets gate knows.
+- `.env`.
+
+These path and marker checks apply to every file. The credential patterns the secrets gate knows apply only to
+project-owned files (`agent/*.mjs`, the app binary's embedded web bundle, `mygo.json`-derived metadata), with the secrets gate's
+binary skip: third-party dependencies and the Node runtime legitimately contain documentation examples of credential-shaped
+strings, such as AWS's published example access key in the AWS SDK's type docs (scouted 2026-11-18), and the check must not be weakened per file to pass.
 
 ### P7 upgrade check
 

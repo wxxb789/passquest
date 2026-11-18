@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "gate": "bun run harness/gate.ts",
-    "desktop:build": "bun run harness/desktop-build.ts"
+    "desktop:build": "bun run harness/desktop-build.ts",
+    "package": "bun run harness/package.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",

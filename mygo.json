@@ -1,0 +1,13 @@
+{
+  "name": "Pass Quest",
+  "identifier": "com.github.wxxb789.passquest",
+  "version": "0.13.0",
+  "main": "./cmd/passquest-desktop",
+  "out": "build",
+  "icon": "build/package/icon.png",
+  "resources": ["build/package/agent", "build/package/node"],
+  "linux": {
+    "comment": "An AI-native, local-first exam coach",
+    "maintainer": "wxxb789"
+  }
+}
