@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"sort"
 
 	"github.com/wxxb789/passquest/internal/assess"
 	"github.com/wxxb789/passquest/internal/attempt"
@@ -39,6 +40,8 @@ type ReportQuery struct {
 // Reported carries what the requested read produced; Query decides which
 // fields are set.
 type Reported struct {
+	// Pool is QueryPool's pool. Its units are in content-id order, the order
+	// both pool documents show; poolOf's own order is Begin's selection order.
 	Pool       assess.Pool             // QueryPool
 	Identities []assess.SourceIdentity // QueryPool
 	Report     assess.Report           // QueryReport
@@ -68,6 +71,11 @@ func report(s *study.Service, q ReportQuery) (Reported, error) {
 		if err != nil {
 			return Reported{}, err
 		}
+		// The pool document order is defined once, here: content id. Begin
+		// reads poolOf directly and keeps the store order it selects in.
+		sort.SliceStable(pool.Units, func(i, j int) bool {
+			return pool.Units[i].ContentID < pool.Units[j].ContentID
+		})
 		return Reported{Pool: pool, Identities: identities}, nil
 	case QueryReport:
 		material, err := materialOf(s)
@@ -191,4 +199,13 @@ func reportFrom(s *study.Service, runID int64, material material) (assess.Report
 		}
 	}
 	return assess.BuildReport(run, items, attempts, events, material.spends, annotations), nil
+}
+
+// AnnotationsAvailable reports whether one item's stored annotations carry
+// anything to show: evidence, reasoning, a glossary entry or an option
+// explanation with text. The CLI's report item and the window's item value
+// both carry the verdict.
+func AnnotationsAvailable(a assess.Annotations) bool {
+	return a.Evidence != "" || a.Reasoning != "" || len(a.Glossary) > 0 ||
+		len(study.OptionReasoningTexts(a.OptionReasoning)) > 0
 }

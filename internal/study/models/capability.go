@@ -41,3 +41,55 @@ func CapabilityStateOf(capability provider.Capability, declared bool, verificati
 	}
 	return state
 }
+
+// CredentialState is the credential variable of one provider and whether the
+// environment supplies a value for it. An empty provider id is the
+// hand-configured legacy endpoint.
+func CredentialState(getenv func(string) string, providerID string) (string, bool) {
+	env, _, present := provider.CredentialValue(getenv, providerID)
+	return env, present
+}
+
+// AuthState is how a provider's authorization is shown: present means the
+// credential variable is set, no_credential never means unsupported.
+func AuthState(present bool) string {
+	if present {
+		return "present"
+	}
+	return "no_credential"
+}
+
+// capabilityStateText renders the state without the table's timestamp. The
+// model list and the previews both derive their wording from here.
+func capabilityStateText(c CapabilityState) string {
+	if c.ID == "" || !c.Declared {
+		return "unsupported"
+	}
+	switch c.State {
+	case "verified":
+		return "verified"
+	case "failed":
+		return "failed:" + c.FailureType
+	case "legacy":
+		return "legacy,unverified"
+	default:
+		return "declared,unverified"
+	}
+}
+
+// RenderCapability renders one capability's evidence as the sentence both
+// adapters show, with the model test timestamp when there is one.
+func RenderCapability(c CapabilityState) string {
+	state := capabilityStateText(c)
+	if (c.State == "verified" || c.State == "failed") && c.CheckedAt != "" {
+		return state + "@" + shortTimestamp(c.CheckedAt)
+	}
+	return state
+}
+
+func shortTimestamp(value string) string {
+	if len(value) >= 20 {
+		return value[:19] + "Z"
+	}
+	return value
+}

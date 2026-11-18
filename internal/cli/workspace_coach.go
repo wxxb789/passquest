@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/wxxb789/passquest/internal/studio"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/coach"
+	"github.com/wxxb789/passquest/internal/study/models"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -66,16 +66,16 @@ func studioCoachPreviewOf(prepared coach.Prepared) studio.CoachPreview {
 		MaxTokens:     prepared.Preview.Request.Chat.MaxTokens,
 		RequestSHA256: prepared.Preview.RequestSHA,
 		RequestBytes:  prepared.Preview.RequestBytes,
-		Limits:        tutorLimits,
+		Limits:        coach.Limits(),
 	}
 	for _, message := range prepared.Preview.Request.Chat.Messages {
 		preview.Messages = append(preview.Messages, studio.CoachMessage{Role: message.Role, Content: message.Content})
 	}
 	if prepared.TextChat != nil {
-		state := capabilityViewOf(*prepared.TextChat)
-		preview.TextChatState = renderCapability(state)
+		state := *prepared.TextChat
+		preview.TextChatState = models.RenderCapability(state)
 		if !state.Verified {
-			preview.Action = fmt.Sprintf("passquest model test %s/%s", strings.TrimSpace(prepared.Config.Provider), prepared.Config.Model)
+			preview.Action = models.TestCommand(prepared.Config.Provider, prepared.Config.Model)
 		}
 	}
 	preview.Verified = prepared.Config.Provider == "" || preview.Action == ""
@@ -119,7 +119,7 @@ func (w *Workspace) CoachHistory(attemptID int64) (studio.CoachHistory, error) {
 	}); err != nil {
 		return studio.CoachHistory{}, err
 	}
-	history := studio.CoachHistory{AttemptID: attemptID, Calls: []studio.CoachCall{}, Limits: tutorLimits}
+	history := studio.CoachHistory{AttemptID: attemptID, Calls: []studio.CoachCall{}, Limits: coach.Limits()}
 	for _, call := range calls {
 		item := studio.CoachCall{
 			CallID:           call.ID,
@@ -184,7 +184,7 @@ func (w *Workspace) CoachAsk(attemptID int64, mode string) (studio.CoachReply, e
 		return studio.CoachReply{}, err
 	}
 	if out.Failure == nil {
-		reply := coachReplyOf(out.Call, out.Failover, tutorLimits)
+		reply := coachReplyOf(out.Call, out.Failover, coach.Limits())
 		reply.State = "advisory"
 		reply.Text = out.Text
 		reply.Advisory = true
@@ -192,7 +192,7 @@ func (w *Workspace) CoachAsk(attemptID int64, mode string) (studio.CoachReply, e
 		reply.Consent = coachConsentOf(out.Prepared.Preview.Context)
 		return reply, nil
 	}
-	reply := coachReplyOf(out.Call, out.Failover, tutorLimits)
+	reply := coachReplyOf(out.Call, out.Failover, coach.Limits())
 	reply.State = "failed"
 	reply.Advisory = true
 	reply.Failure = &studio.CoachFailure{Code: out.Call.ErrorCode, Message: out.Call.ErrorMessage, Action: out.Failure.Action}

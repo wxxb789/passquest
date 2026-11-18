@@ -58,12 +58,6 @@ func deliveredGuidanceOf(run *practice.TacticRun) *guidanceView {
 	return guidanceFor(*run.Lesson)
 }
 
-// refuse builds the learner-fixable refusal the CLI prints as a usage error:
-// a study error whose code and message are the protocol's bytes.
-func refuse(code, format string, args ...any) *study.Error {
-	return study.Refuse(code, format, args...)
-}
-
 func runTactic(args []string, opt Options) int {
 	if len(args) == 0 {
 		return usageError(opt, jsonFlagRequested(args), "invalid_input", "tactic requires list, show or practice")

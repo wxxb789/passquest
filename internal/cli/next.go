@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/adaptive"
+	"github.com/wxxb789/passquest/internal/cmdline"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/recommend"
@@ -28,7 +29,7 @@ func runNext(args []string, opt Options) int {
 	// unusable override must refuse before anything is written, as it did when
 	// the check sat between the read and the spend. Its error is reported after
 	// the read, so a failing read keeps precedence.
-	shell, shellErr := detectShell(opt.Getenv, runtime.GOOS)
+	shell, shellErr := cmdline.DetectShell(opt.Getenv, runtime.GOOS)
 	spend := recommend.SpendRecommended
 	if shellErr != nil {
 		spend = recommend.SpendNone
@@ -48,7 +49,8 @@ func runNext(args []string, opt Options) int {
 	if shellErr != nil {
 		return usageError(opt, *jsonFlag, "invalid_input", shellErr.Error())
 	}
-	doc := nextDocOf(result.Adaptive, result.Unclassified, *sourceFlag, result.Catalog.SourceTaggedQuestions, nextDatabaseArgument(*dbFlag, opt), commandQuoter{shell: shell})
+	doc := nextDocOf(result.Adaptive, result.Unclassified, *sourceFlag, result.Catalog.SourceTaggedQuestions,
+		cmdline.NextDatabaseArgument(databasePath(*dbFlag, opt.Getenv), study.DefaultDatabasePath), commandQuoter{shell: shell})
 	if *jsonFlag {
 		return writeJSON(opt, doc)
 	}
@@ -62,19 +64,6 @@ func runNext(args []string, opt Options) int {
 func buildAdaptiveInput(st *store.Store, sourceID string) (adaptive.Input, []unclassifiedAttemptView, recommend.Catalog, error) {
 	input, unclassified, catalog, err := recommend.BuildInput(st, sourceID)
 	return input, unclassifiedViews(unclassified), catalog, err
-}
-
-// nextDatabaseArgument is the database selection repeated in generated
-// commands that open learner history. It is empty for the app-owned default
-// path, which a copied command resolves the same way, and non-empty for any
-// other path chosen with --db or PASSQUEST_DB so the command does not silently
-// fall back to the default store.
-func nextDatabaseArgument(flagValue string, opt Options) string {
-	selected := databasePath(flagValue, opt.Getenv)
-	if selected == defaultDatabasePath {
-		return ""
-	}
-	return selected
 }
 
 // unclassifiedViews renders the recommendation module's unclassified attempts
@@ -114,7 +103,7 @@ func nextDocOf(result adaptive.Result, unclassified []recommend.Unclassified, so
 		})
 	}
 	if result.Recommendation != nil {
-		command, followUp := nextCommands(result.Recommendation, dbArg, quoter)
+		command, followUp := cmdline.NextCommands(result.Recommendation, dbArg, quoter.renderer())
 		doc.Recommendation = &nextRecommendationView{
 			Action:             string(result.Recommendation.Action),
 			Skill:              skillRefOf(result.Recommendation.Skill),
@@ -126,56 +115,6 @@ func nextDocOf(result adaptive.Result, unclassified []recommend.Unclassified, so
 		}
 	}
 	return doc
-}
-
-func nextCommands(rec *adaptive.Recommendation, dbArg string, quoter commandQuoter) (string, string) {
-	primary, followUp := recommend.Targets(rec)
-	return targetCommand(primary, dbArg, quoter), targetCommand(followUp, dbArg, quoter)
-}
-
-// targetCommand renders one recommendation target as the command that reaches
-// it.
-func targetCommand(t *recommend.Target, dbArg string, quoter commandQuoter) string {
-	if t == nil {
-		return ""
-	}
-	switch t.Kind {
-	case recommend.TargetTactic:
-		return tacticPracticeCommand(t.SkillID, dbArg, quoter)
-	case recommend.TargetLesson:
-		return fmt.Sprintf("passquest skill show %s", t.SkillID)
-	default:
-		return skillPracticeCommand(t.SkillID, t.Material, t.IncludeQuestion, dbArg, quoter)
-	}
-}
-
-func tacticPracticeCommand(skillID, dbArg string, quoter commandQuoter) string {
-	command := fmt.Sprintf("passquest tactic practice %s --stage guided", skillID)
-	return withDatabaseArgument(command, dbArg, quoter)
-}
-
-// withDatabaseArgument appends the selected database to a command that opens
-// learner history. Callers do not use it for read-only lesson commands such as
-// `skill show`, which never open the store.
-func withDatabaseArgument(command, dbArg string, quoter commandQuoter) string {
-	if dbArg == "" {
-		return command
-	}
-	return command + " --db " + quoter.quote(dbArg)
-}
-
-func skillPracticeCommand(skillID string, material *adaptive.Material, includeQuestion bool, dbArg string, quoter commandQuoter) string {
-	parts := []string{"passquest", "skill", "practice", skillID}
-	if material != nil && material.SourceID != "" {
-		parts = append(parts, "--source", material.SourceID)
-	}
-	if material != nil && includeQuestion {
-		parts = append(parts, "--question", material.QuestionID)
-	}
-	if dbArg != "" {
-		parts = append(parts, "--db", quoter.quote(dbArg))
-	}
-	return strings.Join(parts, " ")
 }
 
 func skillRefOf(candidate adaptive.Skill) skillRefView {
@@ -304,15 +243,15 @@ func writeShellDisclosure(w io.Writer, doc nextDoc) {
 	}
 	from := "no shell detected, defaulted"
 	switch doc.Shell.DetectedFrom {
-	case shellOverrideEnv:
-		from = "from " + shellOverrideEnv
+	case cmdline.ShellOverrideEnv:
+		from = "from " + cmdline.ShellOverrideEnv
 	case "PSModulePath":
 		from = "from PSModulePath"
 	case "SHELL", "ComSpec":
 		from = fmt.Sprintf("from %s=%s", doc.Shell.DetectedFrom, doc.Shell.Detail)
 	}
 	fmt.Fprintf(w, "Quoted for %s (%s); override with %s.\n", doc.Shell.Family, from, doc.Shell.Override)
-	if doc.Shell.Family == string(shellFamilyCmd) && recommendationExpandsPercent(doc) {
+	if doc.Shell.Family == string(cmdline.ShellCmd) && recommendationExpandsPercent(doc) {
 		fmt.Fprintln(w, "Warning: cmd.exe expands %NAME% even inside double quotes, so this command is not copy-safe with that path; set PASSQUEST_SHELL=powershell or pass the path another way.")
 	}
 }

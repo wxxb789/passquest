@@ -7,12 +7,9 @@ import (
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/note"
 	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/notes"
 	"github.com/wxxb789/passquest/internal/study/outbox"
 )
-
-// defaultAnkiTimeoutSeconds is the AnkiConnect timeout of `note push` when
-// --timeout-seconds is not given; the desktop push uses the same value.
-const defaultAnkiTimeoutSeconds = 10
 
 // runNotePush sends every pending note to AnkiConnect and renders the push
 // report: exit 0 with the report on stdout, exit 3 with the same document on
@@ -23,7 +20,7 @@ func runNotePush(args []string, opt Options) int {
 	args = reorderArgs(args, map[string]bool{"endpoint": true, "timeout-seconds": true, "db": true})
 	fs := newFlagSet("note push", opt, wantJSON)
 	endpointFlag := fs.String("endpoint", "", "AnkiConnect endpoint (loopback only)")
-	timeoutFlag := fs.Int("timeout-seconds", defaultAnkiTimeoutSeconds, "AnkiConnect timeout in seconds (1-120)")
+	timeoutFlag := fs.Int("timeout-seconds", outbox.DefaultTimeoutSeconds, "AnkiConnect timeout in seconds (1-120)")
 	forceFlag := fs.Bool("force", false, "overwrite a card whose Anki fields changed")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
@@ -33,7 +30,7 @@ func runNotePush(args []string, opt Options) int {
 	if *timeoutFlag < 1 || *timeoutFlag > 120 {
 		return usageError(opt, *jsonFlag, "invalid_input", "--timeout-seconds must be 1..120")
 	}
-	endpoint, err := anki.NormalizeEndpoint(noteAnkiEndpoint(*endpointFlag, opt.Getenv))
+	endpoint, err := anki.NormalizeEndpoint(outbox.Endpoint(*endpointFlag, opt.Getenv))
 	if err != nil {
 		return usageError(opt, *jsonFlag, "invalid_endpoint", err.Error())
 	}
@@ -71,7 +68,7 @@ func runNotePush(args []string, opt Options) int {
 			DeckMismatch:   report.Counts.DeckMismatch,
 		},
 		Notes:  []notePushItemView{},
-		Limits: noteLimits,
+		Limits: notes.Limits(),
 	}
 	for _, item := range report.Items {
 		doc.Notes = append(doc.Notes, notePushItemView{

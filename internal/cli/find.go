@@ -15,10 +15,7 @@ import (
 	"github.com/wxxb789/passquest/internal/study"
 )
 
-const (
-	findDefaultMaxQueries    = 5
-	findDefaultMaxCandidates = 20
-)
+const findDefaultMaxCandidates = 20
 
 func runFind(args []string, opt Options) int {
 	if code := guardAssessmentCommand(args, opt, "find"); code != 0 {
@@ -38,7 +35,7 @@ func runFind(args []string, opt Options) int {
 func runFindQuery(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
 	fs := newFlagSet("find", opt, wantJSON)
-	maxQueriesFlag := fs.Int("max-queries", findDefaultMaxQueries, "daily query budget (1-100)")
+	maxQueriesFlag := fs.Int("max-queries", find.DefaultMaxQueries, "daily query budget (1-100)")
 	maxCandidatesFlag := fs.Int("max-candidates", findDefaultMaxCandidates, "candidate budget for this run (1-100)")
 	timeoutFlag := fs.Int("timeout-seconds", search.DefaultTimeoutMS/1000, "provider timeout in seconds (1-120)")
 	dbFlag := fs.String("db", "", "SQLite database path")
@@ -255,7 +252,7 @@ func runFindHistory(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
 	fs := newFlagSet("find history", opt, wantJSON)
 	limitFlag := fs.Int("limit", 20, "number of stored queries (1-100)")
-	maxQueriesFlag := fs.Int("max-queries", findDefaultMaxQueries, "daily query budget used for the remaining count (1-100)")
+	maxQueriesFlag := fs.Int("max-queries", find.DefaultMaxQueries, "daily query budget used for the remaining count (1-100)")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
@@ -329,7 +326,7 @@ func runFindShow(args []string, opt Options) int {
 		State:         "query",
 		Query:         findQueryViewOf(query),
 		Candidates:    findCandidateViewsOf(candidates),
-		Budget:        findBudgetViewOf(day, findDefaultMaxQueries, findDefaultMaxCandidates, usage.Used(), 0),
+		Budget:        findBudgetViewOf(day, find.DefaultMaxQueries, findDefaultMaxCandidates, usage.Used(), 0),
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)

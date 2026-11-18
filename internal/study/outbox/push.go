@@ -18,6 +18,22 @@ import (
 	"github.com/wxxb789/passquest/internal/study/internal/kernel"
 )
 
+// DefaultTimeoutSeconds is the AnkiConnect timeout of a push when nothing
+// names one: the CLI's --timeout-seconds default and the window's push.
+const DefaultTimeoutSeconds = 10
+
+// Endpoint resolves the AnkiConnect endpoint a push (or the settings read)
+// uses: the flag, then the environment, then the loopback default.
+func Endpoint(flagValue string, getenv func(string) string) string {
+	if strings.TrimSpace(flagValue) != "" {
+		return flagValue
+	}
+	if value := strings.TrimSpace(getenv(anki.EndpointEnv)); value != "" {
+		return value
+	}
+	return anki.DefaultEndpoint
+}
+
 // pushWork is one pending note's work item: the stored outbox entry, the local
 // note row and the fields this push writes for it. Every classified outcome is
 // recorded through persist.

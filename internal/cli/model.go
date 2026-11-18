@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/wxxb789/passquest/internal/provider"
@@ -33,11 +32,6 @@ func runModel(args []string, opt Options) int {
 	}
 }
 
-func credentialState(opt Options, providerID string) (string, bool) {
-	env, _, present := provider.CredentialValue(opt.Getenv, providerID)
-	return env, present
-}
-
 func runModelList(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
 	fs := newFlagSet("model list", opt, wantJSON)
@@ -61,57 +55,41 @@ func runModelList(args []string, opt Options) int {
 	if listing.ActiveErr != nil {
 		return usageError(opt, *jsonFlag, "unknown_model", listing.ActiveErr.Error())
 	}
-	activeID := strings.TrimSpace(listing.Active.Provider)
+	selection := models.SelectionOf(listing)
 	doc := modelListDoc{
 		SchemaVersion:   ProtocolVersion,
 		State:           "models",
 		RegistryVersion: listing.Registry.Version,
 		RegistrySource:  listing.Source,
 		Active: modelActiveView{
-			Configured: listing.Configured && activeID != "",
-			Provider:   activeID,
-			Model:      listing.Active.Model,
-			Endpoint:   listing.Active.Endpoint,
+			Configured: selection.Configured,
+			Provider:   selection.Provider,
+			Model:      selection.Model,
+			Endpoint:   selection.Endpoint,
+			Legacy:     selection.Legacy,
 		},
-		Limits: modelLimits,
+		Limits: models.Limits(),
 	}
-	for _, p := range listing.Registry.Providers {
-		env, present := credentialState(opt, p.ID)
+	for _, p := range models.ProvidersOf(listing) {
+		env, present := models.CredentialState(opt.Getenv, p.CredentialID)
 		item := modelProviderView{
 			ID:            p.ID,
 			Name:          p.Name,
 			EndpointShape: p.EndpointShape,
 			CredentialEnv: env,
-			Auth:          authState(present),
+			Auth:          models.AuthState(present),
 			Custom:        p.Custom,
-			Active:        activeID == p.ID,
+			Active:        p.Active,
+			Models:        make([]modelView, 0, len(p.Models)),
 		}
-		item.Models = modelViewsOf(listing, p.ID, p, activeID == p.ID)
-		if p.Custom && activeID == p.ID {
-			custom := provider.Model{ID: listing.Active.Model, Capabilities: []provider.Capability{provider.CapTextChat}}
-			item.Models = modelViewsOf(listing, p.ID, provider.Provider{Models: []provider.Model{custom}}, true)
+		for _, m := range p.Models {
+			model := modelView{ID: m.ID, Label: m.Label, Default: m.Default, Active: m.Active}
+			for _, c := range m.Capabilities {
+				model.Capabilities = append(model.Capabilities, capabilityViewOf(c))
+			}
+			item.Models = append(item.Models, model)
 		}
 		doc.Providers = append(doc.Providers, item)
-	}
-	if listing.Configured && activeID == "" {
-		env, present := credentialState(opt, "")
-		doc.Active.Legacy = true
-		doc.Providers = append(doc.Providers, modelProviderView{
-			ID:            "legacy",
-			Name:          "Manual tutor configuration",
-			EndpointShape: provider.EndpointShape,
-			CredentialEnv: env,
-			Auth:          authState(present),
-			Active:        true,
-			Models: []modelView{{
-				ID:     listing.Active.Model,
-				Label:  "hand-configured endpoint",
-				Active: true,
-				Capabilities: []modelCapabilityView{
-					{ID: string(provider.CapTextChat), Declared: true, State: "legacy"},
-				},
-			}},
-		})
 	}
 	doc.Budget = budgetViewOf(listing.Budget)
 	if *jsonFlag {
@@ -158,8 +136,8 @@ func runModelUse(args []string, opt Options) int {
 		CredentialEnv:     used.CredentialEnv,
 		CredentialPresent: used.CredentialPresent,
 		TextChat:          capabilityViewOf(used.TextChat),
-		Auth:              authState(used.CredentialPresent),
-		Limits:            modelLimits,
+		Auth:              models.AuthState(used.CredentialPresent),
+		Limits:            models.Limits(),
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)
@@ -204,7 +182,7 @@ func runModelTest(args []string, opt Options) int {
 		HTTPStatus:    tested.HTTPStatus,
 		RequestSHA256: tested.SHA,
 		RequestBytes:  tested.Bytes,
-		Limits:        modelLimits,
+		Limits:        models.Limits(),
 	}
 	if tested.Failure == nil {
 		doc.State = "verified"
@@ -257,7 +235,7 @@ func runModelBudget(args []string, opt Options) int {
 		RegistryVersion: listing.Registry.Version,
 		RegistrySource:  listing.Source,
 		Budget:          budgetViewOf(listing.Budget),
-		Limits:          modelLimits,
+		Limits:          models.Limits(),
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)

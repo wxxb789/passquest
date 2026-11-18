@@ -11,13 +11,6 @@ import (
 	"github.com/wxxb789/passquest/internal/study/notes"
 )
 
-var noteLimits = []string{
-	"A note is a study aid derived from recorded evidence, not a verified answer key or grade.",
-	"Anki owns the card and its review scheduling after import or push.",
-	"AnkiWeb and mobile synchronization are your own manual actions in Anki; Pass Quest never contacts AnkiWeb or a phone.",
-	"A real Anki Desktop write is unverified on this machine; the adapter is proven against a loopback AnkiConnect stub.",
-}
-
 const noteSyncStatement = "AnkiWeb and mobile synchronization are your own manual actions in Anki. Pass Quest never contacts AnkiWeb or a phone."
 
 type noteTargetView struct {
@@ -275,9 +268,7 @@ func noteViewOf(n store.Note) noteView {
 		NoteID:         n.AnkiNoteID,
 		PushedRevision: n.AnkiPushedRevision,
 		Deck:           n.AnkiDeck,
-	}
-	if n.AnkiDeck != "" && n.AnkiDeck != note.Deck {
-		anki.DeckExpected = note.Deck
+		DeckExpected:   notes.DeckExpected(n),
 	}
 	return noteView{
 		NoteID:     n.NoteID,

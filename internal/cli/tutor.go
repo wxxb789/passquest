@@ -12,6 +12,7 @@ import (
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/coach"
+	"github.com/wxxb789/passquest/internal/study/models"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -81,14 +82,13 @@ func runTutorPreview(args []string, opt Options) int {
 		Chat:          prepared.Preview.Request.Chat,
 		RequestSHA256: prepared.Preview.RequestSHA,
 		RequestBytes:  prepared.Preview.RequestBytes,
-		Limits:        tutorLimits,
+		Limits:        coach.Limits(),
 	}
 	if prepared.TextChat != nil {
-		state := capabilityViewOf(*prepared.TextChat)
-		doc.Provider.TextChatState = renderCapability(state)
+		state := *prepared.TextChat
+		doc.Provider.TextChatState = models.RenderCapability(state)
 		if !state.Verified {
-			doc.Provider.TextChatAction = fmt.Sprintf("passquest model test %s/%s",
-				strings.TrimSpace(prepared.Config.Provider), prepared.Config.Model)
+			doc.Provider.TextChatAction = models.TestCommand(prepared.Config.Provider, prepared.Config.Model)
 		}
 	}
 	if *jsonFlag {
@@ -214,7 +214,7 @@ func runTutorAsk(args []string, opt Options) int {
 			Suggestion:    tutorSuggestionView{Text: out.Text, Advisory: true, VerifiedAnswer: false},
 			Context:       tutorContextViewOf(out.Prepared.Preview.Context),
 			Failover:      failover,
-			Limits:        tutorLimits,
+			Limits:        coach.Limits(),
 		}
 		if *jsonFlag {
 			return writeJSON(opt, doc)
@@ -229,7 +229,7 @@ func runTutorAsk(args []string, opt Options) int {
 		Action:        out.Failure.Action,
 		Call:          tutorCallViewOf(out.Call, false),
 		Failover:      failover,
-		Limits:        tutorLimits,
+		Limits:        coach.Limits(),
 	}
 	if *jsonFlag {
 		_ = writeJSONTo(opt.Stderr, doc)
@@ -317,7 +317,7 @@ func runTutorHistory(args []string, opt Options) int {
 		State:         "history",
 		Summary:       summary,
 		Calls:         make([]tutorCallView, 0, len(history.Calls)),
-		Limits:        tutorLimits,
+		Limits:        coach.Limits(),
 	}
 	for _, call := range history.Calls {
 		doc.Summary.Calls++
@@ -421,7 +421,7 @@ func runTutorShow(args []string, opt Options) int {
 		SchemaVersion: ProtocolVersion,
 		State:         "advisory",
 		Call:          tutorCallViewOf(shown.Call, true),
-		Limits:        tutorLimits,
+		Limits:        coach.Limits(),
 	}
 	if shown.Call.Status == "error" {
 		doc.State = "failed"
@@ -494,7 +494,7 @@ func runTutorConsentCommand(args []string, opt Options, command string, granted 
 		Granted:       event.Granted,
 		RecordedAt:    event.At.UTC().Format(time.RFC3339Nano),
 		Reviewer:      event.Reviewer,
-		Limits:        tutorLimits,
+		Limits:        coach.Limits(),
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)
@@ -539,7 +539,7 @@ func runTutorConsents(args []string, opt Options) int {
 		SchemaVersion: ProtocolVersion,
 		State:         "consents",
 		Sources:       make([]tutorConsentSourceView, 0, len(entries)),
-		Limits:        tutorLimits,
+		Limits:        coach.Limits(),
 	}
 	for _, entry := range entries {
 		item := tutorConsentSourceView{

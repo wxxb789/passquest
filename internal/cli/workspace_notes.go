@@ -3,14 +3,15 @@ package cli
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/note"
+	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
 	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/models"
 	"github.com/wxxb789/passquest/internal/study/notes"
 	"github.com/wxxb789/passquest/internal/study/outbox"
 )
@@ -49,7 +50,7 @@ func (w *Workspace) ProposeNote(request studio.NoteRequest) (studio.NoteDraft, e
 	if err != nil {
 		return studio.NoteDraft{}, err
 	}
-	return studioNoteDraft(noteDraftViewOf(effective), notePlainViewOf(effective), effective.Advisory, noteLimits)
+	return windowStudioNoteDraft(effective), nil
 }
 
 // OpenNoteDraft is the draft `note preview` resolves without --draft (the
@@ -77,10 +78,7 @@ func (w *Workspace) OpenNoteDraft() (*studio.NoteDraft, error) {
 			return err
 		}
 		view := noteWindowOf(effective)
-		restored, err := studioNoteDraft(noteDraftViewOf(view.base), notePlainViewOf(view.base), view.base.Advisory, noteLimits)
-		if err != nil {
-			return err
-		}
+		restored := windowStudioNoteDraft(view.base)
 		if view.suggestion != nil {
 			record, err := notes.RefinementRecord(context.Background(), svc, draft.RefinementID)
 			if err != nil {
@@ -136,28 +134,35 @@ func studioNoteRefinement(draftID int64, record store.NoteRefinement, suggestion
 		RequestSHA256: record.RequestSHA256,
 		RequestBytes:  record.RequestBytes,
 		LatencyMS:     record.LatencyMS,
-		Limits:        noteLimits,
+		Limits:        notes.Limits(),
 	}
 }
 
-func studioNoteDraft(view noteDraftView, plain notePlainView, advisory bool, limits []string) (studio.NoteDraft, error) {
-	draft := studio.NoteDraft{
-		ID:             view.ID,
-		Origin:         view.Origin,
-		Restricted:     view.Restricted,
-		ConsentGranted: view.ConsentGranted,
-		Withheld:       append([]string{}, view.Withheld...),
-		Unanswered:     view.Unanswered,
-		TacticID:       view.TacticID,
-		Fields:         studio.NoteFields{Front: plain.Front, Back: plain.Back, Tactic: plain.Tactic},
-		Source:         plain.Source,
-		Advisory:       advisory,
-		Limits:         limits,
+// windowStudioNoteDraft maps one derived draft onto the window's value: the
+// draft's own fields, the captions the proposal carries and the target the
+// attempt or mark names.
+func windowStudioNoteDraft(e notes.Effective) studio.NoteDraft {
+	return studio.NoteDraft{
+		ID: e.Draft.ID,
+		Target: studio.NoteTarget{
+			ContentID:  e.Draft.ContentID,
+			QuestionID: e.Draft.QuestionID,
+			SourceID:   e.Draft.SourceID,
+			Page:       e.Draft.Page,
+			AttemptID:  e.Draft.AttemptID,
+			Mark:       e.Draft.Mark,
+		},
+		Origin:         string(e.Origin),
+		Restricted:     e.Built.Restricted,
+		ConsentGranted: e.Built.ConsentGranted,
+		Withheld:       append([]string{}, e.Built.Withheld...),
+		Unanswered:     e.Built.Unanswered,
+		TacticID:       e.Built.TacticID,
+		Fields:         studio.NoteFields{Front: e.Front, Back: e.Back, Tactic: e.Tactic},
+		Source:         e.Built.SourceLabel,
+		Advisory:       e.Advisory,
+		Limits:         notes.Limits(),
 	}
-	if err := convertJSON(view.Target, &draft.Target); err != nil {
-		return studio.NoteDraft{}, workspaceError(err)
-	}
-	return draft, nil
 }
 
 // PreviewNote renders the draft with the real note model. Non-empty fields
@@ -246,14 +251,14 @@ func studioNoteRefinePreviewOf(resolved notes.Preview) studio.NoteRefinePreview 
 		Unanswered: resolved.Unanswered,
 		Messages:   []studio.CoachMessage{},
 		MaxTokens:  resolved.MaxTokens,
-		Limits:     noteLimits,
+		Limits:     notes.Limits(),
 	}
 	if resolved.HasCapability {
-		state := capabilityViewOf(resolved.Capability)
-		preview.TextChatState = renderCapability(state)
+		state := resolved.Capability
+		preview.TextChatState = models.RenderCapability(state)
 		preview.Verified = state.Verified
 		if !state.Verified {
-			preview.Action = fmt.Sprintf("passquest model test %s/%s", resolved.ProviderID, resolved.Config.Model)
+			preview.Action = models.TestCommand(resolved.ProviderID, resolved.Config.Model)
 		}
 	}
 	consent := studio.CoachConsent{
@@ -398,7 +403,7 @@ func (w *Workspace) AcceptNote(draftID int64, fields studio.NoteFields) (studio.
 	}
 	return studio.NoteAccept{
 		State:            settled.State,
-		Note:             studioNote(noteViewOf(settled.Note)),
+		Note:             windowStudioNote(settled.Note),
 		Created:          settled.Created,
 		Changed:          settled.Changed,
 		PreviousRevision: settled.Previous,
@@ -423,9 +428,9 @@ func (w *Workspace) Notes() (studio.NoteList, error) {
 		if err != nil {
 			return err
 		}
-		list = studio.NoteList{Notes: []studio.Note{}, Limits: noteLimits}
+		list = studio.NoteList{Notes: []studio.Note{}, Limits: notes.Limits()}
 		for _, item := range listed {
-			list.Notes = append(list.Notes, studioNote(noteViewOf(item.Note)))
+			list.Notes = append(list.Notes, windowStudioNote(item.Note))
 		}
 		return nil
 	}); err != nil {
@@ -459,14 +464,14 @@ func (w *Workspace) PushNotes(force bool) (studio.NotePush, error) {
 	// The shimmed call ran `note push` without flags, so the endpoint came from
 	// the environment or the loopback default and the timeout stayed the
 	// flag's default.
-	endpoint, err := anki.NormalizeEndpoint(noteAnkiEndpoint("", w.getenv))
+	endpoint, err := anki.NormalizeEndpoint(outbox.Endpoint("", w.getenv))
 	if err != nil {
 		return studio.NotePush{}, cliCoded(study.Refuse("invalid_endpoint", "%s", err.Error()))
 	}
 	var push studio.NotePush
 	if err := w.codedCall(func(svc *study.Service) error {
 		out, err := outbox.Push(context.Background(), svc, outbox.PushRequest{
-			Endpoint: endpoint, TimeoutSeconds: defaultAnkiTimeoutSeconds, Force: force,
+			Endpoint: endpoint, TimeoutSeconds: outbox.DefaultTimeoutSeconds, Force: force,
 		})
 		if err != nil {
 			return err
@@ -492,7 +497,7 @@ func (w *Workspace) PushNotes(force bool) (studio.NotePush, error) {
 				DeckMismatch:   report.Counts.DeckMismatch,
 			},
 			Notes:           []studio.NotePushItem{},
-			Limits:          noteLimits,
+			Limits:          notes.Limits(),
 			ModelUpdated:    report.ModelUpdated,
 			ModelCustomized: report.ModelCustomized,
 		}
@@ -513,24 +518,33 @@ func (w *Workspace) PushNotes(force bool) (studio.NotePush, error) {
 	return push, nil
 }
 
-func studioNote(n noteView) studio.Note {
-	view := studio.Note{
-		NoteID:         n.NoteID,
-		Revision:       n.Revision,
+// windowStudioNote maps one accepted note onto the window's value. Deck is
+// what Anki reported for the note's card at the last completed deck read;
+// DeckExpected is set only when that is not the deck this build names.
+func windowStudioNote(n store.Note) studio.Note {
+	return studio.Note{
+		NoteID:   n.NoteID,
+		Revision: n.Revision,
+		Target: studio.NoteTarget{
+			ContentID:  n.ContentID,
+			QuestionID: n.QuestionID,
+			SourceID:   n.SourceID,
+			Page:       n.Page,
+			AttemptID:  n.AttemptID,
+			Mark:       n.Mark,
+		},
 		Fields:         studio.NoteFields{Front: n.Front, Back: n.Back, Tactic: n.Tactic},
-		Source:         n.Source,
+		Source:         n.SourceLabel,
 		Restricted:     n.Restricted,
 		Origin:         n.Origin,
-		AnkiState:      n.Anki.State,
-		AnkiNoteID:     n.Anki.NoteID,
-		PushedRevision: n.Anki.PushedRevision,
-		Deck:           n.Anki.Deck,
-		DeckExpected:   n.Anki.DeckExpected,
-		CreatedAt:      n.CreatedAt,
-		UpdatedAt:      n.UpdatedAt,
+		AnkiState:      n.AnkiState,
+		AnkiNoteID:     n.AnkiNoteID,
+		PushedRevision: n.AnkiPushedRevision,
+		Deck:           n.AnkiDeck,
+		DeckExpected:   notes.DeckExpected(n),
+		CreatedAt:      source.FormatTime(n.CreatedAt),
+		UpdatedAt:      source.FormatTime(n.UpdatedAt),
 	}
-	_ = convertJSON(n.Target, &view.Target)
-	return view
 }
 
 // startRefining claims draftID for one refinement; false when one is in flight.

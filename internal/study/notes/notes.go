@@ -256,3 +256,25 @@ func refineConsentMessage(sourceID, providerID string) string {
 		"source %s is private and its consent does not cover provider %s; authorize with:\n  passquest tutor consent %s --provider %s --reviewer NAME",
 		sourceID, providerID, sourceID, providerID)
 }
+
+// Limits is the disclosure every note document carries: what a note is, and
+// what Anki and the app do or do not verify. The CLI's note documents and the
+// window's note documents show the same statements.
+func Limits() []string {
+	return []string{
+		"A note is a study aid derived from recorded evidence, not a verified answer key or grade.",
+		"Anki owns the card and its review scheduling after import or push.",
+		"AnkiWeb and mobile synchronization are your own manual actions in Anki; Pass Quest never contacts AnkiWeb or a phone.",
+		"A real Anki Desktop write is unverified on this machine; the adapter is proven against a loopback AnkiConnect stub.",
+	}
+}
+
+// DeckExpected is the deck a note's card belongs in, and is empty unless the
+// last completed deck read found the card in another one. Both note documents
+// set their deck_expected field from it.
+func DeckExpected(n store.Note) string {
+	if n.AnkiDeck != "" && n.AnkiDeck != note.Deck {
+		return note.Deck
+	}
+	return ""
+}

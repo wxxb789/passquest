@@ -62,7 +62,8 @@ func (w *Workspace) AssessmentPool() (studio.AssessmentPool, error) {
 		if err != nil {
 			return err
 		}
-		return convertJSON(poolDocOf(reported.Pool, reported.Identities), &view)
+		view = studioPoolOf(reported.Pool, reported.Identities)
+		return nil
 	})
 	return view, err
 }
@@ -102,7 +103,7 @@ func (w *Workspace) AssessmentState() (studio.AssessmentState, error) {
 			return err
 		}
 		if !found {
-			state = studio.AssessmentState{State: studio.AssessmentNoneState, Now: formatTime(w.opt.Now()),
+			state = studio.AssessmentState{State: studio.AssessmentNoneState, Now: source.FormatTime(w.opt.Now()),
 				Navigator: []studio.NavigatorItem{}, Notices: []string{}}
 			return nil
 		}
@@ -172,18 +173,18 @@ func (w *Workspace) AnswerAssessmentItem(runID int64, position int, label string
 			return nil
 		}
 		if run.Status != assess.StatusActive {
-			return refuse("run_state", "assessment run %d is %s", run.ID, run.Status)
+			return study.Refuse("run_state", "assessment run %d is %s", run.ID, run.Status)
 		}
 		if position < 0 || position >= len(items) {
-			return refuse("invalid_input", "assessment run %d has no item %d", run.ID, position+1)
+			return study.Refuse("invalid_input", "assessment run %d has no item %d", run.ID, position+1)
 		}
 		item := items[position]
 		if item.State != assess.StatePresented {
-			return refuse("run_state", "item %d of run %d is %s, not presented", position+1, run.ID, item.State)
+			return study.Refuse("run_state", "item %d of run %d is %s, not presented", position+1, run.ID, item.State)
 		}
 		_, question, ok := assessment.Question(svc, item)
 		if !ok {
-			return refuse("content_unavailable", "item %d of run %d is no longer available; present the run again", position+1, run.ID)
+			return study.Refuse("content_unavailable", "item %d of run %d is no longer available; present the run again", position+1, run.ID)
 		}
 		stepped, err := assessment.Submit(context.Background(), svc, run, assessment.Presented{Item: item, Question: question}, label, collectNotices(&notices))
 		if err != nil {
@@ -192,7 +193,7 @@ func (w *Workspace) AnswerAssessmentItem(runID int64, position int, label string
 		answer.Position = position
 		switch stepped.Outcome {
 		case assessment.AnswerInvalid:
-			return refuse("invalid_answer", "item %d: %v; the run remains active", position+1, stepped.ParseErr)
+			return study.Refuse("invalid_answer", "item %d: %v; the run remains active", position+1, stepped.ParseErr)
 		case assessment.AnswerAbandoned:
 			answer.Outcome = assess.StatusAbandoned
 		case assessment.AnswerTimedOut:
@@ -260,9 +261,7 @@ func (w *Workspace) AssessmentReport(runID int64) (studio.AssessmentReport, erro
 		if err != nil {
 			return assessmentStudioError(err)
 		}
-		if err := convertJSON(reportDocOf(reported.Report), &view); err != nil {
-			return err
-		}
+		view = studioReportOf(reported.Report)
 		view.PassThreshold = studio.PassThresholdUnknown
 		return attachReportQuestions(st, runID, reported.Units, &view)
 	})
@@ -338,9 +337,7 @@ func (w *Workspace) AssessmentCompare(first, second int64) (studio.AssessmentCom
 		if err != nil {
 			return assessmentStudioError(err)
 		}
-		if err := convertJSON(comparisonDocOf(reported.First, reported.Second), &view); err != nil {
-			return err
-		}
+		view = studioComparisonOf(reported.First, reported.Second)
 		view.PassThreshold = studio.PassThresholdUnknown
 		return nil
 	})
@@ -401,7 +398,7 @@ func assessmentStateOf(now time.Time, run assess.Run, items []assess.Item, prese
 	view := studioRun(run)
 	state := studio.AssessmentState{
 		State:     studio.AssessmentItemState,
-		Now:       formatTime(now),
+		Now:       source.FormatTime(now),
 		Run:       &view,
 		Navigator: make([]studio.NavigatorItem, 0, len(items)),
 		Notices:   append([]string{}, notices...),
@@ -445,17 +442,198 @@ func assessmentStateOf(now time.Time, run assess.Run, items []assess.Item, prese
 		},
 		Stem:          presented.Question.Stem,
 		Options:       studioOptions(presented.Question.Options),
-		PresentedAt:   formatTime(item.PresentedAt),
-		DeadlineAt:    formatTime(item.DeadlineAt),
-		RunDeadlineAt: formatTime(run.DeadlineAt),
+		PresentedAt:   source.FormatTime(item.PresentedAt),
+		DeadlineAt:    source.FormatTime(item.DeadlineAt),
+		RunDeadlineAt: source.FormatTime(run.DeadlineAt),
 	}
 	return state
 }
 
+// studioRun maps one stored run onto the window's value.
 func studioRun(run assess.Run) studio.AssessmentRun {
-	var view studio.AssessmentRun
-	_ = convertJSON(runViewOf(run), &view)
+	return studio.AssessmentRun{
+		ID:               run.ID,
+		Status:           run.Status,
+		StartedAt:        source.FormatTime(run.StartedAt),
+		DeadlineAt:       source.FormatTime(run.DeadlineAt),
+		WindowMinutes:    run.WindowMinutes,
+		RequestedSize:    run.RequestedSize,
+		ActualSize:       run.ActualSize,
+		PerItemTimeoutMS: run.PerItemTimeoutMS,
+		Annotations:      run.Annotations,
+		PoolFamily:       run.PoolFamily,
+		SourceCount:      run.SourceCount,
+		ResumeCount:      run.ResumeCount,
+		LastResumedAt:    source.FormatTime(run.LastResumedAt),
+		CompletedAt:      source.FormatTime(run.CompletedAt),
+		AbandonedAt:      source.FormatTime(run.AbandonedAt),
+		AbandonedReason:  run.AbandonedReason,
+	}
+}
+
+// studioPoolOf maps one pool read onto the window's value: the same fields
+// and unit order the pool document carried.
+func studioPoolOf(pool assess.Pool, identities []assess.SourceIdentity) studio.AssessmentPool {
+	view := studio.AssessmentPool{
+		QualifyingItems:   pool.ItemCount,
+		QualifyingUnits:   pool.UnitCount,
+		PracticeableItems: pool.PracticeableItems,
+		PracticeableUnits: pool.PracticeableUnits,
+		SpentUnits:        pool.SpentUnits,
+		FloorItems:        assess.MinPoolItems,
+		FloorMet:          assessment.FloorMet(pool),
+		ShortfallItems:    assessment.Shortfall(pool),
+		DefaultSize:       assess.DefaultSize,
+		DefaultMinutes:    assess.DefaultMinutes,
+		SourceCount:       len(identities),
+		ContentUnits:      make([]studio.PoolUnit, 0, len(pool.Units)),
+		Limitations:       assessment.PoolLimitations(),
+	}
+	for _, unit := range pool.Units {
+		view.ContentUnits = append(view.ContentUnits, studio.PoolUnit{
+			ContentID:     unit.ContentID,
+			SourceID:      unit.SourceID,
+			Page:          unit.Page,
+			QuestionCount: len(unit.Questions),
+			Spent:         unit.Spent,
+			SpentBy:       append([]string(nil), unit.SpentBy...),
+			FirstSpentAt:  source.FormatTime(unit.FirstSpentAt),
+		})
+	}
 	return view
+}
+
+// studioReportOf maps one report read onto the window's value.
+func studioReportOf(report assess.Report) studio.AssessmentReport {
+	view := studio.AssessmentReport{
+		Run:      studioRun(report.Run),
+		Counts:   studioCountsOf(report.Counts),
+		Accuracy: studioAccuracyOf(report.Accuracy),
+		Speed:    studioSpeedOf(report.Speed),
+		Skills:   studioSkillsOf(report.Skills),
+		Contamination: studio.AssessmentContamination{
+			PriorExposure:      report.Contamination.PriorExposure,
+			RepeatedVariant:    report.Contamination.RepeatedVariant,
+			HintsDuringRun:     report.Contamination.HintsDuringRun,
+			ResumedAfterWindow: report.Contamination.ResumedAfterWindow,
+			ExcludedItems:      make([]studio.AssessmentReportItem, 0, len(report.Contamination.Excluded)),
+		},
+		Items:       make([]studio.AssessmentReportItem, 0, len(report.Items)),
+		Unknowns:    append([]string(nil), report.Unknowns...),
+		Limitations: append([]string(nil), report.Limitations...),
+	}
+	for _, item := range report.Items {
+		view.Items = append(view.Items, studioReportItemOf(item))
+	}
+	for _, item := range report.Contamination.Excluded {
+		view.Contamination.ExcludedItems = append(view.Contamination.ExcludedItems, studioReportItemOf(item))
+	}
+	return view
+}
+
+// studioReportItemOf maps one item of a report (or of its contamination
+// list). Annotations stay withheld during the run, exactly as stored.
+func studioReportItemOf(item assess.ItemReport) studio.AssessmentReportItem {
+	reasoning := study.OptionReasoningTexts(item.Annotations.OptionReasoning)
+	return studio.AssessmentReportItem{
+		Position:    item.Position,
+		ContentID:   item.ContentID,
+		QuestionID:  item.QuestionID,
+		State:       item.State,
+		Status:      string(item.Status),
+		TimedOut:    item.TimedOut,
+		ElapsedMS:   item.ElapsedMS,
+		AfterResume: item.AfterResume,
+		Scored:      item.Scored,
+		Reasons:     append([]string(nil), item.Reasons...),
+		Annotations: studio.AssessmentAnnotations{
+			Withheld:  item.Annotations.Withheld,
+			Available: assessment.AnnotationsAvailable(item.Annotations),
+			Evidence:  item.Annotations.Evidence,
+			Reasoning: item.Annotations.Reasoning,
+			// The explanations that carry text stay a map; the others are
+			// listed by label in OptionReasoningMissing.
+			OptionReasoning:        reasoning,
+			OptionReasoningMissing: append([]string(nil), item.Annotations.OptionReasoningMissing...),
+			Glossary:               studioGlossary(item.Annotations.Glossary),
+		},
+	}
+}
+
+func studioCountsOf(counts assess.Counts) studio.AssessmentCounts {
+	return studio.AssessmentCounts{
+		Selected:            counts.Selected,
+		Presented:           counts.Presented,
+		Finalized:           counts.Finalized,
+		Scored:              counts.Scored,
+		Correct:             counts.Correct,
+		Total:               counts.Total,
+		Contaminated:        counts.Contaminated,
+		TimedOut:            counts.TimedOut,
+		Skipped:             counts.Skipped,
+		Unavailable:         counts.Unavailable,
+		Pending:             counts.Pending,
+		AnsweredAfterResume: counts.AnsweredAfterResume,
+	}
+}
+
+func studioAccuracyOf(accuracy assess.Accuracy) studio.AssessmentAccuracy {
+	return studio.AssessmentAccuracy{
+		Correct: accuracy.Correct,
+		Total:   accuracy.Total,
+		Ratio:   accuracy.Ratio,
+		Band:    accuracy.Band,
+	}
+}
+
+func studioSpeedOf(speed assess.Speed) studio.AssessmentSpeed {
+	return studio.AssessmentSpeed{
+		MedianMS:         speed.MedianMS,
+		P90MS:            speed.P90MS,
+		PerItemTimeoutMS: speed.PerItemTimeoutMS,
+		Basis:            speed.Basis,
+		Band:             speed.Band,
+	}
+}
+
+// studioSkillsOf maps the per-skill rows; an empty read stays a null list,
+// exactly as the document carried it.
+func studioSkillsOf(skills []assess.SkillAccuracy) []studio.AssessmentSkill {
+	if len(skills) == 0 {
+		return nil
+	}
+	out := make([]studio.AssessmentSkill, 0, len(skills))
+	for _, skill := range skills {
+		out = append(out, studio.AssessmentSkill{
+			SkillID: skill.SkillID, Correct: skill.Correct, Total: skill.Total, Ratio: skill.Ratio,
+		})
+	}
+	return out
+}
+
+// studioComparisonOf maps two compared reports onto the window's value.
+func studioComparisonOf(a, b assess.Report) studio.AssessmentComparison {
+	comparison := assessment.Compare(a, b)
+	return studio.AssessmentComparison{
+		Runs:           []studio.AssessmentCompareRun{studioComparisonRunOf(a), studioComparisonRunOf(b)},
+		AccuracyPoints: comparison.AccuracyPoints,
+		MedianChangeMS: comparison.MedianChangeMS,
+		P90ChangeMS:    comparison.P90ChangeMS,
+		TimedOutChange: comparison.TimedOutChange,
+		ScoredChange:   comparison.ScoredChange,
+		Dimensions:     comparison.Dimensions,
+		Limitations:    assessment.CompareLimitations(),
+	}
+}
+
+func studioComparisonRunOf(report assess.Report) studio.AssessmentCompareRun {
+	return studio.AssessmentCompareRun{
+		Run:      studioRun(report.Run),
+		Counts:   studioCountsOf(report.Counts),
+		Accuracy: studioAccuracyOf(report.Accuracy),
+		Speed:    studioSpeedOf(report.Speed),
+		Skills:   studioSkillsOf(report.Skills),
+	}
 }
 
 // assessmentStudioError maps a run read's error the way `assess report` and

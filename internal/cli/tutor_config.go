@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/wxxb789/passquest/internal/provider"
+	"github.com/wxxb789/passquest/internal/study/coach"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -94,7 +95,7 @@ func runTutorConfig(args []string, opt Options) int {
 		Configured:    configured,
 		Config:        tutorConfigViewOf(cfg),
 		Credential:    tutorCredentialView{Env: env, Present: present},
-		Limits:        tutorLimits,
+		Limits:        coach.Limits(),
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)

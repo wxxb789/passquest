@@ -7,6 +7,7 @@ import (
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study/coach"
+	"github.com/wxxb789/passquest/internal/study/models"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -59,7 +60,7 @@ func tutorProviderViewOf(cfg tutor.Config, opt Options) tutorProviderView {
 	return tutorProviderView{
 		tutorConfigView:   tutorConfigViewOf(cfg),
 		Provider:          cfg.Provider,
-		Auth:              authState(present),
+		Auth:              models.AuthState(present),
 		CredentialEnv:     env,
 		CredentialPresent: present,
 	}
@@ -317,13 +318,4 @@ type tutorConsentsDoc struct {
 	State         string                   `json:"state"`
 	Sources       []tutorConsentSourceView `json:"sources"`
 	Limits        []string                 `json:"limits"`
-}
-
-var tutorLimits = []string{
-	"Model output is advisory study guidance; it is not a verified answer, grade, exam fact or readiness claim.",
-	"One recorded attempt is sent per call. No attempt history, database path, source title, endpoint path or credential is sent.",
-	"Raw prompt text is not stored: a call records the SHA-256 and byte size of the exact serialized request body plus scope flags. Run `passquest tutor preview` to inspect the exact text before sending.",
-	"Private imported source text is withheld until a recorded `tutor consent` event for that source; first-party material needs no consent.",
-	"A failed or malformed provider response is recorded as a failure and cannot append an attempt, change a grade or edit an answer key.",
-	"The daily call budget counts failed calls and resets at 00:00 UTC. `tutor ask` retries at most once, only on another verified provider with the same recorded consent scope and remaining budget.",
 }

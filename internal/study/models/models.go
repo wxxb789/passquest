@@ -62,3 +62,22 @@ func providerConfig(base tutor.Config, registry provider.Registry, providerID, m
 	}
 	return cfg, nil
 }
+
+// Limits is the disclosure every model document carries: what a registry entry
+// and a budget row mean. The CLI's model documents and the window's model list
+// show the same statements.
+func Limits() []string {
+	return []string{
+		"A registry entry is a declaration; only model test records verified evidence.",
+		"A capability that is not verified is never offered as working.",
+		"The daily budget is counted per provider in UTC; the ceiling is the printed sum, not one global cap.",
+		"Model text, provider availability and price are not exam facts and never change an attempt or answer key.",
+	}
+}
+
+// TestCommand is the command that verifies one provider/model selection. The
+// tutor and note-refinement previews point at it while text.chat is
+// unverified, in the CLI documents and in the window values alike.
+func TestCommand(providerID, modelID string) string {
+	return fmt.Sprintf("passquest model test %s/%s", strings.TrimSpace(providerID), modelID)
+}

@@ -207,14 +207,10 @@ func agentRunViewOf(run store.AgentRun) agentRunView {
 }
 
 func agentStatusViewOf(state agent.State, failure *agent.Failure, latestEvent string) agentStatusView {
-	view := agentStatusView{State: string(state), Reason: string(state)}
-	if latestEvent != "" {
-		view.Reason = latestEvent
-	}
+	reason, action := brief.ReasonAndAction(state, failure, latestEvent)
+	view := agentStatusView{State: string(state), Reason: reason, Action: action}
 	if failure != nil {
 		view.Error = &agent.ErrorDoc{Code: failure.Code, Message: failure.Message}
-		view.Action = failure.Action
-		view.Reason = failure.Code
 	}
 	return view
 }
@@ -224,7 +220,7 @@ func agentStepViews(steps []store.AgentStep) []agentStepView {
 	for _, step := range steps {
 		out = append(out, agentStepView{
 			Index: step.Index, Kind: step.Kind, Title: step.Title, Body: step.Body,
-			Advisory: true, VerifiedAnswer: false, CreatedAt: source.FormatTime(step.CreatedAt),
+			Advisory: brief.StepAdvisory, VerifiedAnswer: false, CreatedAt: source.FormatTime(step.CreatedAt),
 		})
 	}
 	return out
@@ -281,7 +277,7 @@ func agentEventViews(events []store.AgentRunEvent) []agentEventView {
 func agentRunSummaryViews(summaries []store.AgentRunSummary) []agentRunSummaryView {
 	out := make([]agentRunSummaryView, 0, len(summaries))
 	for _, summary := range summaries {
-		state := string(agentAppState(summary.LatestEvent))
+		state := string(brief.AppState(summary.LatestEvent))
 		out = append(out, agentRunSummaryView{
 			RunID: summary.RunID, Task: summary.TaskKind, Provider: summary.Provider,
 			Model: summary.Model, MaxSteps: summary.MaxSteps,
@@ -304,7 +300,7 @@ func agentRunDocOf(run store.AgentRun, state agent.State, failure *agent.Failure
 			ConversationID: response.ConversationID,
 			Snapshot:       response.Snapshot,
 		},
-		Limits: append(brief.Limits(), response.Limits...),
+		Limits: brief.RunLimits(response.Limits),
 	}
 	if response.Answer != "" || response.AnswerChars > 0 || response.Turns > 0 || response.ToolCalls > 0 {
 		doc.Summary = &agentSummaryView{
@@ -319,12 +315,7 @@ func agentRunDocOf(run store.AgentRun, state agent.State, failure *agent.Failure
 // cancelled/confirmed flags and the status event, so no caller can emit a
 // confirmed cancellation for a run that is still cancelling.
 func agentCancelDocOf(run store.AgentRun, state agent.State, heartbeatPID int) agentCancelDoc {
-	event := store.AgentEventCancelRequested
-	confirmed := false
-	if state == agent.StateCancelled {
-		event = store.AgentEventCancelled
-		confirmed = true
-	}
+	event, confirmed := brief.CancelOutcome(state)
 	return agentCancelDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         string(state),

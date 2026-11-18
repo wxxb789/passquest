@@ -4,9 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"strings"
 
-	"github.com/wxxb789/passquest/internal/anki"
 	"github.com/wxxb789/passquest/internal/note"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/notes"
@@ -99,7 +97,7 @@ func runNotePropose(args []string, opt Options) int {
 		Plain:         notePlainViewOf(effective),
 		Advisory:      effective.Advisory,
 		Refinement:    refinementView,
-		Limits:        noteLimits,
+		Limits:        notes.Limits(),
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)
@@ -154,7 +152,7 @@ func runNotePreview(args []string, opt Options) int {
 		Deck:          note.Deck,
 		Model:         note.ModelName,
 		Advisory:      effective.Advisory,
-		Limits:        noteLimits,
+		Limits:        notes.Limits(),
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)
@@ -244,7 +242,7 @@ func runNoteAccept(args []string, opt Options) int {
 		Plain:            notePlainView{settled.Front, settled.Back, settled.Tactic, settled.SourceLabel},
 		Created:          settled.Created,
 		Changed:          settled.Changed,
-		Limits:           noteLimits,
+		Limits:           notes.Limits(),
 		PreviousRevision: settled.Previous,
 	}
 	if *jsonFlag {
@@ -280,7 +278,7 @@ func runNoteSkip(args []string, opt Options) int {
 		ContentID:     draft.ContentID,
 		QuestionID:    draft.QuestionID,
 		Mark:          draft.Mark,
-		Limits:        noteLimits,
+		Limits:        notes.Limits(),
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)
@@ -318,7 +316,7 @@ func runNoteShow(args []string, opt Options) int {
 	if err != nil {
 		return fail(opt, *jsonFlag, err)
 	}
-	doc := noteShowDoc{SchemaVersion: ProtocolVersion, State: "show", Notes: []noteShowItem{}, Limits: noteLimits}
+	doc := noteShowDoc{SchemaVersion: ProtocolVersion, State: "show", Notes: []noteShowItem{}, Limits: notes.Limits()}
 	for _, item := range listed {
 		doc.Notes = append(doc.Notes, noteShowItem{Note: noteViewOf(item.Note), Revisions: noteRevisionViewsOf(item.Revisions)})
 	}
@@ -355,22 +353,11 @@ func runNoteModel(args []string, opt Options) int {
 		BackTemplate:  model.BackTemplate,
 		SampleFields:  noteFieldsViewOf(sample),
 		Rendered:      note.RenderCard(sample),
-		Limits:        noteLimits,
+		Limits:        notes.Limits(),
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)
 	}
 	writeNoteModel(opt.Stdout, doc)
 	return 0
-}
-
-// noteAnkiEndpoint is shared by push and the human documentation.
-func noteAnkiEndpoint(flagValue string, getenv func(string) string) string {
-	if strings.TrimSpace(flagValue) != "" {
-		return flagValue
-	}
-	if value := strings.TrimSpace(getenv(anki.EndpointEnv)); value != "" {
-		return value
-	}
-	return anki.DefaultEndpoint
 }

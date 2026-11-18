@@ -3,10 +3,13 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/agent"
+	"github.com/wxxb789/passquest/internal/source"
+	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/brief"
@@ -28,9 +31,7 @@ func (w *Workspace) BriefStatus() (studio.BriefStatus, error) {
 			}
 			return err
 		}
-		status = briefStatusOf(agentRunViewOf(live.Run),
-			agentStatusViewOf(live.State, live.Failure, live.LatestEvent),
-			agentStepViews(live.Steps), brief.Limits())
+		status = briefStatusOf(live.Run, live.State, live.Failure, live.LatestEvent, live.Steps, brief.Limits())
 		status.LatestEvent = live.LatestEvent
 		status.Live = live.Durable.HeartbeatFresh
 		return nil
@@ -57,9 +58,7 @@ func (w *Workspace) ResumeBrief() (studio.BriefStatus, error) {
 		return studio.BriefStatus{}, err
 	}
 	if advanced.Failure != nil {
-		return briefStatusOf(agentRunViewOf(advanced.Run),
-			agentStatusViewOf(advanced.State, advanced.Failure, ""),
-			agentStepViews(advanced.Steps), brief.Limits()), nil
+		return briefStatusOf(advanced.Run, advanced.State, advanced.Failure, "", advanced.Steps, brief.Limits()), nil
 	}
 	if advanced.State == agent.StatePaused {
 		// A paused run was an exit code, not a document the window read: the
@@ -67,11 +66,10 @@ func (w *Workspace) ResumeBrief() (studio.BriefStatus, error) {
 		// its reader surfaced the bare exit code instead. Kept byte for byte.
 		return studio.BriefStatus{}, &studio.Error{Code: "internal_error", Message: "command exited with 4"}
 	}
-	// The shimmed command's exit-0 stdout was the CLI's run document
-	// (agentRunDocOf); its limits are the brief's disclosure plus the host's
-	// own. Build that same document rather than repeat the composition.
-	doc := agentRunDocOf(advanced.Run, advanced.State, nil, advanced.Response, advanced.Steps)
-	status := briefStatusOf(doc.Run, doc.Status, doc.Steps, doc.Limits)
+	// The shimmed command's exit-0 stdout carried the brief's disclosure plus
+	// the host's own limits, and no failure: the same composition.
+	status := briefStatusOf(advanced.Run, advanced.State, nil, "", advanced.Steps,
+		brief.RunLimits(advanced.Response.Limits))
 	status.Answer = advanced.Response.Answer
 	return status, nil
 }
@@ -87,27 +85,33 @@ func (w *Workspace) CancelBrief() (studio.BriefStatus, error) {
 	}); err != nil {
 		return studio.BriefStatus{}, err
 	}
-	doc := agentCancelDocOf(advanced.Run, advanced.State, advanced.HeartbeatPID)
 	if advanced.State == agent.StateCancelling {
 		// An unconfirmed cancellation was an exit code with the cancel
 		// document on stderr, which held no error for the window's reader; it
 		// surfaced the raw document. Kept byte for byte: this is the shape the
 		// capture's hard-killed-host fixture pins the kill grace against.
 		var buf bytes.Buffer
-		_ = writeJSONTo(&buf, doc)
+		enc := json.NewEncoder(&buf)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(windowCancelDocOf(advanced.Run, advanced.State, advanced.HeartbeatPID))
 		return studio.BriefStatus{}, &studio.Error{Code: "internal_error", Message: strings.TrimSpace(buf.String())}
 	}
-	return briefStatusOf(doc.Run, doc.Status, nil, doc.Limits), nil
+	event, _ := brief.CancelOutcome(advanced.State)
+	return briefStatusOf(advanced.Run, advanced.State, nil, event, nil, brief.Limits()), nil
 }
 
-func briefStatusOf(run agentRunView, status agentStatusView, steps []agentStepView, limits []string) studio.BriefStatus {
+// briefStatusOf maps a brief's stored run, state, failure and steps onto the
+// window's status: the same fields and the same reason/action rules the CLI's
+// agent documents carried.
+func briefStatusOf(run store.AgentRun, state agent.State, failure *agent.Failure, latestEvent string, steps []store.AgentStep, limits []string) studio.BriefStatus {
+	reason, action := brief.ReasonAndAction(state, failure, latestEvent)
 	view := studio.BriefStatus{
 		Found:    true,
 		RunID:    run.RunID,
-		Task:     run.Task,
-		State:    status.State,
-		Reason:   status.Reason,
-		Action:   status.Action,
+		Task:     run.TaskKind,
+		State:    string(state),
+		Reason:   reason,
+		Action:   action,
 		Provider: run.Provider,
 		Model:    run.Model,
 		MaxSteps: run.MaxSteps,
@@ -116,8 +120,76 @@ func briefStatusOf(run agentRunView, status agentStatusView, steps []agentStepVi
 	}
 	for _, step := range steps {
 		view.Steps = append(view.Steps, studio.BriefStep{
-			Index: step.Index, Kind: step.Kind, Title: step.Title, Body: step.Body, Advisory: step.Advisory,
+			Index: step.Index, Kind: step.Kind, Title: step.Title, Body: step.Body, Advisory: brief.StepAdvisory,
 		})
 	}
 	return view
+}
+
+// The cancel document below and its nested views reproduce, field for field
+// and in the same order, the document the shimmed `agent cancel` wrote; the
+// JSON field names are protocol.
+type windowCancelDoc struct {
+	SchemaVersion int                   `json:"schema_version"`
+	State         string                `json:"state"`
+	Run           windowAgentRunView    `json:"run"`
+	Status        windowAgentStatusView `json:"status"`
+	Cancelled     bool                  `json:"cancelled"`
+	Confirmed     bool                  `json:"confirmed"`
+	HeartbeatPID  int                   `json:"heartbeat_pid,omitempty"`
+	Limits        []string              `json:"limits"`
+}
+
+type windowAgentRunView struct {
+	RunID         string `json:"run_id"`
+	Task          string `json:"task"`
+	PromptVersion string `json:"prompt_version"`
+	Provider      string `json:"provider,omitempty"`
+	Model         string `json:"model"`
+	Store         string `json:"store,omitempty"`
+	MaxSteps      int    `json:"max_steps"`
+	MaxTurns      int    `json:"max_turns"`
+	CreatedAt     string `json:"created_at"`
+}
+
+type windowAgentStatusView struct {
+	State  string `json:"state"`
+	Reason string `json:"reason,omitempty"`
+	Action string `json:"action,omitempty"`
+}
+
+// windowCancelDocSchemaVersion is the schema_version of the CLI `agent cancel`
+// document this message reproduces: cli.ProtocolVersion, "the JSON protocol
+// emitted by --json". It is deliberately not agent.ProtocolVersion — the
+// durable-host IPC version, which may move independently. The CLI's own
+// ProtocolVersion cannot be imported here (the desktop adapter never imports
+// internal/cli), so this one reproduced document keeps the value as a literal
+// with this note.
+const windowCancelDocSchemaVersion = 1
+
+// windowCancelDocOf renders one cancel outcome: the state decides the paired
+// cancelled/confirmed flags and the status event, so no caller can emit a
+// confirmed cancellation for a run that is still cancelling.
+func windowCancelDocOf(run store.AgentRun, state agent.State, heartbeatPID int) windowCancelDoc {
+	event, confirmed := brief.CancelOutcome(state)
+	return windowCancelDoc{
+		SchemaVersion: windowCancelDocSchemaVersion,
+		State:         string(state),
+		Run: windowAgentRunView{
+			RunID:         run.RunID,
+			Task:          run.TaskKind,
+			PromptVersion: run.PromptVersion,
+			Provider:      run.Provider,
+			Model:         run.Model,
+			Store:         run.StorePath,
+			MaxSteps:      run.MaxSteps,
+			MaxTurns:      run.MaxTurns,
+			CreatedAt:     source.FormatTime(run.CreatedAt),
+		},
+		Status:       windowAgentStatusView{State: string(state), Reason: event},
+		Cancelled:    confirmed,
+		Confirmed:    confirmed,
+		HeartbeatPID: heartbeatPID,
+		Limits:       brief.Limits(),
+	}
 }

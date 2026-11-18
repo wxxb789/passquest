@@ -331,7 +331,7 @@ func runAgentShow(args []string, opt Options) int {
 		SchemaVersion: ProtocolVersion,
 		State:         "run",
 		Run:           agentRunViewOf(run),
-		TrailState:    string(agentAppState(latest.Kind)),
+		TrailState:    string(brief.AppState(latest.Kind)),
 		LatestEvent:   latest.Kind,
 		Counts:        agentCountsOf(steps, attempts),
 		Events:        agentEventViews(events),
@@ -519,25 +519,6 @@ func redactAgent(opt Options, value string) string {
 		return value
 	}
 	return strings.ReplaceAll(value, key, "[redacted]")
-}
-
-func agentAppState(kind string) agent.State {
-	switch kind {
-	case store.AgentEventCompleted:
-		return agent.StateCompleted
-	case store.AgentEventCancelled:
-		return agent.StateCancelled
-	case store.AgentEventCancelRequested:
-		return agent.StateCancelling
-	case store.AgentEventFailed:
-		return agent.StateFailed
-	case store.AgentEventNeedsAction:
-		return agent.StateNeedsAction
-	case store.AgentEventInterrupted:
-		return agent.StatePaused
-	default:
-		return agent.StatePaused
-	}
 }
 
 // agentKillGrace is how long cancel waits after a hard kill: one heartbeat

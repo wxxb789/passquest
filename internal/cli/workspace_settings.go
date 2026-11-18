@@ -12,6 +12,7 @@ import (
 	"github.com/wxxb789/passquest/internal/studio"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/models"
+	"github.com/wxxb789/passquest/internal/study/outbox"
 )
 
 // Models is `model list`: providers, models, capabilities and authorization
@@ -33,7 +34,7 @@ func (w *Workspace) Models() (studio.ModelList, error) {
 		if listing.ActiveErr != nil {
 			return study.Refuse("unknown_model", "%s", listing.ActiveErr.Error())
 		}
-		list = studioModelListOf(listing, w.opt)
+		list = studioModelListOf(listing, w.opt.Getenv)
 		return nil
 	}); err != nil {
 		return studio.ModelList{}, err
@@ -145,10 +146,8 @@ func (w *Workspace) Budget() (studio.Budget, error) {
 }
 
 // codedCall opens one study service over the workspace ports, runs fn and maps
-// the error the way the shimmed CLI call mapped it. These four methods and the
-// note methods that came off the shim in C5b used to run through w.run; the
-// command's error document carried the study refusal unchanged and everything
-// else as internal_error, which is cliCoded.
+// the error the way the CLI mapped it for the methods that used to run through
+// the shim: a study refusal keeps its code, anything else is internal_error.
 func (w *Workspace) codedCall(fn func(svc *study.Service) error) error {
 	svc, err := study.Open(w.ports)
 	if err != nil {
@@ -162,80 +161,43 @@ func (w *Workspace) codedCall(fn func(svc *study.Service) error) error {
 // providers and each provider's models are appended like `model list` built
 // its document, so an empty registry stays a null list and a provider without
 // models stays an empty one.
-func studioModelListOf(listing models.Listing, opt Options) studio.ModelList {
-	activeID := strings.TrimSpace(listing.Active.Provider)
+func studioModelListOf(listing models.Listing, getenv func(string) string) studio.ModelList {
+	selection := models.SelectionOf(listing)
 	list := studio.ModelList{
 		RegistryVersion: listing.Registry.Version,
 		RegistrySource:  listing.Source,
 		Active: studio.ActiveModel{
-			Configured: listing.Configured && activeID != "",
-			Provider:   activeID,
-			Model:      listing.Active.Model,
-			Endpoint:   listing.Active.Endpoint,
+			Configured: selection.Configured,
+			Provider:   selection.Provider,
+			Model:      selection.Model,
+			Endpoint:   selection.Endpoint,
+			Legacy:     selection.Legacy,
 		},
-		Limits: modelLimits,
+		Limits: models.Limits(),
 	}
-	for _, p := range listing.Registry.Providers {
-		env, present := credentialState(opt, p.ID)
+	for _, p := range models.ProvidersOf(listing) {
+		env, present := models.CredentialState(getenv, p.CredentialID)
 		item := studio.ModelProvider{
 			ID:            p.ID,
 			Name:          p.Name,
 			EndpointShape: p.EndpointShape,
 			CredentialEnv: env,
-			Auth:          authState(present),
+			Auth:          models.AuthState(present),
 			Custom:        p.Custom,
-			Active:        activeID == p.ID,
-			Models:        studioModelsOf(listing, p.ID, p, activeID == p.ID),
+			Active:        p.Active,
+			Models:        make([]studio.Model, 0, len(p.Models)),
 		}
-		if p.Custom && activeID == p.ID {
-			custom := provider.Model{ID: listing.Active.Model, Capabilities: []provider.Capability{provider.CapTextChat}}
-			item.Models = studioModelsOf(listing, p.ID, provider.Provider{Models: []provider.Model{custom}}, true)
+		for _, m := range p.Models {
+			model := studio.Model{ID: m.ID, Label: m.Label, Default: m.Default, Active: m.Active}
+			for _, c := range m.Capabilities {
+				model.Capabilities = append(model.Capabilities, studioCapabilityOf(c))
+			}
+			item.Models = append(item.Models, model)
 		}
 		list.Providers = append(list.Providers, item)
 	}
-	if listing.Configured && activeID == "" {
-		env, present := credentialState(opt, "")
-		list.Active.Legacy = true
-		list.Providers = append(list.Providers, studio.ModelProvider{
-			ID:            "legacy",
-			Name:          "Manual tutor configuration",
-			EndpointShape: provider.EndpointShape,
-			CredentialEnv: env,
-			Auth:          authState(present),
-			Active:        true,
-			Models: []studio.Model{{
-				ID:     listing.Active.Model,
-				Label:  "hand-configured endpoint",
-				Active: true,
-				Capabilities: []studio.Capability{
-					{ID: string(provider.CapTextChat), Declared: true, State: "legacy"},
-				},
-			}},
-		})
-	}
 	list.Budget = studioModelBudgetOf(listing.Budget)
 	return list
-}
-
-// studioModelsOf renders one provider's models with their capability evidence,
-// the way `model list` shows them.
-func studioModelsOf(listing models.Listing, providerID string, p provider.Provider, active bool) []studio.Model {
-	views := make([]studio.Model, 0, len(p.Models))
-	for _, m := range p.Models {
-		item := studio.Model{
-			ID:      m.ID,
-			Label:   m.Label,
-			Default: m.Default,
-			Active:  active && listing.Active.Model == m.ID,
-		}
-		verifications := listing.Index.ForModel(providerID, m.ID)
-		for _, c := range provider.Capabilities {
-			item.Capabilities = append(item.Capabilities,
-				studioCapabilityOf(models.CapabilityStateOf(c, m.Has(c), verifications)))
-		}
-		views = append(views, item)
-	}
-	return views
 }
 
 // studioCapabilityOf renders one capability's evidence state as the window's
@@ -264,7 +226,7 @@ func studioModelUseOf(used models.Used) studio.ModelUse {
 		ProviderName:      used.Provider.Name,
 		CredentialEnv:     used.CredentialEnv,
 		CredentialPresent: used.CredentialPresent,
-		Auth:              authState(used.CredentialPresent),
+		Auth:              models.AuthState(used.CredentialPresent),
 		TextChat:          studioCapabilityOf(used.TextChat),
 	}
 }
@@ -365,7 +327,7 @@ func (w *Workspace) ClearCredential(providerID string) (studio.CredentialStatus,
 // credential presence.
 func (w *Workspace) Services() (studio.Services, error) {
 	services := studio.Services{
-		AnkiEndpoint:     noteAnkiEndpoint("", w.getenv),
+		AnkiEndpoint:     outbox.Endpoint("", w.getenv),
 		SearchConfigured: strings.TrimSpace(w.getenv(search.EndpointEnv)) != "",
 		SearchEnv:        search.EndpointEnv,
 		CredentialStore:  w.credentials != nil,

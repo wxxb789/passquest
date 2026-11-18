@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -76,7 +74,7 @@ type Workspace struct {
 	credentials    CredentialStore
 	credentialEnvs map[string]string
 	newToken       func() string
-	opt            Options
+	opt            windowOptions
 	// ports is the completed process seam set; every direct call from C3b on
 	// opens its service through it.
 	ports study.Ports
@@ -87,6 +85,14 @@ type Workspace struct {
 	// draft at a time, whatever the window's own state (a reload forgets it).
 	refining   map[int64]bool
 	refiningMu sync.Mutex
+}
+
+// windowOptions are the process seams the window's methods read directly: the
+// clock every document is stamped with and the credential-layered
+// environment. The transports and identity seams live in ports.
+type windowOptions struct {
+	Now    func() time.Time
+	Getenv func(string) string
 }
 
 // OpenWorkspace validates the options, migrates the database once and
@@ -117,64 +123,56 @@ func OpenWorkspace(options WorkspaceOptions) (*Workspace, error) {
 	}
 	w.dbPath = strings.TrimSpace(options.DBPath)
 	if w.dbPath == "" {
-		w.dbPath = databasePath("", w.baseGetenv)
+		w.dbPath = study.DatabasePath("", w.baseGetenv)
 	}
-	w.opt = Options{
-		Stdin:           strings.NewReader(""),
-		Now:             options.Now,
-		NewSession:      options.NewSession,
-		Getenv:          w.getenv,
-		TutorTransport:  options.TutorTransport,
-		AnkiTransport:   options.AnkiTransport,
-		SearchTransport: options.SearchTransport,
-		AgentRunner:     options.AgentRunner,
-		NewRunID:        options.NewRunID,
-		NewHostToken:    options.NewHostToken,
-	}
+	w.opt = windowOptions{Now: options.Now, Getenv: w.getenv}
 	if w.opt.Now == nil {
 		w.opt.Now = time.Now
 	}
-	if w.opt.NewSession == nil {
-		w.opt.NewSession = newSessionID
+	newSession := options.NewSession
+	if newSession == nil {
+		newSession = study.NewSessionID
 	}
-	// Side-effect exposure rows use the same clock as everything else the
-	// window records.
-	w.opt.PresentationNow = w.opt.Now
-	w.hostTutor = w.opt.TutorTransport == nil
-	w.hostAnki = w.opt.AnkiTransport == nil
-	w.hostAgent = w.opt.AgentRunner == nil
-	if w.opt.TutorTransport == nil {
-		w.opt.TutorTransport = tutor.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
+	w.hostTutor = options.TutorTransport == nil
+	w.hostAnki = options.AnkiTransport == nil
+	w.hostAgent = options.AgentRunner == nil
+	tutorTransport := options.TutorTransport
+	if tutorTransport == nil {
+		tutorTransport = tutor.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
 	}
-	if w.opt.AnkiTransport == nil {
-		w.opt.AnkiTransport = anki.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
+	ankiTransport := options.AnkiTransport
+	if ankiTransport == nil {
+		ankiTransport = anki.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
 	}
-	if w.opt.SearchTransport == nil {
-		w.opt.SearchTransport = search.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
+	searchTransport := options.SearchTransport
+	if searchTransport == nil {
+		searchTransport = search.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
 	}
-	if w.opt.AgentRunner == nil {
-		w.opt.AgentRunner = agent.HostRunner{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
+	agentRunner := options.AgentRunner
+	if agentRunner == nil {
+		agentRunner = agent.HostRunner{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
 	}
 	// The desktop always opens a path the window resolved (its own default or
 	// the user's --db), never the app-owned private default of a bare CLI
 	// invocation, so PrivateDir stays false and Complete fills what
-	// withDefaults fills for every shimmed call: the run id over this clock,
-	// the host token and the cancel kill grace.
+	// cli.withDefaults filled for every call that ran through the CLI: the run
+	// id over this clock, the host token and the cancel kill grace.
+	// Side-effect exposure rows use the same clock as everything else the
+	// window records.
 	w.ports = study.Ports{
 		DBPath:          w.dbPath,
 		PrivateDir:      false,
 		Now:             w.opt.Now,
-		PresentationNow: w.opt.PresentationNow,
-		NewSession:      w.opt.NewSession,
+		PresentationNow: w.opt.Now,
+		NewSession:      newSession,
 		NewToken:        w.newToken,
-		NewRunID:        w.opt.NewRunID,
-		NewHostToken:    w.opt.NewHostToken,
+		NewRunID:        options.NewRunID,
+		NewHostToken:    options.NewHostToken,
 		Getenv:          w.getenv,
-		Tutor:           w.opt.TutorTransport,
-		Anki:            w.opt.AnkiTransport,
-		Search:          w.opt.SearchTransport,
-		Agent:           w.opt.AgentRunner,
-		KillGrace:       w.opt.agentKillGrace,
+		Tutor:           tutorTransport,
+		Anki:            ankiTransport,
+		Search:          searchTransport,
+		Agent:           agentRunner,
 	}
 	study.Complete(&w.ports)
 	st, err := w.open()
@@ -282,12 +280,6 @@ func (w *Workspace) locked(fn func(*study.Service) error) error {
 	return w.withService(fn)
 }
 
-// unlocked runs fn with a service opened for this call without the write lock,
-// for the calls that wait on a host process (ask, test, push, resume).
-func (w *Workspace) unlocked(fn func(*study.Service) error) error {
-	return w.withService(fn)
-}
-
 // workspaceError converts an orchestration error into a typed studio error
 // carrying the same code the CLI would print. A study refusal keeps its code;
 // a classified study error is matched on its wrapped sentinel with the
@@ -368,71 +360,6 @@ func withAction(e *studio.Error) *studio.Error {
 	return e
 }
 
-// commandResult is one in-process CLI invocation.
-type commandResult struct {
-	code   int
-	stdout []byte
-	stderr []byte
-}
-
-// run executes one CLI command in-process against the workspace database with
-// --json, using the workspace's clock, environment and transports. The
-// commands it runs are the CLI's own orchestration; the workspace decodes
-// their protocol documents into studio types instead of reimplementing them.
-func (w *Workspace) run(args ...string) commandResult {
-	var stdout, stderr bytes.Buffer
-	opt := w.opt
-	opt.Stdout = &stdout
-	opt.Stderr = &stderr
-	opt.Stdin = strings.NewReader("")
-	full := make([]string, 0, len(args)+3)
-	full = append(full, args...)
-	full = append(full, "--db", w.dbPath, "--json")
-	code := Run(full, opt)
-	return commandResult{code: code, stdout: stdout.Bytes(), stderr: stderr.Bytes()}
-}
-
-// decode reads a successful document into dst, or turns the error document
-// into a studio error.
-func (r commandResult) decode(dst any) error {
-	if r.code != 0 {
-		return r.err()
-	}
-	if err := json.Unmarshal(r.stdout, dst); err != nil {
-		return &studio.Error{Code: "internal_error", Message: fmt.Sprintf("decode command output: %v", err)}
-	}
-	return nil
-}
-
-// err converts the error document a failed command wrote to stderr.
-func (r commandResult) err() error {
-	var doc struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-		Action string `json:"action"`
-	}
-	if json.Unmarshal(r.stderr, &doc) != nil || doc.Error.Code == "" {
-		message := strings.TrimSpace(string(r.stderr))
-		if message == "" {
-			message = fmt.Sprintf("command exited with %d", r.code)
-		}
-		return &studio.Error{Code: "internal_error", Message: message}
-	}
-	return withAction(&studio.Error{Code: doc.Error.Code, Message: doc.Error.Message, Action: doc.Action})
-}
-
-// convertJSON copies a CLI protocol document into the studio type with the
-// same JSON field names.
-func convertJSON(src, dst any) error {
-	data, err := json.Marshal(src)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, dst)
-}
-
 // nodePath resolves the Node executable the hosts would spawn.
 func (w *Workspace) nodePath() (string, error) {
 	node := strings.TrimSpace(w.getenv(tutor.NodeEnv))
@@ -452,11 +379,4 @@ func (w *Workspace) requireNode(host bool) error {
 		return withAction(&studio.Error{Code: "node_unavailable", Message: fmt.Sprintf("Node.js was not found: %v", err)})
 	}
 	return nil
-}
-
-func formatTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339Nano)
 }

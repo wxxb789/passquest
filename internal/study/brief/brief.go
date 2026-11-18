@@ -76,3 +76,59 @@ func Limits() []string {
 		"One agent run at a time; a second start is refused until the current run completes or is cancelled.",
 	}
 }
+
+// RunLimits is what one run document's limits are: the brief's own disclosure
+// followed by the host's recorded limits. Both adapters compose it.
+func RunLimits(host []string) []string {
+	return append(Limits(), host...)
+}
+
+// ReasonAndAction is the status text one run shows: the reason is the state's
+// name, the latest recorded event's name when there is one, or the failure's
+// code; the action comes from the failure. The CLI's agent documents and the
+// window's brief status both show it.
+func ReasonAndAction(state agent.State, failure *agent.Failure, latestEvent string) (reason, action string) {
+	reason = string(state)
+	if latestEvent != "" {
+		reason = latestEvent
+	}
+	if failure != nil {
+		reason = failure.Code
+		action = failure.Action
+	}
+	return reason, action
+}
+
+// StepAdvisory is what every recorded step is: advisory model output, never a
+// verified answer or grade. Both step views carry it.
+const StepAdvisory = true
+
+// CancelOutcome is how one cancel state reads on the trail: the event the
+// cancellation records and whether the host's stop is confirmed. Only a
+// cancelled run is confirmed; anything else is still cancelling.
+func CancelOutcome(state agent.State) (event string, confirmed bool) {
+	if state == agent.StateCancelled {
+		return store.AgentEventCancelled, true
+	}
+	return store.AgentEventCancelRequested, false
+}
+
+// AppState maps a recorded run event to the run state both adapters show.
+func AppState(kind string) agent.State {
+	switch kind {
+	case store.AgentEventCompleted:
+		return agent.StateCompleted
+	case store.AgentEventCancelled:
+		return agent.StateCancelled
+	case store.AgentEventCancelRequested:
+		return agent.StateCancelling
+	case store.AgentEventFailed:
+		return agent.StateFailed
+	case store.AgentEventNeedsAction:
+		return agent.StateNeedsAction
+	case store.AgentEventInterrupted:
+		return agent.StatePaused
+	default:
+		return agent.StatePaused
+	}
+}

@@ -7,13 +7,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wxxb789/passquest/internal/adaptive"
+	"github.com/wxxb789/passquest/internal/cmdline"
+	"github.com/wxxb789/passquest/internal/find"
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/search"
+	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/assessment"
+	"github.com/wxxb789/passquest/internal/study/brief"
 	"github.com/wxxb789/passquest/internal/study/models"
+	"github.com/wxxb789/passquest/internal/study/practice"
 	"github.com/wxxb789/passquest/internal/study/recommend"
 )
 
@@ -33,7 +39,7 @@ func (w *Workspace) Today() (studio.Today, error) {
 	err := w.withStore(func(st *store.Store) error {
 		now := w.opt.Now()
 		today = studio.Today{
-			GeneratedAt: formatTime(now),
+			GeneratedAt: source.FormatTime(now),
 			Skills:      []studio.SkillEvidence{},
 			Limitations: todayLimitations,
 		}
@@ -50,9 +56,7 @@ func (w *Workspace) Today() (studio.Today, error) {
 		if err != nil {
 			return err
 		}
-		if err := convertJSON(poolDocOf(reported.Pool, reported.Identities), &today.Pool); err != nil {
-			return err
-		}
+		today.Pool = studioPoolOf(reported.Pool, reported.Identities)
 		if err := todayRuns(svc, &today); err != nil {
 			return err
 		}
@@ -97,29 +101,27 @@ func (w *Workspace) todayRecommendation(st *store.Store, today *studio.Today, no
 			return err
 		}
 	}
-	shell, err := detectShell(w.getenv, runtime.GOOS)
+	shell, err := cmdline.DetectShell(w.getenv, runtime.GOOS)
 	if err != nil {
-		shell, _ = detectShell(func(string) string { return "" }, runtime.GOOS)
+		shell, _ = cmdline.DetectShell(func(string) string { return "" }, runtime.GOOS)
 	}
-	doc := nextDocOf(result.Adaptive, result.Unclassified, "", 0, nextDatabaseArgument(w.dbPath, w.opt), commandQuoter{shell: shell})
-	if err := convertJSON(doc.Skills, &today.Skills); err != nil {
-		return err
-	}
+	today.Skills = studioSkillEvidenceOf(result.Adaptive.Skills)
 	today.Unclassified = len(result.Unclassified)
 	if result.Adaptive.Recommendation == nil {
 		return nil
 	}
-	rec := doc.Recommendation
+	rec := result.Adaptive.Recommendation
 	primary, followUp := recommend.Targets(result.Adaptive.Recommendation)
+	command, followUpCommand := cmdline.NextCommands(rec, cmdline.NextDatabaseArgument(w.dbPath, study.DefaultDatabasePath), cmdline.CommandQuoter{Shell: shell})
 	today.Recommendation = &studio.Recommendation{
-		Action:             rec.Action,
-		State:              rec.State,
+		Action:             string(rec.Action),
+		State:              string(rec.State),
 		Reason:             rec.Reason,
 		Skill:              studio.SkillRef{ID: rec.Skill.ID, Kind: rec.Skill.Kind, Title: rec.Skill.Title},
 		Target:             studioTarget(primary),
-		Command:            rec.Command,
-		FollowUpCommand:    rec.FollowUpCommand,
-		EvidenceAttemptIDs: rec.EvidenceAttemptIDs,
+		Command:            command,
+		FollowUpCommand:    followUpCommand,
+		EvidenceAttemptIDs: append([]int64{}, rec.EvidenceAttemptIDs...),
 	}
 	if followUp != nil {
 		target := studioTarget(followUp)
@@ -134,7 +136,7 @@ func studioTarget(t *recommend.Target) studio.Target {
 	}
 	target := studio.Target{Kind: t.Kind, Skill: t.SkillID}
 	if t.Kind == recommend.TargetTactic {
-		target.Stage = stageGuided
+		target.Stage = practice.StageGuided
 	}
 	if t.Material != nil {
 		target.SourceID = t.Material.SourceID
@@ -215,12 +217,12 @@ func briefSummary(st *store.Store) (*studio.BriefSummary, error) {
 	return &studio.BriefSummary{
 		RunID:       run.RunID,
 		Task:        run.TaskKind,
-		State:       string(agentAppState(latest.Kind)),
+		State:       string(brief.AppState(latest.Kind)),
 		Step:        len(steps),
 		MaxSteps:    run.MaxSteps,
 		Provider:    run.Provider,
 		Model:       run.Model,
-		CreatedAt:   formatTime(run.CreatedAt),
+		CreatedAt:   source.FormatTime(run.CreatedAt),
 		LatestEvent: latest.Kind,
 	}, nil
 }
@@ -236,7 +238,7 @@ func (w *Workspace) findStatus(st *store.Store, now time.Time) (studio.FindStatu
 		EndpointEnv:  search.EndpointEnv,
 		Day:          day,
 		QueriesUsed:  usage.Used(),
-		QueriesLimit: findDefaultMaxQueries,
+		QueriesLimit: find.DefaultMaxQueries,
 	}, nil
 }
 
@@ -267,8 +269,8 @@ func (w *Workspace) modelStatus(st *store.Store) (studio.ModelStatus, error) {
 	if listing.ActiveErr != nil {
 		status.Problem = listing.ActiveErr.Error()
 	}
-	_, present := credentialState(w.opt, activeID)
-	status.Auth = authState(present)
+	_, present := models.CredentialState(w.opt.Getenv, activeID)
+	status.Auth = models.AuthState(present)
 	switch {
 	case status.Legacy:
 		status.TextChatState = "legacy"
@@ -315,7 +317,7 @@ func prepStatus(st *store.Store, now time.Time) (studio.PrepStatus, error) {
 		return prep, err
 	}
 	if found {
-		prep.FirstAttemptAt = formatTime(first)
+		prep.FirstAttemptAt = source.FormatTime(first)
 		startDay := time.Date(first.UTC().Year(), first.UTC().Month(), first.UTC().Day(), 0, 0, 0, 0, time.UTC)
 		today := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
 		prep.Day = int(today.Sub(startDay).Hours()/24) + 1
@@ -360,4 +362,56 @@ func (w *Workspace) SetLearnerSettings(settings studio.LearnerSettings) error {
 		}
 		return st.SetLearnerSetting(store.LearnerSettingDailyMinutes, minutes, now)
 	})
+}
+
+// studioSkillEvidenceOf maps the recommendation's per-skill evidence onto the
+// window's value: the same fields the evidence document carried, always a
+// list.
+func studioSkillEvidenceOf(skills []adaptive.SkillResult) []studio.SkillEvidence {
+	views := make([]studio.SkillEvidence, 0, len(skills))
+	for _, candidate := range skills {
+		views = append(views, studio.SkillEvidence{
+			Skill:     studio.SkillRef{ID: candidate.Skill.ID, Kind: candidate.Skill.Kind, Title: candidate.Skill.Title},
+			Evidence:  studioEvidenceOf(candidate.Evidence),
+			Inference: studioInferenceOf(candidate.Inference),
+		})
+	}
+	return views
+}
+
+func studioEvidenceOf(ev adaptive.Evidence) studio.Evidence {
+	return studio.Evidence{
+		Attempts:                ev.Attempts,
+		AssistedAttempts:        ev.AssistedAttempts,
+		AssistedCorrect:         ev.AssistedCorrect,
+		GuidedAttempts:          ev.GuidedAttempts,
+		IndependentAttempts:     ev.IndependentAttempts,
+		IndependentCorrect:      ev.IndependentCorrect,
+		IndependentIncorrect:    ev.IndependentIncorrect,
+		IndependentSkipped:      ev.IndependentSkipped,
+		Revisits:                ev.Revisits,
+		PassageRepeats:          ev.PassageRepeats,
+		DistinctPassages:        ev.DistinctPassages,
+		QuestionsSeen:           ev.QuestionsSeen,
+		FreshPassages:           ev.FreshPassages,
+		FastestIndependentMS:    ev.FastestIndependentMS,
+		LatestIndependentMS:     ev.LatestIndependentMS,
+		LatestIndependentStatus: string(ev.LatestIndependentStatus),
+		LatestAttemptID:         ev.LatestAttemptID,
+		LatestStatus:            string(ev.LatestStatus),
+		LatestAssistance:        string(ev.LatestAssistance),
+		AttemptIDs:              append([]int64{}, ev.AttemptIDs...),
+		IndependentAttemptIDs:   append([]int64{}, ev.IndependentAttemptIDs...),
+		MappedFromCurrentTags:   ev.MappedFromCurrentTags,
+	}
+}
+
+func studioInferenceOf(inference adaptive.Inference) studio.Inference {
+	return studio.Inference{
+		State:           string(inference.State),
+		Action:          string(inference.Action),
+		Reason:          inference.Reason,
+		CausalDiagnosis: inference.CausalDiagnosis,
+		Uncertainty:     append([]string(nil), inference.Uncertainty...),
+	}
 }

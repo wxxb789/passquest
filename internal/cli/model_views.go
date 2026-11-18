@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/provider"
-	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study/models"
 )
 
@@ -124,13 +123,6 @@ type modelBudgetDoc struct {
 	Limits          []string        `json:"limits"`
 }
 
-var modelLimits = []string{
-	"A registry entry is a declaration; only model test records verified evidence.",
-	"A capability that is not verified is never offered as working.",
-	"The daily budget is counted per provider in UTC; the ceiling is the printed sum, not one global cap.",
-	"Model text, provider availability and price are not exam facts and never change an attempt or answer key.",
-}
-
 // capabilityViewOf renders a study capability state as this package's document
 // type.
 func capabilityViewOf(state models.CapabilityState) modelCapabilityView {
@@ -143,32 +135,6 @@ func capabilityViewOf(state models.CapabilityState) modelCapabilityView {
 		FailureType: state.FailureType,
 		Action:      state.Action,
 	}
-}
-
-// capabilityView reads one capability's evidence the way the model and tutor
-// documents show it.
-func capabilityView(capability provider.Capability, declared bool, verifications map[provider.Capability]store.ProviderVerification) modelCapabilityView {
-	return capabilityViewOf(models.CapabilityStateOf(capability, declared, verifications))
-}
-
-// modelViewsOf renders one registry provider's models with their capability
-// evidence, the way `model list` shows them.
-func modelViewsOf(listing models.Listing, providerID string, p provider.Provider, active bool) []modelView {
-	views := make([]modelView, 0, len(p.Models))
-	for _, m := range p.Models {
-		item := modelView{
-			ID:      m.ID,
-			Label:   m.Label,
-			Default: m.Default,
-			Active:  active && listing.Active.Model == m.ID,
-		}
-		verifications := listing.Index.ForModel(providerID, m.ID)
-		for _, c := range provider.Capabilities {
-			item.Capabilities = append(item.Capabilities, capabilityView(c, m.Has(c), verifications))
-		}
-		views = append(views, item)
-	}
-	return views
 }
 
 // budgetViewOf renders the catalog's budget as this package's document type.
@@ -272,37 +238,14 @@ func writeCapabilityRow(w io.Writer, marker, providerID, modelID, auth string, c
 	fmt.Fprintln(w)
 }
 
-// capabilityState renders the state without the table's timestamp. The list
-// and the preview both derive their wording from here.
-func capabilityState(c modelCapabilityView) string {
-	if c.ID == "" || !c.Declared {
-		return "unsupported"
-	}
-	switch c.State {
-	case "verified":
-		return "verified"
-	case "failed":
-		return "failed:" + c.FailureType
-	case "legacy":
-		return "legacy,unverified"
-	default:
-		return "declared,unverified"
-	}
-}
-
+// renderCapability renders one capability's evidence with the model test
+// timestamp; the wording is the models module's, so the window cannot drift
+// from the table.
 func renderCapability(c modelCapabilityView) string {
-	state := capabilityState(c)
-	if (c.State == "verified" || c.State == "failed") && c.CheckedAt != "" {
-		return state + "@" + shortTimestamp(c.CheckedAt)
-	}
-	return state
-}
-
-func authState(present bool) string {
-	if present {
-		return "present"
-	}
-	return "no_credential"
+	return models.RenderCapability(models.CapabilityState{
+		ID: c.ID, Declared: c.Declared, State: c.State, Verified: c.Verified,
+		CheckedAt: c.CheckedAt, FailureType: c.FailureType, Action: c.Action,
+	})
 }
 
 // budgetProviderName shows the recorded label for an unattributed legacy row,
@@ -312,13 +255,6 @@ func budgetProviderName(item modelBudgetProviderView) string {
 		return item.Label
 	}
 	return item.Provider
-}
-
-func shortTimestamp(value string) string {
-	if len(value) >= 20 {
-		return value[:19] + "Z"
-	}
-	return value
 }
 
 func writeModelUse(w io.Writer, doc modelUseDoc) {

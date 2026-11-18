@@ -6,6 +6,11 @@
 package study
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/wxxb789/passquest/internal/store"
@@ -40,6 +45,35 @@ func DefaultKillGrace() time.Duration { return kernel.DefaultKillGrace() }
 // Refuse builds a refusal: the code and message the CLI prints today.
 func Refuse(code, format string, args ...any) *Error {
 	return kernel.Refuse(code, format, args...)
+}
+
+// DefaultDatabasePath is the app-owned relative path resolved when neither
+// --db nor PASSQUEST_DB selects a database.
+var DefaultDatabasePath = filepath.Join(".passquest", "passquest.sqlite")
+
+// DatabasePath resolves the database a command opens: --db (or the window's
+// selected path), then PASSQUEST_DB, then the app-owned default. A flag value
+// that is only whitespace selects the next source; the selected value is
+// returned as given. Both composition roots use it, so the CLI's commands and
+// the window's generated commands name the same store.
+func DatabasePath(flagValue string, getenv func(string) string) string {
+	if strings.TrimSpace(flagValue) != "" {
+		return flagValue
+	}
+	if v := strings.TrimSpace(getenv("PASSQUEST_DB")); v != "" {
+		return v
+	}
+	return DefaultDatabasePath
+}
+
+// NewSessionID is the default session identity both roots fill a nil
+// Ports.NewSession with: random bits, with the wall clock only as a fallback.
+func NewSessionID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("session-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // Guard refuses command with assessment_active while a run is active (and

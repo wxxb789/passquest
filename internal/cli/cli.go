@@ -3,12 +3,9 @@
 package cli
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -75,7 +72,7 @@ func (o Options) withDefaults() Options {
 		o.Now = time.Now
 	}
 	if o.NewSession == nil {
-		o.NewSession = newSessionID
+		o.NewSession = study.NewSessionID
 	}
 	if o.Getenv == nil {
 		o.Getenv = os.Getenv
@@ -266,26 +263,10 @@ limit are unknown, so no pass probability is produced.
 Default database: $PASSQUEST_DB or ./.passquest/passquest.sqlite
 `
 
-func newSessionID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("session-%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b[:])
-}
-
-// defaultDatabasePath is the app-owned relative path resolved when neither
-// --db nor PASSQUEST_DB selects a database.
-var defaultDatabasePath = filepath.Join(".passquest", "passquest.sqlite")
-
+// databasePath resolves the database a command opens. The rule is the study
+// façade's (study.DefaultDatabasePath), so the CLI and the window cannot drift.
 func databasePath(flagValue string, getenv func(string) string) string {
-	if strings.TrimSpace(flagValue) != "" {
-		return flagValue
-	}
-	if v := strings.TrimSpace(getenv("PASSQUEST_DB")); v != "" {
-		return v
-	}
-	return defaultDatabasePath
+	return study.DatabasePath(flagValue, getenv)
 }
 
 // privateDefault reports whether the app-owned default state directory is in

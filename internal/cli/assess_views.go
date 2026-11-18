@@ -224,17 +224,13 @@ func poolDocOf(pool assess.Pool, identities []assess.SourceIdentity) poolDoc {
 		PracticeableUnits: pool.PracticeableUnits,
 		SpentUnits:        pool.SpentUnits,
 		FloorItems:        assess.MinPoolItems,
-		FloorMet:          pool.ItemCount >= assess.MinPoolItems,
+		FloorMet:          assessment.FloorMet(pool),
 		ShortfallItems:    assessment.Shortfall(pool),
 		DefaultSize:       assess.DefaultSize,
 		DefaultMinutes:    assess.DefaultMinutes,
 		SourceCount:       len(identities),
 		ContentUnits:      make([]poolUnitView, 0, len(pool.Units)),
-		Limitations: []string{
-			"The pool is counted per content unit (one imported source page): presenting any question on a page spends every question on it.",
-			"The qualifying unit count is the binding constraint on how many independent assessments the imported material supports.",
-			"No embedded first-party sample or skill passage enters the assessment pool.",
-		},
+		Limitations:       assessment.PoolLimitations(),
 	}
 	for _, unit := range pool.Units {
 		doc.ContentUnits = append(doc.ContentUnits, poolUnitView{
@@ -247,9 +243,6 @@ func poolDocOf(pool assess.Pool, identities []assess.SourceIdentity) poolDoc {
 			FirstSpentAt:  source.FormatTime(unit.FirstSpentAt),
 		})
 	}
-	sort.SliceStable(doc.ContentUnits, func(i, j int) bool {
-		return doc.ContentUnits[i].ContentID < doc.ContentUnits[j].ContentID
-	})
 	return doc
 }
 
@@ -378,7 +371,7 @@ func reportDocOf(report assess.Report) assessReportDoc {
 }
 
 func reportItemViewOf(item assess.ItemReport) assessReportItemView {
-	reasoning := optionReasoningWithText(item.Annotations.OptionReasoning)
+	reasoning := study.OptionReasoningTexts(item.Annotations.OptionReasoning)
 	view := assessReportItemView{
 		Position:    item.Position,
 		ContentID:   item.ContentID,
@@ -392,7 +385,7 @@ func reportItemViewOf(item assess.ItemReport) assessReportItemView {
 		Reasons:     append([]string(nil), item.Reasons...),
 		Annotations: assessAnnotationView{
 			Withheld:               item.Annotations.Withheld,
-			Available:              item.Annotations.Evidence != "" || item.Annotations.Reasoning != "" || len(item.Annotations.Glossary) > 0 || len(reasoning) > 0,
+			Available:              assessment.AnnotationsAvailable(item.Annotations),
 			Evidence:               item.Annotations.Evidence,
 			Reasoning:              item.Annotations.Reasoning,
 			OptionReasoning:        reasoning,
@@ -404,25 +397,18 @@ func reportItemViewOf(item assess.ItemReport) assessReportItemView {
 }
 
 func comparisonDocOf(a, b assess.Report) assessComparisonDoc {
+	comparison := assessment.Compare(a, b)
 	doc := assessComparisonDoc{
 		SchemaVersion:  ProtocolVersion,
 		State:          "compared",
 		Runs:           []assessCompareRunView{compareRunViewOf(a), compareRunViewOf(b)},
-		AccuracyPoints: (b.Accuracy.Ratio - a.Accuracy.Ratio) * 100,
-		MedianChangeMS: b.Speed.MedianMS - a.Speed.MedianMS,
-		P90ChangeMS:    b.Speed.P90MS - a.Speed.P90MS,
-		TimedOutChange: b.Counts.TimedOut - a.Counts.TimedOut,
-		ScoredChange:   b.Counts.Scored - a.Counts.Scored,
-		Dimensions: map[string]string{
-			"item_count":     fmt.Sprintf("%d", a.Run.ActualSize),
-			"window_minutes": fmt.Sprintf("%d", a.Run.WindowMinutes),
-			"pool_family":    a.Run.PoolFamily,
-		},
-		Limitations: []string{
-			"This compares two local samples with the same item count, time window and pool family.",
-			"It does not show that AI, coaching or the app caused any change.",
-			"Contaminated items are excluded from each headline; an unequal scored-item count is shown rather than normalized away.",
-		},
+		AccuracyPoints: comparison.AccuracyPoints,
+		MedianChangeMS: comparison.MedianChangeMS,
+		P90ChangeMS:    comparison.P90ChangeMS,
+		TimedOutChange: comparison.TimedOutChange,
+		ScoredChange:   comparison.ScoredChange,
+		Dimensions:     comparison.Dimensions,
+		Limitations:    assessment.CompareLimitations(),
 	}
 	return doc
 }

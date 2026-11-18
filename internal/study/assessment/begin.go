@@ -90,7 +90,10 @@ func Begin(ctx context.Context, s *study.Service, size, minutes int) (Started, e
 }
 
 // poolOf builds every currently practiceable imported unit and the spend
-// union. Title and passage stay in memory; documents carry ids only.
+// union in store order: sources by created_at, pages by number. Begin selects
+// from this order (assess.Pool.Select takes whole units in pool order), so it
+// must not be sorted here; report applies the content-id order the pool
+// documents show. Title and passage stay in memory; documents carry ids only.
 func poolOf(s *study.Service) (assess.Pool, []assess.SourceIdentity, error) {
 	units, identities, err := unitsOf(s)
 	if err != nil {
@@ -172,6 +175,22 @@ func Shortfall(pool assess.Pool) int {
 		shortfall = 0
 	}
 	return shortfall
+}
+
+// FloorMet reports whether the pool reaches the item floor a run needs. Both
+// pool documents carry the verdict beside the floor itself.
+func FloorMet(pool assess.Pool) bool {
+	return pool.ItemCount >= assess.MinPoolItems
+}
+
+// PoolLimitations are the statements every pool document carries: what one
+// content unit is, which count binds, and what never enters the pool.
+func PoolLimitations() []string {
+	return []string{
+		"The pool is counted per content unit (one imported source page): presenting any question on a page spends every question on it.",
+		"The qualifying unit count is the binding constraint on how many independent assessments the imported material supports.",
+		"No embedded first-party sample or skill passage enters the assessment pool.",
+	}
 }
 
 func poolFloorMessage(pool assess.Pool) string {
