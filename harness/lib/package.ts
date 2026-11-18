@@ -14,10 +14,14 @@
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
+  readFileSync,
+  readSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -33,6 +37,9 @@ import { executable, run } from "./process.ts";
 /** The staged tree, under the gitignored build/ directory. */
 export const STAGE_DIR = "build/package";
 
+/** The staged agent directory: the host scripts, and the node_modules they resolve from. */
+export const AGENT_DIR = "agent";
+
 /**
  * Where downloaded archives are kept, so a re-run does not download again. It sits beside the
  * staged tree, not inside it, so nothing that copies the staged tree can carry other platforms' archives.
@@ -42,6 +49,52 @@ const CACHE_DIR = "build/package-cache";
 /** The Node runtime every package carries. */
 export const NODE_VERSION = "22.23.5";
 
+const PLATFORMS = ["win32", "darwin", "linux"] as const;
+const ARCHS = ["x64", "arm64"] as const;
+
+/** The systems a package is built for, spelled as Node pins them. */
+export type PackagePlatform = (typeof PLATFORMS)[number];
+/** The architectures a package is built for, spelled as Node pins them. */
+export type PackageArch = (typeof ARCHS)[number];
+
+/** One package target: the system and architecture a build produces its package for. */
+export interface PackageTarget {
+  platform: PackagePlatform;
+  arch: PackageArch;
+}
+
+/** The target a `--target` argument names: `<platform>-<arch>`, as in linux-x64. */
+export function parseTarget(value: string): PackageTarget {
+  const [platform, arch, ...rest] = value.split("-");
+  const platforms: readonly string[] = PLATFORMS;
+  const arches: readonly string[] = ARCHS;
+  if (rest.length > 0 || !platforms.includes(platform) || !arches.includes(arch)) {
+    throw new Error(
+      `--target ${value}: want <platform>-<arch>, where platform is ${PLATFORMS.join(", ")} and arch is ${ARCHS.join(", ")}`,
+    );
+  }
+  return { platform: platform as PackagePlatform, arch: arch as PackageArch };
+}
+
+/**
+ * The target of the machine running the build. Only this target's staged
+ * runtime can be executed here; a package for another target is staged,
+ * built and then run where it ships.
+ */
+export function hostTarget(): PackageTarget {
+  return { platform: process.platform as PackagePlatform, arch: process.arch as PackageArch };
+}
+
+/** Go's spelling of a target, as MyGo's `-platform` and Go's GOOS/GOARCH take it. */
+export function goTarget(target: PackageTarget): string {
+  return `${target.platform === "win32" ? "windows" : target.platform}/${target.arch === "x64" ? "amd64" : target.arch}`;
+}
+
+/** The directory MyGo writes a target's output to (mygo.json `out`), relative to the root. */
+export function targetDir(target: PackageTarget): string {
+  return `build/${goTarget(target).replace("/", "-")}`;
+}
+
 /**
  * One platform's Node runtime: the official archive, its executable inside it,
  * where the app looks for that executable, and the archive's SHA-256 as
@@ -50,9 +103,9 @@ export const NODE_VERSION = "22.23.5";
  */
 export interface NodePin {
   /** process.platform of the target. */
-  platform: "win32" | "darwin" | "linux";
+  platform: PackagePlatform;
   /** process.arch of the target. */
-  arch: "x64" | "arm64";
+  arch: PackageArch;
   /** The archive's file name under nodejs.org/dist/v<NODE_VERSION>/. */
   archive: string;
   /** SHA-256 of that archive. */
@@ -123,13 +176,15 @@ export interface StagedResources {
   entries: StageEntry[];
   files: number;
   bytes: number;
-  /** What the load checks printed (the runtime's version, the imports). */
+  /** What the checks printed (the portability scan, and where it can run, the runtime and its imports). */
   checks: string[];
 }
 
 export interface StageOptions {
   /** Progress lines, one per step; a build log, not gate output. */
   log?: (line: string) => void;
+  /** The target to stage for; the host by default. */
+  target?: PackageTarget;
 }
 
 /**
@@ -137,16 +192,21 @@ export interface StageOptions {
  * copied, their production dependencies are installed with Bun's hoisted
  * linker into a temporary directory (so bun.lock is not written and the
  * checkout's node_modules is untouched), the pinned Node runtime comes from
- * the cached archive, and the icon is drawn here. Then the staged runtime
- * loads the host scripts' own imports, which is what proves the tree before a
- * build copies it.
+ * the cached archive of the target's platform, and the icon is drawn here.
+ * The dependency tree is proved portable (no .node files, no package
+ * restricting itself with os, cpu or libc), and where the target is this
+ * machine's, the staged runtime loads the host scripts' own imports, which is
+ * what proves the tree before a build copies it. A package for another target
+ * is proved where it runs.
  */
 export async function stageResources(root: string, options: StageOptions = {}): Promise<StagedResources> {
   const log = options.log ?? (() => {});
+  const target = options.target ?? hostTarget();
   const dir = path.join(root, STAGE_DIR);
-  const pin = nodePin();
+  const pin = nodePin(target.platform, target.arch);
   clearStage(dir);
   mkdirSync(dir, { recursive: true });
+  log(`target: ${target.platform}-${target.arch}`);
 
   const hosts = copyAgentHosts(root, dir);
   if (hosts.length === 0) throw new Error("agent/ holds no host scripts to package");
@@ -156,13 +216,13 @@ export async function stageResources(root: string, options: StageOptions = {}): 
   if (modules.dropped > 0) {
     log(`agent/node_modules: ${modules.dropped} hidden directories MyGo would not copy are removed`);
   }
-  const node = await stageNodeRuntime(dir, path.join(root, CACHE_DIR), pin, log);
+  const node = await stageNodeRuntime(dir, cacheDir(root), pin, log);
   log(`node ${NODE_VERSION}: ${STAGE_DIR}/${pin.path}`);
   const icon = path.join(dir, "icon.png");
   writeFileSync(icon, iconPng());
   log(`icon: ${STAGE_DIR}/icon.png (${statSync(icon).size} bytes)`);
 
-  const checks = await checkStaged(root, dir, pin, hosts);
+  const checks = [modules.portable, ...(await checkStagedFor(root, dir, pin, hosts, target))];
   for (const line of checks) log(`check: ${line}`);
   const { entries, files, bytes } = summarize(dir);
   return { dir, node, entries, files, bytes, checks };
@@ -190,8 +250,8 @@ function clearStage(dir: string): void {
  * devDependencies out and `--linker=hoisted` writes one node_modules without
  * the isolated linker's store.
  */
-async function stageAgentModules(root: string, dir: string): Promise<{ files: number; bytes: number; dropped: number }> {
-  const target = path.join(dir, "agent", "node_modules");
+async function stageAgentModules(root: string, dir: string): Promise<{ files: number; bytes: number; dropped: number; portable: string }> {
+  const target = path.join(dir, AGENT_DIR, "node_modules");
   const tmp = mkdtempSync(path.join(dir, "install-"));
   try {
     copyFileSync(path.join(root, "package.json"), path.join(tmp, "package.json"));
@@ -216,8 +276,9 @@ async function stageAgentModules(root: string, dir: string): Promise<{ files: nu
     }
     const dropped = pruneUncopied(modules);
     assertNoLinks(modules);
+    const portable = assertPortableModules(modules);
     renameSync(modules, target);
-    return { ...count(target), dropped };
+    return { ...count(target), dropped, portable };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -267,17 +328,106 @@ function assertNoLinks(dir: string): void {
   if (links.length > 0) throw new Error(`node_modules holds ${links.length} symlinks, which a package must not: ${links.slice(0, 5).join(", ")}`);
 }
 
+/** The package.json fields with which npm restricts a package to one platform set. */
+const PLATFORM_FIELDS = ["os", "cpu", "libc"] as const;
+
+/**
+ * The staged dependency tree as the portability check reads it: every package
+ * under a node_modules directory (a scoped package's name inside its scope),
+ * the package.json fields that restrict it to a platform set, and every file
+ * ending .node. A directory without a package.json declares nothing and is no
+ * package.
+ */
+function scanModules(dir: string): { packages: number; offenders: string[] } {
+  const offenders: string[] = [];
+  let packages = 0;
+  const scanNodeModules = (modules: string): void => {
+    const roots = readdirSync(modules, { withFileTypes: true }).filter((pkg) => pkg.isDirectory());
+    for (const pkg of roots) {
+      const candidates = pkg.name.startsWith("@")
+        ? readdirSync(path.join(modules, pkg.name), { withFileTypes: true })
+            .filter((scoped) => scoped.isDirectory())
+            .map((scoped) => path.join(modules, pkg.name, scoped.name))
+        : [path.join(modules, pkg.name)];
+      for (const candidate of candidates) {
+        const manifest = path.join(candidate, "package.json");
+        if (!existsSync(manifest)) continue;
+        packages += 1;
+        const declared = JSON.parse(readFileSync(manifest, "utf8")) as Record<string, unknown>;
+        const restricted = PLATFORM_FIELDS.filter((field) => declared[field] !== undefined).map(
+          (field) => `${field}: ${JSON.stringify(declared[field])}`,
+        );
+        if (restricted.length > 0) offenders.push(`${candidate} (${restricted.join(", ")})`);
+      }
+    }
+  };
+  const walk = (current: string): void => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const child = path.join(current, entry.name);
+      if (!entry.isDirectory()) {
+        if (entry.name.endsWith(".node")) offenders.push(child);
+        continue;
+      }
+      if (entry.name === "node_modules") scanNodeModules(child);
+      walk(child);
+    }
+  };
+  // The passed directory is a node_modules; the walk finds the nested ones.
+  scanNodeModules(dir);
+  walk(dir);
+  return { packages, offenders };
+}
+
+/**
+ * The dependency tree one package carries must be the same tree on every
+ * platform, or a cross-staged package ships this host's binaries silently.
+ * The hosts' dependencies are all JavaScript (agent/package.json and bun.lock),
+ * so a native addon or a package whose package.json restricts it with npm's
+ * os, cpu or libc fields means the tree changed and the staging decision must
+ * be looked at, not a check relaxed.
+ *
+ * Exported for a caller that checks a tree outside staging (a gate over an
+ * extracted package, a fixture that must fail).
+ */
+export function assertPortableModules(dir: string): string {
+  const { packages, offenders } = scanModules(dir);
+  if (offenders.length > 0) {
+    const more = offenders.length > 5 ? ` (${offenders.length - 5} more)` : "";
+    throw new Error(
+      `agent/node_modules holds files or packages a package for another platform cannot carry: ${offenders.slice(0, 5).join(", ")}${more}`,
+    );
+  }
+  return `agent/node_modules is portable: packages checked ${packages}, no .node files, no package restricting os, cpu or libc`;
+}
+
 /** How long one archive's whole download may take before it fails. */
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
-/** Downloads, verifies and extracts the pinned runtime for the host platform. */
-async function stageNodeRuntime(dir: string, cache: string, pin: NodePin, log: (line: string) => void): Promise<string> {
+/** Where a build's downloaded archives are cached, so a re-run does not download again. */
+export function cacheDir(root: string): string {
+  return path.join(root, CACHE_DIR);
+}
+
+/**
+ * One pinned build artifact, downloaded into the cache once and checked
+ * against its SHA-256 every time. `label` names the artifact in the progress
+ * line and `published` names where the pin was published, for a mismatch.
+ */
+export async function fetchPinned(options: {
+  cache: string;
+  asset: string;
+  url: string;
+  sha256: string;
+  label: string;
+  published: string;
+  log: (line: string) => void;
+}): Promise<string> {
+  const { cache, asset, url, sha256, label, published, log } = options;
   mkdirSync(cache, { recursive: true });
-  const archive = path.join(cache, pin.archive);
-  if (!existsSync(archive)) {
-    const url = `https://nodejs.org/dist/v${NODE_VERSION}/${pin.archive}`;
-    log(`node ${NODE_VERSION}: downloading ${url}`);
-    const part = `${archive}.part`;
+  const file = path.join(cache, asset);
+  if (!existsSync(file)) {
+    log(`${label}: downloading ${url}`);
+    const part = `${file}.part`;
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
       if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
@@ -287,29 +437,55 @@ async function stageNodeRuntime(dir: string, cache: string, pin: NodePin, log: (
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(`${url}: download failed within ${DOWNLOAD_TIMEOUT_MS / 60000} minutes: ${reason}`);
     }
-    renameSync(part, archive);
+    renameSync(part, file);
   }
-  const sum = createHash("sha256").update(new Uint8Array(await Bun.file(archive).arrayBuffer())).digest("hex");
-  if (sum !== pin.sha256) {
-    throw new Error(
-      `${pin.archive}: SHA-256 ${sum}, want ${pin.sha256} (nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt)`,
-    );
+  const sum = createHash("sha256").update(new Uint8Array(await Bun.file(file).arrayBuffer())).digest("hex");
+  if (sum !== sha256) {
+    throw new Error(`${asset}: SHA-256 ${sum}, want ${sha256} (${published})`);
   }
+  return file;
+}
+
+/** Downloads, verifies and extracts the pinned runtime for the target's platform. */
+async function stageNodeRuntime(dir: string, cache: string, pin: NodePin, log: (line: string) => void): Promise<string> {
+  const archive = await fetchPinned({
+    cache,
+    asset: pin.archive,
+    url: `https://nodejs.org/dist/v${NODE_VERSION}/${pin.archive}`,
+    sha256: pin.sha256,
+    label: `node ${NODE_VERSION}`,
+    published: `nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt`,
+    log,
+  });
   const dest = path.join(dir, pin.path);
   mkdirSync(path.dirname(dest), { recursive: true });
   const unpack = mkdtempSync(path.join(dir, "unpack-"));
   try {
     const binary = await extractMember(archive, pin.member, unpack);
-    const magic = Buffer.from(await Bun.file(binary).slice(0, 4).arrayBuffer()).toString("hex");
-    if (!EXECUTABLE_MAGIC[pin.platform].some((prefix) => magic.startsWith(prefix))) {
-      throw new Error(`${pin.archive}: ${pin.member} starts with ${magic}, not a ${pin.platform} executable`);
-    }
+    assertPlatformExecutable(binary, pin.platform, `${pin.archive}: ${pin.member}`);
     renameSync(binary, dest);
   } finally {
     rmSync(unpack, { recursive: true, force: true });
   }
+  // Cross-staged on Windows the bit is meaningless here; the AppImage and the
+  // packages set it where the runtime ships (buildAppImage chmods node).
   if (process.platform !== "win32") chmodSync(dest, 0o755);
   return dest;
+}
+
+/** Fails unless file starts with the native executable header of platform. */
+export function assertPlatformExecutable(file: string, platform: NodePin["platform"], label: string): void {
+  const header = Buffer.alloc(4);
+  const fd = openSync(file, "r");
+  try {
+    readSync(fd, header, 0, 4, 0);
+  } finally {
+    closeSync(fd);
+  }
+  const magic = header.toString("hex");
+  if (!EXECUTABLE_MAGIC[platform].some((prefix) => magic.startsWith(prefix))) {
+    throw new Error(`${label} starts with ${magic}, not a ${platform} executable`);
+  }
 }
 
 /** The first bytes of a native executable per platform: PE, Mach-O, ELF. */
@@ -348,6 +524,19 @@ function tarExecutable(): string {
 }
 
 /**
+ * The runtime checks, run only where the staged runtime is executable: a
+ * package for another target is proved by its tests there (its archive's
+ * SHA-256 and executable magic were checked when it was unpacked), and the
+ * portability check covers the tree either way.
+ */
+async function checkStagedFor(root: string, dir: string, pin: NodePin, hosts: string[], target: PackageTarget): Promise<string[]> {
+  if (target.platform === process.platform && target.arch === process.arch) return checkStaged(root, dir, pin, hosts);
+  return [
+    `the ${target.platform}-${target.arch} runtime was not run: it does not execute on ${process.platform}-${process.arch}; the package proves it where it ships`,
+  ];
+}
+
+/**
  * Proves the staged tree with the staged runtime: the runtime runs at all, and
  * every module the host scripts and agent/package.json name resolves from the
  * staged agent directory. Every specifier comes from the tree itself, so a
@@ -361,16 +550,16 @@ async function checkStaged(root: string, dir: string, pin: NodePin, hosts: strin
   if (version.stdout.trim() !== `v${NODE_VERSION}`) {
     throw new Error(`${node} --version printed ${version.stdout.trim()}, want v${NODE_VERSION}`);
   }
-  const imports = await hostImports(root, path.join(dir, "agent"), hosts);
-  const check = await run(node, ["--input-type=module", "-e", imports], { cwd: path.join(dir, "agent") });
+  const imports = await hostImports(root, path.join(dir, AGENT_DIR), hosts);
+  const check = await run(node, ["--input-type=module", "-e", imports], { cwd: path.join(dir, AGENT_DIR) });
   if (check.code !== 0) {
     throw new Error(`the staged runtime could not import the hosts' dependencies (exit ${check.code}):\n${check.stdout}${check.stderr}`);
   }
   return [`node --version: ${version.stdout.trim()}`, ...check.stdout.trim().split("\n")];
 }
 
-/** The one host with dependencies; the check below must see them in it. */
-const DURABLE_HOST = "durable-host.mjs";
+/** The one host with dependencies; the check below must see them in it, and the AppImage carries it. */
+export const DURABLE_HOST = "durable-host.mjs";
 
 /**
  * The import forms a host script writes: `from "x"` or `from 'x'`, a bare
