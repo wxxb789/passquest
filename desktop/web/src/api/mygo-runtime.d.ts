@@ -3,7 +3,7 @@
 //
 // The npm package `mygo-runtime` is not a dependency: its functions are thin wrappers over
 // `window.mygo`, so ./client.ts imports ./mygo.ts for its types only (the import is erased by the
-// bundler) and calls `window.mygo` directly. These declarations mirror mygo-runtime v0.9.0
+// bundler) and calls `window.mygo` directly. These declarations mirror mygo-runtime v0.10.0
 // (packages/runtime/src/index.ts in github.com/egoist/mygo).
 
 interface MygoRuntime {
@@ -25,6 +25,16 @@ declare module 'mygo-runtime' {
     on(listener: (payload: T) => void): () => void;
     once(listener: (payload: T) => void): () => void;
   }
+  export interface CallOptions {
+    /** Cancels the call when it is aborted, as `fetch` does. */
+    signal?: AbortSignal;
+  }
+  /** A bound Go method, which a call may cancel (the generated client's method type). */
+  export interface Cancellable<A extends unknown[], R> {
+    (...args: A): Promise<R>;
+    with(options: CallOptions): (...args: A) => Promise<R>;
+  }
   export function call<T = unknown>(method: string, ...args: unknown[]): Promise<T>;
+  export function bind<A extends unknown[], R>(method: string, args: (...a: A) => unknown[]): Cancellable<A, R>;
   export function event<T>(name: string): GoEvent<T>;
 }

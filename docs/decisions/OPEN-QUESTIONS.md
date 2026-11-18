@@ -485,6 +485,8 @@ Entry format:
   behind the versioned document; the application run/effect tables stay.
 - Revisit when: Pi's API changes incompatibly, packaging goal 0013 starts, or the dependency tree is a
   material install problem on a target platform.
+- Updated (2026-11-18): the pins are now 1.5.2 (`agent/package.json`); the store location and the
+  reversal are unchanged.
 
 ### Q-0006-03 — How is one run paused, resumed and cancelled across processes?
 - Status: decided(default taken)
@@ -1302,6 +1304,9 @@ Entry format:
   packages another way.
 - Default taken: none — the owner chose (A).
 - Revisit when: the feed carries the locked versions; then the local gate must be fully green again.
+- Revisited (2026-11-18): the dependency upgrade moved the Pi packages to `@earendil-works/*@1.5.2`, which
+  the feed carries; `agent smoke` (118 assertions) and `provider smoke` (92) pass locally again, so the
+  local gate is expected to be fully green and this exception no longer applies to new merges.
 
 ### Q-0012-00 — Which design direction does goal 0012 refine?
 - Status: resolved
