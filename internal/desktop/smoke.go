@@ -178,6 +178,13 @@ func (h *smokeHook) finish(value any, err error) {
 	})
 }
 
+// writeFailure writes a failure result for a launch that never started the
+// window (the webview runtime is missing): a scripted run reports it the same
+// way a window failure would, and never waits on a dialog.
+func (h *smokeHook) writeFailure(err error) error {
+	return os.WriteFile(h.resultPath, smokeResult(nil, err), 0o644)
+}
+
 // smokeResult encodes the result document.
 func smokeResult(value any, err error) []byte {
 	doc := map[string]any{"ok": true, "value": value}

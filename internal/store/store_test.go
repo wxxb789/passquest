@@ -1,7 +1,11 @@
 package store
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"errors"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -144,6 +148,68 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 	}
 	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "newer than supported") {
 		t.Fatalf("Open error = %v, want newer-schema rejection", err)
+	}
+}
+
+// sideFileDigests hashes the database and every side file SQLite may keep
+// beside it (WAL, shared memory, rollback journal), by base name. A write to
+// any of them, or a side file that appears, changes the result.
+func sideFileDigests(t *testing.T, path string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, name := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
+		raw, err := os.ReadFile(name)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		sum := sha256.Sum256(raw)
+		out[filepath.Base(name)] = hex.EncodeToString(sum[:])
+	}
+	return out
+}
+
+// TestOpenRejectsNewerSchemaLeavesFileUntouched pins the refusal of a database
+// a newer build wrote: Open fails with the typed error before it writes
+// anything, so the build that owns the file keeps working. The version check
+// runs before any migration, pragma or WAL creation, and the side files count:
+// a refused open must neither appear nor change one.
+//
+// The fixture is what a downgrade meets: a newer build that quit, which
+// SQLite leaves with no side files. A database whose writer is still running
+// (or crashed mid-transaction) makes SQLite itself touch -shm bookkeeping or
+// recover the WAL; that is SQLite's own, data-preserving work, and no reader
+// can avoid it.
+func TestOpenRejectsNewerSchemaLeavesFileUntouched(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "future.sqlite")
+	db := openSQLite(t, path)
+	if _, err := db.Exec(`PRAGMA user_version = 99`); err != nil {
+		t.Fatalf("set version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	before := sideFileDigests(t, path)
+	if _, err := Open(path); err == nil {
+		t.Fatal("Open accepted a newer schema")
+	} else {
+		var newer *SchemaNewerError
+		if !errors.As(err, &newer) {
+			t.Fatalf("Open error = %v (%T), want *SchemaNewerError", err, err)
+		}
+		if newer.Version != 99 || newer.Supported != SchemaVersion {
+			t.Fatalf("SchemaNewerError = %+v, want version 99 supported %d", newer, SchemaVersion)
+		}
+	}
+	after := sideFileDigests(t, path)
+	if !maps.Equal(before, after) {
+		t.Fatalf("a refused open changed the database files:\nbefore: %v\nafter:  %v", before, after)
+	}
+	if _, ok := after[filepath.Base(path)]; !ok {
+		t.Fatal("the database file vanished")
 	}
 }
 

@@ -23,12 +23,23 @@ func envOf(values map[string]string) func(string) string {
 	return func(name string) string { return values[name] }
 }
 
+// testInstall returns install directories beside the test's own files, so a
+// data directory inside them exists only when a case puts it there.
+func testInstall(t *testing.T) installDirs {
+	t.Helper()
+	dir := t.TempDir()
+	return installDirs{
+		Executable: func() (string, error) { return filepath.Join(dir, "app", "Pass Quest.exe"), nil },
+		Resources:  func() (string, error) { return filepath.Join(dir, "app", "resources"), nil },
+	}
+}
+
 func TestResolveStorage(t *testing.T) {
 	userDir := filepath.Join(t.TempDir(), "Pass Quest")
 	// MyGo's PathUserData creates the directory 0755 before resolveStorage runs.
 	userData := func() (string, error) { return userDir, os.MkdirAll(userDir, 0o755) }
 
-	got, err := resolveStorage(envOf(nil), userData)
+	got, err := resolveStorage(envOf(nil), userData, testInstall(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +56,7 @@ func TestResolveStorage(t *testing.T) {
 	got, err = resolveStorage(envOf(map[string]string{EnvData: override}), func() (string, error) {
 		t.Fatal("user data directory consulted despite the override")
 		return "", nil
-	})
+	}, testInstall(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +70,7 @@ func TestResolveStorage(t *testing.T) {
 	}
 
 	db := filepath.Join(t.TempDir(), "elsewhere.sqlite")
-	got, err = resolveStorage(envOf(map[string]string{EnvDB: db}), userData)
+	got, err = resolveStorage(envOf(map[string]string{EnvDB: db}), userData, testInstall(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +78,7 @@ func TestResolveStorage(t *testing.T) {
 		t.Fatalf("PASSQUEST_DB storage = %+v", got)
 	}
 
-	if _, err := resolveStorage(envOf(nil), func() (string, error) { return "", errors.New("no home") }); err == nil {
+	if _, err := resolveStorage(envOf(nil), func() (string, error) { return "", errors.New("no home") }, testInstall(t)); err == nil {
 		t.Fatal("a failing user data directory was accepted")
 	}
 }

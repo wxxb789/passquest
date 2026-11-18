@@ -251,6 +251,14 @@ func (w *Workspace) storedCredential(name string) (string, bool) {
 func (w *Workspace) open() (*store.Store, error) {
 	st, err := store.Open(w.dbPath)
 	if err != nil {
+		var newer *store.SchemaNewerError
+		if errors.As(err, &newer) {
+			return nil, withAction(&studio.Error{
+				Code: "database_newer",
+				Message: fmt.Sprintf("this database was written by a newer Pass Quest (schema version %d; this build supports %d)",
+					newer.Version, newer.Supported),
+			})
+		}
 		return nil, &studio.Error{Code: "internal_error", Message: err.Error()}
 	}
 	return st, nil
@@ -351,6 +359,7 @@ func desktopSentinelCode(err error) (string, bool) {
 // itself.
 var codeActions = map[string]string{
 	"assessment_active":     "finish or abandon the active assessment run first",
+	"database_newer":        "install the newer Pass Quest that wrote this data",
 	"no_credential":         "add the provider key in Settings, or set its environment variable",
 	"missing_credential":    "add the provider key in Settings, or set its environment variable",
 	"capability_unverified": "run the model test for the active model in Settings",

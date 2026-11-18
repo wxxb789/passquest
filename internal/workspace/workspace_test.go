@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -318,6 +320,60 @@ func TestWorkspaceBriefWithoutRun(t *testing.T) {
 	mustNoErr(t, err)
 	if status.Found || status.State != "none" {
 		t.Fatalf("brief status = %+v", status)
+	}
+}
+
+// TestOpenRefusesNewerSchemaTyped pins the desktop's refusal of a database a
+// newer build wrote: Open, the first thing the window's startup touches, fails
+// with database_newer and one action, before any call and before anything
+// writes the file. The CLI path keeps the store's own error text (see the
+// store tests), because commands open the store directly.
+func TestOpenRefusesNewerSchemaTyped(t *testing.T) {
+	t.Parallel()
+	db := newDB(t)
+	st, err := store.Open(db)
+	mustNoErr(t, err)
+	if err := st.Close(); err != nil {
+		t.Fatalf("close fixture: %v", err)
+	}
+	raw, err := sql.Open("sqlite", db)
+	if err != nil {
+		t.Fatalf("open fixture connection: %v", err)
+	}
+	if _, err := raw.Exec(`PRAGMA user_version = 99`); err != nil {
+		t.Fatalf("bump version: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close fixture connection: %v", err)
+	}
+	before, err := os.ReadFile(db)
+	mustNoErr(t, err)
+
+	_, err = Open(Options{
+		DBPath:  db,
+		Getenv:  func(string) string { return "" },
+		Environ: func() []string { return nil },
+	})
+	if err == nil {
+		t.Fatal("Open accepted a database from a newer build")
+	}
+	var typed *studio.Error
+	if !errors.As(err, &typed) {
+		t.Fatalf("Open error = %v (%T), want *studio.Error", err, err)
+	}
+	if typed.Code != "database_newer" {
+		t.Fatalf("code = %q, want database_newer (message %q)", typed.Code, typed.Message)
+	}
+	if typed.Action == "" {
+		t.Fatal("database_newer has no action for the learner")
+	}
+	if !strings.Contains(typed.Message, "99") || !strings.Contains(typed.Message, fmt.Sprint(store.SchemaVersion)) {
+		t.Fatalf("message = %q, want both schema versions", typed.Message)
+	}
+	after, err := os.ReadFile(db)
+	mustNoErr(t, err)
+	if !bytes.Equal(before, after) {
+		t.Fatal("a refused Open changed the database")
 	}
 }
 
