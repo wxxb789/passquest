@@ -1415,6 +1415,11 @@ Entry format:
   The owner may rebalance the groups.
 - Revisit when: the first split CI run shows the desktop or self-test builds slower than before (then key the
   cache per group), or the per-gate timings show one group as the bottleneck.
+- Updated (2026-11-18): goal 0013's package gate added a fourth group, `package` (the package smoke, gate 24).
+  Its job builds, installs and drives a real package on its own OS, so the matrix gives it a 60-minute timeout
+  (`timeout-minutes: ${{ matrix.group == 'package' && 60 || 20 }}`) while every other group keeps its 20, and it
+  uploads the package this run built as the 7-day `package-<os>` artifact. The four jobs of one OS still share
+  setup-go's cache key, with the same disclosure as above.
 
 ### Q-0012-09 — Should the gate run independent gates in parallel in one process?
 - Status: decided(default taken)
