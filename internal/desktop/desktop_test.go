@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/wxxb789/passquest/internal/cli"
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/workspace"
 )
 
 func envOf(values map[string]string) func(string) string {
@@ -199,7 +199,7 @@ func openTestStudy(t *testing.T, events func(BriefEvent)) *Study {
 	study := newStudy(events)
 	// No Node: host calls are refused up front, whatever this machine has.
 	env := map[string]string{"PASSQUEST_NODE": filepath.Join(t.TempDir(), "no-node-here")}
-	if err := study.open(cli.WorkspaceOptions{
+	if err := study.open(workspace.Options{
 		DBPath:      filepath.Join(t.TempDir(), DatabaseFile),
 		Getenv:      envOf(env),
 		Environ:     func() []string { return nil },

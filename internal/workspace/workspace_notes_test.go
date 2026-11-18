@@ -1,4 +1,4 @@
-package cli
+package workspace
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 func TestWorkspaceNotesFlow(t *testing.T) {
 	t.Parallel()
 	anki := newFakeAnki()
-	f := newWSFixture(t, func(o *WorkspaceOptions) { o.AnkiTransport = anki })
+	f := newWSFixture(t, func(o *Options) { o.AnkiTransport = anki })
 	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample, QuestionID: "q2"})
 	mustNoErr(t, err)
 	feedback, err := f.w.Answer(item.Token, "A")
@@ -146,7 +146,7 @@ func TestWorkspaceNotePreviewIsTheDeckCard(t *testing.T) {
 func TestWorkspaceRefineNote(t *testing.T) {
 	t.Parallel()
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
-	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f := newWSFixture(t, func(o *Options) { o.TutorTransport = transport })
 	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
 	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
 	f.reopen(t)
@@ -271,7 +271,7 @@ func TestWorkspaceRefineNote(t *testing.T) {
 func TestWorkspaceRefineNoteRespectsConsent(t *testing.T) {
 	t.Parallel()
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
-	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f := newWSFixture(t, func(o *Options) { o.TutorTransport = transport })
 	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
 	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
 	f.reopen(t)
@@ -349,7 +349,7 @@ func (g *gatedTutorTransport) Call(ctx context.Context, req tutor.HostRequest) (
 // draft keeps the accepted fields, so a restart does not bring it back.
 func TestWorkspaceRefinementDoesNotUndoAnAccept(t *testing.T) {
 	transport := &gatedTutorTransport{fakeTutorTransport: fakeTutorTransport{response: fixedTutorResponse("OK")}}
-	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f := newWSFixture(t, func(o *Options) { o.TutorTransport = transport })
 	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
 	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
 	f.reopen(t)
@@ -435,7 +435,7 @@ func TestWorkspaceRefinementDoesNotUndoAnAccept(t *testing.T) {
 func TestWorkspaceRefinementStaysAdvisory(t *testing.T) {
 	t.Parallel()
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
-	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f := newWSFixture(t, func(o *Options) { o.TutorTransport = transport })
 	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
 	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
 	f.reopen(t)

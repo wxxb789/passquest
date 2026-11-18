@@ -1,4 +1,4 @@
-package cli
+package workspace
 
 import (
 	"testing"
@@ -139,7 +139,7 @@ func TestWorkspaceHintMakesTacticAttemptAssisted(t *testing.T) {
 // still record the attempt under a fresh session.
 func TestWorkspaceAnswerWithDefaultSession(t *testing.T) {
 	t.Parallel()
-	f := newWSFixture(t, func(o *WorkspaceOptions) { o.NewSession = nil })
+	f := newWSFixture(t, func(o *Options) { o.NewSession = nil })
 	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample})
 	mustNoErr(t, err)
 	feedback, err := f.w.Answer(item.Token, item.Options[0].Label)

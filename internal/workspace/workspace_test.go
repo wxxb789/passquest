@@ -1,4 +1,4 @@
-package cli
+package workspace
 
 import (
 	"encoding/json"
@@ -74,15 +74,15 @@ type wsFixture struct {
 	db    string
 	clock *wsClock
 	env   map[string]string
-	opts  WorkspaceOptions
+	opts  Options
 	w     *Workspace
 }
 
-func newWSFixture(t *testing.T, mutate func(*WorkspaceOptions)) *wsFixture {
+func newWSFixture(t *testing.T, mutate func(*Options)) *wsFixture {
 	t.Helper()
 	f := &wsFixture{db: newDB(t), clock: newWSClock(), env: map[string]string{}}
 	tokens := 0
-	f.opts = WorkspaceOptions{
+	f.opts = Options{
 		DBPath:     f.db,
 		Getenv:     func(key string) string { return f.env[key] },
 		Environ:    func() []string { return envList(f.env) },
@@ -102,9 +102,9 @@ func newWSFixture(t *testing.T, mutate func(*WorkspaceOptions)) *wsFixture {
 
 func (f *wsFixture) reopen(t *testing.T) {
 	t.Helper()
-	w, err := OpenWorkspace(f.opts)
+	w, err := Open(f.opts)
 	if err != nil {
-		t.Fatalf("OpenWorkspace: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	f.w = w
 }
@@ -185,7 +185,7 @@ func TestWorkspaceCredentialStoreLayering(t *testing.T) {
 	creds := newMemCredentials()
 	const storeKey = "store-key-0123456789-not-real"
 	const envKey = "env-key-9876543210-not-real"
-	f := newWSFixture(t, func(o *WorkspaceOptions) { o.Credentials = creds })
+	f := newWSFixture(t, func(o *Options) { o.Credentials = creds })
 	registry := modelRegistryFile(t, modelProvider("alpha", "https://alpha.example.com/v1/chat/completions"))
 	f.env[provider.RegistryEnv] = registry
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
@@ -297,7 +297,7 @@ func TestWorkspaceLegacyCustomCredentialBeatsStoredKey(t *testing.T) {
 	creds := newMemCredentials()
 	const storeKey = "store-key-0123456789-not-real"
 	const legacyKey = "legacy-key-9876543210-not-real"
-	f := newWSFixture(t, func(o *WorkspaceOptions) { o.Credentials = creds })
+	f := newWSFixture(t, func(o *Options) { o.Credentials = creds })
 	_, err := f.w.SetCredential(provider.CustomProvider, storeKey)
 	mustNoErr(t, err)
 	primary := provider.CredentialEnvFor(provider.CustomProvider)

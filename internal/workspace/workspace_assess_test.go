@@ -1,4 +1,4 @@
-package cli
+package workspace
 
 import (
 	"encoding/json"
@@ -15,7 +15,7 @@ func TestWorkspaceAssessmentStepFlow(t *testing.T) {
 	t.Parallel()
 	// Seed before the workspace opens: the seed is copied to a fresh path, and
 	// opening an already migrated database is a no-op.
-	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
+	f := newWSFixture(t, func(o *Options) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	pool, err := f.w.AssessmentPool()
 	mustNoErr(t, err)
 	if !pool.FloorMet || pool.QualifyingItems != 22 {
@@ -126,7 +126,7 @@ func TestWorkspaceAssessmentWindowElapseAbandons(t *testing.T) {
 	t.Parallel()
 	// Seed before the workspace opens: the seed is copied to a fresh path, and
 	// opening an already migrated database is a no-op.
-	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
+	f := newWSFixture(t, func(o *Options) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(2, 1)
 	mustNoErr(t, err)
 	f.clock.Advance(2 * time.Minute)
@@ -178,7 +178,7 @@ func TestWorkspaceAssessmentReportWithholdsQuestions(t *testing.T) {
 	t.Parallel()
 	// Seed before the workspace opens: the seed is copied to a fresh path, and
 	// opening an already migrated database is a no-op.
-	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
+	f := newWSFixture(t, func(o *Options) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(3, 30)
 	mustNoErr(t, err)
 	runID := state.Run.ID
@@ -216,7 +216,7 @@ func TestWorkspaceAssessmentReportHidesUnseenUnavailableItems(t *testing.T) {
 	t.Parallel()
 	// Seed before the workspace opens: the seed is copied to a fresh path, and
 	// opening an already migrated database is a no-op.
-	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
+	f := newWSFixture(t, func(o *Options) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(2, 30)
 	mustNoErr(t, err)
 	runID := state.Run.ID

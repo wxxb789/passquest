@@ -1,4 +1,4 @@
-package cli
+package workspace
 
 import (
 	"encoding/json"
@@ -12,7 +12,7 @@ import (
 func TestWorkspaceCoachPreviewAndFailure(t *testing.T) {
 	t.Parallel()
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
-	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f := newWSFixture(t, func(o *Options) { o.TutorTransport = transport })
 	registry := modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
 	f.env[provider.RegistryEnv] = registry
 	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
@@ -73,7 +73,7 @@ func TestWorkspaceCoachPreviewAndFailure(t *testing.T) {
 func TestWorkspaceCoachHistory(t *testing.T) {
 	t.Parallel()
 	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
-	f := newWSFixture(t, func(o *WorkspaceOptions) { o.TutorTransport = transport })
+	f := newWSFixture(t, func(o *Options) { o.TutorTransport = transport })
 	f.env[provider.RegistryEnv] = modelRegistryFile(t, modelProvider("alpha", "http://127.0.0.1:9/v1/chat/completions"))
 	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
 	f.reopen(t)

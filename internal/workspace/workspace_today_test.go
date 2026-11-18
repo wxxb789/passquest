@@ -1,4 +1,4 @@
-package cli
+package workspace
 
 import (
 	"testing"
@@ -69,7 +69,7 @@ func TestWorkspaceTodayAfterElapsedRunTimesOutPresentedItem(t *testing.T) {
 	t.Parallel()
 	// Seed before the workspace opens: the seed is copied to a fresh path, and
 	// opening an already migrated database is a no-op.
-	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
+	f := newWSFixture(t, func(o *Options) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(2, 1)
 	mustNoErr(t, err)
 	if state.Item == nil || state.Item.Position != 0 {
@@ -99,7 +99,7 @@ func TestWorkspaceTodaySpendsNothingDuringAnActiveRun(t *testing.T) {
 	t.Parallel()
 	// Seed before the workspace opens: the seed is copied to a fresh path, and
 	// opening an already migrated database is a no-op.
-	f := newWSFixture(t, func(o *WorkspaceOptions) { seedAssessmentSource(t, o.DBPath, 22, 1) })
+	f := newWSFixture(t, func(o *Options) { seedAssessmentSource(t, o.DBPath, 22, 1) })
 	state, err := f.w.StartAssessment(2, 30)
 	mustNoErr(t, err)
 	// The window renders Today on boot and on leaving a run; that must not

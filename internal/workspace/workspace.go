@@ -1,4 +1,4 @@
-package cli
+package workspace
 
 import (
 	"crypto/rand"
@@ -32,9 +32,9 @@ type CredentialStore interface {
 	Delete(provider string) error
 }
 
-// WorkspaceOptions are the process seams of one desktop workspace. They are
+// Options are the process seams of one desktop workspace. They are
 // the CLI's Options seams plus the database path and a credential store.
-type WorkspaceOptions struct {
+type Options struct {
 	// DBPath is the database the workspace opens per call. Empty selects
 	// PASSQUEST_DB or the CLI default, exactly as the CLI does.
 	DBPath string
@@ -95,9 +95,9 @@ type windowOptions struct {
 	Getenv func(string) string
 }
 
-// OpenWorkspace validates the options, migrates the database once and
+// Open validates the options, migrates the database once and
 // returns the workspace.
-func OpenWorkspace(options WorkspaceOptions) (*Workspace, error) {
+func Open(options Options) (*Workspace, error) {
 	w := &Workspace{
 		baseGetenv:  options.Getenv,
 		baseEnviron: options.Environ,
