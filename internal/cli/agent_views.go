@@ -9,6 +9,7 @@ import (
 	"github.com/wxxb789/passquest/internal/agent"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study/brief"
 )
 
 func providerLabelOrManual(providerID string) string {
@@ -291,14 +292,6 @@ func agentRunSummaryViews(summaries []store.AgentRunSummary) []agentRunSummaryVi
 	return out
 }
 
-func agentLimits() []string {
-	return []string{
-		"Study steps are advisory model output, not verified answers, grades or exam facts.",
-		"The durable task carries recorded attempt facts, derived skill state and authored lesson text only; no private source text, answer key or learner identity.",
-		"One agent run at a time; a second start is refused until the current run completes or is cancelled.",
-	}
-}
-
 func agentRunDocOf(run store.AgentRun, state agent.State, failure *agent.Failure, response agent.HostResponse, steps []store.AgentStep) agentRunDoc {
 	doc := agentRunDoc{
 		SchemaVersion: ProtocolVersion,
@@ -311,7 +304,7 @@ func agentRunDocOf(run store.AgentRun, state agent.State, failure *agent.Failure
 			ConversationID: response.ConversationID,
 			Snapshot:       response.Snapshot,
 		},
-		Limits: append(agentLimits(), response.Limits...),
+		Limits: append(brief.Limits(), response.Limits...),
 	}
 	if response.Answer != "" || response.AnswerChars > 0 || response.Turns > 0 || response.ToolCalls > 0 {
 		doc.Summary = &agentSummaryView{
@@ -340,7 +333,7 @@ func agentCancelDocOf(run store.AgentRun, state agent.State, heartbeatPID int) a
 		Cancelled:     confirmed,
 		Confirmed:     confirmed,
 		HeartbeatPID:  heartbeatPID,
-		Limits:        agentLimits(),
+		Limits:        brief.Limits(),
 	}
 }
 

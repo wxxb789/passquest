@@ -7,10 +7,8 @@ import (
 	"time"
 
 	"github.com/wxxb789/passquest/internal/provider"
-	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/study/models"
-	"github.com/wxxb789/passquest/internal/tutor"
 )
 
 func runModel(args []string, opt Options) int {
@@ -33,57 +31,6 @@ func runModel(args []string, opt Options) int {
 	default:
 		return usageError(opt, jsonFlagRequested(args), "invalid_input", fmt.Sprintf("unknown model command %q", args[0]))
 	}
-}
-
-// activeProvider refreshes the endpoint from the registry so a data edit drives
-// behaviour on the next call. The active model id stays the stored setting. The
-// returned configuration is the one every caller should use.
-func activeProvider(cfg tutor.Config, registry provider.Registry) (provider.Provider, provider.Model, tutor.Config, bool, error) {
-	providerID := strings.TrimSpace(cfg.Provider)
-	if providerID == "" {
-		return provider.Provider{}, provider.Model{}, cfg, false, nil
-	}
-	p, m, ok := registry.Find(providerID, cfg.Model)
-	if !ok {
-		return provider.Provider{}, provider.Model{}, cfg, true,
-			fmt.Errorf("active model %s/%s is no longer in the provider registry", providerID, cfg.Model)
-	}
-	if !p.Custom {
-		cfg.Endpoint = p.Endpoint
-	}
-	return p, m, cfg, true, nil
-}
-
-// requireVerifiedTextChat refuses a registry pair whose text.chat has no
-// verified evidence. The legacy hand-configured path needs no verification.
-func requireVerifiedTextChat(st *store.Store, registry provider.Registry, opt Options, providerID, modelID string, jsonMode bool) int {
-	providerID = strings.TrimSpace(providerID)
-	if providerID == "" {
-		return 0
-	}
-	_, model, ok := registry.Find(providerID, modelID)
-	if !ok {
-		return usageError(opt, jsonMode, "unknown_model",
-			fmt.Sprintf("%s/%s is no longer in the provider registry", providerID, modelID))
-	}
-	if !model.Has(provider.CapTextChat) {
-		return usageError(opt, jsonMode, "capability_not_declared",
-			fmt.Sprintf("%s/%s does not declare text.chat", providerID, modelID))
-	}
-	verification, found, err := st.LatestProviderVerification(providerID, modelID, string(provider.CapTextChat))
-	if err != nil {
-		return internalError(opt, jsonMode, err)
-	}
-	if !found || verification.Status != "verified" {
-		detail := "text.chat is declared but unverified"
-		if found && verification.Status == "failed" {
-			detail = "the last text.chat test failed: " + verification.FailureType
-		}
-		return usageError(opt, jsonMode, "capability_unverified",
-			fmt.Sprintf("%s/%s: %s; run passquest model test %s/%s before asking",
-				providerID, modelID, detail, providerID, modelID))
-	}
-	return 0
 }
 
 func credentialState(opt Options, providerID string) (string, bool) {

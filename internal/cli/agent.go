@@ -8,19 +8,14 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
-	"github.com/wxxb789/passquest/internal/adaptive"
 	"github.com/wxxb789/passquest/internal/agent"
-	"github.com/wxxb789/passquest/internal/provider"
-	"github.com/wxxb789/passquest/internal/skill"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study"
-	"github.com/wxxb789/passquest/internal/tutor"
+	"github.com/wxxb789/passquest/internal/study/brief"
 )
 
 func runAgent(args []string, opt Options) int {
@@ -106,81 +101,18 @@ func runAgentStart(args []string, opt Options) int {
 		return usageError(opt, *flags.json, "invalid_input",
 			fmt.Sprintf("--timeout-seconds %d is outside %d..%d", *timeoutFlag, agent.MinTimeoutSeconds, agent.MaxTimeoutSeconds))
 	}
-
-	st, err := openDatabase(*flags.db, opt)
+	svc, err := study.Open(opt.ports(*flags.db))
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
-	defer st.Close()
-
-	cfg, registry, code := agentProviderConfig(st, opt, *flags.json)
-	if code != 0 {
-		return code
-	}
-	if code := requireVerifiedTextChat(st, registry, opt, cfg.Provider, cfg.Model, *flags.json); code != 0 {
-		return code
-	}
-	if existing, ok, err := st.LatestAgentRun(true); err != nil {
-		return internalError(opt, *flags.json, err)
-	} else if ok {
-		return usageError(opt, *flags.json, "agent_busy",
-			fmt.Sprintf("run %s is unfinished; run passquest agent resume %s or passquest agent cancel %s before starting another brief",
-				existing.RunID, existing.RunID, existing.RunID))
-	}
-	storePath, err := agent.StorePath(*flags.store, st.Path(), opt.Getenv)
+	defer svc.Close()
+	advanced, err := brief.Advance(context.Background(), svc, brief.Start, brief.AdvanceInput{
+		MaxSteps: *stepsFlag, TimeoutSeconds: *timeoutFlag, StoreOverride: *flags.store,
+	})
 	if err != nil {
-		return usageError(opt, *flags.json, "invalid_input", err.Error())
+		return agentAdvanceError(opt, *flags.json, err)
 	}
-	if err := agent.PrepareStorePath(storePath); err != nil {
-		return internalError(opt, *flags.json, err)
-	}
-	runID, err := opt.NewRunID()
-	if err != nil {
-		return internalError(opt, *flags.json, err)
-	}
-	maxTurns := *stepsFlag*2 + 2
-	prompt, err := agentPrompt(st, runID, *stepsFlag, maxTurns)
-	if err != nil {
-		return sourceError(opt, *flags.json, err)
-	}
-	token, err := opt.NewHostToken()
-	if err != nil {
-		return internalError(opt, *flags.json, err)
-	}
-	run := store.AgentRun{
-		RunID:         runID,
-		TaskKind:      agent.TaskStudyBrief,
-		PromptVersion: agent.PromptVersion,
-		Provider:      cfg.Provider,
-		Model:         cfg.Model,
-		StorePath:     storePath,
-		MaxSteps:      *stepsFlag,
-		MaxTurns:      maxTurns,
-		CreatedAt:     opt.Now(),
-	}
-	detail := map[string]any{
-		"task": run.TaskKind, "model": run.Model, "max_steps": run.MaxSteps,
-		"max_turns": run.MaxTurns, "host_token": token, "prompt_version": run.PromptVersion,
-	}
-	if err := st.CreateAgentRun(run, detail, opt.Now()); err != nil {
-		if errors.Is(err, store.ErrAgentRunUnfinished) {
-			return usageError(opt, *flags.json, "agent_busy", err.Error())
-		}
-		return internalError(opt, *flags.json, err)
-	}
-
-	env, _, present := provider.CredentialValue(opt.Getenv, run.Provider)
-	if !present {
-		return agentMissingCredential(opt, *flags.json, st, run, env)
-	}
-
-	// start binds the model recorded with the run; a model rename needs
-	// cancel + start, while endpoint, timeout and credential stay current.
-	request, err := agentHostRequest(st, run, agent.ModeStart, cfg.Model, prompt, token, cfg, *timeoutFlag, env)
-	if err != nil {
-		return internalError(opt, *flags.json, err)
-	}
-	return executeAgentRun(opt, *flags.json, st, run, request, time.Duration(*timeoutFlag)*time.Second)
+	return writeAgentRunOutcome(opt, *flags.json, advanced)
 }
 
 func runAgentResume(args []string, opt Options) int {
@@ -195,200 +127,18 @@ func runAgentResume(args []string, opt Options) int {
 		return usageError(opt, *flags.json, "invalid_input",
 			fmt.Sprintf("--timeout-seconds %d is outside %d..%d", *timeoutFlag, agent.MinTimeoutSeconds, agent.MaxTimeoutSeconds))
 	}
-	st, err := openDatabase(*flags.db, opt)
+	svc, err := study.Open(opt.ports(*flags.db))
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
-	defer st.Close()
-	run, latest, code := resolveAgentRun(opt, st, flags.fs.Arg(0), true, *flags.json)
-	if code != 0 {
-		return code
-	}
-	storePath, code := agentRecordedStore(opt, st, run, *flags.store, *flags.json)
-	if code != 0 {
-		return code
-	}
-	run.StorePath = storePath
-	pending, err := st.AgentRunCancelPending(run.RunID)
+	defer svc.Close()
+	advanced, err := brief.Advance(context.Background(), svc, brief.Resume, brief.AdvanceInput{
+		RunRef: flags.fs.Arg(0), TimeoutSeconds: *timeoutFlag, StoreOverride: *flags.store,
+	})
 	if err != nil {
-		return internalError(opt, *flags.json, err)
+		return agentAdvanceError(opt, *flags.json, err)
 	}
-	if pending {
-		return usageError(opt, *flags.json, "cancel_pending",
-			fmt.Sprintf("cancellation was requested for run %s; run agent cancel to confirm it", run.RunID))
-	}
-	// A fresh heartbeat is a live host only while the trail still describes a
-	// live claim. After an interruption or failure the recording process has
-	// already reaped the host; a heartbeat it could not remove (a Windows kill
-	// cannot) must not veto resume. A start/resume claim younger than the
-	// heartbeat window may not have written its heartbeat yet, so it is
-	// treated as live too.
-	// An unknown read (present file, transient failure) is live: refusing a
-	// resume costs nothing, starting a second host beside the old one does not.
-	if heartbeat, status := agent.ProbeHeartbeat(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow()); status.Live() &&
-		agent.HeartbeatAuthority(latest.Kind) {
-		return usageError(opt, *flags.json, "run_running",
-			fmt.Sprintf("run %s has a live host (pid %d); cancel it before resuming", run.RunID, heartbeat.PID))
-	}
-	if (latest.Kind == store.AgentEventStarted || latest.Kind == store.AgentEventResumed) &&
-		!latest.At.IsZero() && opt.Now().Sub(latest.At) < agentHeartbeatWindow() {
-		return usageError(opt, *flags.json, "run_running",
-			fmt.Sprintf("run %s was claimed moments ago and its host may still be starting; check agent status before resuming", run.RunID))
-	}
-	switch latest.Kind {
-	case store.AgentEventCompleted:
-		return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed; use agent show or start a new run", run.RunID))
-	case store.AgentEventCancelled:
-		return usageError(opt, *flags.json, "run_cancelled", fmt.Sprintf("run %s was cancelled; start a new run", run.RunID))
-	case store.AgentEventFailed:
-		if agentEventCode(latest) == agent.CodeNoSteps {
-			return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s answered without steps; start a new run", run.RunID))
-		}
-	}
-	cfg, registry, code := agentProviderConfig(st, opt, *flags.json)
-	if code != 0 {
-		return code
-	}
-	env := provider.CredentialEnvFor(run.Provider)
-	if strings.TrimSpace(run.Provider) != "" {
-		if len(registry.Providers) == 0 {
-			loaded, _, err := provider.Load(opt.Getenv)
-			if err != nil {
-				return usageError(opt, *flags.json, "invalid_registry", err.Error())
-			}
-			registry = loaded
-		}
-		recorded, _, ok := registry.Find(run.Provider, run.Model)
-		if !ok {
-			return usageError(opt, *flags.json, "unknown_model",
-				fmt.Sprintf("run %s recorded model %s/%s, which is no longer in the registry", run.RunID, run.Provider, run.Model))
-		}
-		if recorded.Custom {
-			if cfg.Provider != run.Provider {
-				return usageError(opt, *flags.json, "provider_changed",
-					fmt.Sprintf("run %s uses the custom provider; run passquest model use custom/%s --endpoint URL before resuming",
-						run.RunID, run.Model))
-			}
-		} else {
-			cfg.Endpoint = recorded.Endpoint
-		}
-		if code := requireVerifiedTextChat(st, registry, opt, run.Provider, run.Model, *flags.json); code != 0 {
-			return code
-		}
-		var present bool
-		env, _, present = provider.CredentialValue(opt.Getenv, run.Provider)
-		if !present {
-			return agentMissingCredential(opt, *flags.json, st, run, env)
-		}
-	}
-	if err := agent.PrepareStorePath(run.StorePath); err != nil {
-		return internalError(opt, *flags.json, err)
-	}
-	prompt, err := agentPrompt(st, run.RunID, run.MaxSteps, run.MaxTurns)
-	if err != nil {
-		return sourceError(opt, *flags.json, err)
-	}
-	token, err := opt.NewHostToken()
-	if err != nil {
-		return internalError(opt, *flags.json, err)
-	}
-	if _, err := st.ClaimAgentResume(run.RunID, latest.ID, map[string]any{
-		"model": run.Model, "host_token": token, "max_steps": run.MaxSteps, "max_turns": run.MaxTurns,
-	}, opt.Now()); err != nil {
-		switch {
-		case errors.Is(err, store.ErrAgentRunChanged):
-			return usageError(opt, *flags.json, "run_running",
-				fmt.Sprintf("run %s changed or was claimed by another process; check agent status before retrying", run.RunID))
-		case errors.Is(err, store.ErrAgentRunFinished):
-			return agentAppendFinished(opt, *flags.json, st, run, nil)
-		case errors.Is(err, store.ErrAgentRunCancelled):
-			return usageError(opt, *flags.json, "cancel_pending",
-				fmt.Sprintf("cancellation was requested for run %s; run agent cancel to confirm it", run.RunID))
-		default:
-			return internalError(opt, *flags.json, err)
-		}
-	}
-	request, err := agentHostRequest(st, run, agent.ModeResume, run.Model, prompt, token, cfg, *timeoutFlag, env)
-	if err != nil {
-		return internalError(opt, *flags.json, err)
-	}
-	return executeAgentRun(opt, *flags.json, st, run, request, time.Duration(*timeoutFlag)*time.Second)
-}
-
-// agentProviderConfig applies the provider preconditions start and resume
-// share: a configured endpoint, the active registry endpoint and the agent's
-// endpoint rule. The loaded registry is returned so a run resolves it once.
-func agentProviderConfig(st *store.Store, opt Options, jsonMode bool) (tutor.Config, provider.Registry, int) {
-	cfg, configured, err := st.TutorConfig()
-	if err != nil {
-		return tutor.Config{}, provider.Registry{}, internalError(opt, jsonMode, err)
-	}
-	if !configured {
-		return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "not_configured",
-			"no provider is configured; run passquest tutor config --endpoint URL --model NAME")
-	}
-	var registry provider.Registry
-	if strings.TrimSpace(cfg.Provider) != "" {
-		var err error
-		registry, _, err = provider.Load(opt.Getenv)
-		if err != nil {
-			return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "invalid_registry", err.Error())
-		}
-		_, _, refreshed, _, err := activeProvider(cfg, registry)
-		if err != nil {
-			return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "unknown_model", err.Error())
-		}
-		cfg = refreshed
-	}
-	if err := agent.ValidateEndpoint(cfg.Endpoint); err != nil {
-		return tutor.Config{}, provider.Registry{}, usageError(opt, jsonMode, "invalid_config", err.Error())
-	}
-	return cfg, registry, 0
-}
-
-// agentMissingCredential records the one needs_action event every missing-key
-// path shares.
-func agentMissingCredential(opt Options, jsonMode bool, st *store.Store, run store.AgentRun, env string) int {
-	failure := agent.FailureForCode(agent.CodeMissingCredential)
-	failure.Message = fmt.Sprintf("%s is not set", env)
-	detail := agentFailureDetail(failure, agent.StateNeedsAction, "")
-	if _, err := st.AppendAgentRunEvent(run.RunID, store.AgentEventNeedsAction, detail, opt.Now()); err != nil {
-		return internalError(opt, jsonMode, err)
-	}
-	return writeAgentFailure(opt, jsonMode, run, agent.StateNeedsAction, failure, nil)
-}
-
-// agentHostRequest builds the one host request shape start and resume share.
-// model is explicit because resume binds the run's recorded model while start
-// binds the current configuration (Q-0006-05).
-func agentHostRequest(st *store.Store, run store.AgentRun, mode, model, prompt, token string, cfg tutor.Config, timeoutSeconds int, credentialEnv string) (agent.HostRequest, error) {
-	executable, err := os.Executable()
-	if err != nil {
-		return agent.HostRequest{}, err
-	}
-	return agent.HostRequest{
-		ProtocolVersion: agent.ProtocolVersion,
-		Mode:            mode,
-		RunID:           run.RunID,
-		TaskKind:        run.TaskKind,
-		PromptVersion:   run.PromptVersion,
-		StorePath:       run.StorePath,
-		HeartbeatPath:   run.StorePath + ".host",
-		HostToken:       token,
-		BinaryPath:      executable,
-		DBPath:          st.Path(),
-		CredentialEnv:   credentialEnv,
-		Model: &agent.ModelConfig{
-			Endpoint:        cfg.Endpoint,
-			Model:           model,
-			TimeoutMS:       cfg.TimeoutMS,
-			MaxOutputTokens: cfg.MaxOutputTokens,
-			MaxSteps:        run.MaxSteps,
-			MaxTurns:        run.MaxTurns,
-		},
-		Prompt:     prompt,
-		DeadlineMS: int64(timeoutSeconds)*1000 + 10000,
-	}, nil
+	return writeAgentRunOutcome(opt, *flags.json, advanced)
 }
 
 func runAgentStatus(args []string, opt Options) int {
@@ -398,99 +148,33 @@ func runAgentStatus(args []string, opt Options) int {
 	if code := parseAgentPositionals(flags.fs, args, opt, wantJSON, 0, 1, "agent status [RUN]"); code != 0 {
 		return code
 	}
-	st, err := openDatabase(*flags.db, opt)
+	svc, err := study.Open(opt.ports(*flags.db))
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
-	defer st.Close()
-	run, latest, code := resolveAgentRun(opt, st, flags.fs.Arg(0), false, *flags.json)
-	if code != 0 {
-		return code
-	}
-	storePath, code := agentStoreOverride(opt, st, run, *flags.store, *flags.json)
-	if code != 0 {
-		return code
-	}
-	run.StorePath = storePath
-	steps, err := st.AgentSteps(run.RunID)
+	defer svc.Close()
+	live, err := brief.Status(context.Background(), svc, flags.fs.Arg(0), *flags.store)
 	if err != nil {
-		return internalError(opt, *flags.json, err)
+		return fail(opt, *flags.json, err)
 	}
-	attempts, err := st.AgentStepAttempts(run.RunID)
-	if err != nil {
-		return internalError(opt, *flags.json, err)
-	}
-	// A fresh heartbeat belongs to the run, not to the token of the latest
-	// trail event: a second host that raced the claim still means a live run.
-	// It describes a live host only while the trail is a live claim; an
-	// interrupted/failed/completed trail wins over a heartbeat the dead host
-	// could not remove.
-	heartbeat, status := agent.ProbeHeartbeat(run.StorePath+".host", run.RunID, opt.Now(), agentHeartbeatWindow())
-	fresh := status.Live()
-	if !agent.HeartbeatAuthority(latest.Kind) {
-		fresh = false
-	}
-
-	durable := agentDurableView{Available: false, Reason: "not_started", HeartbeatFresh: fresh, HeartbeatPID: heartbeat.PID}
-	var snapshot *agent.Snapshot
-	if _, statErr := os.Stat(run.StorePath); statErr != nil {
-		durable.Available = true
-		durable.Reason = "store_missing"
-		snapshot = &agent.Snapshot{Found: false}
-	} else {
-		response, runErr := runAgentHost(opt, agent.HostRequest{
-			ProtocolVersion: agent.ProtocolVersion,
-			Mode:            agent.ModeStatus,
-			RunID:           run.RunID,
-			StorePath:       run.StorePath,
-			CredentialEnv:   agent.CredentialEnv,
-		}, 20*time.Second)
-		switch {
-		case runErr != nil:
-			var unavailable *agent.UnavailableError
-			if errors.As(runErr, &unavailable) {
-				durable.Reason = agent.CodeAgentUnavailable
-			} else {
-				durable.Reason = agent.CodeHostProtocol
-			}
-		case response.Response.State == "status":
-			durable.Available = true
-			durable.Reason = ""
-			snapshot = response.Response.Snapshot
-			if snapshot == nil {
-				snapshot = &agent.Snapshot{Found: false}
-			}
-			durable.ConversationID = response.Response.ConversationID
-			if durable.ConversationID == 0 && snapshot != nil {
-				durable.ConversationID = snapshot.ConversationID
-			}
-		default:
-			durable.Reason = agent.CodeHostProtocol
-		}
-	}
-
-	state, failure := agent.ClassifyStatus(agent.StatusInput{
-		LatestEvent:      latest.Kind,
-		LatestCode:       agentEventCode(latest),
-		HeartbeatFresh:   fresh,
-		DurableAvailable: durable.Available,
-		Snapshot:         snapshot,
-		Steps:            len(steps),
-	})
 	doc := agentStatusDoc{
 		SchemaVersion: ProtocolVersion,
-		State:         string(state),
-		Run:           agentRunViewOf(run),
-		Status:        agentStatusViewOf(state, failure, latest.Kind),
-		Steps:         agentStepViews(steps),
-		Counts:        agentCountsOf(steps, attempts),
-		Durable:       durable,
-		LatestEvent:   latest.Kind,
-		Events:        agentEventCount(st, run.RunID),
-		Limits:        agentLimits(),
-	}
-	if snapshot != nil {
-		doc.Durable.Snapshot = snapshot
+		State:         string(live.State),
+		Run:           agentRunViewOf(live.Run),
+		Status:        agentStatusViewOf(live.State, live.Failure, live.LatestEvent),
+		Steps:         agentStepViews(live.Steps),
+		Counts:        agentCountsOf(live.Steps, live.Attempts),
+		Durable: agentDurableView{
+			Available:      live.Durable.Available,
+			Reason:         live.Durable.Reason,
+			ConversationID: live.Durable.ConversationID,
+			HeartbeatPID:   live.Durable.HeartbeatPID,
+			HeartbeatFresh: live.Durable.HeartbeatFresh,
+			Snapshot:       live.Durable.Snapshot,
+		},
+		LatestEvent: live.LatestEvent,
+		Events:      live.Events,
+		Limits:      brief.Limits(),
 	}
 	if *flags.json {
 		return writeJSON(opt, doc)
@@ -511,154 +195,73 @@ func runAgentCancel(args []string, opt Options) int {
 		return usageError(opt, *flags.json, "invalid_input",
 			fmt.Sprintf("--wait-seconds %d is outside %d..%d", *waitFlag, agent.MinCancelWaitSeconds, agent.MaxCancelWaitSeconds))
 	}
-	st, err := openDatabase(*flags.db, opt)
+	svc, err := study.Open(opt.ports(*flags.db))
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
-	defer st.Close()
-	run, latest, code := resolveAgentRun(opt, st, flags.fs.Arg(0), true, *flags.json)
-	if code != 0 {
-		return code
-	}
-	storePath, code := agentRecordedStore(opt, st, run, *flags.store, *flags.json)
-	if code != 0 {
-		return code
-	}
-	run.StorePath = storePath
-	if latest.Kind == store.AgentEventCompleted {
-		return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed", run.RunID))
-	}
-	heartbeatPath := run.StorePath + ".host"
-	if latest.Kind == store.AgentEventCancelled {
-		// Cancellation is already terminal. Do not touch the shared heartbeat
-		// or control file: a newer run on the same store owns them now.
-		existing := agentCancelDocOf(run, agent.StateCancelled, 0)
-		if *flags.json {
-			return writeJSON(opt, existing)
-		}
-		writeAgentCancel(opt.Stdout, existing)
-		return 0
-	}
-	// The latest claim recorded the token given to the host before that host
-	// wrote a heartbeat. A live heartbeat is more precise when a host raced the
-	// claim. The token keeps an old control request from stopping a later
-	// resume, which always receives a new token.
-	controlToken, err := agentLatestToken(st, run.RunID)
+	defer svc.Close()
+	advanced, err := brief.Advance(context.Background(), svc, brief.Cancel, brief.AdvanceInput{
+		RunRef: flags.fs.Arg(0), StoreOverride: *flags.store, WaitSeconds: *waitFlag,
+	})
 	if err != nil {
-		return internalError(opt, *flags.json, err)
+		return agentAdvanceError(opt, *flags.json, err)
 	}
-	heartbeat, heartbeatStatus := agent.ProbeHeartbeat(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow())
-	live := heartbeatStatus.Live()
-	if live && agent.HeartbeatAuthority(latest.Kind) {
-		if heartbeat.Token != "" {
-			controlToken = heartbeat.Token
-		}
-	} else {
-		// A heartbeat left by a host that already exited (interrupted/failed)
-		// is not a live host, so cancellation needs no wait.
-		live = false
-	}
-	if latest.Kind != store.AgentEventCancelRequested && latest.Kind != store.AgentEventCancelled {
-		info := map[string]any{"host_token": controlToken}
-		if live {
-			info["pid"] = heartbeat.PID
-			// A live heartbeat names the host to signal even when the latest
-			// event recorded another token; keep that host's token as
-			// provenance in the cancellation request.
-			if heartbeat.Token != "" {
-				info["host_token"] = heartbeat.Token
-			}
-		}
-		if _, err := st.AppendAgentRunEvent(run.RunID, store.AgentEventCancelRequested, info, opt.Now()); err != nil {
-			if errors.Is(err, store.ErrAgentRunFinished) {
-				agent.RemoveHeartbeatForRun(heartbeatPath, run.RunID)
-				agent.RemoveHostControlForRun(heartbeatPath, run.RunID, controlToken)
-				latest, _, _ := st.LatestAgentRunEvent(run.RunID)
-				if latest.Kind == store.AgentEventCompleted {
-					return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed", run.RunID))
-				}
-				existing := agentCancelDocOf(run, agent.StateCancelled, 0)
-				if *flags.json {
-					return writeJSON(opt, existing)
-				}
-				writeAgentCancel(opt.Stdout, existing)
-				return 0
-			}
-			return internalError(opt, *flags.json, err)
-		}
-	}
-	// The host polls this file itself, so the request reaches a Windows host
-	// that cannot receive SIGINT. Signalling below is only an optimisation.
-	_ = agent.WriteHostControl(heartbeatPath, run.RunID, controlToken, agent.HostControlCancel)
+	return writeAgentCancelOutcome(opt, *flags.json, advanced)
+}
 
-	heartbeat, live = agentHostClaimWait(heartbeatPath, run.RunID, latest, opt)
-	confirmed := true
-	if live {
-		confirmed = false
-		_ = agent.SignalCancelPID(heartbeat.PID)
-		deadline := time.Now().Add(time.Duration(*waitFlag) * time.Second)
-		for time.Now().Before(deadline) {
-			time.Sleep(100 * time.Millisecond)
-			if _, still := agent.ProbeHeartbeat(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow()); !still.Live() {
-				confirmed = true
-				break
-			}
-		}
-		if !confirmed {
-			_ = agent.SignalKillPID(heartbeat.PID)
-			// The heartbeat is only stale after its window. A killed process
-			// must be given that window before cancellation is called
-			// unconfirmed.
-			killDeadline := time.Now().Add(opt.agentKillGrace)
-			for time.Now().Before(killDeadline) {
-				time.Sleep(100 * time.Millisecond)
-				if _, still := agent.ProbeHeartbeat(heartbeatPath, run.RunID, opt.Now(), agentHeartbeatWindow()); !still.Live() {
-					confirmed = true
-					break
-				}
-			}
-		}
+// agentAdvanceError maps a brief.Advance error the way the agent commands
+// mapped theirs: a refusal is the CLI's usage error, the brief packet's
+// learner-fixable errors keep the source table, and anything else is an
+// internal error.
+func agentAdvanceError(opt Options, jsonMode bool, err error) int {
+	var e *study.Error
+	if errors.As(err, &e) {
+		return usageError(opt, jsonMode, e.Code, e.Message)
 	}
-	if !confirmed {
-		// Do not record a terminal cancellation beside a fresh heartbeat: that
-		// would hide a process that may still be running. cancel_requested stays
-		// the latest event, so status reports cancelling and resume refuses.
-		doc := agentCancelDocOf(run, agent.StateCancelling, heartbeat.PID)
-		if *flags.json {
+	return sourceError(opt, jsonMode, err)
+}
+
+// writeAgentRunOutcome renders one start or resume result and returns its exit
+// code: a recorded failure is the stderr failure document (3), a paused run
+// the stdout run document (4), and a completed or cancelled run the stdout run
+// document (0).
+func writeAgentRunOutcome(opt Options, jsonMode bool, advanced brief.Advanced) int {
+	if advanced.Failure != nil {
+		return writeAgentFailure(opt, jsonMode, advanced.Run, advanced.State, *advanced.Failure, advanced.Steps)
+	}
+	doc := agentRunDocOf(advanced.Run, advanced.State, nil, advanced.Response, advanced.Steps)
+	if advanced.State == agent.StatePaused {
+		doc.Status.Reason = advanced.Reason
+		if jsonMode {
+			if err := writeJSONTo(opt.Stdout, doc); err != nil {
+				return internalError(opt, jsonMode, err)
+			}
+			return 4
+		}
+		writeAgentRun(opt.Stdout, doc)
+		return 4
+	}
+	if jsonMode {
+		return writeJSON(opt, doc)
+	}
+	writeAgentRun(opt.Stdout, doc)
+	return 0
+}
+
+// writeAgentCancelOutcome renders one cancel result and returns its exit code:
+// a cancellation the host did not confirm goes to stderr with exit 1, a
+// confirmed (or already terminal) cancellation to stdout with exit 0.
+func writeAgentCancelOutcome(opt Options, jsonMode bool, advanced brief.Advanced) int {
+	doc := agentCancelDocOf(advanced.Run, advanced.State, advanced.HeartbeatPID)
+	if advanced.State == agent.StateCancelling {
+		if jsonMode {
 			_ = writeJSONTo(opt.Stderr, doc)
 		} else {
 			writeAgentCancel(opt.Stderr, doc)
 		}
 		return 1
 	}
-	detail := map[string]any{"confirmed": true}
-	if heartbeat.PID > 0 {
-		detail["pid"] = heartbeat.PID
-	}
-	changed, err := st.AppendAgentRunTerminal(run.RunID, store.AgentEventCancelled, detail, opt.Now())
-	if err != nil {
-		return internalError(opt, *flags.json, err)
-	}
-	// The host is gone in both terminal paths, including when another process
-	// recorded cancelled first. A Windows hard kill cannot remove these files
-	// itself, so this process clears its own run's files. It must not delete a
-	// newer run's shared heartbeat or control file.
-	agent.RemoveHeartbeatForRun(heartbeatPath, run.RunID)
-	agent.RemoveHostControlForRun(heartbeatPath, run.RunID, controlToken)
-	if !changed {
-		latest, _, _ := st.LatestAgentRunEvent(run.RunID)
-		if latest.Kind == store.AgentEventCompleted {
-			return usageError(opt, *flags.json, "run_completed", fmt.Sprintf("run %s already completed", run.RunID))
-		}
-		existing := agentCancelDocOf(run, agent.StateCancelled, heartbeat.PID)
-		if *flags.json {
-			return writeJSON(opt, existing)
-		}
-		writeAgentCancel(opt.Stdout, existing)
-		return 0
-	}
-	doc := agentCancelDocOf(run, agent.StateCancelled, heartbeat.PID)
-	if *flags.json {
+	if jsonMode {
 		return writeJSON(opt, doc)
 	}
 	writeAgentCancel(opt.Stdout, doc)
@@ -683,7 +286,7 @@ func runAgentRuns(args []string, opt Options) int {
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	doc := agentRunsDoc{SchemaVersion: ProtocolVersion, State: "runs", Runs: agentRunSummaryViews(summaries), Limits: agentLimits()}
+	doc := agentRunsDoc{SchemaVersion: ProtocolVersion, State: "runs", Runs: agentRunSummaryViews(summaries), Limits: brief.Limits()}
 	if *jsonFlag {
 		return writeJSON(opt, doc)
 	}
@@ -705,9 +308,9 @@ func runAgentShow(args []string, opt Options) int {
 		return internalError(opt, *jsonFlag, err)
 	}
 	defer st.Close()
-	run, latest, code := resolveAgentRun(opt, st, fs.Arg(0), false, *jsonFlag)
-	if code != 0 {
-		return code
+	run, latest, err := brief.Resolve(st, fs.Arg(0), false)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
 	}
 	events, err := st.AgentRunEvents(run.RunID)
 	if err != nil {
@@ -734,7 +337,7 @@ func runAgentShow(args []string, opt Options) int {
 		Events:        agentEventViews(events),
 		Steps:         agentStepViews(steps),
 		Effects:       agentEffectsOf(steps, attempts, events),
-		Limits:        agentLimits(),
+		Limits:        brief.Limits(),
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)
@@ -770,7 +373,7 @@ func runAgentTranscript(args []string, opt Options) int {
 		return usageError(opt, *jsonFlag, "store_missing",
 			fmt.Sprintf("durable store %s does not exist; pass --agent-store with the saved Pi SQLite file", storePath))
 	}
-	outcome, runErr := runAgentHost(opt, agent.HostRequest{
+	outcome, runErr := brief.RunHost(opt.AgentRunner, agent.HostRequest{
 		ProtocolVersion: agent.ProtocolVersion,
 		Mode:            agent.ModeTranscript,
 		RunID:           runID,
@@ -834,435 +437,80 @@ func runAgentRecordStep(args []string, opt Options) int {
 	if err := json.Unmarshal(raw, &request); err != nil {
 		return agentRecordStepError(opt, *jsonFlag, "invalid_step", fmt.Sprintf("step is not JSON: %v", err))
 	}
-	st, err := openDatabase(*dbFlag, opt)
+	svc, err := study.Open(opt.ports(*dbFlag))
 	if err != nil {
 		return agentRecordStepError(opt, *jsonFlag, "internal_error", err.Error())
 	}
-	defer st.Close()
-	run, ok, err := st.AgentRun(request.RunID)
+	defer svc.Close()
+	recorded, err := brief.Record(context.Background(), svc, brief.StepInput{
+		RunID: request.RunID, AttemptKey: request.AttemptKey, Index: request.Index,
+		Kind: request.Kind, Title: request.Title, Body: request.Body,
+	})
 	if err != nil {
-		return agentRecordStepError(opt, *jsonFlag, "internal_error", err.Error())
-	}
-	if !ok {
-		return agentRecordStepError(opt, *jsonFlag, "unknown_run", fmt.Sprintf("run %s is unknown", request.RunID))
-	}
-	step, err := agent.ValidateStep(request.RunID, request.AttemptKey, request.Kind, request.Title, request.Body, request.Index, run.MaxSteps)
-	if err != nil {
-		return agentRecordStepError(opt, *jsonFlag, "invalid_step", err.Error())
-	}
-	recorded, duplicate, attempts, err := st.RecordAgentStep(step.RunID, step.Index, step.Kind, step.Title, step.Body, step.AttemptKey, opt.Now())
-	if err != nil {
-		switch {
-		case errors.Is(err, store.ErrAgentRunNotFound):
-			return agentRecordStepError(opt, *jsonFlag, "unknown_run", err.Error())
-		case errors.Is(err, store.ErrAgentRunCancelled):
-			return agentRecordStepError(opt, *jsonFlag, "run_cancelled", err.Error())
-		case errors.Is(err, store.ErrAgentRunCompleted):
-			return agentRecordStepError(opt, *jsonFlag, "run_completed", err.Error())
-		default:
-			return agentRecordStepError(opt, *jsonFlag, "internal_error", err.Error())
+		var e *study.Error
+		if errors.As(err, &e) {
+			return agentRecordStepError(opt, *jsonFlag, e.Code, e.Message)
 		}
+		return agentRecordStepError(opt, *jsonFlag, "internal_error", err.Error())
 	}
 	doc := agentStepDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         "step",
-		RunID:         recorded.RunID,
+		RunID:         recorded.Step.RunID,
 		Step: agentStepView{
-			Index: recorded.Index, Kind: recorded.Kind, Title: recorded.Title, Body: recorded.Body,
-			Advisory: true, VerifiedAnswer: false, CreatedAt: source.FormatTime(recorded.CreatedAt),
+			Index: recorded.Step.Index, Kind: recorded.Step.Kind, Title: recorded.Step.Title, Body: recorded.Step.Body,
+			Advisory: true, VerifiedAnswer: false, CreatedAt: source.FormatTime(recorded.Step.CreatedAt),
 		},
-		Duplicate:  duplicate,
-		AttemptKey: step.AttemptKey,
-		Attempts:   attempts,
+		Duplicate:  recorded.Duplicate,
+		AttemptKey: recorded.AttemptKey,
+		Attempts:   recorded.Attempts,
 	}
 	return writeJSON(opt, doc)
 }
 
-// agentAppendFinished reports the terminal state another process already stored.
-// It is used when a late transition loses the race with completion/cancellation
-// so the command cannot present the wrong outcome.
-func agentAppendFinished(opt Options, jsonMode bool, st *store.Store, run store.AgentRun, steps []store.AgentStep) int {
-	latest, ok, err := st.LatestAgentRunEvent(run.RunID)
-	if err != nil {
-		return internalError(opt, jsonMode, err)
+func writeAgentFailure(opt Options, jsonMode bool, run store.AgentRun, state agent.State, failure agent.Failure, steps []store.AgentStep) int {
+	status := agentStatusViewOf(state, &failure, "")
+	runView := agentRunViewOf(run)
+	doc := agentFailureDoc{
+		SchemaVersion: ProtocolVersion,
+		Error:         agent.ErrorDoc{Code: failure.Code, Message: failure.Message},
+		Run:           &runView,
+		Status:        &status,
+		Steps:         agentStepViews(steps),
+		Limits:        brief.Limits(),
 	}
-	if !ok {
-		return internalError(opt, jsonMode, fmt.Errorf("agent: run %s has no events", run.RunID))
-	}
-	state := agentAppState(latest.Kind)
-	if state != agent.StateCompleted && state != agent.StateCancelled {
-		return internalError(opt, jsonMode, fmt.Errorf("agent: run %s is not terminal", run.RunID))
-	}
-	if steps == nil {
-		steps, err = st.AgentSteps(run.RunID)
-		if err != nil {
-			return internalError(opt, jsonMode, err)
-		}
-	}
-	doc := agentRunDocOf(run, state, nil, agent.HostResponse{}, steps)
-	doc.Status.Reason = latest.Kind
 	if jsonMode {
-		return writeJSON(opt, doc)
-	}
-	writeAgentRun(opt.Stdout, doc)
-	return 0
-}
-
-// executeAgentRun runs one start/resume host process, records the transition and
-// writes the outcome document. start and resume differ only in the request and
-// the events already on disk.
-func executeAgentRun(opt Options, jsonMode bool, st *store.Store, run store.AgentRun, request agent.HostRequest, timeout time.Duration) int {
-	agent.RemoveHeartbeatForRun(request.HeartbeatPath, request.RunID)
-	outcome, runErr := runAgentHost(opt, request, timeout)
-	// runAgentHost returns only after the host process has exited. A hard kill
-	// (Windows) cannot remove its liveness or control files itself, so the
-	// application clears this run's files once the process is gone. Files that
-	// name another run are left for that run's host.
-	agent.RemoveHeartbeatForRun(request.HeartbeatPath, request.RunID)
-	agent.RemoveHostControlForRun(request.HeartbeatPath, request.RunID, "")
-	response := outcome.Response
-	steps, err := st.AgentSteps(run.RunID)
-	if err != nil {
-		return internalError(opt, jsonMode, err)
-	}
-
-	if runErr != nil {
-		var unavailable *agent.UnavailableError
-		failure := agent.FailureForCode(agent.CodeHostError)
-		if errors.As(runErr, &unavailable) {
-			failure = agent.FailureForCode(agent.CodeAgentUnavailable)
-			failure.Message = redactAgent(opt, runErr.Error())
-		} else {
-			var protocol *agent.ProtocolError
-			if errors.As(runErr, &protocol) {
-				failure = agent.FailureForCode(agent.CodeHostProtocol)
-				failure.Message = redactAgent(opt, protocol.Message)
-			} else {
-				failure.Message = redactAgent(opt, runErr.Error())
-			}
-		}
-		state := agent.StateFailed
-		if failure.NeedsAction() {
-			state = agent.StateNeedsAction
-		}
-		if _, err := st.AppendAgentRunEvent(run.RunID, eventForState(state), agentFailureDetail(failure, state, ""), opt.Now()); err != nil {
-			if errors.Is(err, store.ErrAgentRunFinished) {
-				return agentAppendFinished(opt, jsonMode, st, run, steps)
-			}
-			return internalError(opt, jsonMode, err)
-		}
-		return writeAgentFailure(opt, jsonMode, run, state, failure, steps)
-	}
-
-	latest, _, err := st.LatestAgentRunEvent(run.RunID)
-	if err != nil {
-		return internalError(opt, jsonMode, err)
-	}
-	cancelRequested := latest.Kind == store.AgentEventCancelRequested || (response.State == "cancelled")
-	if outcome.Interrupted || response.State == "interrupted" || response.State == "cancelled" {
-		state := agent.StatePaused
-		if cancelRequested || response.State == "cancelled" {
-			state = agent.StateCancelled
-			changed, err := st.AppendAgentRunTerminal(run.RunID, store.AgentEventCancelled,
-				map[string]any{"confirmed": true, "host_state": response.State}, opt.Now())
-			if err != nil {
-				return internalError(opt, jsonMode, err)
-			}
-			if !changed {
-				return agentAppendFinished(opt, jsonMode, st, run, steps)
-			}
-		} else {
-			if _, err := st.AppendAgentRunEvent(run.RunID, store.AgentEventInterrupted, map[string]any{
-				"reason": outcome.InterruptReason, "exit_code": outcome.ExitCode, "host_state": response.State,
-			}, opt.Now()); err != nil {
-				if errors.Is(err, store.ErrAgentRunFinished) {
-					return agentAppendFinished(opt, jsonMode, st, run, steps)
-				}
-				return internalError(opt, jsonMode, err)
-			}
-		}
-		doc := agentRunDocOf(run, state, nil, response, steps)
-		if state == agent.StatePaused {
-			doc.Status.Reason = "interrupted"
-			if outcome.InterruptReason != "" {
-				doc.Status.Reason = outcome.InterruptReason
-			}
-		}
-		if state == agent.StateCancelled {
-			if jsonMode {
-				return writeJSON(opt, doc)
-			}
-			writeAgentRun(opt.Stdout, doc)
-			return 0
-		}
-		if jsonMode {
-			if err := writeJSONTo(opt.Stdout, doc); err != nil {
-				return internalError(opt, jsonMode, err)
-			}
-			return 4
-		}
-		writeAgentRun(opt.Stdout, doc)
-		return 4
-	}
-	if response.State == "completed" {
-		if len(steps) == 0 {
-			failure := agent.FailureForCode(agent.CodeNoSteps)
-			if _, err := st.AppendAgentRunEvent(run.RunID, store.AgentEventFailed, agentFailureDetail(failure, agent.StateFailed, "completed_without_steps"), opt.Now()); err != nil {
-				if errors.Is(err, store.ErrAgentRunFinished) {
-					return agentAppendFinished(opt, jsonMode, st, run, steps)
-				}
-				return internalError(opt, jsonMode, err)
-			}
-			return writeAgentFailure(opt, jsonMode, run, agent.StateFailed, failure, steps)
-		}
-		detail := agentCompletionDetail(response, len(steps))
-		changed, err := st.AppendAgentRunTerminal(run.RunID, store.AgentEventCompleted, detail, opt.Now())
-		if err != nil {
-			return internalError(opt, jsonMode, err)
-		}
-		if !changed {
-			return agentAppendFinished(opt, jsonMode, st, run, steps)
-		}
-		doc := agentRunDocOf(run, agent.StateCompleted, nil, response, steps)
-		if jsonMode {
-			return writeJSON(opt, doc)
-		}
-		writeAgentRun(opt.Stdout, doc)
-		return 0
-	}
-
-	var failure agent.Failure
-	switch {
-	case response.Error != nil:
-		failure = agent.FailureForCode(response.Error.Code)
-		if strings.TrimSpace(response.Error.Message) != "" {
-			failure.Message = redactAgent(opt, response.Error.Message)
-		}
-	case response.Failure != nil:
-		failure = agent.ClassifyRunFailure(response.Failure.Reason, response.Failure.Detail)
-		failure.Message = redactAgent(opt, failure.Message)
-	default:
-		failure = agent.FailureForCode(agent.CodeHostProtocol)
-	}
-	state := agent.StateFailed
-	if failure.NeedsAction() {
-		state = agent.StateNeedsAction
-	}
-	reason := ""
-	if response.Failure != nil {
-		reason = response.Failure.Reason
-	}
-	if _, err := st.AppendAgentRunEvent(run.RunID, eventForState(state), agentFailureDetail(failure, state, reason), opt.Now()); err != nil {
-		if errors.Is(err, store.ErrAgentRunFinished) {
-			return agentAppendFinished(opt, jsonMode, st, run, steps)
-		}
-		return internalError(opt, jsonMode, err)
-	}
-	return writeAgentFailure(opt, jsonMode, run, state, failure, steps)
-}
-
-func runAgentHost(opt Options, request agent.HostRequest, timeout time.Duration) (agent.RunOutcome, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
-	go func() {
-		select {
-		case <-signals:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-	return opt.AgentRunner.Run(ctx, request)
-}
-
-func agentPrompt(st *store.Store, runID string, maxSteps, maxTurns int) (string, error) {
-	input, _, _, err := buildAdaptiveInput(st, "")
-	if err != nil {
-		return "", err
-	}
-	result := adaptive.Recommend(input)
-	packet, err := agent.BuildStudyBrief(runID, input.Records, result, skill.All(), maxSteps, maxTurns)
-	if err != nil {
-		return "", err
-	}
-	return packet.Prompt()
-}
-
-// agentStoreOverride resolves one command's --agent-store override. Every
-// command shares agent.ResolveStorePath's inequality guard, so no override can
-// point the Pi host at the application database.
-func agentStoreOverride(opt Options, st *store.Store, run store.AgentRun, raw string, jsonMode bool) (string, int) {
-	if strings.TrimSpace(raw) == "" {
-		return run.StorePath, 0
-	}
-	resolved, err := agent.ResolveStorePath(raw, st.Path())
-	if err != nil {
-		return "", usageError(opt, jsonMode, "invalid_input", err.Error())
-	}
-	return resolved, 0
-}
-
-// agentRecordedStore resolves --agent-store for a command that addresses one
-// recorded run. The recorded store is authoritative: a different path would
-// read or delete another store's shared heartbeat and control files. status
-// and transcript keep the exploratory override.
-func agentRecordedStore(opt Options, st *store.Store, run store.AgentRun, raw string, jsonMode bool) (string, int) {
-	storePath, code := agentStoreOverride(opt, st, run, raw, jsonMode)
-	if code != 0 {
-		return "", code
-	}
-	if strings.TrimSpace(raw) != "" && storePath != run.StorePath {
-		return "", usageError(opt, jsonMode, "store_mismatch",
-			fmt.Sprintf("--agent-store %s is not the store recorded for run %s; the recorded Pi store is authoritative", storePath, run.RunID))
-	}
-	return storePath, 0
-}
-
-// agentHeartbeatWindow is the liveness window for the host heartbeat file and
-// the grace period for a start/resume claim whose host has not written one yet.
-func agentHeartbeatWindow() time.Duration {
-	return time.Duration(agent.HeartbeatStaleMS) * time.Millisecond
-}
-
-// agentKillGrace is how long cancel waits after a hard kill: one heartbeat
-// window plus a second of margin for the last write to age out.
-func agentKillGrace() time.Duration {
-	return study.DefaultKillGrace()
-}
-
-// agentHostClaimWait gives a start/resume claim younger than the heartbeat
-// window a chance to publish its first heartbeat. A cancel that finds no
-// heartbeat for such a claim must not record a terminal outcome beside a host
-// that is still starting; it either observes the heartbeat or waits until the
-// claim can no longer be starting.
-func agentHostClaimWait(path, runID string, latest store.AgentRunEvent, opt Options) (agent.Heartbeat, bool) {
-	heartbeat, status := agent.ProbeHeartbeat(path, runID, opt.Now(), agentHeartbeatWindow())
-	live := status.Live()
-	if live && !agent.HeartbeatAuthority(latest.Kind) {
-		// The trail proves the host has gone; a heartbeat it left behind must
-		// not make cancellation wait or signal a dead pid.
-		live = false
-	}
-	if live || latest.At.IsZero() ||
-		(latest.Kind != store.AgentEventStarted && latest.Kind != store.AgentEventResumed) {
-		return heartbeat, live
-	}
-	age := opt.Now().Sub(latest.At)
-	if age >= agentHeartbeatWindow() {
-		return heartbeat, false
-	}
-	deadline := time.Now().Add(agentHeartbeatWindow() - age)
-	for time.Now().Before(deadline) {
-		time.Sleep(100 * time.Millisecond)
-		if heartbeat, status = agent.ProbeHeartbeat(path, runID, opt.Now(), agentHeartbeatWindow()); status.Live() {
-			return heartbeat, true
-		}
-	}
-	return heartbeat, false
-}
-
-func resolveAgentRun(opt Options, st *store.Store, raw string, unfinished bool, jsonMode bool) (store.AgentRun, store.AgentRunEvent, int) {
-	var (
-		run store.AgentRun
-		ok  bool
-		err error
-	)
-	if strings.TrimSpace(raw) != "" {
-		runID, normalizeErr := agent.NormalizeRunID(raw)
-		if normalizeErr != nil {
-			return store.AgentRun{}, store.AgentRunEvent{}, usageError(opt, jsonMode, "invalid_input", normalizeErr.Error())
-		}
-		run, ok, err = st.AgentRun(runID)
-		if err != nil {
-			return store.AgentRun{}, store.AgentRunEvent{}, internalError(opt, jsonMode, err)
-		}
-		if !ok {
-			return store.AgentRun{}, store.AgentRunEvent{}, usageError(opt, jsonMode, "unknown_run", fmt.Sprintf("run %s is unknown", runID))
-		}
+		_ = writeJSONTo(opt.Stderr, doc)
 	} else {
-		run, ok, err = st.LatestAgentRun(unfinished)
-		if err != nil {
-			return store.AgentRun{}, store.AgentRunEvent{}, internalError(opt, jsonMode, err)
-		}
-		if !ok {
-			if unfinished {
-				return store.AgentRun{}, store.AgentRunEvent{}, usageError(opt, jsonMode, "no_run", "no unfinished agent run; start one with passquest agent start")
-			}
-			return store.AgentRun{}, store.AgentRunEvent{}, usageError(opt, jsonMode, "no_run", "no agent run has been recorded")
-		}
+		writeAgentFailureHuman(opt.Stderr, doc)
 	}
-	latest, exists, err := st.LatestAgentRunEvent(run.RunID)
-	if err != nil {
-		return store.AgentRun{}, store.AgentRunEvent{}, internalError(opt, jsonMode, err)
-	}
-	if !exists {
-		latest = store.AgentRunEvent{RunID: run.RunID, Kind: store.AgentEventStarted}
-	}
-	return run, latest, 0
+	return 3
 }
 
-func agentLatestToken(st *store.Store, runID string) (string, error) {
-	events, err := st.AgentRunEvents(runID)
-	if err != nil {
-		return "", err
+func agentCommandError(opt Options, jsonMode bool, code, message string) int {
+	doc := agentFailureDoc{
+		SchemaVersion: ProtocolVersion,
+		Error:         agent.ErrorDoc{Code: code, Message: redactAgent(opt, message)},
+		Limits:        brief.Limits(),
 	}
-	for i := len(events) - 1; i >= 0; i-- {
-		var detail struct {
-			HostToken string `json:"host_token"`
-		}
-		if err := json.Unmarshal([]byte(events[i].DetailJSON), &detail); err == nil && detail.HostToken != "" {
-			return detail.HostToken, nil
-		}
+	if jsonMode {
+		_ = writeJSONTo(opt.Stderr, doc)
+	} else {
+		fmt.Fprintf(opt.Stderr, "passquest: %s\n", redactAgent(opt, message))
 	}
-	return "", nil
+	return 3
 }
 
-func agentEventCode(event store.AgentRunEvent) string {
-	var detail struct {
-		Code string `json:"code"`
+func agentRecordStepError(opt Options, jsonMode bool, code, message string) int {
+	doc := agentRecordStepErrorDoc{SchemaVersion: ProtocolVersion, Error: agent.ErrorDoc{Code: code, Message: message}}
+	_ = writeJSONTo(opt.Stdout, doc)
+	if !jsonMode {
+		fmt.Fprintf(opt.Stderr, "passquest: %s\n", message)
 	}
-	if err := json.Unmarshal([]byte(event.DetailJSON), &detail); err == nil {
-		return detail.Code
+	if code == "invalid_step" || code == "unknown_run" || code == "run_cancelled" || code == "run_completed" {
+		return 2
 	}
-	return ""
-}
-
-func agentEventCount(st *store.Store, runID string) int {
-	events, err := st.AgentRunEvents(runID)
-	if err != nil {
-		return 0
-	}
-	return len(events)
-}
-
-func eventForState(state agent.State) string {
-	if state == agent.StateNeedsAction {
-		return store.AgentEventNeedsAction
-	}
-	return store.AgentEventFailed
-}
-
-func agentFailureDetail(failure agent.Failure, state agent.State, reason string) map[string]any {
-	detail := map[string]any{
-		"code": failure.Code, "message": failure.Message, "action": failure.Action, "state": string(state),
-	}
-	if reason != "" {
-		detail["reason"] = reason
-	}
-	return detail
-}
-
-func agentCompletionDetail(response agent.HostResponse, steps int) map[string]any {
-	detail := map[string]any{
-		"steps": steps, "answer_chars": response.AnswerChars, "turns": response.Turns,
-		"tool_calls": response.ToolCalls, "tool_errors": response.ToolErrors,
-	}
-	if len(response.Usage) > 0 {
-		detail["usage"] = json.RawMessage(response.Usage)
-	}
-	return detail
+	return 1
 }
 
 func redactAgent(opt Options, value string) string {
@@ -1292,47 +540,8 @@ func agentAppState(kind string) agent.State {
 	}
 }
 
-func writeAgentFailure(opt Options, jsonMode bool, run store.AgentRun, state agent.State, failure agent.Failure, steps []store.AgentStep) int {
-	status := agentStatusViewOf(state, &failure, "")
-	runView := agentRunViewOf(run)
-	doc := agentFailureDoc{
-		SchemaVersion: ProtocolVersion,
-		Error:         agent.ErrorDoc{Code: failure.Code, Message: failure.Message},
-		Run:           &runView,
-		Status:        &status,
-		Steps:         agentStepViews(steps),
-		Limits:        agentLimits(),
-	}
-	if jsonMode {
-		_ = writeJSONTo(opt.Stderr, doc)
-	} else {
-		writeAgentFailureHuman(opt.Stderr, doc)
-	}
-	return 3
-}
-
-func agentCommandError(opt Options, jsonMode bool, code, message string) int {
-	doc := agentFailureDoc{
-		SchemaVersion: ProtocolVersion,
-		Error:         agent.ErrorDoc{Code: code, Message: redactAgent(opt, message)},
-		Limits:        agentLimits(),
-	}
-	if jsonMode {
-		_ = writeJSONTo(opt.Stderr, doc)
-	} else {
-		fmt.Fprintf(opt.Stderr, "passquest: %s\n", redactAgent(opt, message))
-	}
-	return 3
-}
-
-func agentRecordStepError(opt Options, jsonMode bool, code, message string) int {
-	doc := agentRecordStepErrorDoc{SchemaVersion: ProtocolVersion, Error: agent.ErrorDoc{Code: code, Message: message}}
-	_ = writeJSONTo(opt.Stdout, doc)
-	if !jsonMode {
-		fmt.Fprintf(opt.Stderr, "passquest: %s\n", message)
-	}
-	if code == "invalid_step" || code == "unknown_run" || code == "run_cancelled" || code == "run_completed" {
-		return 2
-	}
-	return 1
+// agentKillGrace is how long cancel waits after a hard kill: one heartbeat
+// window plus a second of margin for the last write to age out.
+func agentKillGrace() time.Duration {
+	return study.DefaultKillGrace()
 }

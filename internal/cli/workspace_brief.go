@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/study/brief"
 )
 
 // BriefStatus is `agent status` for the latest study brief. Found is false
@@ -12,7 +13,7 @@ func (w *Workspace) BriefStatus() (studio.BriefStatus, error) {
 	result := w.run("agent", "status")
 	if result.code != 0 {
 		if err := result.err(); isCode(err, "no_run") {
-			return studio.BriefStatus{State: "none", Steps: []studio.BriefStep{}, Limits: agentLimits()}, nil
+			return studio.BriefStatus{State: "none", Steps: []studio.BriefStep{}, Limits: brief.Limits()}, nil
 		}
 		return studio.BriefStatus{}, result.err()
 	}

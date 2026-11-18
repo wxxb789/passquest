@@ -57,8 +57,8 @@ func runNext(args []string, opt Options) int {
 }
 
 // buildAdaptiveInput delegates to the recommendation module, mapping its
-// unclassified attempts onto this package's document type. It is shared by the
-// durable study brief, find and TestAssessNextSpendsRecommendedUnit.
+// unclassified attempts onto this package's document type. It is shared by
+// find and TestAssessNextSpendsRecommendedUnit.
 func buildAdaptiveInput(st *store.Store, sourceID string) (adaptive.Input, []unclassifiedAttemptView, recommend.Catalog, error) {
 	input, unclassified, catalog, err := recommend.BuildInput(st, sourceID)
 	return input, unclassifiedViews(unclassified), catalog, err
