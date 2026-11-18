@@ -12,6 +12,7 @@ import (
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/assessment"
 )
 
 type poolUnitView struct {
@@ -224,7 +225,7 @@ func poolDocOf(pool assess.Pool, identities []assess.SourceIdentity) poolDoc {
 		SpentUnits:        pool.SpentUnits,
 		FloorItems:        assess.MinPoolItems,
 		FloorMet:          pool.ItemCount >= assess.MinPoolItems,
-		ShortfallItems:    poolShortfall(pool),
+		ShortfallItems:    assessment.Shortfall(pool),
 		DefaultSize:       assess.DefaultSize,
 		DefaultMinutes:    assess.DefaultMinutes,
 		SourceCount:       len(identities),
@@ -274,6 +275,27 @@ func itemOutcomeViews(items []assess.Item, attempts []attempt.Attempt) []assessm
 		out = append(out, view)
 	}
 	return out
+}
+
+// assessmentRunDocFor builds the result document of a finished run read back:
+// the run, its items with their recorded outcomes, and the limitations every
+// run carries.
+func assessmentRunDocFor(result assessment.Result) assessmentRunResultDoc {
+	return assessmentRunResultDoc{
+		SchemaVersion: ProtocolVersion,
+		State:         result.Run.Status,
+		Run:           runViewOf(result.Run),
+		Items:         itemOutcomeViews(result.Items, result.Attempts),
+		Limitations:   assessmentRunLimitations(),
+	}
+}
+
+func assessmentRunLimitations() []string {
+	return []string{
+		"An assessment run records timed, unassisted answers on unseen units. It is not the real examination and computes no pass probability.",
+		"The real item count, time limit and pass threshold are unknown; the requested values are local flags and the report prints the values it used.",
+		"Contaminated items are excluded from the headline and listed separately; a partial run reports only finalized items.",
+	}
 }
 
 func countsViewOf(counts assess.Counts) assessCountsView {

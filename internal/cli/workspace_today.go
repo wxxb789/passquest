@@ -12,6 +12,7 @@ import (
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
 	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/assessment"
 	"github.com/wxxb789/passquest/internal/study/models"
 	"github.com/wxxb789/passquest/internal/study/recommend"
 )
@@ -42,14 +43,17 @@ func (w *Workspace) Today() (studio.Today, error) {
 		if err := w.todayRecommendation(st, &today, now); err != nil {
 			return err
 		}
-		pool, identities, err := assessmentPool(st)
+		// The render already holds this call's store (withStore); the unit
+		// wraps it, so the pool and run reads do not open a second one.
+		svc := study.Wrap(st, w.ports)
+		reported, err := assessment.Report(context.Background(), svc, assessment.ReportQuery{Query: assessment.QueryPool})
 		if err != nil {
 			return err
 		}
-		if err := convertJSON(poolDocOf(pool, identities), &today.Pool); err != nil {
+		if err := convertJSON(poolDocOf(reported.Pool, reported.Identities), &today.Pool); err != nil {
 			return err
 		}
-		if err := todayRuns(st, &today); err != nil {
+		if err := todayRuns(svc, &today); err != nil {
 			return err
 		}
 		if today.Anki, err = ankiCounts(st); err != nil {
@@ -142,18 +146,18 @@ func studioTarget(t *recommend.Target) studio.Target {
 	return target
 }
 
-func todayRuns(st *store.Store, today *studio.Today) error {
-	runs, err := st.AssessmentRuns()
+func todayRuns(svc *study.Service, today *studio.Today) error {
+	reported, err := assessment.Report(context.Background(), svc, assessment.ReportQuery{Query: assessment.QueryRuns})
 	if err != nil {
 		return err
 	}
-	for i := len(runs) - 1; i >= 0; i-- {
-		view := studioRun(runs[i])
-		if runs[i].Status == "active" && today.ActiveRun == nil {
+	for i := len(reported.Runs) - 1; i >= 0; i-- {
+		view := studioRun(reported.Runs[i])
+		if reported.Runs[i].Status == "active" && today.ActiveRun == nil {
 			today.ActiveRun = &view
 			continue
 		}
-		if today.LastRun == nil && runs[i].Status != "active" {
+		if today.LastRun == nil && reported.Runs[i].Status != "active" {
 			today.LastRun = &view
 		}
 	}

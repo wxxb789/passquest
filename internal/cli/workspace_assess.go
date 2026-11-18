@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,6 +11,8 @@ import (
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/assessment"
 )
 
 // withAssessmentStore is withStore plus the reconcile every assess
@@ -23,35 +27,28 @@ func (w *Workspace) withAssessmentStore(fn func(st *store.Store) error) error {
 }
 
 // reconcileAssessments closes an active run whose whole window has passed
-// under the CLI loop's rule (abandonElapsedAssessment): the item on screen is
+// under the CLI loop's rule (assessment.Timeout): the item on screen is
 // recorded as a timed-out attempt at its deadline before the run is abandoned,
 // so it stays in the timeout count and the score denominator. The store-level
 // reconcile then catches anything else. It reports the active run it closed,
 // or zero.
-func (w *Workspace) reconcileAssessments(st *store.Store, notify assessmentNotice) (int64, error) {
+func (w *Workspace) reconcileAssessments(st *store.Store, notify assessment.Notify) (int64, error) {
 	var closed int64
+	svc := study.Wrap(st, w.ports)
 	active, found, err := st.ActiveAssessmentRun()
 	if err != nil {
 		return 0, err
 	}
-	if found && !w.opt.Now().Before(active.DeadlineAt) {
-		run, items, err := st.AssessmentRunItems(active.ID)
+	if found {
+		stepped, err := assessment.Step(context.Background(), svc, active.ID, assessment.Timeout, 0, notify)
 		if err != nil {
 			return 0, err
 		}
-		var onScreen assess.Item
-		for _, item := range items {
-			if item.State == assess.StatePresented {
-				onScreen = item
-				break
-			}
+		if stepped.Kind == assessment.Abandoned {
+			closed = active.ID
 		}
-		if err := abandonElapsedAssessment(w.opt, st, run, onScreen, notify); err != nil {
-			return 0, err
-		}
-		closed = run.ID
 	}
-	if _, err := st.ReconcileAssessmentRuns(w.opt.Now()); err != nil {
+	if err := assessment.Reconcile(context.Background(), svc); err != nil {
 		return 0, err
 	}
 	return closed, nil
@@ -61,11 +58,11 @@ func (w *Workspace) reconcileAssessments(st *store.Store, notify assessmentNotic
 func (w *Workspace) AssessmentPool() (studio.AssessmentPool, error) {
 	var view studio.AssessmentPool
 	err := w.withAssessmentStore(func(st *store.Store) error {
-		pool, identities, err := assessmentPool(st)
+		reported, err := assessment.Report(context.Background(), study.Wrap(st, w.ports), assessment.ReportQuery{Query: assessment.QueryPool})
 		if err != nil {
 			return err
 		}
-		return convertJSON(poolDocOf(pool, identities), &view)
+		return convertJSON(poolDocOf(reported.Pool, reported.Identities), &view)
 	})
 	return view, err
 }
@@ -80,16 +77,16 @@ func (w *Workspace) StartAssessment(size, minutes int) (studio.AssessmentState, 
 	if minutes == 0 {
 		minutes = assess.DefaultMinutes
 	}
-	if err := assessmentSettingsError(size, minutes, assess.AnnotationsNone); err != nil {
+	if err := assessment.ValidateSettings(size, minutes, assess.AnnotationsNone); err != nil {
 		return studio.AssessmentState{}, workspaceError(err)
 	}
 	var state studio.AssessmentState
 	err := w.withAssessmentStore(func(st *store.Store) error {
-		run, items, err := createAssessmentRun(w.opt, st, size, minutes)
+		started, err := assessment.Begin(context.Background(), study.Wrap(st, w.ports), size, minutes)
 		if err != nil {
 			return err
 		}
-		state, err = w.advance(st, run, items)
+		state, err = w.advance(st, started.Run.ID)
 		return err
 	})
 	return state, err
@@ -114,12 +111,14 @@ func (w *Workspace) AssessmentState() (studio.AssessmentState, error) {
 			return err
 		}
 		state = assessmentStateOf(w.opt.Now(), run, items, nil, nil)
+		svc := study.Wrap(st, w.ports)
 		for _, item := range items {
 			if item.State != assess.StatePresented {
 				continue
 			}
-			if content, question, ok := assessmentQuestion(st, item); ok {
-				state = assessmentStateOf(w.opt.Now(), run, items, &assessmentStep{kind: stepReady, item: item, content: content, question: question}, nil)
+			if content, question, ok := assessment.Question(svc, item); ok {
+				state = assessmentStateOf(w.opt.Now(), run, items,
+					&assessment.Presented{Item: item, Content: content, Question: question}, nil)
 			}
 			break
 		}
@@ -142,7 +141,7 @@ func (w *Workspace) PresentAssessmentItem(runID int64) (studio.AssessmentState, 
 			state = assessmentStateOf(w.opt.Now(), run, items, nil, nil)
 			return nil
 		}
-		state, err = w.advance(st, run, items)
+		state, err = w.advance(st, runID)
 		return err
 	})
 	return state, err
@@ -160,6 +159,7 @@ func (w *Workspace) AnswerAssessmentItem(runID int64, position int, label string
 		if err != nil {
 			return err
 		}
+		svc := study.Wrap(st, w.ports)
 		run, items, err := st.AssessmentRunItems(runID)
 		if err != nil {
 			return err
@@ -168,7 +168,7 @@ func (w *Workspace) AnswerAssessmentItem(runID int64, position int, label string
 			answer.Position = position
 			answer.Outcome = assess.StatusAbandoned
 			answer.State = assessmentStateOf(w.opt.Now(), run, items, nil, notices)
-			answer.State.Message = abandonedRunMessage(run)
+			answer.State.Message = assessment.AbandonedMessage(run)
 			return nil
 		}
 		if run.Status != assess.StatusActive {
@@ -181,21 +181,21 @@ func (w *Workspace) AnswerAssessmentItem(runID int64, position int, label string
 		if item.State != assess.StatePresented {
 			return refuse("run_state", "item %d of run %d is %s, not presented", position+1, run.ID, item.State)
 		}
-		_, question, ok := assessmentQuestion(st, item)
+		_, question, ok := assessment.Question(svc, item)
 		if !ok {
 			return refuse("content_unavailable", "item %d of run %d is no longer available; present the run again", position+1, run.ID)
 		}
-		outcome, parseErr, err := submitAssessmentAnswer(w.opt, st, run, item, question, label, collectNotices(&notices))
+		stepped, err := assessment.Submit(context.Background(), svc, run, assessment.Presented{Item: item, Question: question}, label, collectNotices(&notices))
 		if err != nil {
 			return err
 		}
 		answer.Position = position
-		switch outcome {
-		case answerInvalid:
-			return refuse("invalid_answer", "item %d: %v; the run remains active", position+1, parseErr)
-		case answerAbandoned:
+		switch stepped.Outcome {
+		case assessment.AnswerInvalid:
+			return refuse("invalid_answer", "item %d: %v; the run remains active", position+1, stepped.ParseErr)
+		case assessment.AnswerAbandoned:
 			answer.Outcome = assess.StatusAbandoned
-		case answerTimedOut:
+		case assessment.AnswerTimedOut:
 			answer.Outcome = assess.StateTimedOut
 		default:
 			answer.Outcome = assess.StateAnswered
@@ -205,8 +205,8 @@ func (w *Workspace) AnswerAssessmentItem(runID int64, position int, label string
 			return err
 		}
 		answer.State = assessmentStateOf(w.opt.Now(), run, items, nil, notices)
-		if outcome == answerAbandoned {
-			answer.State.Message = abandonedRunMessage(run)
+		if stepped.Outcome == assessment.AnswerAbandoned {
+			answer.State.Message = assessment.AbandonedMessage(run)
 		}
 		return nil
 	})
@@ -218,15 +218,15 @@ func (w *Workspace) AnswerAssessmentItem(runID int64, position int, label string
 func (w *Workspace) ResumeAssessment(runID int64) (studio.AssessmentState, error) {
 	var state studio.AssessmentState
 	err := w.withAssessmentStore(func(st *store.Store) error {
-		run, items, completed, err := resumeAssessment(w.opt, st, runID)
+		stepped, err := assessment.Step(context.Background(), study.Wrap(st, w.ports), runID, assessment.Resume, 0, nil)
 		if err != nil {
 			return err
 		}
-		if completed != nil {
-			state = assessmentStateOf(w.opt.Now(), run, items, nil, nil)
+		if stepped.Result != nil {
+			state = assessmentStateOf(w.opt.Now(), stepped.Result.Run, stepped.Result.Items, nil, nil)
 			return nil
 		}
-		state, err = w.advance(st, run, items)
+		state, err = w.advance(st, runID)
 		return err
 	})
 	return state, err
@@ -237,7 +237,7 @@ func (w *Workspace) ResumeAssessment(runID int64) (studio.AssessmentState, error
 func (w *Workspace) AbandonAssessment(runID int64) (studio.AssessmentState, error) {
 	var state studio.AssessmentState
 	err := w.withAssessmentStore(func(st *store.Store) error {
-		if _, err := abandonAssessment(w.opt, st, runID); err != nil {
+		if _, err := assessment.Step(context.Background(), study.Wrap(st, w.ports), runID, assessment.Abandon, 0, nil); err != nil {
 			return err
 		}
 		run, items, err := st.AssessmentRunItems(runID)
@@ -255,19 +255,16 @@ func (w *Workspace) AbandonAssessment(runID int64) (studio.AssessmentState, erro
 func (w *Workspace) AssessmentReport(runID int64) (studio.AssessmentReport, error) {
 	var view studio.AssessmentReport
 	err := w.withAssessmentStore(func(st *store.Store) error {
-		material, err := loadAssessmentMaterial(st)
+		reported, err := assessment.Report(context.Background(), study.Wrap(st, w.ports),
+			assessment.ReportQuery{Query: assessment.QueryReport, RunID: runID})
 		if err != nil {
 			return assessmentStudioError(err)
 		}
-		report, err := assessmentReportFrom(st, runID, material)
-		if err != nil {
-			return assessmentStudioError(err)
-		}
-		if err := convertJSON(reportDocOf(report), &view); err != nil {
+		if err := convertJSON(reportDocOf(reported.Report), &view); err != nil {
 			return err
 		}
 		view.PassThreshold = studio.PassThresholdUnknown
-		return attachReportQuestions(st, runID, material, &view)
+		return attachReportQuestions(st, runID, reported.Units, &view)
 	})
 	return view, err
 }
@@ -279,7 +276,7 @@ func (w *Workspace) AssessmentReport(runID int64) (studio.AssessmentReport, erro
 // one: a pending or unavailable item may be selected again as unseen. An item
 // whose stored content version no longer matches gets none, exactly as its
 // annotations are unavailable.
-func attachReportQuestions(st *store.Store, runID int64, material assessmentMaterial, view *studio.AssessmentReport) error {
+func attachReportQuestions(st *store.Store, runID int64, units []assess.Unit, view *studio.AssessmentReport) error {
 	_, items, _, err := st.AssessmentRun(runID)
 	if err != nil {
 		return err
@@ -288,9 +285,9 @@ func attachReportQuestions(st *store.Store, runID int64, material assessmentMate
 	if err != nil {
 		return err
 	}
-	units := make(map[string]assess.Unit, len(material.units))
-	for _, unit := range material.units {
-		units[unit.ContentID] = unit
+	byContent := make(map[string]assess.Unit, len(units))
+	for _, unit := range units {
+		byContent[unit.ContentID] = unit
 	}
 	byPosition := make(map[int]assess.Item, len(items))
 	for _, item := range items {
@@ -305,7 +302,7 @@ func attachReportQuestions(st *store.Store, runID int64, material assessmentMate
 		if !ok || !item.Finalized() || item.PresentedAt.IsZero() || entry.State == assess.StateUnavailable {
 			continue
 		}
-		unit, found := units[item.ContentID]
+		unit, found := byContent[item.ContentID]
 		if !found || unit.Version != item.ContentVersion {
 			continue
 		}
@@ -336,11 +333,12 @@ func attachReportQuestions(st *store.Store, runID int64, material assessmentMate
 func (w *Workspace) AssessmentCompare(first, second int64) (studio.AssessmentComparison, error) {
 	var view studio.AssessmentComparison
 	err := w.withAssessmentStore(func(st *store.Store) error {
-		doc, err := compareAssessmentRuns(st, first, second)
+		reported, err := assessment.Report(context.Background(), study.Wrap(st, w.ports),
+			assessment.ReportQuery{Query: assessment.QueryCompare, First: first, Second: second})
 		if err != nil {
 			return assessmentStudioError(err)
 		}
-		if err := convertJSON(doc, &view); err != nil {
+		if err := convertJSON(comparisonDocOf(reported.First, reported.Second), &view); err != nil {
 			return err
 		}
 		view.PassThreshold = studio.PassThresholdUnknown
@@ -353,12 +351,12 @@ func (w *Workspace) AssessmentCompare(first, second int64) (studio.AssessmentCom
 func (w *Workspace) AssessmentRuns() ([]studio.AssessmentRun, error) {
 	views := []studio.AssessmentRun{}
 	err := w.withAssessmentStore(func(st *store.Store) error {
-		runs, err := st.AssessmentRuns()
+		reported, err := assessment.Report(context.Background(), study.Wrap(st, w.ports), assessment.ReportQuery{Query: assessment.QueryRuns})
 		if err != nil {
 			return err
 		}
-		for i := len(runs) - 1; i >= 0; i-- {
-			views = append(views, studioRun(runs[i]))
+		for i := len(reported.Runs) - 1; i >= 0; i-- {
+			views = append(views, studioRun(reported.Runs[i]))
 		}
 		return nil
 	})
@@ -366,32 +364,27 @@ func (w *Workspace) AssessmentRuns() ([]studio.AssessmentRun, error) {
 }
 
 // advance runs the CLI loop's step rules and renders the result.
-func (w *Workspace) advance(st *store.Store, run assess.Run, items []assess.Item) (studio.AssessmentState, error) {
+func (w *Workspace) advance(st *store.Store, runID int64) (studio.AssessmentState, error) {
 	var notices []string
-	step, err := advanceAssessment(w.opt, st, run, items, 0, collectNotices(&notices))
+	stepped, err := assessment.Step(context.Background(), study.Wrap(st, w.ports), runID, assessment.Present, 0, collectNotices(&notices))
 	if err != nil {
 		return studio.AssessmentState{}, err
 	}
-	if step.kind == stepDone {
-		if _, err := completeAssessment(w.opt, st, run); err != nil {
-			return studio.AssessmentState{}, err
-		}
-	}
-	run, current, err := st.AssessmentRunItems(run.ID)
+	run, current, err := st.AssessmentRunItems(runID)
 	if err != nil {
 		return studio.AssessmentState{}, err
 	}
-	if step.kind != stepReady {
+	if stepped.Kind != assessment.Ready {
 		state := assessmentStateOf(w.opt.Now(), run, current, nil, notices)
-		if step.kind == stepAbandoned {
-			state.Message = abandonedRunMessage(run)
+		if stepped.Kind == assessment.Abandoned {
+			state.Message = assessment.AbandonedMessage(run)
 		}
 		return state, nil
 	}
-	return assessmentStateOf(w.opt.Now(), run, current, &step, notices), nil
+	return assessmentStateOf(w.opt.Now(), run, current, stepped.Presented, notices), nil
 }
 
-func collectNotices(notices *[]string) assessmentNotice {
+func collectNotices(notices *[]string) assessment.Notify {
 	return func(kind string, position int) {
 		switch kind {
 		case assess.StateUnavailable:
@@ -404,7 +397,7 @@ func collectNotices(notices *[]string) assessmentNotice {
 
 // assessmentStateOf renders a run's navigator (no correctness) and, when a
 // step is ready, the presented item without glossary, evidence or reasoning.
-func assessmentStateOf(now time.Time, run assess.Run, items []assess.Item, step *assessmentStep, notices []string) studio.AssessmentState {
+func assessmentStateOf(now time.Time, run assess.Run, items []assess.Item, presented *assessment.Presented, notices []string) studio.AssessmentState {
 	view := studioRun(run)
 	state := studio.AssessmentState{
 		State:     studio.AssessmentItemState,
@@ -423,14 +416,14 @@ func assessmentStateOf(now time.Time, run assess.Run, items []assess.Item, step 
 		state.Navigator = append(state.Navigator, studio.NavigatorItem{
 			Position: item.Position,
 			State:    item.State,
-			Current:  step != nil && step.item.Position == item.Position,
+			Current:  presented != nil && presented.Item.Position == item.Position,
 		})
 	}
-	if step == nil || run.Status != assess.StatusActive {
+	if presented == nil || run.Status != assess.StatusActive {
 		return state
 	}
-	item := step.item
-	content := step.content
+	item := presented.Item
+	content := presented.Content
 	_, page, _ := source.ParseContentID(item.ContentID)
 	state.Item = &studio.AssessmentItem{
 		RunID:      run.ID,
@@ -450,8 +443,8 @@ func assessmentStateOf(now time.Time, run assess.Run, items []assess.Item, step 
 			},
 			Paragraphs: exam.Paragraphs(content.Passage.Text),
 		},
-		Stem:          step.question.Stem,
-		Options:       studioOptions(step.question.Options),
+		Stem:          presented.Question.Stem,
+		Options:       studioOptions(presented.Question.Options),
 		PresentedAt:   formatTime(item.PresentedAt),
 		DeadlineAt:    formatTime(item.DeadlineAt),
 		RunDeadlineAt: formatTime(run.DeadlineAt),
@@ -465,11 +458,20 @@ func studioRun(run assess.Run) studio.AssessmentRun {
 	return view
 }
 
-// assessmentStudioError maps run lookups to the codes `assess report` and
-// `assess compare` print (unknown_run, run_state, incomparable_runs).
+// assessmentStudioError maps a run read's error the way `assess report` and
+// `assess compare` always have: a study refusal — or an assessment sentinel
+// the module already classified (unknown_run, run_state, run_abandoned,
+// incomparable_runs) — becomes the studio error with its code, and anything
+// else keeps the direct-path mapping. This is the one place the window still
+// honours the assessment area's own codes instead of the desktop's sentinel
+// table.
 func assessmentStudioError(err error) error {
-	if code, ok := assessmentErrorCode(err); ok {
-		return withAction(&studio.Error{Code: code, Message: err.Error()})
+	if err == nil {
+		return nil
 	}
-	return err
+	var e *study.Error
+	if errors.As(err, &e) {
+		return withAction(&studio.Error{Code: e.Code, Message: e.Message})
+	}
+	return workspaceError(err)
 }
