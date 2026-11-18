@@ -10,7 +10,11 @@ import type { Study } from './mygo';
 import type { StudioError } from './types';
 
 type StudyClient = typeof Study;
-export type StudyApi = { [K in keyof StudyClient]: StudyClient[K] };
+// The generated methods are cancellable (`.with`); the window calls them plainly through `window.mygo`,
+// so the API it holds is the call signature alone.
+export type StudyApi = {
+  [K in keyof StudyClient]: (...args: Parameters<StudyClient[K]>) => ReturnType<StudyClient[K]>;
+};
 
 /** Every bound method, by its client name. The type check below fails when one is missing. */
 const METHODS = [
