@@ -274,3 +274,12 @@ cite out of `note_test.go`, with names and bodies unchanged: the fake Anki trans
 (`TestNotePushReportsADeckMismatchAndKeepsTheNoteID`), the unconfirmed read
 (`TestNotePushRecordsNoDeckWhenTheReadCannotNameIt`) and both readd tests are in
 `internal/cli/note_push_deck_test.go`. `internal/store/note_test.go` was not moved.
+
+## Later file moves (2026-11-18)
+
+The study-seam refactor moved the deck check: the comparison now lives in `internal/study/outbox/deck.go`
+and `TestReadNoteDecks` in `internal/study/outbox/deck_test.go` (supersedes the 2026-11-17 note's
+location); the self-test case this record names removes the comparison from
+`internal/study/outbox/deck.go`. `internal/cli/note_anki.go`, the path its 35th-case row names, was
+renamed to `internal/study/outbox/push.go` when the push moved into `internal/study/outbox` (the
+read-back split into `deck.go`); the CLI adapter is `internal/cli/note_push.go`.

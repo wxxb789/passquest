@@ -9,6 +9,7 @@ import (
 	"github.com/wxxb789/passquest/internal/agent"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study/brief"
 )
 
 func providerLabelOrManual(providerID string) string {
@@ -206,14 +207,10 @@ func agentRunViewOf(run store.AgentRun) agentRunView {
 }
 
 func agentStatusViewOf(state agent.State, failure *agent.Failure, latestEvent string) agentStatusView {
-	view := agentStatusView{State: string(state), Reason: string(state)}
-	if latestEvent != "" {
-		view.Reason = latestEvent
-	}
+	reason, action := brief.ReasonAndAction(state, failure, latestEvent)
+	view := agentStatusView{State: string(state), Reason: reason, Action: action}
 	if failure != nil {
 		view.Error = &agent.ErrorDoc{Code: failure.Code, Message: failure.Message}
-		view.Action = failure.Action
-		view.Reason = failure.Code
 	}
 	return view
 }
@@ -223,7 +220,7 @@ func agentStepViews(steps []store.AgentStep) []agentStepView {
 	for _, step := range steps {
 		out = append(out, agentStepView{
 			Index: step.Index, Kind: step.Kind, Title: step.Title, Body: step.Body,
-			Advisory: true, VerifiedAnswer: false, CreatedAt: source.FormatTime(step.CreatedAt),
+			Advisory: brief.StepAdvisory, VerifiedAnswer: false, CreatedAt: source.FormatTime(step.CreatedAt),
 		})
 	}
 	return out
@@ -280,7 +277,7 @@ func agentEventViews(events []store.AgentRunEvent) []agentEventView {
 func agentRunSummaryViews(summaries []store.AgentRunSummary) []agentRunSummaryView {
 	out := make([]agentRunSummaryView, 0, len(summaries))
 	for _, summary := range summaries {
-		state := string(agentAppState(summary.LatestEvent))
+		state := string(brief.AppState(summary.LatestEvent))
 		out = append(out, agentRunSummaryView{
 			RunID: summary.RunID, Task: summary.TaskKind, Provider: summary.Provider,
 			Model: summary.Model, MaxSteps: summary.MaxSteps,
@@ -289,14 +286,6 @@ func agentRunSummaryViews(summaries []store.AgentRunSummary) []agentRunSummaryVi
 		})
 	}
 	return out
-}
-
-func agentLimits() []string {
-	return []string{
-		"Study steps are advisory model output, not verified answers, grades or exam facts.",
-		"The durable task carries recorded attempt facts, derived skill state and authored lesson text only; no private source text, answer key or learner identity.",
-		"One agent run at a time; a second start is refused until the current run completes or is cancelled.",
-	}
 }
 
 func agentRunDocOf(run store.AgentRun, state agent.State, failure *agent.Failure, response agent.HostResponse, steps []store.AgentStep) agentRunDoc {
@@ -311,7 +300,7 @@ func agentRunDocOf(run store.AgentRun, state agent.State, failure *agent.Failure
 			ConversationID: response.ConversationID,
 			Snapshot:       response.Snapshot,
 		},
-		Limits: append(agentLimits(), response.Limits...),
+		Limits: brief.RunLimits(response.Limits),
 	}
 	if response.Answer != "" || response.AnswerChars > 0 || response.Turns > 0 || response.ToolCalls > 0 {
 		doc.Summary = &agentSummaryView{
@@ -326,12 +315,7 @@ func agentRunDocOf(run store.AgentRun, state agent.State, failure *agent.Failure
 // cancelled/confirmed flags and the status event, so no caller can emit a
 // confirmed cancellation for a run that is still cancelling.
 func agentCancelDocOf(run store.AgentRun, state agent.State, heartbeatPID int) agentCancelDoc {
-	event := store.AgentEventCancelRequested
-	confirmed := false
-	if state == agent.StateCancelled {
-		event = store.AgentEventCancelled
-		confirmed = true
-	}
+	event, confirmed := brief.CancelOutcome(state)
 	return agentCancelDoc{
 		SchemaVersion: ProtocolVersion,
 		State:         string(state),
@@ -340,7 +324,7 @@ func agentCancelDocOf(run store.AgentRun, state agent.State, heartbeatPID int) a
 		Cancelled:     confirmed,
 		Confirmed:     confirmed,
 		HeartbeatPID:  heartbeatPID,
-		Limits:        agentLimits(),
+		Limits:        brief.Limits(),
 	}
 }
 

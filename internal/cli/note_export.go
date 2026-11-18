@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/wxxb789/passquest/internal/note"
+	"github.com/wxxb789/passquest/internal/study/notes"
+	"github.com/wxxb789/passquest/internal/study/outbox"
 )
 
 func runNoteExport(args []string, opt Options) int {
@@ -22,18 +24,18 @@ func runNoteExport(args []string, opt Options) int {
 		return internalError(opt, *jsonFlag, err)
 	}
 	defer st.Close()
-	notes, err := st.Notes()
+	stored, err := st.Notes()
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	if len(notes) == 0 {
+	if len(stored) == 0 {
 		return usageError(opt, *jsonFlag, "no_notes", "no accepted note is recorded; run passquest note propose and passquest note accept first")
 	}
-	if message, denied := noteConsentRefusal(st, notes, "exported"); denied {
+	if message, denied := outbox.ConsentRefusal(st, stored, "exported"); denied {
 		return usageError(opt, *jsonFlag, "consent_required", message)
 	}
-	rows := make([]note.Fields, 0, len(notes))
-	for _, n := range notes {
+	rows := make([]note.Fields, 0, len(stored))
+	for _, n := range stored {
 		rows = append(rows, note.HTML(n.Front, n.Back, n.Tactic, n.SourceLabel))
 	}
 	path := strings.TrimSpace(*outFlag)
@@ -54,7 +56,7 @@ func runNoteExport(args []string, opt Options) int {
 		Header:        result.Header,
 		Deck:          note.Deck,
 		Model:         note.ModelName,
-		Limits:        noteLimits,
+		Limits:        notes.Limits(),
 	}
 	if *jsonFlag {
 		return writeJSON(opt, doc)

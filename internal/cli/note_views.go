@@ -8,14 +8,8 @@ import (
 	"github.com/wxxb789/passquest/internal/note"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study/notes"
 )
-
-var noteLimits = []string{
-	"A note is a study aid derived from recorded evidence, not a verified answer key or grade.",
-	"Anki owns the card and its review scheduling after import or push.",
-	"AnkiWeb and mobile synchronization are your own manual actions in Anki; Pass Quest never contacts AnkiWeb or a phone.",
-	"A real Anki Desktop write is unverified on this machine; the adapter is proven against a loopback AnkiConnect stub.",
-}
 
 const noteSyncStatement = "AnkiWeb and mobile synchronization are your own manual actions in Anki. Pass Quest never contacts AnkiWeb or a phone."
 
@@ -243,7 +237,7 @@ func noteTargetViewOf(contentID, questionID, sourceID string, page int, attemptI
 	}
 }
 
-func noteDraftViewOf(e noteEffective) noteDraftView {
+func noteDraftViewOf(e notes.Effective) noteDraftView {
 	withheld := append([]string{}, e.Built.Withheld...)
 	return noteDraftView{
 		ID: e.Draft.ID,
@@ -263,7 +257,7 @@ func noteFieldsViewOf(f note.Fields) noteFieldsView {
 	return noteFieldsView{Front: f.Front, Back: f.Back, Tactic: f.Tactic, Source: f.Source}
 }
 
-func notePlainViewOf(e noteEffective) notePlainView {
+func notePlainViewOf(e notes.Effective) notePlainView {
 	return notePlainView{Front: e.Front, Back: e.Back, Tactic: e.Tactic, Source: e.Built.SourceLabel}
 }
 
@@ -274,9 +268,7 @@ func noteViewOf(n store.Note) noteView {
 		NoteID:         n.AnkiNoteID,
 		PushedRevision: n.AnkiPushedRevision,
 		Deck:           n.AnkiDeck,
-	}
-	if n.AnkiDeck != "" && n.AnkiDeck != note.Deck {
-		anki.DeckExpected = note.Deck
+		DeckExpected:   notes.DeckExpected(n),
 	}
 	return noteView{
 		NoteID:     n.NoteID,
@@ -544,26 +536,4 @@ func firstLine(value string) string {
 		return value[:index]
 	}
 	return value
-}
-
-// noteCountsOf tallies push item states.
-func noteCountsOf(items []notePushItemView) notePushCounts {
-	var counts notePushCounts
-	for _, item := range items {
-		switch item.State {
-		case store.AnkiStatePushed:
-			counts.Pushed++
-		case store.AnkiStateAlreadyExists:
-			counts.AlreadyPresent++
-		case store.AnkiStateConflict:
-			counts.Conflicts++
-		case store.AnkiStateFailed:
-			counts.Failed++
-		case store.AnkiStateQueued:
-			counts.Queued++
-		case store.AnkiStateDeckMismatch:
-			counts.DeckMismatch++
-		}
-	}
-	return counts
 }

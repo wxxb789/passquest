@@ -7,6 +7,7 @@ import (
 
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
 )
 
 func runPage(args []string, opt Options) int {
@@ -71,7 +72,7 @@ func runPageEdit(args []string, opt Options) int {
 		})
 	}
 	fmt.Fprintf(opt.Stdout, "Page %d corrected: revision %d, review reset to %s.\nFlags: %s\nDatabase: %s\n",
-		corrected.Number, corrected.Revision, corrected.Review, displayFlags(corrected.Flags), st.Path())
+		corrected.Number, corrected.Revision, corrected.Review, study.DisplayFlags(corrected.Flags), st.Path())
 	return 0
 }
 
@@ -111,7 +112,7 @@ func runPageReview(args []string, opt Options) int {
 		})
 	}
 	fmt.Fprintf(opt.Stdout, "Page %d reviewed by %s.\nFlags: %s\nDatabase: %s\n",
-		reviewed.Number, reviewed.ReviewedBy, displayFlags(reviewed.Flags), st.Path())
+		reviewed.Number, reviewed.ReviewedBy, study.DisplayFlags(reviewed.Flags), st.Path())
 	return 0
 }
 

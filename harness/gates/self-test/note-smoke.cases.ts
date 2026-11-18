@@ -12,11 +12,11 @@ import type { BrokenCase } from "./fixture.ts";
  */
 async function removeTheDeckComparison(root: string): Promise<string | null> {
   if (copyProduct(root, NOTE_SMOKE_SOURCES) === 0) return "no product source was copied into the fixture root";
-  const file = path.join(root, "internal", "cli", "note_anki.go");
+  const file = path.join(root, "internal", "study", "outbox", "deck.go");
   const source = readFileSync(file, "utf8");
   const anchor = "if deck != expected && !containsString(unexpected, deck) {";
   if (source.split(anchor).length !== 2) {
-    return `the deck comparison anchor appears ${source.split(anchor).length - 1} time(s) in internal/cli/note_anki.go`;
+    return `the deck comparison anchor appears ${source.split(anchor).length - 1} time(s) in internal/study/outbox/deck.go`;
   }
   writeFileSync(file, source.replace(anchor, "if false && !containsString(unexpected, deck) {"));
   return null;

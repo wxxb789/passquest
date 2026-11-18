@@ -111,3 +111,10 @@ No existing field or ordering changed. `TestGoldenNext*` passes unchanged otherw
   registered slug and no path, so they need no family-specific quoting. A copyable command added later
   must use `commandQuoter`.
 - No attempt, schema, migration or stored-evidence change: quoting affects printed text only.
+
+## Later file moves (2026-11-18)
+
+The study-seam refactor moved detection, quoting and the command builders to `internal/cmdline`
+(`shell.go`, `commands.go`): `TestDetectShell`, `TestQuoteArgumentPerShell` and
+`TestShQuotingRoundTripsThroughSh` now live in `internal/cmdline/shell_test.go`; `internal/cli/shell.go`
+keeps only the CLI's quoting handle, and the CLI-level quoting cases stay in `internal/cli`.

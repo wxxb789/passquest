@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
+	"github.com/wxxb789/passquest/internal/study"
 )
 
 type sourceSummaryView struct {
@@ -137,10 +138,6 @@ func sourceQuestionViewOf(q source.Question, page source.Page) sourceQuestionVie
 		value := q.Answer
 		answer = &value
 	}
-	reasoning := q.OptionReasoning
-	if reasoning == nil {
-		reasoning = map[string]string{}
-	}
 	return sourceQuestionView{
 		ID:                     q.ID,
 		SourceID:               q.SourceID,
@@ -152,8 +149,8 @@ func sourceQuestionViewOf(q source.Question, page source.Page) sourceQuestionVie
 		ReviewStatus:           string(q.Review),
 		Evidence:               q.Evidence,
 		Reasoning:              q.Reasoning,
-		OptionReasoning:        optionReasoningWithText(reasoning),
-		OptionReasoningMissing: exam.MissingOptionReasoning(q.Options, reasoning),
+		OptionReasoning:        study.OptionReasoningTexts(q.OptionReasoning),
+		OptionReasoningMissing: exam.MissingOptionReasoning(q.Options, q.OptionReasoning),
 		Tactics:                append([]string(nil), q.Tactics...),
 		Glossary:               glossaryViews(q.Glossary),
 		ReviewedBy:             q.ReviewedBy,

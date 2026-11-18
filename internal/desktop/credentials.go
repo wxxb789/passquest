@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/egoist/mygo"
-	"github.com/wxxb789/passquest/internal/cli"
+	"github.com/wxxb789/passquest/internal/workspace"
 )
 
 // secrets is the part of mygo.SecretsModule the credential store uses.
@@ -52,7 +52,7 @@ func (s secretStore) Delete(provider string) error {
 // has no credential store (errors.ErrUnsupported, e.g. Linux without a Secret
 // Service): the workspace then reports credential_store_unavailable and the
 // environment variable stays the only path.
-func newCredentialStore(secrets secrets) cli.CredentialStore {
+func newCredentialStore(secrets secrets) workspace.CredentialStore {
 	if _, err := secrets.Get(credentialAccount("probe")); errors.Is(err, errors.ErrUnsupported) {
 		return nil
 	}

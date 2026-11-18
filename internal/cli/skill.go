@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -8,22 +9,29 @@ import (
 
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/skill"
-	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
+	"github.com/wxxb789/passquest/internal/study/practice"
 )
 
 // Passage exposure values are part of the skill practice protocol. A fresh
 // passage can supply independent transfer evidence; an already-seen passage
-// cannot, even when the question is new.
-const (
-	passageFresh = "fresh"
-	passageSeen  = "already_seen"
-)
+// cannot, even when the question is new. The practice module's values are the
+// one source of truth.
+const passageFresh = practice.PassageFresh
 
 // skillRun is the CLI's view of one skill practice question.
 type skillRun struct {
 	Skill           skill.Skill
 	Assistance      attempt.Assistance
 	PassageExposure string
+}
+
+// skillRunOf maps a practice skill run to the CLI's display view.
+func skillRunOf(run *practice.SkillRun) *skillRun {
+	if run == nil {
+		return nil
+	}
+	return &skillRun{Skill: run.Skill, Assistance: run.Assistance, PassageExposure: run.PassageExposure}
 }
 
 func runSkill(args []string, opt Options) int {
@@ -121,164 +129,31 @@ func runSkillPractice(args []string, opt Options) int {
 			fmt.Sprintf("skill %q is not registered; available: %s", fs.Arg(0), strings.Join(skill.Registered(), ", ")))
 	}
 
-	st, err := openDatabase(*dbFlag, opt)
+	svc, err := study.Open(opt.ports(*dbFlag))
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
-	defer st.Close()
-	selection, err := selectSkillPractice(st, lesson, *sourceFlag, *questionFlag)
+	defer svc.Close()
+	item, err := practice.Show(context.Background(), svc, practice.Request{
+		Kind:       practice.KindSkill,
+		SkillID:    lesson.ID,
+		SourceID:   *sourceFlag,
+		QuestionID: *questionFlag,
+	}, practiceHold(*jsonFlag, answerSet, *skipFlag))
 	if err != nil {
-		return tacticError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 
-	if *jsonFlag {
-		if !answerSet && !*skipFlag {
-			return writeJSON(opt, awaitingDoc{
-				SchemaVersion: ProtocolVersion,
-				State:         "awaiting_answer",
-				Skill:         skillRunViewOf(selection.Skill),
-				Content:       contentViewOf(selection.Content),
-				Question:      questionViewOf(selection),
-			})
-		}
-		return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, true)
-	}
-	return answerQuestion(opt, selection, st, answerFlag, answerSet, *skipFlag, false)
-}
-
-// selectSkillPractice applies the guided-first rule for scoring skills and
-// picks the question a `skill practice` invocation would show, with its
-// assistance and passage exposure.
-func selectSkillPractice(st *store.Store, lesson skill.Skill, sourceID, questionID string) (practiceSelection, error) {
-	records, err := st.List()
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	if err := requireGuidedTactic(lesson, records); err != nil {
-		return practiceSelection{}, err
-	}
-	exposures, err := st.ListExposures()
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	candidates, err := skillCandidates(st, lesson, sourceID)
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	candidate, err := pickSkillCandidate(lesson, questionID, candidates, records, exposures)
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	exposed, err := st.Exposed(candidate.key())
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	assistance := attempt.AssistanceIndependent
-	if exposed {
-		assistance = attempt.AssistanceAssisted
-	}
-	return practiceSelection{
-		Content:  candidate.Content,
-		Question: candidate.Question,
-		Number:   candidate.Number,
-		Page:     candidate.Page,
-		Review:   candidate.Review,
-		Skill: &skillRun{
-			Skill:           lesson,
-			Assistance:      assistance,
-			PassageExposure: skillPassageExposure(candidate.Content.ID, records),
-		},
-	}, nil
-}
-
-func skillCandidates(st *store.Store, lesson skill.Skill, sourceID string) ([]practiceCandidate, error) {
-	if strings.TrimSpace(sourceID) != "" {
-		return sourceCandidates(st, sourceID, lesson.ID)
-	}
-
-	tagged, err := skill.Tagged(lesson.ID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]practiceCandidate, 0, len(tagged))
-	for _, exercise := range tagged {
-		out = append(out, practiceCandidate{
-			Content: exercise.Content, Question: exercise.Question, Number: exercise.Number,
+	if *jsonFlag && !answerSet && !*skipFlag {
+		return writeJSON(opt, awaitingDoc{
+			SchemaVersion: ProtocolVersion,
+			State:         "awaiting_answer",
+			Skill:         skillRunViewOf(skillRunOf(item.Skill)),
+			Content:       contentViewOf(item.Content),
+			Question:      questionViewOf(item),
 		})
 	}
-	if len(out) == 0 {
-		return nil, refuse("not_practiceable", "the first-party exercises have no question tagged %q", lesson.ID)
-	}
-	return out, nil
-}
-
-// pickSkillCandidate prefers material that can add independent transfer: a
-// fresh passage first, then an unattempted question on a seen passage, then a
-// repeat. A question whose guided walkthrough was already shown is skipped in
-// the first two passes because the attempt would be assisted, not independent;
-// an explicit --question still selects it and is recorded as assisted. A repeat
-// is allowed but its exposure is printed and never counted as independent
-// transfer by the adaptive policy.
-func pickSkillCandidate(lesson skill.Skill, questionID string, candidates []practiceCandidate, records []attempt.Attempt, exposures []store.Exposure) (practiceCandidate, error) {
-	attempted := make(map[attempt.QuestionKey]bool, len(records))
-	seenContent := make(map[string]bool)
-	for _, record := range records {
-		attempted[record.Key()] = true
-		seenContent[record.ContentID] = true
-	}
-	exposed := make(map[attempt.QuestionKey]bool, len(exposures))
-	for _, exposure := range exposures {
-		exposed[exposure.Key()] = true
-	}
-	if strings.TrimSpace(questionID) != "" {
-		for _, candidate := range candidates {
-			if candidate.Question.ID == questionID {
-				return candidate, nil
-			}
-		}
-		return practiceCandidate{}, refuse("invalid_input",
-			"question %q is not a practiceable question tagged %q in this material", questionID, lesson.ID)
-	}
-	for _, candidate := range candidates {
-		if !seenContent[candidate.Content.ID] && !exposed[candidate.key()] {
-			return candidate, nil
-		}
-	}
-	for _, candidate := range candidates {
-		if !attempted[candidate.key()] && !exposed[candidate.key()] {
-			return candidate, nil
-		}
-	}
-	return candidates[0], nil
-}
-
-// requireGuidedTactic applies Q-0003-02 to the scoring skill's practice surface.
-// Ordinary language practice measures a prerequisite; scoring practice records
-// independent evidence about a tactic, so it must follow the guided walkthrough
-// rather than bypass it. Without the rule, a skill-practice answer on the
-// guided-example question silently consumes it and makes the tactic's own
-// independent stage unreachable.
-func requireGuidedTactic(lesson skill.Skill, records []attempt.Attempt) error {
-	if lesson.Kind != skill.KindScoring {
-		return nil
-	}
-	for _, record := range records {
-		if record.TacticID == lesson.ID && record.Assistance == attempt.AssistanceAssisted {
-			return nil
-		}
-	}
-	return refuse("guided_required",
-		"complete a guided %s attempt before independent %s practice; run passquest tactic practice %s --stage guided",
-		lesson.ID, lesson.ID, lesson.ID)
-}
-
-func skillPassageExposure(contentID string, records []attempt.Attempt) string {
-	for _, record := range records {
-		if record.ContentID == contentID {
-			return passageSeen
-		}
-	}
-	return passageFresh
+	return answerItem(opt, svc, item, answerFlag, answerSet, *skipFlag, *jsonFlag)
 }
 
 func skillRunViewOf(run *skillRun) *skillRunView {

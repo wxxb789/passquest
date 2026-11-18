@@ -45,6 +45,11 @@ const (
 	LevelConsolidating Level = "consolidating"
 )
 
+// DefaultMaxQueries is the daily search-query budget a find run gets when the
+// learner does not pass --max-queries. The CLI's flag default and the window's
+// reported limit are the same number.
+const DefaultMaxQueries = 5
+
 // Record is one attempt as the search policy sees it. Skills is the effective
 // snapshot (recorded snapshot, or current tags only for a pre-v6 row); the CLI
 // resolves ExamSection from the content the attempt was taken on.

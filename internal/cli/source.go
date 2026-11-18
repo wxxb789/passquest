@@ -5,14 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
-	"sort"
 	"strings"
 
-	"github.com/wxxb789/passquest/internal/attempt"
-	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
 )
 
 func requireReviewer(reviewer string, opt Options, jsonMode bool) int {
@@ -105,218 +102,6 @@ func runImport(args []string, opt Options) int {
 	return 0
 }
 
-type practiceSelection struct {
-	Content  exam.Exam
-	Question exam.Question
-	Number   int
-	Page     *source.Page
-	Review   *source.Question
-	Tactic   *tacticRun
-	Skill    *skillRun
-}
-
-// practiceCandidate is one practiceable question selected by skill tag. Page
-// and Review are nil for embedded first-party content.
-type practiceCandidate struct {
-	Content  exam.Exam
-	Question exam.Question
-	Number   int
-	Page     *source.Page
-	Review   *source.Question
-}
-
-func (c practiceCandidate) key() attempt.QuestionKey {
-	return attempt.QuestionKey{ContentID: c.Content.ID, QuestionID: c.Question.ID}
-}
-
-// sourceCandidates scans a reviewed source for every question tagged with the
-// skill id. A source without one is a refusal, never a silent fallback to
-// embedded material.
-func sourceCandidates(st *store.Store, sourceID, skillID string) ([]practiceCandidate, error) {
-	src, questions, err := loadSourceBundle(st, sourceID)
-	if err != nil {
-		return nil, err
-	}
-	var out []practiceCandidate
-	for _, page := range src.Pages {
-		content, _, buildErr := source.BuildPracticeExam(src, page, questions)
-		if buildErr != nil {
-			continue
-		}
-		for i, question := range content.Questions {
-			if !slices.Contains(question.Tactics, skillID) {
-				continue
-			}
-			meta, ok := findQuestion(questions, question.ID)
-			if !ok {
-				continue
-			}
-			pageCopy := page
-			metaCopy := meta
-			out = append(out, practiceCandidate{
-				Content: content, Question: question, Number: i, Page: &pageCopy, Review: &metaCopy,
-			})
-		}
-	}
-	if len(out) == 0 {
-		return nil, refuse("not_practiceable",
-			"source %s has no reviewed question tagged %q; add a tagged question with `question add`, then review the page and its answer (see `passquest questions %s`)",
-			sourceID, skillID, sourceID)
-	}
-	return out, nil
-}
-
-func selectSourcePractice(st *store.Store, sourceID string, pageNumber int, questionID string, records []attempt.Attempt) (practiceSelection, error) {
-	src, questions, err := loadSourceBundle(st, sourceID)
-	if err != nil {
-		return practiceSelection{}, err
-	}
-	if len(src.Pages) == 0 {
-		return practiceSelection{}, fmt.Errorf("%w: source %s has no pages", source.ErrNotPracticeable, sourceID)
-	}
-
-	attempts := make(map[attempt.QuestionKey]int, len(records))
-	for _, rec := range records {
-		attempts[rec.Key()]++
-	}
-
-	pageIndex := -1
-	if pageNumber != 0 {
-		for i, page := range src.Pages {
-			if page.Number == pageNumber {
-				pageIndex = i
-				break
-			}
-		}
-		if pageIndex < 0 {
-			return practiceSelection{}, fmt.Errorf("%w: page %d is not in source %s", source.ErrInvalidInput, pageNumber, sourceID)
-		}
-		if questionID != "" {
-			q, ok := findQuestion(questions, questionID)
-			if !ok {
-				return practiceSelection{}, fmt.Errorf("%w: question %q is not in source %s", source.ErrInvalidInput, questionID, sourceID)
-			}
-			if q.Page != pageNumber {
-				return practiceSelection{}, fmt.Errorf("%w: question %q belongs to page %d, not %d", source.ErrInvalidInput, questionID, q.Page, pageNumber)
-			}
-		}
-	} else if questionID != "" {
-		q, ok := findQuestion(questions, questionID)
-		if !ok {
-			return practiceSelection{}, fmt.Errorf("%w: question %q is not in source %s", source.ErrInvalidInput, questionID, sourceID)
-		}
-		for i, page := range src.Pages {
-			if page.Number == q.Page {
-				pageIndex = i
-				break
-			}
-		}
-		if pageIndex < 0 {
-			return practiceSelection{}, fmt.Errorf("%w: question %q points at missing page %d", source.ErrInvalidInput, questionID, q.Page)
-		}
-	} else {
-		// Prefer a page with an unattempted reviewed question; otherwise use the
-		// first page that has any reviewed question.
-		firstPage := -1
-		for i, page := range src.Pages {
-			content, _, buildErr := source.BuildPracticeExam(src, page, questions)
-			if buildErr != nil {
-				continue
-			}
-			if firstPage < 0 {
-				firstPage = i
-			}
-			if firstUnattempted(content.ID, content.Questions, attempts) >= 0 {
-				pageIndex = i
-				break
-			}
-		}
-		if pageIndex < 0 {
-			pageIndex = firstPage
-		}
-		if pageIndex < 0 {
-			return practiceSelection{}, fmt.Errorf("%w: source %s has no reviewed page and question to practice; use passquest questions %s", source.ErrNotPracticeable, sourceID, sourceID)
-		}
-	}
-
-	page := src.Pages[pageIndex]
-	content, _, err := source.BuildPracticeExam(src, page, questions)
-	if err != nil {
-		return practiceSelection{}, err
-	}
-
-	index := -1
-	if questionID != "" {
-		for i, candidate := range content.Questions {
-			if candidate.ID == questionID {
-				index = i
-				break
-			}
-		}
-		if index < 0 {
-			q, _ := findQuestion(questions, questionID)
-			return practiceSelection{}, fmt.Errorf(
-				"%w: question %s is not practiceable (review %s, answer %s, flags %s)",
-				source.ErrNotPracticeable, questionID, q.Review, q.AnswerStatus, displayFlags(q.Flags(page)))
-		}
-	} else if i := firstUnattempted(content.ID, content.Questions, attempts); i >= 0 {
-		index = i
-	} else {
-		index = 0
-	}
-
-	reviewQuestion, ok := findQuestion(questions, content.Questions[index].ID)
-	if !ok {
-		return practiceSelection{}, fmt.Errorf("%w: selected question is missing from the source", source.ErrNotPracticeable)
-	}
-	return practiceSelection{
-		Content:  content,
-		Question: content.Questions[index],
-		Number:   index,
-		Page:     &page,
-		Review:   &reviewQuestion,
-	}, nil
-}
-
-func firstUnattempted(contentID string, questions []exam.Question, attempts map[attempt.QuestionKey]int) int {
-	for i, q := range questions {
-		if attempts[attempt.QuestionKey{ContentID: contentID, QuestionID: q.ID}] == 0 {
-			return i
-		}
-	}
-	return -1
-}
-
-func loadSourceBundle(st *store.Store, sourceID string) (source.Source, []source.Question, error) {
-	src, err := st.Source(sourceID)
-	if err != nil {
-		return source.Source{}, nil, err
-	}
-	questions, err := st.Questions(sourceID)
-	if err != nil {
-		return source.Source{}, nil, err
-	}
-	return src, questions, nil
-}
-
-func findPage(src source.Source, number int) (source.Page, bool) {
-	for _, page := range src.Pages {
-		if page.Number == number {
-			return page, true
-		}
-	}
-	return source.Page{}, false
-}
-
-func findQuestion(questions []source.Question, id string) (source.Question, bool) {
-	for _, q := range questions {
-		if q.ID == id {
-			return q, true
-		}
-	}
-	return source.Question{}, false
-}
-
 func readInputFile(path string, opt Options) ([]byte, error) {
 	if path == "-" {
 		data, err := io.ReadAll(opt.Stdin)
@@ -332,22 +117,13 @@ func readInputFile(path string, opt Options) ([]byte, error) {
 	return data, nil
 }
 
-func displayFlags(flags []source.Flag) string {
-	if len(flags) == 0 {
-		return "—"
-	}
-	values := source.FlagStrings(flags)
-	sort.Strings(values)
-	return strings.Join(values, ",")
-}
-
 func pageLine(page source.Page) string {
 	reviewed := string(page.Review)
 	if page.ReviewedBy != "" {
 		reviewed += " by " + page.ReviewedBy
 	}
 	return fmt.Sprintf("page %03d  %-7s  %-10s  flags %s  %d chars  rev %d",
-		page.Number, page.Origin, reviewed, displayFlags(page.Flags), source.CountNonSpace(page.Text), page.Revision)
+		page.Number, page.Origin, reviewed, study.DisplayFlags(page.Flags), source.CountNonSpace(page.Text), page.Revision)
 }
 
 func questionLine(q source.Question, page source.Page) string {
@@ -361,7 +137,7 @@ func questionLine(q source.Question, page source.Page) string {
 	}
 	flags := q.Flags(page)
 	line := fmt.Sprintf("%s  page %03d  answer %-14s  review %-10s  flags %s  %s",
-		q.ID, q.Page, answer, reviewed, displayFlags(flags), q.Stem)
+		q.ID, q.Page, answer, reviewed, study.DisplayFlags(flags), q.Stem)
 	if len(q.Tactics) > 0 {
 		line += "  skills " + strings.Join(q.Tactics, ",")
 	}

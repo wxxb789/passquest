@@ -8,6 +8,7 @@ import (
 	"github.com/wxxb789/passquest/internal/exam"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
 )
 
 func runReport(args []string, opt Options) int {
@@ -97,7 +98,7 @@ func reportContentView(st *store.Store, sample exam.Exam, id string, sources map
 	if id == sample.ID {
 		return contentViewOf(sample), sample.Questions
 	}
-	if content, found, err := embeddedContent(id); err != nil {
+	if content, found, err := study.EmbeddedContent(id); err != nil {
 		return unavailableContentView(id, err.Error()), nil
 	} else if found {
 		return contentViewOf(content), content.Questions
@@ -117,7 +118,7 @@ func reportContentView(st *store.Store, sample exam.Exam, id string, sources map
 	if loaded.err != nil {
 		return unavailableContentView(id, loaded.err.Error()), nil
 	}
-	pageRecord, ok := findPage(loaded.src, page)
+	pageRecord, ok := study.FindPage(loaded.src, page)
 	if !ok {
 		return unavailableSourceView(id, loaded.src, page, fmt.Errorf("page %d is not in the source", page)), nil
 	}

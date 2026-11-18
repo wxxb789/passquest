@@ -78,7 +78,7 @@ turns red.
   is therefore printed beside the command with its source and the override hint, and `next --json`
   records it in `shell.{family,detected_from,detail,override}`. A wrong guess is visible before the
   paste, not after it.
-- Quoting per family (`internal/cli/shell.go`):
+- Quoting per family (`internal/cmdline/shell.go`, shared by both adapters):
   - `sh`: single quotes, with `'\''` for an embedded quote. Nothing inside expands, so `$`,
     backticks, `"`, `%`, `!`, spaces and non-ASCII text arrive unchanged. Proven by a round trip
     through a real `sh -c` wherever `sh` is on `PATH`; where it is absent the table test still pins

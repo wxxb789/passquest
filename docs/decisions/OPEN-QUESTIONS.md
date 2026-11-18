@@ -306,6 +306,9 @@ Entry format:
   `internal/cli/skill.go`; stored attempts are unaffected.
 - Revisit when: the owner wants a separate unassisted scoring surface that does not feed adaptive
   transfer evidence, or goal 0009 defines a held-out assessment with different help rules.
+- Moved (2026-11-18): `requireGuidedTactic` and the exposure skip now live in
+  `internal/study/practice/lesson.go` (refactor/study-seam); the reversal now touches
+  `internal/study/practice` and the `internal/cli/skill.go` adapter.
 
 ### Q-0004-06 — Does an exhausted review always yield to another skill's evidence-adding action?
 - Status: decided(default taken)
@@ -745,6 +748,9 @@ Entry format:
   or push but does not delete an accepted local note. Reverse by adding a per-source rights field and
   relaxing `noteEffectiveFor`/`runNoteAccept`.
 - Revisit when: an imported source carries an explicit redistribution or public-domain grant.
+- Moved (2026-11-18): `noteEffectiveFor` is now `draftOf` in `internal/study/notes/notes.go` and the
+  accept write is `notes.Settle` in `internal/study/notes/settle.go` (refactor/study-seam);
+  `runNoteAccept` in `internal/cli/note.go` is the CLI adapter the reversal now touches.
 
 ### Q-0007-09 — What is note identity, and is a skipped attempt unanswered?
 - Status: decided(default taken)
@@ -900,6 +906,10 @@ Entry format:
   names. This is conservative and reversible by deleting that single `recordPresentation` call; no
   stored attempt or answer changes. `skill show` and `tactic show` remain non-spending lessons.
 - Revisit when: the owner wants adaptive recommendation to stop shrinking the holdout pool.
+- Moved (2026-11-18): the presentation `next` records is now `recommend.RecordPresentation`,
+  called once inside `recommend.Recommend` in `internal/study/recommend/recommend.go`
+  (refactor/study-seam); `internal/cli/next.go` asks for it with `recommend.SpendRecommended`, so the
+  reversal is passing `recommend.SpendNone` there.
 
 ### Q-0009-07 — How is the per-item clock derived, and what happens to a late answer?
 - Status: decided(default taken)
@@ -1040,6 +1050,10 @@ Entry format:
   the mismatch.
 - Revisit when: the owner decides whether Q-0006-05's "endpoint is current" rule extends to a run that
   predates registry providers.
+- Moved (2026-11-18): `agentProviderConfig` and the resume logic now live in
+  `internal/study/brief/advance.go` (refactor/study-seam); `runAgentResume` in
+  `internal/cli/agent.go` is the CLI adapter that calls it. The reversal and repro now touch
+  `internal/study/brief`.
 
 ### Q-0014-01 — Can Pass Quest tell that AnkiConnect ignored the requested deck?
 - Status: open

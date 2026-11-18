@@ -89,6 +89,38 @@ export function localOnlyCases(): BrokenCase[] {
           ? null
           : `local-only: expected one marker failure in desktop/web/src/main.ts, saw ${failures.join("; ")}`,
     },
+    {
+      gate: localOnly,
+      label: "study package importing the CLI adapter",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": "package main\n\nfunc main() {}\n",
+        "internal/cli/cli.go": "package cli\n\nconst X = 1\n",
+        "internal/study/practice/practice.go":
+          'package practice\n\nimport "example.com/selftest/internal/cli"\n\nvar _ = cli.X\n',
+      },
+      tracked: [],
+      postFail: (failures) =>
+        failures.some((line) => line.includes("module boundary: internal/study/practice imports internal/cli"))
+          ? null
+          : "local-only: did not report the study -> cli import",
+    },
+    {
+      gate: localOnly,
+      label: "study package importing a sub-package of a banned module",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": "package main\n\nfunc main() {}\n",
+        "internal/workspace/sub/sub.go": "package sub\n\nconst X = 1\n",
+        "internal/study/internal/kernel/kernel.go":
+          'package kernel\n\nimport "example.com/selftest/internal/workspace/sub"\n\nvar _ = sub.X\n',
+      },
+      tracked: [],
+      postFail: (failures) =>
+        failures.some((line) => line.includes("module boundary: internal/study/internal/kernel imports internal/workspace/sub"))
+          ? null
+          : "local-only: an exact-match rule missed the sub-package import",
+    },
   ];
 }
 
@@ -110,6 +142,23 @@ export function localOnlyPassCases(): PassCase[] {
         detail.startsWith("3 first-party packages")
           ? null
           : `local-only: accepted detail ${JSON.stringify(detail)} does not count the desktop main`,
+    },
+    {
+      gate: localOnly,
+      label: "workspace test importing the CLI adapter",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": "package main\n\nfunc main() {}\n",
+        "internal/cli/cli.go": "package cli\n\nconst X = 1\n",
+        "internal/workspace/workspace.go": "package workspace\n",
+        "internal/workspace/workspace_test.go":
+          'package workspace\n\nimport "example.com/selftest/internal/cli"\n\nvar _ = cli.X\n',
+      },
+      tracked: [],
+      postPass: (detail) =>
+        detail === "3 first-party packages, 0 network imports, 0 confidential markers, 0 boundary violations"
+          ? null
+          : `local-only: accepted detail ${JSON.stringify(detail)} is not the boundary-aware pass detail`,
     },
   ];
 }

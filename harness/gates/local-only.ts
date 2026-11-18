@@ -19,6 +19,18 @@ const DESKTOP_WEB_EXTENSIONS = /\.(ts|css|html|json|md|txt)$/;
  */
 const DESKTOP_MAIN = "cmd/passquest-desktop";
 
+/** Module boundaries (docs/conventions.md): from -> imports it must not have. Paths are module-relative. */
+const BOUNDARIES: Array<{ from: string; banned: string[]; why: string }> = [
+  { from: "internal/study", banned: ["internal/cli", "internal/studio", "internal/workspace", "internal/desktop"],
+    why: "study is the orchestration module behind both adapters" },
+  { from: "internal/workspace", banned: ["internal/cli"], why: "the desktop adapter calls study, not the CLI" },
+  { from: "internal/desktop", banned: ["internal/cli"], why: "the window reaches the CLI only through cmd/passquest-desktop" },
+  { from: "internal/cli", banned: ["internal/workspace", "internal/desktop", "internal/studio"], why: "the CLI adapter never sees desktop DTOs" },
+  { from: "internal/cmdline", banned: ["internal/cli", "internal/studio", "internal/workspace", "internal/desktop", "internal/store"],
+    why: "cmdline is a leaf both adapters share" },
+];
+const within = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
+
 /**
  * One `go list` loads the package graph once for every fact the gate needs: each first-party
  * package, its direct imports, and its transitive deps (`.Deps` is what `go list -deps` prints for
@@ -63,11 +75,22 @@ export const localOnly: Gate = {
     if (packages.length === 0) return fail(["no first-party packages found"]);
 
     const problems: string[] = [];
-    for (const { importPath, imports } of packages) {
+    for (const { importPath, module, imports } of packages) {
       const line = `${importPath}:${imports.map((name) => ` ${name}`).join("")}`;
       for (const banned of NETWORK_IMPORTS) {
         if (new RegExp(` ${banned}( |$)`).test(line)) {
           problems.push(`first-party network import: ${line}`);
+        }
+      }
+      if (module === "") continue;
+      const relative = importPath.slice(module.length + 1);
+      for (const name of imports) {
+        if (!name.startsWith(`${module}/`)) continue;
+        const dependency = name.slice(module.length + 1);
+        for (const rule of BOUNDARIES) {
+          if (within(relative, rule.from) && rule.banned.some((bannedPath) => within(dependency, bannedPath))) {
+            problems.push(`module boundary: ${relative} imports ${dependency} (${rule.why})`);
+          }
         }
       }
     }
@@ -89,6 +112,6 @@ export const localOnly: Gate = {
       }
     }
     if (problems.length > 0) return fail(problems);
-    return pass(`${packages.length} first-party packages, 0 network imports, 0 confidential markers`);
+    return pass(`${packages.length} first-party packages, 0 network imports, 0 confidential markers, 0 boundary violations`);
   },
 };

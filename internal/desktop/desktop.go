@@ -1,5 +1,5 @@
 // Package desktop is the Pass Quest window: a MyGo app whose page calls the
-// bound Study service, which forwards to one cli.Workspace. It opens no
+// bound Study service, which forwards to one workspace.Workspace. It opens no
 // network listener: MyGo's single-instance lock is a Unix-domain socket and
 // the smoke hook reads and writes files.
 package desktop
@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/wxxb789/passquest/internal/cli"
 	"github.com/wxxb789/passquest/internal/hostproc"
+	"github.com/wxxb789/passquest/internal/workspace"
 )
 
 // web is the page: the committed index.html and not-built.html plus the
@@ -146,7 +146,7 @@ func openStudy(study *Study, getenv func(string) string) {
 	if err == nil {
 		// Window state and anything else MyGo keeps follow the data directory.
 		mygo.App.SetPath(mygo.PathUserData, where.DataDir)
-		err = study.open(cli.WorkspaceOptions{
+		err = study.open(workspace.Options{
 			DBPath:      where.Database,
 			Credentials: newCredentialStore(mygo.Secrets.Service(secretService(getenv))),
 		})

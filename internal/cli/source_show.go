@@ -6,6 +6,7 @@ import (
 	"github.com/wxxb789/passquest/internal/assess"
 	"github.com/wxxb789/passquest/internal/source"
 	"github.com/wxxb789/passquest/internal/store"
+	"github.com/wxxb789/passquest/internal/study"
 )
 
 func runSources(args []string, opt Options) int {
@@ -64,7 +65,7 @@ func runShow(args []string, opt Options) int {
 		return internalError(opt, *jsonFlag, err)
 	}
 	defer st.Close()
-	src, questions, err := loadSourceBundle(st, sourceID)
+	src, questions, err := study.LoadSourceBundle(st, sourceID)
 	if err != nil {
 		return sourceError(opt, *jsonFlag, err)
 	}
@@ -72,7 +73,7 @@ func runShow(args []string, opt Options) int {
 
 	var page *source.Page
 	if *pageFlag != 0 {
-		candidate, ok := findPage(src, *pageFlag)
+		candidate, ok := study.FindPage(src, *pageFlag)
 		if !ok {
 			return usageError(opt, *jsonFlag, "not_found", fmt.Sprintf("page %d is not in source %s", *pageFlag, sourceID))
 		}
@@ -102,7 +103,7 @@ func runShow(args []string, opt Options) int {
 			if page != nil && q.Page != page.Number {
 				continue
 			}
-			qPage, _ := findPage(src, q.Page)
+			qPage, _ := study.FindPage(src, q.Page)
 			doc.Questions = append(doc.Questions, sourceQuestionViewOf(q, qPage))
 		}
 		return writeJSON(opt, doc)
@@ -120,7 +121,7 @@ func runShow(args []string, opt Options) int {
 	} else {
 		fmt.Fprintf(opt.Stdout, "\nPage %d\n", page.Number)
 		fmt.Fprintf(opt.Stdout, "Origin: %s\nReview: %s\nFlags: %s\nRevision: %d\nChars (no whitespace): %d\n",
-			page.Origin, page.Review, displayFlags(page.Flags), page.Revision, source.CountNonSpace(page.Text))
+			page.Origin, page.Review, study.DisplayFlags(page.Flags), page.Revision, source.CountNonSpace(page.Text))
 		if page.ReviewedBy != "" {
 			fmt.Fprintf(opt.Stdout, "Reviewed by: %s at %s\n", page.ReviewedBy, source.FormatTime(page.ReviewedAt))
 		}
@@ -135,7 +136,7 @@ func runShow(args []string, opt Options) int {
 		if page != nil && q.Page != page.Number {
 			continue
 		}
-		qPage, _ := findPage(src, q.Page)
+		qPage, _ := study.FindPage(src, q.Page)
 		fmt.Fprintln(opt.Stdout, "  "+questionLine(q, qPage))
 	}
 	fmt.Fprintf(opt.Stdout, "\nDatabase: %s\n", st.Path())
@@ -157,12 +158,12 @@ func runQuestions(args []string, opt Options) int {
 		return internalError(opt, *jsonFlag, err)
 	}
 	defer st.Close()
-	src, questions, err := loadSourceBundle(st, fs.Arg(0))
+	src, questions, err := study.LoadSourceBundle(st, fs.Arg(0))
 	if err != nil {
 		return sourceError(opt, *jsonFlag, err)
 	}
 	if *pageFlag != 0 {
-		if _, ok := findPage(src, *pageFlag); !ok {
+		if _, ok := study.FindPage(src, *pageFlag); !ok {
 			return usageError(opt, *jsonFlag, "not_found", fmt.Sprintf("page %d is not in source %s", *pageFlag, src.ID))
 		}
 	}
@@ -177,7 +178,7 @@ func runQuestions(args []string, opt Options) int {
 			if *pageFlag != 0 && q.Page != *pageFlag {
 				continue
 			}
-			qPage, _ := findPage(src, q.Page)
+			qPage, _ := study.FindPage(src, q.Page)
 			doc.Questions = append(doc.Questions, sourceQuestionViewOf(q, qPage))
 		}
 		return writeJSON(opt, doc)
@@ -190,7 +191,7 @@ func runQuestions(args []string, opt Options) int {
 		if *pageFlag != 0 && q.Page != *pageFlag {
 			continue
 		}
-		qPage, _ := findPage(src, q.Page)
+		qPage, _ := study.FindPage(src, q.Page)
 		fmt.Fprintln(opt.Stdout, "  "+questionLine(q, qPage))
 	}
 	fmt.Fprintf(opt.Stdout, "\nDatabase: %s\n", st.Path())
