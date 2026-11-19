@@ -2,8 +2,9 @@
 
 `agent/` holds the only Node/TypeScript product runtime: the provider egress for the BYOK tutor, the
 search transport for bounded resource discovery, the loopback AnkiConnect transport and the Pi Durable
-host for bounded study-brief work. The Go core never imports a network package; every host is spawned
-as a child process over a versioned JSON boundary.
+host for bounded study-brief work. The Go core imports no network package; its only exception is the
+desktop app's on-demand release check ([core-design.md](../docs/core-design.md) §6). Every host is
+spawned as a child process over a versioned JSON boundary.
 
 Install the pinned runtime dependencies from the repository root (they are a Bun workspace):
 
@@ -13,8 +14,9 @@ bun install
 
 ## `tutor-host.mjs` — the single-call tutor path
 
-`tutor-host.mjs` exists for one reason: the Go application core must not import a network client,
-while a BYOK text provider requires HTTPS. It is a single-shot process, not an agent loop.
+`tutor-host.mjs` exists for one reason: the Go core imports no network client, with one exception,
+the desktop app's on-demand release check ([core-design.md](../docs/core-design.md) §6), while a BYOK
+text provider requires HTTPS. It is a single-shot process, not an agent loop.
 
 - One JSON request on stdin, one JSON result on stdout, protocol version `1`.
 - `chat` is the typed request content; `body` is its exact serialization. The host rejects a request
@@ -57,7 +59,8 @@ vocabulary.
 
 ## `anki-host.mjs` — the loopback AnkiConnect path
 
-`anki-host.mjs` exists for the same boundary reason: the Go core must not import a network client,
+`anki-host.mjs` exists for the same boundary reason: the Go core imports no network client, with one
+exception, the desktop app's on-demand release check ([core-design.md](../docs/core-design.md) §6),
 while AnkiConnect is an HTTP endpoint. It is a bounded transport, not an Anki client.
 
 - One JSON request on stdin with an endpoint, a timeout and 1–50 allow-listed actions: `version`,

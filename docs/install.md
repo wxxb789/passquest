@@ -131,8 +131,19 @@ modify it: the window shows *This data is from a newer Pass Quest*, with the nex
 newer Pass Quest that wrote this data; this version will not change it.*, and the CLI reports
 `store: database schema version N is newer than supported version M`.
 
-There is no in-app update check yet (goal 0015): nothing checks for, downloads or installs a newer
-package, and the app makes no update network call.
+**Checking for updates from the app (goal 0015).** Open **Settings** and expand the **Updates** row: it
+shows the version you are running and a **Check for updates** button. Nothing checks on its own — there
+is no check at start-up and no timer — and a check never downloads, installs or writes anything. The
+button sends one `GET` request to GitHub Releases for this repository (`api.github.com`, the path
+`/repos/wxxb789/passquest/releases/latest`) with the two headers the app sets, `Accept` and
+`User-Agent: PassQuest`; Go's transport adds only the host (`Host`, or `:authority` over HTTP/2) and `Accept-Encoding`, and the request sends
+no account, no study data and no device identifier, and downloads nothing. The app refuses a redirect
+and does not use a proxy from your environment. If a newer release exists, the row shows its version
+and publication date with a link to its release page, which opens in your browser; you install it the
+normal way, as above. No release has been published for this repository yet, so a check today answers
+*No release has been published for this repository yet, so there is nothing newer to install.* If the
+request cannot reach GitHub — offline, rate-limited, or a network that requires a proxy — the row says
+*could not check* with a short reason, and study is unaffected.
 
 ## What CI proves, and what is untested
 
@@ -169,4 +180,7 @@ Untested, and therefore not claimed:
 - **Search and the study brief with the bundled runtime.** The package carries their hosts and the
   same resolver finds them, but CI runs only their unavailable path in the installed app; their
   success path is covered by the source-tree smokes, not by the package.
-- **Updates.** No update check and no published release (goal 0015).
+- **Updates.** No release is published (goal 0015), so a check today answers that there is nothing
+  newer to install. The package smoke does not drive the update check or its browser hand-off; those
+  are covered by `desktop smoke`'s `update` scenario in a source checkout, not by the installed
+  package.

@@ -503,6 +503,7 @@ func TestTargetForSmokeOverride(t *testing.T) {
 		"http://example.com:45123/x",
 		"ftp://127.0.0.1:45123/x",
 		stub + "?step=1",
+		stub + "#step",
 		"",
 	}
 	for _, raw := range refused {
