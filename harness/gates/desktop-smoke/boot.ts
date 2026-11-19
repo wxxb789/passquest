@@ -2,7 +2,7 @@ import { field, numberField } from "../../lib/json.ts";
 import { launch } from "./scenario.ts";
 import type { Scenario } from "./scenario.ts";
 
-const MIN_TODAY_TEXT = 200;
+export const MIN_TODAY_TEXT = 200;
 
 const BOOT_SCRIPT = `
 const stage = () => document.querySelector("#stage");

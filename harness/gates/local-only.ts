@@ -55,34 +55,23 @@ const UPDATE_IMPORTERS = ["internal/desktop", "cmd/passquest-desktop"];
 const UPDATE_ENDPOINT_SOURCE = "harness/lib/update-endpoint.ts";
 
 /**
- * The pinned shape of the two constants in harness/lib/update-endpoint.ts:
- * the protocol `https:`, the hosts `api.github.com` and `github.com`, the
- * paths `/repos/wxxb789/passquest/releases/latest` and
- * `/wxxb789/passquest/releases/`, and no query or fragment on either. One
- * problem per drifted part, naming what moved. Exported because a fixture
- * cannot rewrite a harness module: the self-test checks it directly, with a
- * URL of its own.
+ * The gate's own copy of the two constants in harness/lib/update-endpoint.ts,
+ * compared as whole strings: any other spelling (another host or path, a
+ * scheme, a query, userinfo, even an empty `@` or a default port spelled out)
+ * is a named failure, with no URL parsing left to disagree with Go's client.
+ * Exported because a fixture cannot rewrite a harness module: the self-test
+ * checks it directly, with URLs of its own.
  */
+const PINNED_ENDPOINT = "https://api.github.com/repos/wxxb789/passquest/releases/latest";
+const PINNED_RELEASES_PREFIX = "https://github.com/wxxb789/passquest/releases/";
 export function endpointDriftProblems(endpoint: string = UPDATE_ENDPOINT, prefix: string = UPDATE_RELEASES_PREFIX): string[] {
-  const problems: string[] = [];
-  const pinned: Array<{ name: string; value: string; protocol: string; host: string; pathname: string }> = [
-    { name: "UPDATE_ENDPOINT", value: endpoint, protocol: "https:", host: "api.github.com", pathname: "/repos/wxxb789/passquest/releases/latest" },
-    { name: "UPDATE_RELEASES_PREFIX", value: prefix, protocol: "https:", host: "github.com", pathname: "/wxxb789/passquest/releases/" },
+  const pinned = [
+    { name: "UPDATE_ENDPOINT", value: endpoint, want: PINNED_ENDPOINT },
+    { name: "UPDATE_RELEASES_PREFIX", value: prefix, want: PINNED_RELEASES_PREFIX },
   ];
-  for (const { name, value, protocol, host, pathname } of pinned) {
-    let url: URL;
-    try {
-      url = new URL(value);
-    } catch {
-      problems.push(`${UPDATE_ENDPOINT_SOURCE}: ${name} is not a URL: ${JSON.stringify(value)}`);
-      continue;
-    }
-    if (url.protocol !== protocol) problems.push(`${UPDATE_ENDPOINT_SOURCE}: ${name} protocol drifted: ${url.protocol}, want ${protocol}`);
-    if (url.host !== host) problems.push(`${UPDATE_ENDPOINT_SOURCE}: ${name} host drifted: ${url.host}, want ${host}`);
-    if (url.pathname !== pathname) problems.push(`${UPDATE_ENDPOINT_SOURCE}: ${name} pathname drifted: ${url.pathname}, want ${pathname}`);
-    if (url.search !== "" || url.hash !== "") problems.push(`${UPDATE_ENDPOINT_SOURCE}: ${name} carries a query or fragment: ${JSON.stringify(value)}`);
-  }
-  return problems;
+  return pinned
+    .filter(({ value, want }) => value !== want)
+    .map(({ name, value, want }) => `${UPDATE_ENDPOINT_SOURCE}: ${name} drifted: ${JSON.stringify(value)}, want ${JSON.stringify(want)}`);
 }
 
 /** The go/parser tool (harness/tools/urllits) that reports the real http(s) literals. */

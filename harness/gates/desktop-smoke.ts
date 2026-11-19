@@ -31,9 +31,10 @@ import { practice } from "./desktop-smoke/practice.ts";
 import { resume } from "./desktop-smoke/resume.ts";
 import type { Scenario, Shared } from "./desktop-smoke/scenario.ts";
 import { settings } from "./desktop-smoke/settings.ts";
+import { update } from "./desktop-smoke/update.ts";
 
 /** client-fresh and boot run first; the rest need a window that boots. */
-const SCENARIOS: Scenario[] = [clientFresh, boot, lifecycle, practice, hint, feedback, coach, manual, assess, anki, settings, resume];
+const SCENARIOS: Scenario[] = [clientFresh, boot, lifecycle, practice, hint, feedback, coach, manual, assess, anki, settings, update, resume];
 
 /**
  * The desktop smoke over every scenario, or, for a self-test case whose failure is decided by one

@@ -54,6 +54,13 @@ export interface UpdateStub {
    * never settles holds the response open (the stalled-check state).
    */
   queue: Array<(request: UpdateStubRequest) => Response | Promise<Response>>;
+  /**
+   * An answer that never settles on its own, for the stalled-check step: the
+   * client's own timeout ends that check. `stop()` closes the listening socket
+   * and every connection first, then releases the held answers, so the release
+   * is never sent and no handler promise outlives the stub.
+   */
+  hold(): Promise<Response>;
   stop(): void;
 }
 
@@ -69,12 +76,18 @@ export function releaseResponse(release: { tag: string; published?: string; draf
 
 export function startUpdateStub(root: string): UpdateStub {
   const endpointPath = updatePath(root);
+  // The held answers, released by stop() alone: nothing stays pending past the stub.
+  const held: Array<(response: Response) => void> = [];
   const stub: UpdateStub = {
     endpoint: "",
     path: endpointPath,
     requests: [],
     queue: [() => releaseResponse({ tag: "v9.9.9" })],
-    stop: () => server.stop(true),
+    hold: () => new Promise<Response>((release) => held.push(release)),
+    stop: () => {
+      server.stop(true);
+      for (const release of held.splice(0)) release(new Response(null, { status: 503 }));
+    },
   };
   const server = Bun.serve({
     hostname: "127.0.0.1",
