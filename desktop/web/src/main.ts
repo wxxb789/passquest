@@ -10,27 +10,14 @@ import { ACT, doMark, keyActions, onDeadline, onFieldInput, onRoute, recoverOnBo
 import { checkSelection, hideMarkPop, onMark } from './components/passage';
 import { fitCardFrame, watchCardFrame } from './views/anki';
 import { startClock } from './core/clock';
+import { installErrorBar } from './core/errors';
 import { installKeyboard } from './core/keyboard';
 import { moreCue, render, setScreens } from './core/render';
 import { installRouter, parseHash } from './core/router';
 import { ui } from './core/state';
 import { screens } from './screens';
 
-// A visible red bar for any uncaught error, as in the prototype (text only).
-function errorBar(message: string): void {
-  let b = document.getElementById('errbar');
-  if (!b) {
-    b = document.createElement('div');
-    b.id = 'errbar';
-    document.documentElement.appendChild(b);
-  }
-  b.textContent = 'JS error: ' + message;
-  b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#c4122f;color:#fff;font:600 14px/1.4 Consolas,monospace;padding:10px 16px';
-}
-window.onerror = (msg, _src, line, col) => {
-  errorBar(`${String(msg)} @${line ?? 0}:${col ?? 0}`);
-};
-window.addEventListener('unhandledrejection', (e) => errorBar(String(e.reason instanceof Error ? e.reason.message : e.reason)));
+installErrorBar();
 
 function delegate(): void {
   document.addEventListener('click', (e) => {
