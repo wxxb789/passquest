@@ -4,6 +4,7 @@
 // Inside a MyGo window the study service is bound at boot (`connectStudy()`, src/api/client.ts), and
 // an interrupted item or run is recovered (`recoverOnBoot`).
 // Elsewhere every screen shows its "service not connected" state; nothing is invented.
+import './diag';
 import '../styles/index.css';
 import { bindApi, connectStudy } from './api/client';
 import { ACT, doMark, keyActions, onDeadline, onFieldInput, onRoute, recoverOnBoot, setEv, watchBrief } from './actions';
