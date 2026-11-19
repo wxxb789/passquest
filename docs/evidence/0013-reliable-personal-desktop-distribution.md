@@ -1,6 +1,6 @@
 # 0013 — Install and recover Pass Quest as a personal desktop app: evidence
 
-Contract: [`../goals/0013-reliable-personal-desktop-distribution.md`](../goals/0013-reliable-personal-desktop-distribution.md).
+Contract: [`../goals/archive/0013-reliable-personal-desktop-distribution.md`](../goals/archive/0013-reliable-personal-desktop-distribution.md).
 Plan: [`../plans/2026-11-18-1900-0013-desktop-distribution.md`](../plans/2026-11-18-1900-0013-desktop-distribution.md).
 Guide: [`../install.md`](../install.md). Decisions: Q-0013-01…10 in
 [`../decisions/OPEN-QUESTIONS.md`](../decisions/OPEN-QUESTIONS.md).

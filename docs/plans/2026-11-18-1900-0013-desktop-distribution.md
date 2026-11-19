@@ -1,6 +1,6 @@
 # 0013 — Install and recover Pass Quest as a personal desktop app: increment plan
 
-Contract: [`../goals/0013-reliable-personal-desktop-distribution.md`](../goals/0013-reliable-personal-desktop-distribution.md).
+Contract: [`../goals/archive/0013-reliable-personal-desktop-distribution.md`](../goals/archive/0013-reliable-personal-desktop-distribution.md).
 Conventions: [`../conventions.md`](../conventions.md). Harness: [`../harness.md`](../harness.md).
 Cross-platform rules: [`../cross-platform.md`](../cross-platform.md). Base: `main` after the MyGo 0.10.0 /
 Pi 1.5.2 dependency upgrade.
