@@ -27,29 +27,38 @@ function errorBar(message: string): void {
   b.textContent = 'JS error: ' + message;
   b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#c4122f;color:#fff;font:600 14px/1.4 Consolas,monospace;padding:10px 16px';
 }
-window.onerror = (msg, _src, line, col) => {
-  errorBar(`${String(msg)} @${line ?? 0}:${col ?? 0}`);
+window.onerror = (msg, src, line, col, error) => {
+  // DIAGNOSTIC: keep a DIAG line already written, and add where the opaque error came from.
+  const prior = document.getElementById('errbar')?.textContent ?? '';
+  const where = `src=${JSON.stringify(src ?? '')} error=${error === undefined ? 'undefined' : error === null ? 'null' : typeof error} hash=${location.hash} t=${Math.round(performance.now())}`;
+  errorBar(`${String(msg)} @${line ?? 0}:${col ?? 0} [${where}]${prior.includes('DIAG') ? ' || ' + prior : ''}`);
 };
 // DIAGNOSTIC (not for merge): MyGo's injected bridge rethrows a Go-event listener's error through
 // setTimeout from its own user script, which WebKit reports as an opaque "Script error.". Catch
-// the original error here, name it with its stack in the bar, then rethrow unchanged.
+// the original error here and name it with its stack in the bar (no rethrow, so it is not overwritten).
 {
-  const nativeSetTimeout = window.setTimeout.bind(window);
-  (window as unknown as { setTimeout: unknown }).setTimeout = (handler: unknown, ms?: number, ...rest: unknown[]) =>
-    nativeSetTimeout(
-      typeof handler === 'function'
-        ? () => {
-            try {
-              (handler as (...a: unknown[]) => void)(...rest);
-            } catch (error) {
-              const stack = error instanceof Error ? `${error.name}: ${error.message} | ${(error.stack ?? '').replace(/\s+/g, ' ').slice(0, 220)}` : String(error);
-              errorBar(`DIAG timer: ${stack}`);
-              throw error;
-            }
+  const report = (kind: string, error: unknown) => {
+    const text = error instanceof Error ? `${error.name}: ${error.message} | ${(error.stack ?? '').replace(/\s+/g, ' ').slice(0, 200)}` : String(error);
+    errorBar(`DIAG ${kind}: ${text}`);
+  };
+  const wrap = (kind: string, fn: unknown) =>
+    typeof fn === 'function'
+      ? (...a: unknown[]) => {
+          try {
+            return (fn as (...b: unknown[]) => unknown)(...a);
+          } catch (error) {
+            report(kind, error);
+            return undefined;
           }
-        : (handler as string),
-      ms,
-    );
+        }
+      : fn;
+  const w = window as unknown as Record<string, unknown>;
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  w.setTimeout = (handler: unknown, ms?: number, ...rest: unknown[]) => nativeSetTimeout(wrap('timer', handler) as TimerHandler, ms, ...rest);
+  const nativeRaf = window.requestAnimationFrame.bind(window);
+  w.requestAnimationFrame = (cb: FrameRequestCallback) => nativeRaf(wrap('frame', cb) as FrameRequestCallback);
+  const nativeMicrotask = window.queueMicrotask.bind(window);
+  w.queueMicrotask = (cb: VoidFunction) => nativeMicrotask(wrap('microtask', cb) as VoidFunction);
 }
 window.addEventListener('unhandledrejection', (e) => errorBar(String(e.reason instanceof Error ? e.reason.message : e.reason)));
 
