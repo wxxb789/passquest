@@ -445,6 +445,20 @@ const FAILURE_TYPES: Record<string, Pair> = {
 };
 export const failureTypeLabel = (type: string): Html => coded(FAILURE_TYPES, type, ['未知失败', 'unknown failure']);
 
+/** Why an update check could not answer (`update.Reason`): a short clause, never the code. */
+const UPDATE_REASONS: Record<string, Pair> = {
+  timeout: ['请求超时', 'the request timed out'],
+  offline: ['无法连接到 GitHub', 'the request could not reach GitHub'],
+  rate_limited: ['请求次数被限制', 'the request was rate-limited by GitHub'],
+  server_error: ['远端暂时无法回答', 'GitHub could not answer (a server error)'],
+  unexpected: ['回应无法识别', 'the response was not recognised'],
+  redirect: ['回应要求跳转，已拒绝', 'the endpoint answered with a redirect, which is refused'],
+  too_large: ['回应超过上限，已停止读取', 'the response was larger than 1 MiB'],
+  malformed: ['回应不是发布信息', 'the response was not a release document'],
+  invalid_tag: ['发布标签不是有效的版本号', 'the release tag is not a valid version'],
+};
+export const updateReason = (reason: string): string => (UPDATE_REASONS[reason] ? TP(UPDATE_REASONS[reason]) : T('原因未记录', 'the reason was not recorded'));
+
 /** Why a report item is excluded from the score (`assess.Reason*`), in the contamination sheet's words. */
 const CONTAMINATION: Record<string, Pair> = {
   prior_exposure: ['运行前见过', 'seen before the run'],

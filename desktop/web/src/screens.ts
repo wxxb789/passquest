@@ -46,7 +46,15 @@ function knownSources(): string[] {
 }
 
 function settingsData(): SettingsData {
-  return { models: data.models, budget: data.settings.budget, consents: data.settings.consents, services: data.services, sources: knownSources() };
+  return {
+    models: data.models,
+    budget: data.settings.budget,
+    consents: data.settings.consents,
+    services: data.services,
+    version: data.settings.version,
+    update: data.settings.update,
+    sources: knownSources(),
+  };
 }
 
 function stage(): Html {

@@ -29,6 +29,56 @@ async function shrinkTheViewport(root: string): Promise<string | null> {
   );
 }
 
+/**
+ * The product whose Updates row freezes its state hook: the audits' waits read
+ * `data-update-state`, so the newer-state step must time out, not pass.
+ */
+async function freezeUpdateState(root: string): Promise<string | null> {
+  if (copyProduct(root, DESKTOP_UX_SOURCES) === 0) return "no product source was copied into the fixture root";
+  return patchCopy(root, "desktop/web/src/views/settings.ts", 'data-update-state="${state}"', 'data-update-state="stale"');
+}
+
+/**
+ * The product whose Updates row breaks every check the settings part added, at once: the check
+ * action fabricates its states in the page (no request ever reaches the stub), the version the row
+ * shows is hardcoded, and the disclosure no longer names the endpoint. One run must report all three.
+ */
+async function breakEveryUpdateAssertion(root: string): Promise<string | null> {
+  if (copyProduct(root, DESKTOP_UX_SOURCES) === 0) return "no product source was copied into the fixture root";
+  // The fabricated states mirror what the loopback stub's v9.9.9 release and its 500 answer render,
+  // so the script's waits and the state audits still see the row's real layout.
+  const fabricated = [
+    "    const prior = data.settings.update;",
+    "    data.settings.update = { status: 'checking' };",
+    "    void Promise.resolve(",
+    "      prior.status === 'done' && prior.result.state === 'newer'",
+    "        ? { state: 'unavailable', reason: 'server_error' }",
+    "        : {",
+    "            state: 'newer',",
+    "            version: 'v9.9.9',",
+    "            published: '2026-11-18',",
+    "            notes_url: 'https://github.com/wxxb789/passquest/releases/tag/v9.9.9',",
+    "            download_url: 'https://github.com/wxxb789/passquest/releases/tag/v9.9.9',",
+    "          },",
+    "    ).then((result) => {",
+  ].join("\n");
+  return (
+    patchCopy(
+      root,
+      "desktop/web/src/controllers/settings.ts",
+      "    data.settings.update = { status: 'checking' };\n    void write((a) => a.checkForUpdate()).then((result) => {",
+      fabricated,
+    ) ??
+    patchCopy(
+      root,
+      "internal/desktop/study.go",
+      "return callSolo(s, func() (string, error) { return update.Version, nil })",
+      'return callSolo(s, func() (string, error) { return "0.0.0", nil })',
+    ) ??
+    patchCopy(root, "desktop/web/src/views/settings.ts", '<span translate="no">GitHub Releases</span> (<code>api.github.com</code>)', '<span translate="no">GitHub Releases</span>')
+  );
+}
+
 export function desktopUxCases(): BrokenCase[] {
   return [
     {
@@ -58,6 +108,42 @@ export function desktopUxCases(): BrokenCase[] {
         failures.some((line) => line.startsWith("viewport precondition: ") && line.includes("1280x800") && line.includes("1264x784"))
           ? null
           : `desktop-ux: did not report the viewport precondition: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      // The settings part at the first size only: the update row's newer state is what the waits
+      // read, so a frozen hook must fail there rather than let the audit pass on a stale row.
+      gate: makeDesktopUxGate({ sizes: [UX_SIZES[0]], parts: ["two"] }),
+      label: "an Updates row whose check state never leaves the first one",
+      files: {},
+      prepare: freezeUpdateState,
+      postFail: (failures) => {
+        const earlier = failures.find((line) => /go build|bun build|viewport precondition|probes:|seed:/.test(line));
+        if (earlier) return `desktop-ux: the frozen update row broke an earlier stage: ${earlier}`;
+        return failures.some((line) => line.includes("script failed") && line.includes("the newer state"))
+          ? null
+          : `desktop-ux: did not fail on the frozen update state: ${failures.slice(0, 3).join("; ")}`;
+      },
+    },
+    {
+      // The settings part at the first size only. One broken product must fail all three checks the
+      // settings part carries: the stub's request count and path, the version the row shows, and the
+      // disclosure naming the endpoint.
+      gate: makeDesktopUxGate({ sizes: [UX_SIZES[0]], parts: ["two"] }),
+      label: "an Updates row that fabricates its states, misstates its version and drops the endpoint from its disclosure",
+      files: {},
+      prepare: breakEveryUpdateAssertion,
+      postFail: (failures) => {
+        const earlier = failures.find((line) => /go build|bun build|viewport precondition|probes:|script failed|seed:/.test(line));
+        if (earlier) return `desktop-ux: the broken Updates row broke an earlier stage: ${earlier}`;
+        const wanted = [
+          ["the stub answered", "the stub's request count and path"],
+          ["the Updates row shows version", "the version the row shows"],
+          ["disclosure does not name api.github.com", "the disclosure naming the endpoint"],
+        ] as const;
+        const missing = wanted.filter(([needle]) => !failures.some((line) => line.includes(needle))).map(([, what]) => what);
+        if (missing.length > 0) return `desktop-ux: did not fail on ${missing.join(" and ")}`;
+        return null;
+      },
     },
   ];
 }

@@ -61,6 +61,7 @@ const METHODS = [
   'testModel',
   'today',
   'useModel',
+  'version',
 ] as const satisfies readonly (keyof StudyClient)[];
 
 type Unlisted = Exclude<keyof StudyClient, (typeof METHODS)[number]>;

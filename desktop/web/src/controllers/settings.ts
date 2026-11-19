@@ -6,7 +6,7 @@ import { closeLayer, openLayer, render, renderLayer } from '../core/render';
 import { data, ui, valueOf } from '../core/state';
 import { toast } from '../core/toast';
 import { $, type Act } from './dom';
-import { failureLine, load, loadToday, write, writeOk } from './service';
+import { busyRefused, failureLine, load, loadToday, write, writeOk } from './service';
 
 export const loadServices = () => load((a) => a.services(), (l) => (data.services = l), valueOf(data.services));
 export const loadModels = () => load((a) => a.models(), (l) => (data.models = l), valueOf(data.models));
@@ -19,6 +19,7 @@ export async function loadSettings(): Promise<void> {
     loadServices(),
     load((a) => a.budget(), (l) => (s.budget = l), valueOf(s.budget)),
     loadConsents(),
+    load((a) => a.version(), (l) => (s.version = l), valueOf(s.version)),
   ]);
   if (ui.layer?.startsWith('sheet:')) renderLayer(false);
 }
@@ -44,6 +45,16 @@ export const settingsActs: Record<string, Act> = {
       if (!res) return;
       toast(res.failure ? `${T('测试未通过', 'Test failed')} · ${failureLine({ code: res.failure.code, message: res.failure.message, action: null })}` : T(`${res.provider_name} · ${res.model} 已验证`, `${res.provider_name} · ${res.model} verified`));
       void loadSettings();
+    });
+  },
+  'update-check'() {
+    if (busyRefused()) return;
+    data.settings.update = { status: 'checking' };
+    void write((a) => a.checkForUpdate()).then((result) => {
+      // A call that never reached the service leaves the row unchecked again; any answer it
+      // returned is the check's result, its own "could not check" included.
+      data.settings.update = result ? { status: 'done', result } : { status: 'idle' };
+      render();
     });
   },
   cred(v) {

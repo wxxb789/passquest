@@ -27,6 +27,7 @@ import { resolve } from "../lib/repo.ts";
 import { seedReviewedSource } from "../lib/reviewed-source.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
+import { releaseResponse, startUpdateStub } from "../lib/update-stub.ts";
 import { UX_LIBRARY } from "../lib/ux-page.ts";
 
 /**
@@ -62,6 +63,9 @@ export const UX_STATES = [
   "report-annotations",
   "anki-notes",
   "settings-row",
+  "settings-update-idle",
+  "settings-update-newer",
+  "settings-update-unavailable",
   "run-form",
   "assess-running",
   "practice-long",
@@ -341,6 +345,25 @@ opener.click();
 await steady("the expanded row", () => q(".rrow.open"));
 after("expand a provider row");
 await each("settings-row", true);
+// The Updates row: not checked, then a newer release from the loopback stub, then a failed check.
+// Its key in ui.settings.open ends in ":" (views/settings.ts UPDATE_ROW_KEY), which no provider id
+// can equal, so this selector cannot also match a provider a learner named "updates".
+opener = await steady("the update row", () => q('[data-act="row"][data-v="updates:"]'));
+opener.focus();
+opener.click();
+await steady("the expanded update row", () => q('[data-testid="update-row"].open') && q('[data-act="update-check"]:not([disabled])'));
+after("expand the update row");
+await each("settings-update-idle", true);
+await click('[data-act="update-check"]');
+await steady("the newer state", () => q('[data-update-state="newer"]'));
+after("check for updates");
+await each("settings-update-newer", true);
+await click('[data-act="update-check"]');
+await steady("the unavailable state", () => q('[data-update-state="unavailable"]'));
+after("check for updates again");
+await each("settings-update-unavailable", true);
+const shownVersion = q('[data-testid="update-row"] .model').textContent.trim();
+const disclosureText = q('[data-testid="update-disclosure"]')?.textContent ?? "";
 for (const href of all(".dock a[href]").map((link) => link.getAttribute("href"))) {
   const link = q('.dock a[href="' + href + '"]');
   link.focus();
@@ -364,7 +387,7 @@ await until("the first assessment item", () => q('[data-testid="assess-item"]'))
 await sleep(250);
 after("start a run");
 await each("assess-running", true);
-return { results, focus, checked };
+return { results, focus, checked, shownVersion, disclosureText };
 `;
 
 /** The question of the long source (seeded on its own database). */
@@ -607,11 +630,25 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
     out.problems.push(allow.error);
     return done();
   }
+  // The Updates row must show this same version; P1's Go test ties it to internal/update.Version.
+  let appVersion = "";
+  try {
+    appVersion = stringField(JSON.parse(readFileSync(resolve(ctx.root, "mygo.json"), "utf8")), "version") ?? "";
+  } catch (error) {
+    out.problems.push(`mygo.json is needed for the version the Updates row shows: ${error instanceof Error ? error.message : String(error)}`);
+    return done();
+  }
+  if (!check(appVersion !== "", "mygo.json carries no version for the Updates row")) return done();
 
   const temp = mkdtempSync(path.join(tmpdir(), "passquest-desktop-ux-"));
   const provider = startProviderStub();
   provider.respond = () => chatReply(COACH_REPLY);
   const anki = startAnkiStub();
+  // The stub stands in for the constant endpoint and takes its path from the Go constant itself.
+  const updateStub = startUpdateStub(ctx.root);
+  // Every PART_TWO launch clicks the check twice: the first finds v9.9.9 (newer), the second gets
+  // a 500 (could not check). The queue cycles, so both sizes walk the same two states.
+  updateStub.queue = [() => releaseResponse({ tag: "v9.9.9" }), () => new Response("boom", { status: 500 })];
   try {
     const binary = path.join(temp, executable("passquest-desktop"));
     const build = await buildDesktop(ctx, binary);
@@ -663,6 +700,9 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
           PASSQUEST_DESKTOP_CONTENT_SIZE: `${size[0]}x${size[1]}`,
           PASSQUEST_PROVIDER_REGISTRY: registry,
           PASSQUEST_ANKI_ENDPOINT: anki.endpoint,
+          // Read only because this is a scripted launch (the smoke hook is set); a packaged run
+          // can only reach the constant endpoint (goal 0015, Q-0015-06).
+          PASSQUEST_DESKTOP_UPDATE_URL: updateStub.endpoint,
           ...keyEnv,
         },
         check,
@@ -753,8 +793,24 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
       const sizeName = `${size[0]}x${size[1]}`;
       for (const [part, body, from] of audits) {
         const label = `audit-${sizeName}-${part}`;
+        const checksAsked = updateStub.requests.length;
         const value = await launch(label, copyTemplate(label, from), size, `${DRIVE}\n${body}`);
         if (value === null) return done();
+        if (part === "two") {
+          // The stub's two answers are what the row rendered: both clicks reached the override,
+          // on the constant endpoint's own path, rather than a state fabricated in the page.
+          const asked = updateStub.requests.slice(checksAsked);
+          check(
+            asked.length === 2 && asked.every((request) => request.path === updateStub.path),
+            `${label}: the stub answered ${asked.length} update check(s) at ${asked.map((request) => request.path).join(", ")}, want 2 at ${updateStub.path}`,
+          );
+          const shown = stringField(value, "shownVersion");
+          check(shown === appVersion, `${label}: the Updates row shows version ${JSON.stringify(shown)}, want mygo.json's ${JSON.stringify(appVersion)}`);
+          // The row's one-line disclosure names the endpoint the check contacts: it is the
+          // learner-facing copy of the single request, so its loss must not pass quietly.
+          const disclosure = stringField(value, "disclosureText") ?? "";
+          check(disclosure.includes("api.github.com"), `${label}: the Updates row's disclosure does not name api.github.com: ${JSON.stringify(disclosure)}`);
+        }
         for (const result of arrayField(value, "results")) {
           const state = stringField(result, "state") ?? "?";
           const mode = stringField(result, "mode") ?? "?";
@@ -790,6 +846,7 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
   } finally {
     provider.stop();
     anki.stop();
+    updateStub.stop();
     await removeTree(temp);
   }
 }

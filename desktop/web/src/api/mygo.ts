@@ -1220,6 +1220,12 @@ export const Study = {
   today: bind<[], Today>("Study.Today", () => []),
   /** UseModel selects "provider/model" as the coach model. */
   useModel: bind<[string, string], ModelUse>("Study.UseModel", (id: string, endpoint: string) => [id, endpoint]),
+  /**
+   * Version is the running app version the Updates row shows. It is the same
+   * constant the check compares a release tag against, so the version the row
+   * shows and the version the check used can never differ.
+   */
+  version: bind<[], string>("Study.Version", () => []),
 } as const;
 
 // ---- Events ----

@@ -364,6 +364,13 @@ func (s *Study) ClearCredential(providerID string) (studio.CredentialStatus, err
 // Services reports Node, AnkiConnect, search, the credential store and the database path.
 func (s *Study) Services() (studio.Services, error) { return call(s, (*workspace.Workspace).Services) }
 
+// Version is the running app version the Updates row shows. It is the same
+// constant the check compares a release tag against, so the version the row
+// shows and the version the check used can never differ.
+func (s *Study) Version() (string, error) {
+	return callSolo(s, func() (string, error) { return update.Version, nil })
+}
+
 // CheckForUpdate asks this repository's GitHub Releases once, on the
 // learner's request, whether a newer release exists. It sends nothing about
 // the learner, downloads nothing and writes nothing, and needs no workspace;

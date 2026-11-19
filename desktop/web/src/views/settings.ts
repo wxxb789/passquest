@@ -3,12 +3,12 @@
 // where the presence comes from); keys entered here go to the OS credential store.
 import type { Budget, Consent, CredentialStatus, Model, ModelList, ModelProvider, Services } from '../api/types';
 import { html, type Html } from '../core/html';
-import { capabilityOf, capName, failureTypeLabel, nextStep, shortStamp, T } from '../core/i18n';
-import type { Loadable } from '../core/state';
+import { capabilityOf, capName, failureTypeLabel, nextStep, shortStamp, T, updateReason } from '../core/i18n';
+import { valueOf, type Loadable, type UpdateCheck } from '../core/state';
 import { sat, type Flag } from '../components/satellite';
 import { sheetWrap } from '../components/sheet';
 import { rawDetail } from '../components/failure';
-import { ic } from '../icons';
+import { ic, type IconName } from '../icons';
 import { unusableLine } from './coach';
 import { errorCard, loadingCard, retryButton } from './states';
 
@@ -17,6 +17,10 @@ export interface SettingsData {
   budget: Loadable<Budget>;
   consents: Loadable<Consent[]>;
   services: Loadable<Services>;
+  /** The running app version: the Go constant the check compares a release tag against. */
+  version: Loadable<string>;
+  /** This session's update check; the row renders one view per state. */
+  update: UpdateCheck;
   /** Private sources known locally (imported, reviewed), for granting consent. */
   sources: string[];
 }
@@ -113,6 +117,108 @@ function budgetLine(b: Budget | null): Html {
   return html`<span class="num">${p.calls} / ${p.limit}</span><small>${T('今日 · ', 'today · ')}<span translate="no">${p.label || p.provider}</span></small>`;
 }
 
+// ---------------------------------------------------------------- updates
+
+/** What the check last found, as the row's chip: one short line per state. */
+function updateChip(u: UpdateCheck): { icon: IconName; text: string; cls: string } {
+  if (u.status === 'idle') return { icon: 'minus', text: T('未检查', 'not checked'), cls: 'n' };
+  if (u.status === 'checking') return { icon: 'clock', text: T('检查中…', 'checking…'), cls: 'u' };
+  switch (u.result.state) {
+    case 'newer':
+      return { icon: 'down', text: T('有新版本', 'newer version'), cls: 'v' };
+    case 'current':
+      return { icon: 'check', text: T('已是最新', 'up to date'), cls: 'v' };
+    case 'no_release':
+      return { icon: 'info', text: T('尚无发布', 'no release yet'), cls: 'n' };
+    default:
+      return { icon: 'info', text: T('无法检查', 'could not check'), cls: 'u' };
+  }
+}
+
+/**
+ * One view per check state. The newer view carries the version, the date and the two release links;
+ * both links are the release's own page, `target="_blank"` so the window hands them to the system
+ * browser, and nothing here downloads or installs anything.
+ */
+function updateView(u: UpdateCheck): Html {
+  switch (u.status) {
+    case 'idle':
+      return html`<p class="fine">${T('本次会话还没有检查过。', 'Not checked in this session yet.')}</p>`;
+    case 'checking':
+      return html`<p class="fine">${T('正在检查……', 'Checking…')}</p>`;
+    case 'done':
+      switch (u.result.state) {
+        case 'newer': {
+          const r = u.result;
+          const links =
+            r.notes_url && r.download_url
+              ? html`<div class="acts-row">
+                  <a class="btn ghost sm" href="${r.notes_url}" target="_blank" rel="noopener">${T('发行说明', 'Release notes')}${ic('ext', 'xs')}</a>
+                  <a class="btn ghost sm" href="${r.download_url}" target="_blank" rel="noopener">${T('下载页面', 'Download page')}${ic('ext', 'xs')}</a>
+                </div>`
+              : '';
+          return html`<p class="fine">${T('新版本 ', 'A newer version exists: ')}<span class="num" translate="no">${r.version ?? ''}</span>${
+            r.published ? html`${T(' 发布于 ', ', published ')}<span class="num">${r.published}</span>` : ''
+          }${T('。安装需在它的页面里手动完成。', '. You install it yourself from its page.')}</p>${links}`;
+        }
+        case 'current':
+          return html`<p class="fine">${T('当前版本就是已发布的最新版本。', 'The running version is the latest published release.')}</p>`;
+        case 'no_release':
+          return html`<p class="fine">${T(
+            '这个仓库还没有发布任何版本，所以现在没有可安装的新版本。',
+            'No release has been published for this repository yet, so there is nothing newer to install.',
+          )}</p>`;
+        default:
+          return html`<p class="fine">${T('检查没有完成：', 'The check did not finish: ')}<b>${
+            updateReason(u.result.reason ?? '')
+          }</b>${T('。学习不受影响，可以稍后再试。', '. Study is unaffected; try again later.')}</p>`;
+      }
+  }
+}
+
+/**
+ * The Updates row's own key in `ui.settings.open`. Provider rows key on their registry id, and
+ * `internal/provider` restricts an id to a lowercase slug (`^[a-z][a-z0-9-]{0,31}$`), so the colon
+ * keeps this key outside that namespace: a provider a learner names `updates` cannot open both rows.
+ */
+const UPDATE_ROW_KEY = 'updates:';
+
+/**
+ * The Updates row: the running version, the check state, and — opened — the one-line disclosure of
+ * what the check contacts and sends, the state's own view, and the button that runs it. The check
+ * is on demand only (Q-0015-01): nothing here checks by itself, stores a preference or schedules.
+ */
+function updateRow(d: SettingsData, u: SettingsUi): Html {
+  const open = u.open === UPDATE_ROW_KEY;
+  const chip = updateChip(d.update);
+  const version = valueOf(d.version) ?? null;
+  // The stable state name (idle, checking, or the result's own state) is what the audits and the
+  // smoke scenario read; the text beside it is prose.
+  const state = d.update.status === 'done' ? d.update.result.state : d.update.status;
+  return html`<div class="rrow ${open ? 'open' : ''}" data-testid="update-row" data-update-state="${state}">
+      <span class="pv-name" title="${T('更新', 'Updates')}"><span class="mono-mk" aria-hidden="true">${ic('down', 's')}</span><span class="nm">${T('更新', 'Updates')}</span></span>
+      <span class="model">${version ? html`<span class="num" translate="no">${version}</span>` : html`<span class="muted">—</span>`}</span>
+      <span class="cap ${chip.cls}">${ic(chip.icon, 's')}${chip.text}</span>
+      <span class="auth">${ic('lock', 'xs')}${T('匿名', 'anonymous')}</span>
+      <span class="act"><button class="btn ghost sm" data-act="update-check" ${open ? 'data-primary' : ''} ${u.busy ? 'disabled' : ''}>${ic('down', 'xs')}${T(
+        '检查更新',
+        'Check for updates',
+      )}</button></span>
+      <button class="disc" data-act="row" data-v="${UPDATE_ROW_KEY}" aria-expanded="${open}" aria-label="${T('更新的说明与检查', 'The update disclosure and check')}">${ic('chev', 's')}</button>
+      ${
+        open
+          ? html`<div class="rr-more" style="grid-column:1 / -1">
+              <p class="fine" data-testid="update-disclosure" style="margin-left:38px">${T('只在你点击时检查一次：向 ', 'One check, only when you click: a request to ')}<span translate="no">GitHub Releases</span> (<code>api.github.com</code>)${T(
+                ' 请求本仓库的最新发布版本；不发送账号、学习记录或设备标识，也不下载任何内容。',
+                ' for this repository’s latest release; it sends no account, no study data and no device identifier, and downloads nothing.',
+              )}</p>
+              <div style="padding-left:38px">${updateView(d.update)}</div>
+            </div>`
+          : ''
+      }
+    </div>`;
+}
+
 export function vSettings(d: SettingsData, u: SettingsUi): Html {
   const m = d.models;
   if (m.status === 'error') return errorCard(m.error, retryButton('reload'));
@@ -143,7 +249,7 @@ export function vSettings(d: SettingsData, u: SettingsUi): Html {
         '授权',
         'Authorization',
       )}</span><span style="justify-self:end">${T('状态', 'State')}</span><span></span></div>
-      <div class="reg-b">${reg.providers.map((p) => row(p, u.open === p.id, u.busy, s))}</div>
+      <div class="reg-b">${reg.providers.map((p) => row(p, u.open === p.id, u.busy, s))}${updateRow(d, u)}</div>
       <div class="reg-f">
         <span>${ic('seal', 'xs')}${T(`只有「${capName('text.chat')}」能力会被验证`, `Only ${capName('text.chat')} is ever verified`)}</span>
         <span>${ic('adv', 'xs')}${T('已声明 · 未验证：提供方声称支持，未经测试', 'Declared, not tested: claimed by the provider')}</span>
