@@ -7,16 +7,20 @@
  *
  * The content scan gets three more, driven over the same fixture tree with
  * `only: contents` (no package, no launch): one payload that seeds a PDF
- * under another name, a SQLite header, a `data/private` path, a `.env`, the
- * internal-only marker and a credential-shaped string in a bundled host —
- * the failure must name every seed and stay silent on the same credential in
- * a `node_modules` file — one synthetic baseline whose byte-identical copy
- * and embedded line in the payload must both be reported, and one accepted
- * tree whose only secret-shaped string sits in `node_modules`.
+ * under another name, a SQLite header, every private-path and `.env` spelling
+ * (mixed case included) plus links whose own name and target name private
+ * data or an environment file, the internal-only marker and a
+ * credential-shaped string in a bundled host — the failure must name every
+ * seed and stay silent on the same credential in a `node_modules` file — one
+ * synthetic baseline pair (a page file plus the partial extraction) whose
+ * byte-identical copies, embedded lines and encoded forms — JSON-escaped,
+ * `\uXXXX`-escaped, UTF-16LE — must all be reported while an unrelated line
+ * is not, and one accepted tree whose only secret-shaped string sits in
+ * `node_modules`.
  */
-import { BASELINE } from "../../lib/baseline.ts";
+import { BASELINE, BASELINE_PARTIAL } from "../../lib/baseline.ts";
 import { Database } from "bun:sqlite";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -71,9 +75,31 @@ function fakeKey(): string {
 /** A failure line with Windows separators normalised: gates print absolute platform paths. */
 const slashed = (line: string): string => line.replace(/\\/g, "/");
 
-/** An independently authored stand-in for a baseline page: the scan reads whatever baseline the tree carries. */
-const PAGE_LINE = "A synthetic page line long enough to stand for the baseline text.";
-const PAGE_TEXT = `${PAGE_LINE}\nAnd a second line that the copied page carries whole.\n`;
+/**
+ * The link seeds the last prepared fixture created. Windows refuses a
+ * symlink to a process without the symlink privilege (EPERM); that case then
+ * skips exactly those seeds, says so in its output, and still runs every
+ * other seed.
+ */
+let linkSeeds: string[] = [];
+
+/**
+ * An independently authored stand-in for a baseline page: the scan reads
+ * whatever baseline the tree carries. The first line carries the shapes a
+ * real page carries — leading whitespace, a double quote, a character
+ * outside the BMP — so one page text stands for every encoding the scan
+ * claims to see through; the second is under the scan's 40-byte floor.
+ */
+const PAGE_LINE = 'A synthetic page line long enough to stand for the baseline text, "quoted" 🔒.';
+const PAGE_TEXT = `   ${PAGE_LINE}\nA second line, short.\n`;
+/** The same line with its quote and its surrogate pair written as `\uXXXX` escapes. */
+const ESCAPED_PAGE_LINE = PAGE_LINE.replaceAll('"', "\\u0022").replace("🔒", "\\ud83d\\udd12");
+
+/** A non-page baseline file, so a byte-identical copy of it can be told from a line match. */
+const MANIFEST_TEXT = "page\tsection\tsource\tbytes\tchars_no_ws\n001\tsynthetic\tnative\t1\t1\n";
+/** A synthetic stand-in for the earlier partial extraction, one needle-length line and one short line. */
+const PARTIAL_LINE = "A synthetic stand-in for the earlier partial extraction, long enough to matter.";
+const PARTIAL_TEXT = `${PARTIAL_LINE}\nSecond line.\n`;
 
 /**
  * The package's naming must mirror MyGo's own. The default identifier is
@@ -220,22 +246,51 @@ func main() {
         "build/fixture/vendor/handbook.txt": "%PDF-1.7\n1 0 obj\n",
         "build/fixture/vendor/cache.dat": "SQLite format 3\u0000fixture bytes\n",
         "build/fixture/data/private/x.txt": "private source\n",
+        "build/fixture/data/local/x.txt": "private source\n",
+        "build/fixture/.PassQuest/x.txt": "private source\n",
+        "build/fixture/Local-Data/x.txt": "private source\n",
         "build/fixture/.env": "TOKEN=fixture\n",
+        "build/fixture/config/.env.production": "TOKEN=fixture\n",
         // The internal-only marker, assembled at run time so this file holds no full marker text.
         "build/fixture/vendor/marked.bin": `${["仅限", "内部", "使用"].join("")}\n`,
         "build/fixture/agent/tutor-host.mjs": `// fixture\nconst key = "${fakeKey()}";\n`,
         "build/fixture/agent/node_modules/vendor/index.mjs": `const key = "${fakeKey()}";\n`,
+      },
+      prepare: async (root) => {
+        linkSeeds = [];
+        for (const [link, target] of [
+          ["vendor/private-data-link", "../data/private/x.txt"],
+          ["vendor/environment-link", "../../config/.env"],
+        ] as const) {
+          try {
+            symlinkSync(target, path.join(root, "build", "fixture", link), "file");
+            linkSeeds.push(link);
+          } catch (error) {
+            if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EPERM") {
+              return `the link seed ${link} could not be created: ${error instanceof Error ? error.message : String(error)}`;
+            }
+            process.stdout.write(`    package-smoke self-test: link seed ${link} skipped (symlinkSync EPERM)\n`);
+          }
+        }
+        return null;
       },
       postFail: (failures) => {
         const seeds: Array<[string, string]> = [
           ["vendor/handbook.txt", "PDF"],
           ["vendor/cache.dat", "SQLite"],
           ["data/private/x.txt", "private path"],
+          ["data/local/x.txt", "private path"],
+          [".PassQuest/x.txt", "private path"],
+          ["Local-Data/x.txt", "private path"],
           [".env", "environment file"],
+          ["config/.env.production", "environment file"],
           ["vendor/marked.bin", "internal-only source marker"],
           ["agent/tutor-host.mjs", "credential-shaped string"],
+          ["vendor/private-data-link", "names private data"],
+          ["vendor/environment-link", "environment file"],
         ];
-        const missing = seeds.filter(([name, reason]) => !failures.some((line) => slashed(line).includes(name) && line.includes(reason)));
+        const expected = seeds.filter(([name]) => !name.includes("link") || linkSeeds.includes(name));
+        const missing = expected.filter(([name, reason]) => !failures.some((line) => slashed(line).includes(name) && line.includes(reason)));
         if (missing.length > 0) {
           return `package-smoke: the content scan did not name ${missing.map(([name]) => name).join(", ")}: ${failures.slice(0, 6).join("; ")}`;
         }
@@ -247,18 +302,57 @@ func main() {
     },
     {
       gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),
-      label: "installed payload holding a baseline page",
+      label: "installed payload holding baseline text in its encoded forms",
       files: {
         ...FIXTURE_FILES,
         [`${BASELINE}/pages/page-001.txt`]: PAGE_TEXT,
+        [`${BASELINE}/manifest.tsv`]: MANIFEST_TEXT,
+        [BASELINE_PARTIAL]: PARTIAL_TEXT,
+        // The page and a non-page baseline file, copied whole: only their
+        // hashes can tell them from a file that merely holds a line.
         "build/fixture/vendor/copied-page.txt": PAGE_TEXT,
-        "build/fixture/vendor/report.txt": `notes\n${PAGE_LINE}\n`,
+        "build/fixture/vendor/copied-manifest.tsv": MANIFEST_TEXT,
+        // The first line, indent stripped and sharing a physical line with other bytes.
+        "build/fixture/vendor/report.txt": `notes: ${PAGE_LINE} — see the appendix\n`,
+        // The page as a JSON string: its quote, its newlines and its padlock arrive escaped.
+        "build/fixture/vendor/page.json": JSON.stringify({ page: PAGE_TEXT }),
+        // The same line with its quote and its surrogate pair as `\uXXXX` escapes.
+        "build/fixture/vendor/escaped.txt": `${ESCAPED_PAGE_LINE}\n`,
+        // The earlier partial extraction, copied whole and embedded mid-line.
+        "build/fixture/vendor/the-2025-copy.txt": PARTIAL_TEXT,
+        "build/fixture/vendor/the-2025-line.txt": `excerpt: ${PARTIAL_LINE} (unreviewed)\n`,
+        // The negative: an unrelated English line of the same length class.
+        "build/fixture/vendor/notes.txt": "An unrelated English line, longer than forty bytes, about something else.\n",
+      },
+      // The UTF-16LE copies are bytes no template literal can spell: one with
+      // the BOM, one without it, which only the mostly-NUL odd positions tell
+      // from a binary.
+      prepare: async (root) => {
+        const vendor = path.join(root, "build", "fixture", "vendor");
+        const wide = Buffer.from(PAGE_TEXT, "utf16le");
+        writeFileSync(path.join(vendor, "page-utf16.txt"), Buffer.concat([Buffer.from([0xff, 0xfe]), wide]));
+        writeFileSync(path.join(vendor, "page-utf16-nobom.txt"), wide);
+        return null;
       },
       postFail: (failures) => {
-        for (const name of ["vendor/copied-page.txt", "vendor/report.txt"]) {
-          if (!failures.some((line) => slashed(line).includes(name) && line.includes("baseline text"))) {
-            return `package-smoke: the content scan did not report ${name} as baseline text: ${failures.slice(0, 6).join("; ")}`;
-          }
+        const lines = failures.map(slashed);
+        const wants: Array<[string, string]> = [
+          ["vendor/copied-page.txt", `byte-identical to ${BASELINE}/pages/page-001.txt`],
+          ["vendor/copied-manifest.tsv", `byte-identical to ${BASELINE}/manifest.tsv`],
+          ["vendor/report.txt", `a line of ${BASELINE}/pages/page-001.txt`],
+          ["vendor/page.json", `a line of ${BASELINE}/pages/page-001.txt`],
+          ["vendor/escaped.txt", `a line of ${BASELINE}/pages/page-001.txt`],
+          ["vendor/page-utf16.txt", `a line of ${BASELINE}/pages/page-001.txt`],
+          ["vendor/page-utf16-nobom.txt", `a line of ${BASELINE}/pages/page-001.txt`],
+          ["vendor/the-2025-copy.txt", `byte-identical to ${BASELINE_PARTIAL}`],
+          ["vendor/the-2025-line.txt", `a line of ${BASELINE_PARTIAL}`],
+        ];
+        const missing = wants.filter(([name, reason]) => !lines.some((line) => line.includes(name) && line.includes(reason)));
+        if (missing.length > 0) {
+          return `package-smoke: the content scan did not report ${missing.map(([name]) => name).join(", ")}: ${failures.slice(0, 8).join("; ")}`;
+        }
+        if (lines.some((line) => line.includes("vendor/notes.txt"))) {
+          return `package-smoke: the content scan reported the unrelated line: ${failures.slice(0, 4).join("; ")}`;
         }
         return null;
       },

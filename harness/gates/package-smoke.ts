@@ -32,8 +32,11 @@
  * file the package installed — the Windows prefix with `Uninstall.exe`, the
  * whole macOS `.app` plus the mounted image's captured root listing, the
  * Linux extract tree — and fails on a PDF, a SQLite database, a private path
- * segment, a `.env` file, the internal-only marker or the committed
- * baseline's text, with the secrets gate's credential patterns applied
+ * segment, a `.env` file (its target too, on a link), the internal-only
+ * marker or the text of either committed extraction of the internal-only PDF
+ * — whole-file copies by SHA-256, and normalised lines as substrings of a
+ * view (`package-smoke/contents.ts` carries the views, the 40-byte floor and
+ * the disclosed gaps) — with the secrets gate's credential patterns applied
  * through `scanFiles` to the project-owned files only. The run's artifact
  * itself must carry the exact expected name and no PDF/database header; a
  * compressed container is not byte-scanned further, because its extracted
