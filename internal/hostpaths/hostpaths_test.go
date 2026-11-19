@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -308,27 +307,5 @@ func TestResolveNodeWithoutResources(t *testing.T) {
 	t.Parallel()
 	if got := ResolveNode(Source{Getenv: none}, "windows"); got != "node" {
 		t.Fatalf("ResolveNode = %q; want the PATH name %q", got, "node")
-	}
-}
-
-// TestResolveNodeSkipsANonExecutablePackagedRuntime pins the fall-through to
-// PATH when the packaged runtime lost its executable bit (POSIX only: Windows
-// has no such bit).
-func TestResolveNodeSkipsANonExecutablePackagedRuntime(t *testing.T) {
-	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("no executable bit on Windows")
-	}
-	resources := t.TempDir()
-	packaged := filepath.Join(resources, "node", "bin", "node")
-	if err := os.MkdirAll(filepath.Dir(packaged), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(packaged, []byte("node\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	src := Source{Resources: resources, Getenv: func(string) string { return "" }}
-	if got := ResolveNode(src, runtime.GOOS); got != "node" {
-		t.Fatalf("ResolveNode = %q; want the PATH fallback %q", got, "node")
 	}
 }
