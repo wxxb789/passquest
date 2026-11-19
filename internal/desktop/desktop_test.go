@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,6 +19,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/update"
 	"github.com/wxxb789/passquest/internal/workspace"
 )
 
@@ -264,6 +268,34 @@ func TestStudyForwardsAndConvertsErrors(t *testing.T) {
 	}
 }
 
+// TestStudyCheckForUpdateNeedsNoWorkspace proves the update check is the one
+// call that runs before the workspace exists: pointed at a loopback
+// stand-in for the Releases endpoint, it answers with the newer state while
+// study stays unopened, and the finished check stops counting as busy.
+func TestStudyCheckForUpdateNeedsNoWorkspace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"tag_name":"v0.16.0","html_url":"https://github.com/evil/evil/releases/tag/v0.16.0","published_at":"2026-11-18T00:00:00Z"}`)
+	}))
+	t.Cleanup(server.Close)
+	study := newStudy(func(BriefEvent) {})
+	study.target = update.Target{Endpoint: server.URL + "/repos/wxxb789/passquest/releases/latest", Timeout: 5 * time.Second}
+	got, err := study.CheckForUpdate()
+	if err != nil {
+		t.Fatalf("CheckForUpdate = %v", err)
+	}
+	page := "https://github.com/wxxb789/passquest/releases/tag/v0.16.0"
+	want := update.Result{State: update.StatusNewer, Version: "v0.16.0", Published: "2026-11-18", NotesURL: page, DownloadURL: page}
+	if got != want {
+		t.Fatalf("CheckForUpdate = %+v, want %+v", got, want)
+	}
+	if study.busy() {
+		t.Fatal("the finished check is still counted as busy")
+	}
+	if _, err := study.Today(); decodeCallError(t, err).Code != "starting" {
+		t.Fatalf("Today after the check = %v, want the starting error: the check opened a workspace", err)
+	}
+}
+
 func TestStudyResumeBriefRunsInBackground(t *testing.T) {
 	events := make(chan BriefEvent, 4)
 	study := openTestStudy(t, func(e BriefEvent) { events <- e })
@@ -291,7 +323,7 @@ func TestStudyDrainRefusesNewCallsAndBoundsTheWait(t *testing.T) {
 	if study.busy() {
 		t.Fatal("idle study reports busy")
 	}
-	ws, err := study.begin() // a call that is still running
+	ws, err := study.begin(true) // a call that is still running
 	if err != nil || ws == nil {
 		t.Fatal(err)
 	}

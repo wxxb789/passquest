@@ -30,6 +30,7 @@ const METHODS = [
   'briefStatus',
   'budget',
   'cancelBrief',
+  'checkForUpdate',
   'clearCredential',
   'coachAsk',
   'coachHistory',

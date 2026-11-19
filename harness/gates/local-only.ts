@@ -9,6 +9,18 @@ import type { Gate, GateContext } from "../lib/types.ts";
 const NETWORK_IMPORTS = ["net", "net/http", "net/rpc", "net/smtp"];
 const LINKED_CLIENTS = ["net/http", "net/rpc", "net/smtp"];
 /**
+ * Goal 0015: the one package allowed to reach the network, through one
+ * import, for the one release check the learner asks for. Rule 1 still
+ * covers every other package exactly (the module-relative path, so a
+ * sub-package is not covered), and rule 2 keeps the import out of the CLI's
+ * transitive dependencies; the pass line below already names the allowed
+ * package. The rest of the exception - the endpoint literal and the set of
+ * packages allowed to import this one - arrives with the same goal's next
+ * step.
+ */
+const ALLOWED_NETWORK_PACKAGE = "internal/update";
+const ALLOWED_NETWORK_IMPORTS = ["net/http"];
+/**
  * The internal-only source markers. The texts are exported because the package
  * content scan (gates/package-smoke/contents.ts) searches their UTF-8 bytes in
  * the installed files, binaries included; this gate matches them per line of
@@ -82,15 +94,20 @@ export const localOnly: Gate = {
     if (packages.length === 0) return fail(["no first-party packages found"]);
 
     const problems: string[] = [];
+    const allowedNetwork: string[] = [];
     for (const { importPath, module, imports } of packages) {
       const line = `${importPath}:${imports.map((name) => ` ${name}`).join("")}`;
+      const relative = module === "" ? "" : importPath.slice(module.length + 1);
+      const allowedHere = relative === ALLOWED_NETWORK_PACKAGE ? ALLOWED_NETWORK_IMPORTS : [];
       for (const banned of NETWORK_IMPORTS) {
-        if (new RegExp(` ${banned}( |$)`).test(line)) {
-          problems.push(`first-party network import: ${line}`);
+        if (!new RegExp(` ${banned}( |$)`).test(line)) continue;
+        if (allowedHere.includes(banned)) {
+          allowedNetwork.push(relative);
+          continue;
         }
+        problems.push(`first-party network import: ${line}`);
       }
       if (module === "") continue;
-      const relative = importPath.slice(module.length + 1);
       for (const name of imports) {
         if (!name.startsWith(`${module}/`)) continue;
         const dependency = name.slice(module.length + 1);
@@ -119,6 +136,9 @@ export const localOnly: Gate = {
       }
     }
     if (problems.length > 0) return fail(problems);
-    return pass(`${packages.length} first-party packages, 0 network imports, 0 confidential markers, 0 boundary violations`);
+    const network = allowedNetwork.length === 0
+      ? "0 network imports"
+      : `${allowedNetwork.length} allowed network package: ${allowedNetwork.join(", ")}`;
+    return pass(`${packages.length} first-party packages, ${network}, 0 confidential markers, 0 boundary violations`);
   },
 };

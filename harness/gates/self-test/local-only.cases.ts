@@ -107,6 +107,20 @@ export function localOnlyCases(): BrokenCase[] {
     },
     {
       gate: localOnly,
+      label: "network import in a sub-package of the one allowed package",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": "package main\n\nfunc main() {}\n",
+        "internal/update/sub/sub.go": 'package sub\n\nimport "net/http"\n\nvar _ = http.MethodGet\n',
+      },
+      tracked: [],
+      postFail: (failures) =>
+        failures.some((line) => line.includes("first-party network import") && line.includes("internal/update/sub"))
+          ? null
+          : "local-only: the network exception leaked past the allowed package",
+    },
+    {
+      gate: localOnly,
       label: "study package importing a sub-package of a banned module",
       files: {
         "go.mod": GO_MOD,
@@ -126,6 +140,20 @@ export function localOnlyCases(): BrokenCase[] {
 
 export function localOnlyPassCases(): PassCase[] {
   return [
+    {
+      gate: localOnly,
+      label: "the one allowed network package",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest/main.go": "package main\n\nfunc main() {}\n",
+        "internal/update/update.go": 'package update\n\nimport "net/http"\n\nvar _ = http.MethodGet\n',
+      },
+      tracked: [],
+      postPass: (detail) =>
+        detail === "2 first-party packages, 1 allowed network package: internal/update, 0 confidential markers, 0 boundary violations"
+          ? null
+          : `local-only: accepted detail ${JSON.stringify(detail)} does not name the allowed network package`,
+    },
     {
       gate: localOnly,
       label: "desktop main that links net/http only through a dependency",
