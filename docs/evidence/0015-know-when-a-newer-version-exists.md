@@ -1,6 +1,6 @@
 # 0015 — Know when a newer Pass Quest exists: evidence
 
-Contract: [`../goals/0015-know-when-a-newer-version-exists.md`](../goals/0015-know-when-a-newer-version-exists.md).
+Contract: [`../goals/archive/0015-know-when-a-newer-version-exists.md`](../goals/archive/0015-know-when-a-newer-version-exists.md).
 Plan: [`../plans/2026-11-19-1900-0015-update-check.md`](../plans/2026-11-19-1900-0015-update-check.md).
 Guide: [`../install.md`](../install.md#upgrade). Design: the one network exception in
 [`../core-design.md`](../core-design.md) §6. Decisions: Q-0015-01…06 in
