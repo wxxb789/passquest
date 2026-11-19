@@ -67,7 +67,7 @@
  * untouched; `package-smoke/upgrade.ts` carries the whole sequence, its
  * base-commit constant and its disclosed limits.
  *
- * Disclosed limits: on Linux the runner has no libfuse2, so the AppImage runs
+ * Disclosed limits: on Linux the AppImage is never mounted with FUSE; it runs
  * via `APPIMAGE_EXTRACT_AND_RUN=1` (the runtime's extract-and-run tree is
  * pointed into the gate's temp tree with TMPDIR and kept for the scan by
  * NO_CLEANUP, and the broken-runtime case edits an `--appimage-extract` copy,

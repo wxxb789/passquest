@@ -19,6 +19,9 @@ type packagingConfig struct {
 		Maintainer string `json:"maintainer"`
 		Comment    string `json:"comment"`
 	} `json:"linux"`
+	MacOS struct {
+		MinimumSystemVersion string `json:"minimumSystemVersion"`
+	} `json:"macos"`
 }
 
 var packagingVersion = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
@@ -54,5 +57,11 @@ func TestPackagingIdentity(t *testing.T) {
 	}
 	if config.Linux.Maintainer == "" {
 		t.Error("mygo.json linux.maintainer is empty")
+	}
+	// The Go 1.27 toolchain links darwin binaries for macOS 13 and later
+	// (LC_BUILD_VERSION minos 13.0); MyGo's default Info.plist minimum is
+	// 12.0, which would let macOS 12 try to open a binary it cannot run.
+	if config.MacOS.MinimumSystemVersion != "13.0" {
+		t.Errorf("mygo.json macos.minimumSystemVersion = %q, want 13.0, the toolchain's minimum", config.MacOS.MinimumSystemVersion)
 	}
 }

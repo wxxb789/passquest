@@ -6,6 +6,9 @@
   "out": "build",
   "icon": "build/package/icon.png",
   "resources": ["build/package/agent", "build/package/node"],
+  "macos": {
+    "minimumSystemVersion": "13.0"
+  },
   "linux": {
     "comment": "An AI-native, local-first exam coach",
     "maintainer": "wxxb789"

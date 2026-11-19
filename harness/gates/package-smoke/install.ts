@@ -29,7 +29,7 @@
  *   Gatekeeper prompt a learner sees is not exercised here — a disclosed
  *   limit; the install guide documents that path.
  * - Linux: the AppImage is copied into the prefix and runs there with
- *   `APPIMAGE_EXTRACT_AND_RUN=1`, because the runner has no libfuse2 (a
+ *   `APPIMAGE_EXTRACT_AND_RUN=1`, so no FUSE mount is needed on the runner (a
  *   disclosed limit). The type2-runtime unpacks the image under `$TMPDIR`
  *   when it runs it and deletes that tree when the app exits unless
  *   `NO_CLEANUP` is set (type2-runtime `src/runtime/runtime.c`, the

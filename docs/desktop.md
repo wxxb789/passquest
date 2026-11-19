@@ -8,6 +8,9 @@ Contract: [`goals/archive/0011-desktop-study-workspace.md`](goals/archive/0011-d
 Design direction ("C · Stage", chosen by the owner): [`../design/prototypes/c-stage.html`](../design/prototypes/c-stage.html)
 and its brief [`../design/prototypes/BRIEF.md`](../design/prototypes/BRIEF.md).
 
+Installing the packaged app (the unsigned Windows installer, the macOS `.dmg` and the Linux AppImage,
+what each package carries and what CI proves): [`install.md`](install.md).
+
 ## Build and run
 
 ```bash
@@ -21,7 +24,7 @@ such a binary opens a "frontend not built" page instead of a blank window. With 
 behaves exactly like `passquest` (`passquest-desktop report --json` …), which is how the durable host calls
 `agent record-step` back on it.
 
-Prerequisites: Windows 10/11 with the WebView2 runtime (bundled with Windows 11); macOS 12+; Linux with GTK 3
+Prerequisites: Windows 10/11 with the WebView2 runtime (bundled with Windows 11); macOS 13+; Linux with GTK 3
 and WebKitGTK 4.1. Node ≥ 22 is needed only for the coach, Anki push, find and the study brief — practice,
 feedback, assessment and notes work without it.
 

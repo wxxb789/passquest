@@ -15,7 +15,7 @@ func missingWebViewMessage(goos string) (title, body string) {
 	case "darwin":
 		body = fmt.Sprintf("%s needs the macOS system web view (WKWebView), which this Mac does not provide. Update macOS to a supported version, then start %s again.", AppName, AppName)
 	default:
-		body = fmt.Sprintf("%s needs GTK 3 and WebKitGTK 4.1, which this system does not have. Install libgtk-3-0 and libwebkit2gtk-4.1-0 on Debian/Ubuntu (gtk3 and webkit2gtk4.1 on Fedora), then start %s again.", AppName, AppName)
+		body = fmt.Sprintf("%s needs GTK 3 and WebKitGTK 4.1, which this system does not have. Install libgtk-3-0t64 (libgtk-3-0 on older releases) and libwebkit2gtk-4.1-0 on Debian/Ubuntu (gtk3 and webkit2gtk4.1 on Fedora), then start %s again.", AppName, AppName)
 	}
 	return title, body
 }
