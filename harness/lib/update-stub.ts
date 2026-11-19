@@ -2,33 +2,34 @@
  * A loopback stand-in for the GitHub Releases endpoint the desktop app checks
  * (goal 0015), for the gates that drive the real window: a scripted launch
  * reaches it only through the smoke-only `PASSQUEST_DESKTOP_UPDATE_URL`
- * override, and the URL carries the constant endpoint's own path, so a
- * captured request can be compared with `internal/update.Endpoint` field by
- * field. It records every request and answers from a queue that cycles, so
- * one scripted launch can walk the check's states in order and a second
- * launch can walk the same sequence again. Nothing here leaves 127.0.0.1.
+ * override, and its URL is built from the constant endpoint shared with the
+ * local-only gate (lib/update-endpoint.ts), so a captured request can be
+ * compared with `internal/update.Endpoint` field by field. It records every
+ * request and answers from a queue that cycles, so one scripted launch can
+ * walk the check's states in order and a second launch can walk the same
+ * sequence again. Nothing here leaves 127.0.0.1.
  */
 
 import { readFileSync } from "node:fs";
 
 import { resolve } from "./repo.ts";
+import { UPDATE_ENDPOINT } from "./update-endpoint.ts";
 
 /**
- * The constant endpoint's path, read from the `internal/update.Endpoint` literal in
- * `internal/update/update.go`: the stub's URL and the path a captured request is compared against
- * both come from this read, so the harness cannot hold a stale copy of the endpoint. A file that no
- * longer declares the constant, or declares an endpoint this stub does not stand in for, throws
+ * The constant endpoint's path, bound to the `internal/update.Endpoint` literal in
+ * `internal/update/update.go`: the stub serves, and compares captured requests against, the one
+ * endpoint lib/update-endpoint.ts defines, so neither the source nor the harness can drift from
+ * the other. A file that no longer declares the constant, or declares a different endpoint, throws
  * rather than serving a request the app would never make.
  */
 function updatePath(root: string): string {
   const source = readFileSync(resolve(root, "internal/update/update.go"), "utf8");
   const literal = /^const Endpoint = "([^"]+)"$/m.exec(source)?.[1];
   if (!literal) throw new Error('internal/update/update.go: no `const Endpoint = "..."` line for the update stub to bind to');
-  const url = new URL(literal);
-  if (url.protocol !== "https:" || url.host !== "api.github.com" || url.search !== "" || url.hash !== "") {
-    throw new Error(`internal/update/update.go: Endpoint ${literal} is not the https api.github.com release URL the stub stands in for`);
+  if (literal !== UPDATE_ENDPOINT) {
+    throw new Error(`internal/update/update.go: Endpoint ${literal} is not ${UPDATE_ENDPOINT}, the endpoint the stub stands in for`);
   }
-  return url.pathname;
+  return new URL(UPDATE_ENDPOINT).pathname;
 }
 
 export interface UpdateStubRequest {

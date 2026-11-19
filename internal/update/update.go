@@ -121,15 +121,20 @@ type Result struct {
 	Reason Reason `json:"reason,omitempty"`
 }
 
-// Target is where one check goes and how long it may take.
+// Target is where one check goes and how long it may take. The endpoint and
+// the timeout are unexported, so no caller can name a URL of its own:
+// DefaultTarget returns the constant endpoint, and TargetFor returns it too
+// unless the smoke hook is set and the environment carries a
+// http://127.0.0.1:<port> override. Who may import this package at all is
+// the local-only gate's rule 3: internal/desktop and cmd/passquest-desktop.
 type Target struct {
-	Endpoint string
-	Timeout  time.Duration
+	endpoint string
+	timeout  time.Duration
 }
 
 // DefaultTarget is the constant endpoint and timeout of a packaged run.
 func DefaultTarget() Target {
-	return Target{Endpoint: Endpoint, Timeout: DefaultTimeout}
+	return Target{endpoint: Endpoint, timeout: DefaultTimeout}
 }
 
 // TargetFor returns the target of one launch: DefaultTarget, or the
@@ -141,11 +146,11 @@ func TargetFor(getenv func(string) string, smokeHook bool) Target {
 		return target
 	}
 	if raw := getenv(SmokeEnvURL); loopbackURL(raw) {
-		target.Endpoint = raw
+		target.endpoint = raw
 	}
 	if raw := getenv(SmokeEnvTimeoutMS); raw != "" {
 		if ms, err := strconv.Atoi(raw); err == nil && ms >= 1 && ms <= smokeTimeoutMaxMS {
-			target.Timeout = time.Duration(ms) * time.Millisecond
+			target.timeout = time.Duration(ms) * time.Millisecond
 		}
 	}
 	return target
@@ -177,7 +182,7 @@ func loopbackURL(raw string) bool {
 // NewClient returns the client one check uses: the environment's proxy
 // settings are ignored (the request goes to the endpoint it names or
 // nowhere), a redirect is refused and reported rather than followed, and the
-// timeout comes from the caller's context.
+// deadline is the target's own timeout, applied by Check.
 func NewClient() *http.Client {
 	return &http.Client{
 		Transport:     &http.Transport{Proxy: nil},
@@ -185,15 +190,17 @@ func NewClient() *http.Client {
 	}
 }
 
-// Check asks endpoint once for the latest release and decides whether it is
-// newer than current. It sets exactly the two headers the request carries,
-// sends no body and reads at most maxBody. It closes the client's idle
-// connections on every return: one check keeps no socket beside the window.
-// A failure is a Result, never an error: the window reports the state and
-// study continues.
-func Check(ctx context.Context, client *http.Client, endpoint, current string) Result {
+// Check asks the target's endpoint once, within the target's timeout, for
+// the latest release and decides whether it is newer than current. It sets
+// exactly the two headers the request carries, sends no body and reads at
+// most maxBody. It closes the client's idle connections on every return: one
+// check keeps no socket beside the window. A failure is a Result, never an
+// error: the window reports the state and study continues.
+func Check(ctx context.Context, client *http.Client, target Target, current string) Result {
+	ctx, cancel := context.WithTimeout(ctx, target.timeout)
+	defer cancel()
 	defer client.CloseIdleConnections()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.endpoint, nil)
 	if err != nil {
 		return failed(ReasonUnexpected)
 	}

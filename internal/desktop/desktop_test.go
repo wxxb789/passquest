@@ -278,7 +278,9 @@ func TestStudyCheckForUpdateNeedsNoWorkspace(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	study := newStudy(func(BriefEvent) {})
-	study.target = update.Target{Endpoint: server.URL + "/repos/wxxb789/passquest/releases/latest", Timeout: 5 * time.Second}
+	// The smoke-only override is the one constructor that takes a URL, and it
+	// accepts a loopback one alone: a test cannot aim the check elsewhere.
+	study.target = update.TargetFor(envOf(map[string]string{update.SmokeEnvURL: server.URL + "/repos/wxxb789/passquest/releases/latest"}), true)
 	got, err := study.CheckForUpdate()
 	if err != nil {
 		t.Fatalf("CheckForUpdate = %v", err)

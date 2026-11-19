@@ -51,9 +51,16 @@ func serve(t *testing.T, status int, headers map[string]string, body string) *ht
 
 const latestPath = "/repos/wxxb789/passquest/releases/latest"
 
+// targetFor returns the target a loopback test server answers: its URL under
+// the endpoint's own path, with the given timeout. Targets are built here
+// because only this package may choose the endpoint a check reaches.
+func targetFor(server *httptest.Server, timeout time.Duration) Target {
+	return Target{endpoint: server.URL + latestPath, timeout: timeout}
+}
+
 func check(t *testing.T, server *httptest.Server, current string) Result {
 	t.Helper()
-	return Check(context.Background(), NewClient(), server.URL+latestPath, current)
+	return Check(context.Background(), NewClient(), targetFor(server, DefaultTimeout), current)
 }
 
 // TestCheckStates pins one case per state: what the window shows for a newer
@@ -226,7 +233,7 @@ func TestCheckCapsTheBody(t *testing.T) {
 	}
 }
 
-// TestCheckTimeout proves the context deadline ends a stalled answer: the
+// TestCheckTimeout proves the target's timeout ends a stalled answer: the
 // request never gets headers, and the result is the timeout state.
 func TestCheckTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -236,15 +243,14 @@ func TestCheckTimeout(t *testing.T) {
 		}
 	}))
 	t.Cleanup(server.Close)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	if got := Check(ctx, NewClient(), server.URL+latestPath, Version); got != failed(ReasonTimeout) {
+	if got := Check(context.Background(), NewClient(), targetFor(server, 100*time.Millisecond), Version); got != failed(ReasonTimeout) {
 		t.Fatalf("Check = %+v, want %+v", got, failed(ReasonTimeout))
 	}
 }
 
 // TestCheckStalledBodyTimeout proves the deadline covers the body too: the
-// headers arrive, the rest does not, and the result is still the timeout.
+// headers arrive, the rest does not, and a caller's shorter context deadline
+// still bounds a check whose target timeout is longer.
 func TestCheckStalledBodyTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -260,7 +266,7 @@ func TestCheckStalledBodyTimeout(t *testing.T) {
 	t.Cleanup(server.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if got := Check(ctx, NewClient(), server.URL+latestPath, Version); got != failed(ReasonTimeout) {
+	if got := Check(ctx, NewClient(), targetFor(server, DefaultTimeout), Version); got != failed(ReasonTimeout) {
 		t.Fatalf("Check = %+v, want %+v", got, failed(ReasonTimeout))
 	}
 }
@@ -269,9 +275,9 @@ func TestCheckStalledBodyTimeout(t *testing.T) {
 // reported as offline, not as a version.
 func TestCheckRefusedConnection(t *testing.T) {
 	server := serve(t, http.StatusOK, nil, releaseDoc("v0.16.0", "2026-11-18T00:00:00Z"))
-	endpoint := server.URL + latestPath
+	target := targetFor(server, DefaultTimeout)
 	server.Close()
-	if got := Check(context.Background(), NewClient(), endpoint, Version); got != failed(ReasonOffline) {
+	if got := Check(context.Background(), NewClient(), target, Version); got != failed(ReasonOffline) {
 		t.Fatalf("Check = %+v, want %+v", got, failed(ReasonOffline))
 	}
 }
@@ -317,7 +323,7 @@ func TestCheckRefusesRedirects(t *testing.T) {
 		http.Redirect(w, r, target.URL, http.StatusFound)
 	}))
 	t.Cleanup(redirect.Close)
-	if got := Check(context.Background(), NewClient(), redirect.URL+latestPath, Version); got != failed(ReasonRedirect) {
+	if got := Check(context.Background(), NewClient(), targetFor(redirect, DefaultTimeout), Version); got != failed(ReasonRedirect) {
 		t.Fatalf("Check = %+v, want %+v", got, failed(ReasonRedirect))
 	}
 	if reached != 0 {
@@ -472,19 +478,19 @@ func TestTargetForSmokeOverride(t *testing.T) {
 		t.Fatalf("TargetFor without the smoke hook = %+v, want %+v", got, want)
 	}
 	got := TargetFor(env, true)
-	if got.Endpoint != stub || got.Timeout != 250*time.Millisecond {
+	if got.endpoint != stub || got.timeout != 250*time.Millisecond {
 		t.Fatalf("TargetFor = %+v, want the stub endpoint and 250ms", got)
 	}
 	// The cap is the real check's own timeout: the millisecond under it is
 	// honoured, the one past it is not, so no scripted launch waits longer
 	// than a real check.
 	under := strconv.Itoa(smokeTimeoutMaxMS - 1)
-	if got := TargetFor(envOf(map[string]string{SmokeEnvTimeoutMS: under}), true); got.Timeout != time.Duration(smokeTimeoutMaxMS-1)*time.Millisecond {
-		t.Fatalf("TargetFor(timeout %s) = %v, want %v", under, got.Timeout, time.Duration(smokeTimeoutMaxMS-1)*time.Millisecond)
+	if got := TargetFor(envOf(map[string]string{SmokeEnvTimeoutMS: under}), true); got.timeout != time.Duration(smokeTimeoutMaxMS-1)*time.Millisecond {
+		t.Fatalf("TargetFor(timeout %s) = %v, want %v", under, got.timeout, time.Duration(smokeTimeoutMaxMS-1)*time.Millisecond)
 	}
 	over := strconv.Itoa(smokeTimeoutMaxMS + 1)
-	if got := TargetFor(envOf(map[string]string{SmokeEnvTimeoutMS: over}), true); got.Timeout != DefaultTimeout {
-		t.Fatalf("TargetFor(timeout %s) = %v, want %v", over, got.Timeout, DefaultTimeout)
+	if got := TargetFor(envOf(map[string]string{SmokeEnvTimeoutMS: over}), true); got.timeout != DefaultTimeout {
+		t.Fatalf("TargetFor(timeout %s) = %v, want %v", over, got.timeout, DefaultTimeout)
 	}
 
 	refused := []string{
@@ -500,13 +506,13 @@ func TestTargetForSmokeOverride(t *testing.T) {
 		"",
 	}
 	for _, raw := range refused {
-		if got := TargetFor(envOf(map[string]string{SmokeEnvURL: raw}), true); got.Endpoint != Endpoint {
-			t.Errorf("TargetFor(%q) = %q, want the constant endpoint", raw, got.Endpoint)
+		if got := TargetFor(envOf(map[string]string{SmokeEnvURL: raw}), true); got.endpoint != Endpoint {
+			t.Errorf("TargetFor(%q) = %q, want the constant endpoint", raw, got.endpoint)
 		}
 	}
 	for _, raw := range []string{"0", "-5", "abc", "60001", "1e3", ""} {
-		if got := TargetFor(envOf(map[string]string{SmokeEnvTimeoutMS: raw}), true); got.Timeout != DefaultTimeout {
-			t.Errorf("TargetFor(timeout %q) = %v, want %v", raw, got.Timeout, DefaultTimeout)
+		if got := TargetFor(envOf(map[string]string{SmokeEnvTimeoutMS: raw}), true); got.timeout != DefaultTimeout {
+			t.Errorf("TargetFor(timeout %q) = %v, want %v", raw, got.timeout, DefaultTimeout)
 		}
 	}
 }

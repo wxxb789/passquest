@@ -377,9 +377,7 @@ func (s *Study) Version() (string, error) {
 // a failure is a result, never an error.
 func (s *Study) CheckForUpdate() (update.Result, error) {
 	return callSolo(s, func() (update.Result, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), s.target.Timeout)
-		defer cancel()
-		return update.Check(ctx, update.NewClient(), s.target.Endpoint, update.Version), nil
+		return update.Check(context.Background(), update.NewClient(), s.target, update.Version), nil
 	})
 }
 
