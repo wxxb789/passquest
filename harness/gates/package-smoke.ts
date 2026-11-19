@@ -59,12 +59,13 @@
  *
  * The forward-upgrade case (`upgrade`, P7) builds the previous release's CLI,
  * creates learner data through it, opens that data root with the installed
- * app, compares every old record field by field, flushes a queued note
- * through the app's own notes room and revises a pushed note through this
- * tree's CLI, against an id-persisting Anki stub, and proves a database from
- * a newer schema is refused with its bytes untouched;
- * `package-smoke/upgrade.ts` carries the whole sequence, its base-commit
- * constant and its disclosed limits.
+ * app, checks that the open changed no old table's row count, compares every
+ * old record field by field, flushes a queued note through the app's own
+ * notes room and revises a pushed note through the installed app's own binary
+ * (its CLI mode), against an id-persisting Anki stub, and proves a database
+ * from a newer schema is refused with a clear mapped message and its bytes
+ * untouched; `package-smoke/upgrade.ts` carries the whole sequence, its
+ * base-commit constant and its disclosed limits.
  *
  * Disclosed limits: on Linux the runner has no libfuse2, so the AppImage runs
  * via `APPIMAGE_EXTRACT_AND_RUN=1` (the runtime's extract-and-run tree is
@@ -337,7 +338,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       return true;
     };
     const needsCli =
-      cases.includes("study") || cases.includes("agents") || cases.includes("anki") || cases.includes("upgrade") || cases.includes("credential") || cases.includes("broken");
+      cases.includes("study") || cases.includes("agents") || cases.includes("anki") || cases.includes("credential") || cases.includes("broken");
     const ready = app !== undefined && (!needsCli || (await ensureCli()));
 
     /** One case's launch site: its own temp cwd, per-user root and credential service. */
@@ -425,7 +426,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
           ctx,
           check,
           temp,
-          cli: cliBinary,
+          app: { binary: app!.binary, runtime: app!.runtime, hosts: app!.hosts },
           site: (id) => siteOf(id, app!.binary, app!.launchEnv),
         });
       },

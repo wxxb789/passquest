@@ -25,7 +25,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { makePackageSmokeGate } from "../package-smoke.ts";
-import { compareDatabases } from "../package-smoke/upgrade.ts";
+import { compareDatabases, rowCountProblems } from "../package-smoke/upgrade.ts";
 import { packageNaming } from "../../lib/package-build.ts";
 import { executable, run } from "../../lib/process.ts";
 import { GO_MOD } from "./fixture.ts";
@@ -131,23 +131,31 @@ export function packageNamingProblem(): string | null {
  * The upgrade comparison (P7) over two small fixture databases, no build and
  * no launch: identical content must pass and count its tables, rows and
  * fields; one changed field must fail and name the table, the row key and the
- * column; a new column, a new table and a new row are allowed.
+ * column; a fixture that lost an old row and an old table must name both
+ * losses, and a separate fixture that lost an old column must name it — that
+ * branch reports the column and skips row matching, so the two losses need
+ * one fixture each; a new column, a new table and a new row are allowed.
  */
 export function upgradeComparisonProblem(): string | null {
   const dir = mkdtempSync(path.join(tmpdir(), "passquest-upgrade-compare-"));
   const family = (name: string) => path.join(dir, `${name}.sqlite`);
-  const write = (file: string, options: { changedFront?: string; newer?: boolean } = {}): void => {
+  const write = (
+    file: string,
+    options: { changedFront?: string; newer?: boolean; droppedRow?: boolean; droppedColumn?: boolean } = {},
+  ): void => {
     const db = new Database(file);
     db.run(`CREATE TABLE notes (note_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, front TEXT NOT NULL)`);
     db.run(`CREATE TABLE note_outbox (note_id TEXT NOT NULL, revision INTEGER NOT NULL, status TEXT NOT NULL, PRIMARY KEY (note_id, revision))`);
     db.run(`INSERT INTO notes (note_id, revision, front) VALUES ('pq-1', 1, '${options.changedFront ?? "closes at 4 p.m."}')`);
-    db.run(`INSERT INTO notes (note_id, revision, front) VALUES ('pq-2', 1, 'opens at 9 a.m.')`);
-    db.run(`INSERT INTO note_outbox (note_id, revision, status) VALUES ('pq-1', 1, 'drained')`);
+    if (!options.droppedRow) db.run(`INSERT INTO notes (note_id, revision, front) VALUES ('pq-2', 1, 'opens at 9 a.m.')`);
+    if (!options.droppedRow) db.run(`INSERT INTO note_outbox (note_id, revision, status) VALUES ('pq-1', 1, 'drained')`);
     if (options.newer) {
       db.run(`ALTER TABLE notes ADD COLUMN anki_state TEXT NOT NULL DEFAULT 'local'`);
       db.run(`CREATE TABLE learner_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
       db.run(`INSERT INTO notes (note_id, revision, front) VALUES ('pq-3', 1, 'accepted after the upgrade')`);
     }
+    if (options.droppedRow) db.run(`DROP TABLE note_outbox`);
+    if (options.droppedColumn) db.run(`ALTER TABLE notes DROP COLUMN front`);
     db.close();
   };
   try {
@@ -155,10 +163,14 @@ export function upgradeComparisonProblem(): string | null {
     const same = family("same");
     const changed = family("changed");
     const newer = family("newer");
+    const lossy = family("lossy");
+    const column = family("column");
     write(before);
     write(same);
     write(changed, { changedFront: "closes at 6 p.m." });
     write(newer, { newer: true });
+    write(lossy, { droppedRow: true });
+    write(column, { droppedColumn: true });
     const clean = compareDatabases(before, same);
     if (clean.problems.length > 0) return `the upgrade comparison reports ${clean.problems.join("; ")} for identical databases`;
     if (clean.tables.length !== 2 || clean.rows !== 3 || clean.fields !== 9) {
@@ -175,6 +187,24 @@ export function upgradeComparisonProblem(): string | null {
     if (allowed.problems.length > 0) return `a new column, table and row are reported as differences: ${allowed.problems.join("; ")}`;
     if (allowed.rows !== 3 || allowed.fields !== 9) {
       return `the comparison over the newer fixture counted ${allowed.rows} row(s) and ${allowed.fields} field(s), want the old schema's 3 and 9`;
+    }
+    const lost = compareDatabases(before, lossy).problems.join("; ");
+    for (const want of ["table note_outbox is missing after the upgrade", "row notes note_id=s:pq-2 is missing after the upgrade"]) {
+      if (!lost.includes(want)) {
+        return `a dropped old table and a deleted old row in one fixture are not both reported: want ${want}, got ${lost === "" ? "no problem" : lost}`;
+      }
+    }
+    // The open-only row-count check: identical tables pass, a deleted or an
+    // added row in an old table fails and names the table.
+    if (rowCountProblems(before, same).length > 0) return `the row-count check reports ${rowCountProblems(before, same).join("; ")} for identical databases`;
+    for (const [name, fixture] of [["a deleted row", lossy], ["an added row", newer]] as const) {
+      const counted = rowCountProblems(before, fixture).join("; ");
+      if (!counted.includes("table notes")) return `the row-count check does not report ${name} in notes: ${counted === "" ? "no problem" : counted}`;
+    }
+    const lostColumn = compareDatabases(before, column).problems.join("; ");
+    const wantColumn = "table notes lost column(s) front";
+    if (!lostColumn.includes(wantColumn)) {
+      return `a dropped old column is not reported as ${wantColumn}: ${lostColumn === "" ? "no problem" : lostColumn}`;
     }
     return null;
   } finally {

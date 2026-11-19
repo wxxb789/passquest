@@ -24,9 +24,10 @@
  *   (and, were the schema older, migrates) the database. The case then
  *   compares the old build's snapshot against the upgraded file with
  *   `bun:sqlite`, read-only and without ATTACH, never while the app runs:
- *   every table of the old schema, every column that existed before, every
- *   row that existed before, field by field. New columns and tables are
- *   allowed.
+ *   opening may not add or lose a row in any old table first, then every
+ *   table of the old schema, every column that existed before, every row that
+ *   existed before, field by field, naming every difference. New columns and
+ *   tables are allowed.
  * - The installed app then runs twice more, against a stub restarted over its
  *   state file (the same deck the old build's push wrote). First the smoke
  *   hook drives its notes room to drain the queued note: the old build's
@@ -35,27 +36,34 @@
  *   through the window's own resume card — which also exercises the new build
  *   on the old run; the run's row must read abandoned afterwards — and the
  *   room's push button then adds exactly one note, the queued one.
- * - The revision of the pushed note is the disclosed fallback: the window
- *   cannot revise an accepted note (`Study.OpenNoteDraft` restores only a
- *   pending draft and refuses an accepted one, workspace.OpenNoteDraft, and
- *   the notes list has no edit action), so this tree's CLI accepts revision 2
- *   of the pushed note's draft and pushes it against the same stub. The stub
- *   must show one `updateNoteFields` for the note id the old build's push
- *   created — never a second `addNote` for it — with the revision's edit in
- *   its fields.
+ * - The revision of the pushed note runs through the installed app's own
+ *   binary, which is the CLI when given arguments
+ *   (`cmd/passquest-desktop/main.go`). The window cannot revise an accepted
+ *   note (`Study.OpenNoteDraft` restores only a pending draft and refuses an
+ *   accepted one, workspace.OpenNoteDraft, and the notes list has no edit
+ *   action), so the packaged binary accepts revision 2 of the pushed note's
+ *   draft and pushes it against the same stub, with the packaged Node runtime
+ *   and Anki host pinned through `PASSQUEST_NODE` and `PASSQUEST_ANKI_HOST`:
+ *   the CLI's composition root resolves no resources directory (only the
+ *   window does, internal/desktop/desktop.go) and this launch's PATH carries
+ *   no node. The stub must show one `updateNoteFields` for the note id the
+ *   old build's push created — never a second `addNote` for it — with the
+ *   revision's edit in its fields.
  * - A copy of the upgraded database with its schema version set above the
  *   supported one (the P4 Go test's own way) must leave the packaged app in
  *   the `database_newer` error state, and the file and its side files must be
  *   byte-identical after the launch (sha256 before and after; a side file that
  *   appears or disappears counts).
  *
- * Disclosed limits: the base and this build both persist schema version 17,
- * so no migration statement runs — the case proves the new build opens the
- * old build's data without changing a record, and refuses a newer one; when a
- * release is tagged, PREVIOUS_RELEASE_COMMIT is replaced by that tag's commit.
- * The old CLI's note push runs with the repository as cwd so it finds
- * `agent/anki-host.mjs` and its `node_modules`, exactly as the CLI smokes do;
- * the data itself is created by the base commit's binary.
+ * Disclosed limits: the base commit (357b4c6) and this build persist the same
+ * schema version, so no migration statement runs — the case proves a
+ * same-version reopen by the packaged build, not a migration step. The two
+ * `user_version` values are read from the old snapshot and the upgraded file
+ * at run time and printed in the pass line; when a release is tagged,
+ * PREVIOUS_RELEASE_COMMIT is replaced by that tag's commit. The old CLI's
+ * note push runs with the repository as cwd so it finds `agent/anki-host.mjs`
+ * and its `node_modules`, exactly as the CLI smokes do; the data itself is
+ * created by the base commit's binary.
  */
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
@@ -65,9 +73,11 @@ import path from "node:path";
 import { startAnkiStub } from "../../lib/anki-stub.ts";
 import { field, numberField, stringField } from "../../lib/json.ts";
 import { executable, run } from "../../lib/process.ts";
+import type { RunResult } from "../../lib/process.ts";
 import { seedReviewedSource } from "../../lib/reviewed-source.ts";
 import { pageScript, tail } from "../../lib/desktop-page.ts";
 import type { Check } from "../../lib/desktop-page.ts";
+import { removeTree } from "../../lib/desktop.ts";
 import type { GateContext } from "../../lib/types.ts";
 import { launch, UNREACHABLE_ENDPOINT } from "../desktop-smoke/scenario.ts";
 import type { ScenarioRun } from "../desktop-smoke/scenario.ts";
@@ -87,13 +97,20 @@ export interface UpgradeSite {
   dataRoot: string;
 }
 
+/** The installed app's own files the revision runs through: its binary (the CLI when given arguments) and its Node runtime and Anki host. */
+export interface UpgradeApp {
+  binary: string;
+  runtime: string;
+  hosts: readonly string[];
+}
+
 export interface UpgradeInputs {
   ctx: GateContext;
   check: Check;
   /** The gate's temp tree; the case makes its own subdirectories under it. */
   temp: string;
-  /** This tree's CLI, built by the gate (`buildCLI`): the revision of the pushed note runs through it (see the doc comment). */
-  cli: string;
+  /** The installed app: the revision of the pushed note runs through its own binary (see the doc comment). */
+  app: UpgradeApp;
   /** Creates a per-user-root launch site for the installed app (the study case's `siteOf`). */
   site: (id: string) => UpgradeSite;
 }
@@ -119,7 +136,7 @@ export interface DatabaseDiff {
  * Copies the database and the side files that exist beside it as one set. The
  * writer has exited first: a copy of a live WAL is not a snapshot.
  */
-export function copyDatabaseFamily(from: string, to: string): void {
+function copyDatabaseFamily(from: string, to: string): void {
   for (const suffix of ["", "-wal", "-shm", "-journal"]) {
     if (!existsSync(from + suffix)) continue;
     copyFileSync(from + suffix, to + suffix);
@@ -144,6 +161,12 @@ function quote(identifier: string): string {
 /** A value for a failure line, byte-bounded so one long blob cannot flood the gate log. */
 function shorten(value: string): string {
   return value.length <= 80 ? value : `${value.slice(0, 77)}...`;
+}
+
+/** Every difference as one line, capped at a generous count so one database cannot flood the gate log; the tail is counted, never dropped silently. */
+function listProblems(problems: readonly string[], cap = 20): string {
+  if (problems.length <= cap) return problems.join("; ");
+  return `${problems.slice(0, cap).join("; ")}; and ${problems.length - cap} more`;
 }
 
 /**
@@ -227,6 +250,48 @@ function familyDigests(database: string): Record<string, string> {
   return digests;
 }
 
+/** The file's `user_version`, the schema version SQLite stores; the old snapshot's and the upgraded file's are printed side by side. */
+function schemaVersion(database: string): number {
+  const db = new Database(database, { readonly: true });
+  try {
+    return db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0;
+  } finally {
+    db.close();
+  }
+}
+
+/** Every table's row count, keyed by name, from the file itself. */
+function tableRowCounts(database: string): Record<string, number> {
+  const db = new Database(database, { readonly: true });
+  try {
+    const counts: Record<string, number> = {};
+    const tables = db
+      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+      .all();
+    for (const { name } of tables) counts[name] = db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM ${quote(name)}`).get()?.n ?? 0;
+    return counts;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * The old tables whose row count changed between the two files, one line per
+ * table: opening the old data may not add or lose a row. A table the upgraded
+ * file lost is the comparison's own report, not this check's.
+ */
+export function rowCountProblems(beforePath: string, afterPath: string): string[] {
+  const before = tableRowCounts(beforePath);
+  const after = tableRowCounts(afterPath);
+  const problems: string[] = [];
+  for (const [name, was] of Object.entries(before)) {
+    const now = after[name];
+    if (now === undefined || now === was) continue;
+    problems.push(`table ${name}: ${was} row(s) before the open, ${now} after`);
+  }
+  return problems;
+}
+
 /** True when the checkout holds the commit; false when it must be fetched. */
 async function holdsCommit(root: string, commit: string): Promise<boolean> {
   const check = await run(executable("git"), ["-C", root, "cat-file", "-e", `${commit}^{commit}`]);
@@ -238,18 +303,40 @@ function gitOutput(result: { stdout: string; stderr: string }): string {
   return tail(`${result.stdout}${result.stderr}`, 3);
 }
 
+/** The site's launch environment as `run` takes it: the per-user root, the stripped PATH and the AppImage's extraction are strings. */
+function textEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) if (typeof value === "string") out[name] = value;
+  return out;
+}
+
 /** One old-CLI call: the base commit's binary, `--db` at the old data root, `--json`, repository cwd. */
 type OldCall = (args: string[], stdin?: string) => Promise<{ code: number; stderr: string; stdout: string }>;
 
+/** A pipe-driven `assess start` run: the stdin the items are answered on, and the collected result. */
+interface AssessmentRun {
+  stdin: Bun.Subprocess<"pipe", "pipe", "pipe">["stdin"];
+  /**
+   * The exit code with stdout and stderr read to the end (the assess smoke's
+   * own collector): a large report cannot fill a pipe and block the child.
+   */
+  result: Promise<RunResult>;
+}
+
 /** A run of `assess start` on the old CLI, driven over its stdin. */
-function startAssessment(oldBin: string, cwd: string, database: string, size: number): Bun.Subprocess<"pipe", "pipe", "pipe"> {
-  return Bun.spawn({
+function startAssessment(oldBin: string, cwd: string, database: string, size: number): AssessmentRun {
+  const proc = Bun.spawn({
     cmd: [oldBin, "assess", "start", "--size", String(size), "--minutes", "60", "--db", database, "--json"],
     cwd,
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
   });
+  const result = (async (): Promise<RunResult> => {
+    const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+    return { code: await proc.exited, stdout, stderr };
+  })();
+  return { stdin: proc.stdin, result };
 }
 
 /** The report `assess report RUN` prints, parsed; empty after a failed call. */
@@ -348,8 +435,8 @@ return value;
  * room, whose push button needs no draft. The revision itself cannot go
  * through the window: `Study.OpenNoteDraft` restores only a pending draft and
  * refuses an accepted one (workspace.OpenNoteDraft), and the notes list has
- * no edit action, so the case revises through this tree's CLI against the
- * upgraded database.
+ * no edit action, so the case revises through the installed app's own binary
+ * against the upgraded database.
  */
 const FLUSH_SCRIPT = `
 await until("the old run's resume card", () => q('[data-act="run-abandon-ask"]'), 25000);
@@ -380,14 +467,17 @@ return {
 /**
  * The newer-schema launch. The PRELUDE's `__pq.ready` waits for a rendered
  * Today, which a refused database never shows, so this script is its own
- * minimal one: it waits for the window's error card, calls the service once
- * and reports what the bridge rejected with.
+ * minimal one: it waits for the window's state card — which carries the typed
+ * code in `data-code` — calls the service once, and reports the card's code,
+ * its wording in either language and whether an unmapped-code span appeared
+ * (a code with wording must not render one).
  */
 const NEWER_SCHEMA_SCRIPT = `
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const deadline = Date.now() + 15000;
-while (!document.querySelector("[data-unmapped-code]") && Date.now() < deadline) await sleep(100);
-const card = document.querySelector("[data-unmapped-code]");
+while (!document.querySelector('[data-testid="state"][data-code]') && Date.now() < deadline) await sleep(100);
+const card = document.querySelector('[data-testid="state"][data-code]');
+const text = card ? card.innerText.replace(/\\s+/g, " ").trim() : "";
 let call = null;
 try {
   await window.mygo.call("Study.Today");
@@ -395,7 +485,14 @@ try {
 } catch (error) {
   call = { ok: false, message: String(error && error.message) };
 }
-return { call, card: card ? card.getAttribute("data-unmapped-code") : "", text: document.body.innerText.replace(/\\s+/g, " ").trim().slice(0, 200) };
+return {
+  call,
+  code: card ? card.getAttribute("data-code") : "",
+  unmapped: document.querySelectorAll("[data-unmapped-code]").length,
+  title: ["数据来自更新的 Pass Quest", "This data is from a newer Pass Quest"].some((needle) => text.includes(needle)),
+  next: ["安装写入这些数据的更新版本", "Install the newer Pass Quest that wrote this data"].some((needle) => text.includes(needle)),
+  text: text.slice(0, 200),
+};
 `;
 
 /** The typed studio error a failed call rejected with: the CallError carries its JSON in the message. */
@@ -496,8 +593,8 @@ export async function upgradeCase(inputs: UpgradeInputs): Promise<string> {
     const first = startAssessment(oldBin, root, database, 1);
     first.stdin.write("B\n".repeat(21));
     first.stdin.end();
-    const firstCode = await first.exited;
-    if (!check(firstCode === 0, `upgrade: the old CLI's finished assessment run exit = ${firstCode}`)) {
+    const firstResult = await first.result;
+    if (!check(firstResult.code === 0, `upgrade: the old CLI's finished assessment run exit = ${firstResult.code}: ${tail(firstResult.stderr, 4)}`)) {
       return "upgrade: the old data could not be created";
     }
     const firstReport = await assessmentReport(old, "1");
@@ -509,9 +606,8 @@ export async function upgradeCase(inputs: UpgradeInputs): Promise<string> {
     const second = startAssessment(oldBin, root, database, 2);
     second.stdin.write("B\n");
     second.stdin.end();
-    const secondCode = await second.exited;
-    if (!check(secondCode === 4, `upgrade: the old CLI's interrupted assessment run exit = ${secondCode}, want 4 (run_interrupted)`)) {
-      second.kill();
+    const secondResult = await second.result;
+    if (!check(secondResult.code === 4, `upgrade: the old CLI's interrupted assessment run exit = ${secondResult.code}, want 4 (run_interrupted): ${tail(secondResult.stderr, 4)}`)) {
       return "upgrade: the old data could not be created";
     }
     const secondReport = await assessmentReport(old, "2");
@@ -603,17 +699,33 @@ export async function upgradeCase(inputs: UpgradeInputs): Promise<string> {
     );
     const upgraded = path.join(dir, "after.sqlite");
     copyDatabaseFamily(database, upgraded);
+    // The open itself must not touch a row — an insert or a delete fails
+    // here, before the field-by-field comparison and before any further
+    // action (the queue flush, the revision). New tables may hold anything.
+    const counts = rowCountProblems(snapshot, upgraded);
+    check(counts.length === 0, `upgrade: opening the old database changed ${counts.length} old table's row count(s): ${listProblems(counts)}`);
     const diff = compareDatabases(snapshot, upgraded);
     check(
       diff.problems.length === 0,
-      `upgrade: ${diff.problems.length} difference(s) after the upgrade: ${diff.problems.slice(0, 4).join("; ")}`,
+      `upgrade: ${diff.problems.length} difference(s) after the upgrade: ${listProblems(diff.problems)}`,
     );
-    let line = `${diff.tables.length} tables, ${diff.rows} rows, ${diff.fields} fields compared, ${diff.problems.length} difference(s)`;
+    const baseVersion = schemaVersion(snapshot);
+    const openVersion = schemaVersion(upgraded);
+    check(
+      baseVersion > 0 && openVersion > 0,
+      `upgrade: a database's user_version did not read (snapshot ${baseVersion}, upgraded ${openVersion}), want the store's written version`,
+    );
+    const schemaLine =
+      baseVersion === openVersion
+        ? `schema ${baseVersion} -> ${openVersion}, unchanged (a reopen, no migration step)`
+        : `schema ${baseVersion} -> ${openVersion} (a migration step ran)`;
+    let line = `${diff.tables.length} tables, ${diff.rows} rows, ${diff.fields} fields compared, ${diff.problems.length} difference(s); ${schemaLine}`;
 
     // The queued note's drain through the installed app's notes room (and,
     // with it, the old active run abandoned through the window), then the
-    // revision through this tree's CLI, against a stub restarted over the
-    // same state file — the same deck the old build's push wrote.
+    // revision through the installed app's own binary, against a stub
+    // restarted over the same state file — the same deck the old build's
+    // push wrote.
     const stub2 = startAnkiStub({ stateFile });
     try {
       const flushed = await launch(data.run, {
@@ -661,19 +773,39 @@ export async function upgradeCase(inputs: UpgradeInputs): Promise<string> {
         `upgrade: after the flush the app left ${settledRun.activeRuns} active run(s) and ${settledRun.abandonedRuns} abandoned, want the old active run abandoned by the window`,
       );
 
-      // The revision: this tree's CLI against the upgraded database. The
-      // window cannot revise the pushed note (its draft is accepted, and
-      // OpenNoteDraft refuses an accepted draft), so the revision and its
-      // push go through the CLI — a disclosed fallback.
+      // The revision: the installed app's own binary, which is the CLI when
+      // given arguments (cmd/passquest-desktop/main.go), against the upgraded
+      // database. The window cannot revise the pushed note (its draft is
+      // accepted, and OpenNoteDraft refuses an accepted draft), so the accept
+      // and the push go through that binary, launched with the app's own
+      // environment. The CLI's composition root resolves no resources
+      // directory — only the window does — and this launch's PATH carries no
+      // node, so the packaged copy's Node runtime and Anki host are pinned
+      // through the two documented overrides: the same files the window would
+      // find.
+      const ankiHost = inputs.app.hosts.find((host) => path.basename(host) === "anki-host.mjs");
+      if (ankiHost === undefined) {
+        check(false, "upgrade: the installed app carries no agent/anki-host.mjs; the revision cannot run through it");
+        return `upgrade: ${line}; the installed app carries no Anki host`;
+      }
+      const revisionEnv = {
+        ...textEnv(data.run.shared.launchEnv ?? {}),
+        PASSQUEST_NODE: inputs.app.runtime,
+        PASSQUEST_ANKI_HOST: ankiHost,
+      };
+      const revisionCwd = data.run.shared.cwd ?? root;
       const revision = await run(
-        inputs.cli,
+        inputs.app.binary,
         ["note", "accept", "--draft", String(pushedDraftID), "--front", `${pushedNote.front} upgrade-edit`, "--db", database, "--json"],
-        { cwd: root },
+        { cwd: revisionCwd, env: revisionEnv },
       );
       if (!check(revision.code === 0, `upgrade: the revision accept exit = ${revision.code}: ${tail(revision.stderr, 4)}`)) {
         return `upgrade: ${line}; the revision was refused`;
       }
-      const pushedRevision = await run(inputs.cli, ["note", "push", "--endpoint", stub2.endpoint, "--db", database, "--json"], { cwd: root });
+      const pushedRevision = await run(inputs.app.binary, ["note", "push", "--endpoint", stub2.endpoint, "--db", database, "--json"], {
+        cwd: revisionCwd,
+        env: revisionEnv,
+      });
       if (!check(pushedRevision.code === 0, `upgrade: the revision push exit = ${pushedRevision.code}: ${tail(pushedRevision.stderr, 4)}`)) {
         return `upgrade: ${line}; the revision could not be pushed`;
       }
@@ -724,17 +856,45 @@ export async function upgradeCase(inputs: UpgradeInputs): Promise<string> {
       `upgrade: a newer-schema database failed with ${rejectionCode(refused.value)}, want database_newer`,
     );
     check(
-      stringField(refused.value, "card") === "database_newer",
-      `upgrade: the window's error state is ${String(stringField(refused.value, "card"))}, want database_newer`,
+      stringField(refused.value, "code") === "database_newer",
+      `upgrade: the window's state card carries ${String(stringField(refused.value, "code"))}, want database_newer`,
     );
-    line = `${line}; schema ${futureVersion} refused, ${Object.keys(digestsBefore).length} file(s) unchanged`;
+    check(
+      numberField(refused.value, "unmapped") === 0,
+      `upgrade: the refusal rendered ${String(numberField(refused.value, "unmapped"))} unmapped-code span(s): ${String(stringField(refused.value, "text"))}`,
+    );
+    // Both halves of the wording: the title alone would pass a card whose
+    // next step fell back to the generic retry sentence.
+    check(
+      field(refused.value, "title") === true,
+      `upgrade: the refusal card carries no mapped title for database_newer: ${String(stringField(refused.value, "text"))}`,
+    );
+    check(
+      field(refused.value, "next") === true,
+      `upgrade: the refusal card carries no mapped next step for database_newer: ${String(stringField(refused.value, "text"))}`,
+    );
+    line = `${line}; schema ${futureVersion} refused, ${Object.keys(digestsBefore).length} file(s) unchanged; refusal card: ${JSON.stringify(
+      stringField(refused.value, "text"),
+    )}`;
     return `upgrade: ${line} in ${((performance.now() - started) / 1000).toFixed(1)}s`;
   } finally {
     if (added) {
-      // Every exit path removes the worktree: --force removes a tree whose
-      // build left it dirty, prune drops the entry when the removal left one.
-      await run(executable("git"), ["-C", root, "worktree", "remove", "--force", worktree]);
-      await run(executable("git"), ["-C", root, "worktree", "prune"]);
+      // Every exit path removes this gate's own worktree. `--force` removes a
+      // tree whose build left it dirty; a tree git refuses (a handle that a
+      // killed tool still held) is deleted, then the removal is retried so
+      // git's own bookkeeping goes with it. Never `prune`: it would sweep
+      // every stale worktree entry of the repository, not this gate's.
+      const removed = await run(executable("git"), ["-C", root, "worktree", "remove", "--force", worktree]);
+      if (removed.code !== 0) {
+        const cleared = await removeTree(worktree);
+        const again = await run(executable("git"), ["-C", root, "worktree", "remove", "--force", worktree]);
+        check(
+          cleared && again.code === 0,
+          `cleanup: the gate's worktree ${worktree} could not be removed (tree ${cleared ? "deleted" : "survived"}; git ${
+            again.code === 0 ? "removed the entry" : `refused again: ${gitOutput(again)}`
+          })`,
+        );
+      }
     }
   }
 }
