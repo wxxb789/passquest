@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/wxxb789/passquest/internal/agent"
 	"github.com/wxxb789/passquest/internal/anki"
+	"github.com/wxxb789/passquest/internal/hostpaths"
 	"github.com/wxxb789/passquest/internal/provider"
 	"github.com/wxxb789/passquest/internal/search"
 	"github.com/wxxb789/passquest/internal/source"
@@ -46,6 +48,10 @@ type Options struct {
 	Now     func() time.Time
 	// Executable locates the bundled Node hosts next to the binary.
 	Executable func() (string, error)
+	// Resources is the packaged resources directory (mygo.PathResources in
+	// the desktop): the bundled hosts and Node runtime are looked up there
+	// first. Empty in a source checkout.
+	Resources  string
 	NewSession func() string
 	// NewToken mints practice presentation tokens; nil uses random bits.
 	NewToken    func() string
@@ -69,6 +75,7 @@ type Options struct {
 type Workspace struct {
 	mu             sync.Mutex
 	dbPath         string
+	resources      string
 	baseGetenv     func(string) string
 	baseEnviron    func() []string
 	credentials    CredentialStore
@@ -103,6 +110,7 @@ func Open(options Options) (*Workspace, error) {
 		baseEnviron: options.Environ,
 		credentials: options.Credentials,
 		newToken:    options.NewToken,
+		resources:   options.Resources,
 	}
 	if w.baseGetenv == nil {
 		w.baseGetenv = os.Getenv
@@ -138,19 +146,19 @@ func Open(options Options) (*Workspace, error) {
 	w.hostAgent = options.AgentRunner == nil
 	tutorTransport := options.TutorTransport
 	if tutorTransport == nil {
-		tutorTransport = tutor.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
+		tutorTransport = tutor.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable, Resources: options.Resources}
 	}
 	ankiTransport := options.AnkiTransport
 	if ankiTransport == nil {
-		ankiTransport = anki.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
+		ankiTransport = anki.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable, Resources: options.Resources}
 	}
 	searchTransport := options.SearchTransport
 	if searchTransport == nil {
-		searchTransport = search.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
+		searchTransport = search.HostTransport{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable, Resources: options.Resources}
 	}
 	agentRunner := options.AgentRunner
 	if agentRunner == nil {
-		agentRunner = agent.HostRunner{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable}
+		agentRunner = agent.HostRunner{Getenv: w.getenv, Environ: w.environ, Executable: options.Executable, Resources: options.Resources}
 	}
 	// The desktop always opens a path the window resolved (its own default or
 	// the user's --db), never the app-owned private default of a bare CLI
@@ -243,6 +251,14 @@ func (w *Workspace) storedCredential(name string) (string, bool) {
 func (w *Workspace) open() (*store.Store, error) {
 	st, err := store.Open(w.dbPath)
 	if err != nil {
+		var newer *store.SchemaNewerError
+		if errors.As(err, &newer) {
+			return nil, withAction(&studio.Error{
+				Code: "database_newer",
+				Message: fmt.Sprintf("this database was written by a newer Pass Quest (schema version %d; this build supports %d)",
+					newer.Version, newer.Supported),
+			})
+		}
 		return nil, &studio.Error{Code: "internal_error", Message: err.Error()}
 	}
 	return st, nil
@@ -343,6 +359,7 @@ func desktopSentinelCode(err error) (string, bool) {
 // itself.
 var codeActions = map[string]string{
 	"assessment_active":     "finish or abandon the active assessment run first",
+	"database_newer":        "install the newer Pass Quest that wrote this data",
 	"no_credential":         "add the provider key in Settings, or set its environment variable",
 	"missing_credential":    "add the provider key in Settings, or set its environment variable",
 	"capability_unverified": "run the model test for the active model in Settings",
@@ -360,13 +377,11 @@ func withAction(e *studio.Error) *studio.Error {
 	return e
 }
 
-// nodePath resolves the Node executable the hosts would spawn.
+// nodePath resolves the Node executable the hosts would spawn: the
+// PASSQUEST_NODE override, the runtime packaged in the resources directory,
+// or node on PATH. Services and requireNode report on exactly this lookup.
 func (w *Workspace) nodePath() (string, error) {
-	node := strings.TrimSpace(w.getenv(tutor.NodeEnv))
-	if node == "" {
-		node = "node"
-	}
-	return exec.LookPath(node)
+	return exec.LookPath(hostpaths.ResolveNode(hostpaths.Source{Getenv: w.getenv, Resources: w.resources}, runtime.GOOS))
 }
 
 // requireNode refuses a host call up front when Node cannot be found, so the

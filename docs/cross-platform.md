@@ -93,6 +93,40 @@ turns red.
   non-ASCII text; they are not executed on this Linux host. The 3-OS CI run is what proves the
   shells, as for every other platform claim here.
 
+## Packaging
+
+One sequence (`bun run package`, `harness/lib/package-build.ts`) builds every package: the frontend
+bundle, the staged resources (`agent/*.mjs`, a hoisted production `node_modules`, a pinned Node
+runtime, the icon), then `go tool mygo build` from `mygo.json`.
+
+- **Windows** gets the per-user NSIS installer into `%LOCALAPPDATA%\Programs\Pass Quest`, no admin:
+  a silent install is `/S` with an unquoted `/D=<dir>` (NSIS ignores a quoted `/D=`), so a test
+  prefix under a temp tree holding a space moves to a short directory under the drive root. The
+  installer writes the HKCU uninstall key and the shortcuts it creates into the real shell folders, which
+  neither `/D=` nor an environment redirection moves.
+- **macOS** gets the `.app` inside a `.dmg`, built only on macOS (ad-hoc signed; no notarization, so
+  Gatekeeper blocks a downloaded copy). MyGo's resources directory is the bundle's
+  `Contents/Resources`, which is where the packaged app resolves `agent/` and the Node runtime.
+- **Linux** gets MyGo's binary plus a `harness/lib/appimage.ts` AppImage, built with a pinned
+  `appimagetool` 1.9.1 and a pinned type2 runtime 20251108 (both SHA-256 checked; linux-x64 only). The
+  AppDir is assembled in the OS temp directory so its modes are real: 0755 for directories and
+  executables, 0644 otherwise. Where FUSE is absent the image runs from its own extraction
+  (`APPIMAGE_EXTRACT_AND_RUN=1`, equivalent to `--appimage-extract-and-run`), which is how CI
+  launches it.
+- The Node runtime is pinned per platform and archive (`win32-x64`, `darwin-arm64`, `darwin-x64`,
+  `linux-x64`), each archive's SHA-256 from `SHASUMS256.txt`; a target with no pin fails instead of
+  falling back to another platform's runtime, and staging refuses a tree that carries a `.node` file
+  or a package restricting its own `os`, `cpu` or `libc`.
+- A package carries no second app executable (only the bundled Node runtime beside it): on Windows the GUI-subsystem binary is the CLI too when
+  given arguments, and its stdout over an inherited pipe is how the durable host runs
+  `agent record-step` (`-H=windowsgui` hides the window, not the pipe).
+- The packaged app's per-user data directory is refused when it lands inside the app's own files (its
+  executable or resources directory, `internal/desktop/paths.go`); a binary placed in the user's home
+  or one of its ancestors is a loose file, not an install, and is not refused.
+- CI builds and smoke-installs one package per runner (`package-smoke`, group `package`), so the
+  runner's architecture is the package's: `windows-latest` and `ubuntu-latest` are x64, and
+  `macos-latest` is arm64.
+
 ## Tests
 
 - Fixtures: `t.TempDir()` + `filepath.Join`. Scope a platform difference with an explicit `GOOS` field
@@ -105,6 +139,6 @@ turns red.
 
 ## Gates
 
-`bun run gate` → 24 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
-gates run on all three OS in CI. CI runs it as three groups (`core`, `desktop`, `self-test`) per OS;
-`bun run gate` with no argument still runs all 24.
+`bun run gate` → 25 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
+gates run on all three OS in CI. CI runs it as four groups (`core`, `desktop`, `package`, `self-test`)
+per OS; `bun run gate` with no argument still runs all 25.

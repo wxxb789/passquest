@@ -6,9 +6,11 @@ package desktop
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"log"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -36,7 +38,45 @@ var BriefChanged = mygo.NewEvent[BriefEvent]("brief:changed")
 
 // Run runs the window until the app quits and returns the process exit code.
 func Run() int {
-	getenv := os.Getenv
+	return start(appDeps{
+		getenv:  os.Getenv,
+		webview: mygo.WebViewAvailable,
+		loop:    nativeLoop,
+		quit:    mygo.App.Quit,
+		message: showNativeMessage,
+		window:  mygo.NewWindow,
+	})
+}
+
+// appDeps are the running app's inputs and MyGo touch points. Run binds the
+// real ones; tests replace them to reach the missing-webview branch, which
+// must say what to install and start no window.
+type appDeps struct {
+	getenv  func(string) string
+	webview func() bool
+	loop    func(ready func()) error
+	quit    func()
+	message func(title, body string)
+	window  func(mygo.WindowOptions) *mygo.Window
+}
+
+// nativeLoop schedules ready for when the app is ready and runs the native
+// event loop until the app quits.
+func nativeLoop(ready func()) error {
+	mygo.App.WhenReady(ready)
+	return mygo.App.Run()
+}
+
+// showNativeMessage shows one native message box. MyGo's dialogs need the
+// running app but no webview: a task dialog on Windows, a GTK dialog on
+// Linux, an alert on macOS.
+func showNativeMessage(title, body string) {
+	mygo.Dialog.Error(title, body)
+}
+
+// start runs one app instance and returns its exit code.
+func start(deps appDeps) int {
+	getenv := deps.getenv
 	frontend, err := frontendFS()
 	if err != nil {
 		log.Printf("passquest-desktop: %v", err)
@@ -45,15 +85,25 @@ func Run() int {
 	mygo.SetFrontend(frontend)
 	mygo.App.SetName(appName(getenv))
 
-	study := newStudy(func(e BriefEvent) { _ = BriefChanged.Broadcast(e) })
-	mygo.BindAs("Study", study)
-
 	generating := getenv("MYGO_GENERATE") != ""
-	smoke, err := smokeFromEnv(getenv, mygo.App.Quit)
+	smoke, err := smokeFromEnv(getenv, deps.quit)
 	if err != nil {
 		log.Printf("passquest-desktop: %v", err)
 		return 2
 	}
+
+	// The window shows the page in the system webview; without a runtime
+	// the window is blank or the app dies inside it, so refuse before the
+	// loop starts. A scripted launch reports through its result file rather
+	// than a dialog nobody would dismiss. Generate mode opens no window (it
+	// writes the TypeScript client), so it needs no webview.
+	if !generating && !deps.webview() {
+		return refuseNoWebView(deps, smoke)
+	}
+
+	study := newStudy(func(e BriefEvent) { _ = BriefChanged.Broadcast(e) })
+	mygo.BindAs("Study", study)
+
 	if !generating {
 		if err := killChildrenOnExit(); err != nil {
 			log.Printf("passquest-desktop: child processes may outlive the window: %v", err)
@@ -113,7 +163,7 @@ func Run() int {
 			options.Page.BackgroundThrottling = mygo.ThrottlingOff
 		}
 		smoke.sizeWindow(&options)
-		win = mygo.NewWindow(options)
+		win = deps.window(options)
 		if options.Hidden {
 			if err := layOutHidden(win); err != nil {
 				log.Printf("passquest-desktop: %v", err)
@@ -139,16 +189,46 @@ func Run() int {
 	return 0
 }
 
+// refuseNoWebView reports that the machine has no webview runtime and
+// returns a non-zero exit code. It starts the loop for exactly one native
+// message box, naming what to install, and quits; it creates no window. A
+// scripted launch writes the failure to its result file instead, so a smoke
+// run never waits on a dialog.
+func refuseNoWebView(deps appDeps, smoke *smokeHook) int {
+	title, body := missingWebViewMessage(runtime.GOOS)
+	if smoke != nil {
+		if err := smoke.writeFailure(fmt.Errorf("%s: %s", title, body)); err != nil {
+			log.Printf("passquest-desktop: write smoke result: %v", err)
+		}
+		return 1
+	}
+	log.Printf("passquest-desktop: %s: %s", title, body)
+	if err := deps.loop(func() {
+		deps.message(title, body)
+		deps.quit()
+	}); err != nil {
+		log.Printf("passquest-desktop: %v", err)
+	}
+	return 1
+}
+
 // openStudy opens the workspace on the resolved storage. A failure is kept
 // by the service and shown by the window as an error state.
 func openStudy(study *Study, getenv func(string) string) {
-	where, err := resolveStorage(getenv, func() (string, error) { return mygo.App.Path(mygo.PathUserData) })
+	where, err := resolveStorage(getenv,
+		func() (string, error) { return mygo.App.Path(mygo.PathUserData) },
+		installDirs{
+			Executable: os.Executable,
+			Resources:  func() (string, error) { return mygo.App.Path(mygo.PathResources) },
+			Home:       os.UserHomeDir,
+		})
 	if err == nil {
 		// Window state and anything else MyGo keeps follow the data directory.
 		mygo.App.SetPath(mygo.PathUserData, where.DataDir)
 		err = study.open(workspace.Options{
 			DBPath:      where.Database,
 			Credentials: newCredentialStore(mygo.Secrets.Service(secretService(getenv))),
+			Resources:   resourceDir(),
 		})
 	}
 	if err != nil {
@@ -157,6 +237,20 @@ func openStudy(study *Study, getenv func(string) string) {
 		study.mu.Unlock()
 		log.Printf("passquest-desktop: open workspace: %v", err)
 	}
+}
+
+// resourceDir is the directory the packaged app carries its files in
+// (mygo.PathResources): the bundled agent hosts and Node runtime live there.
+// A development build keeps the source checkout's lookups, so it passes none.
+func resourceDir() string {
+	if mygo.IsDev() {
+		return ""
+	}
+	dir, err := mygo.App.Path(mygo.PathResources)
+	if err != nil {
+		return ""
+	}
+	return dir
 }
 
 // frontendFS is the page's file system, rooted at web/.

@@ -263,6 +263,8 @@ build/desktop/passquest-desktop
 
 Details: [`docs/desktop.md`](docs/desktop.md). Measured evidence:
 [`docs/evidence/0011-desktop-study-workspace.md`](docs/evidence/0011-desktop-study-workspace.md).
+Install the packaged app — an unsigned Windows installer, a macOS `.dmg` or a Linux AppImage:
+[`docs/install.md`](docs/install.md).
 
 ## Run the gates
 

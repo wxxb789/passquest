@@ -1,6 +1,7 @@
 package anki
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -208,6 +209,32 @@ func TestResolveHost(t *testing.T) {
 		return ""
 	}, nil, nil); err == nil {
 		t.Fatal("ResolveHost accepted a missing override")
+	}
+}
+
+// The transport resolves the host through the shared resolver: the packaged
+// resources directory is a candidate before the source checkout's.
+func TestHostTransportLooksInPackagedResources(t *testing.T) {
+	resources := t.TempDir()
+	transport := HostTransport{
+		Getenv:  func(string) string { return "" },
+		Environ: func() []string { return nil },
+		Getwd:   func() (string, error) { return t.TempDir(), nil },
+		Executable: func() (string, error) {
+			return filepath.Join(t.TempDir(), "passquest"), nil
+		},
+		Resources: resources,
+	}
+	req := HostRequest{
+		ProtocolVersion: ProtocolVersion,
+		Endpoint:        DefaultEndpoint,
+		TimeoutMS:       1000,
+		Actions:         []Action{{Action: "version"}},
+	}
+	_, err := transport.Call(context.Background(), req)
+	want := filepath.Join(resources, "agent", "anki-host.mjs")
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v; want a lookup in %s", err, want)
 	}
 }
 

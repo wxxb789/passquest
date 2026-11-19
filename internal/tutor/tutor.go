@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/wxxb789/passquest/internal/attempt"
+	"github.com/wxxb789/passquest/internal/hostpaths"
 )
 
 // ProtocolVersion is the host stdin/stdout protocol this build speaks.
@@ -36,7 +37,7 @@ const CredentialEnv = "PASSQUEST_TUTOR_API_KEY"
 // and the node binary on PATH.
 const (
 	HostEnv = "PASSQUEST_TUTOR_HOST"
-	NodeEnv = "PASSQUEST_NODE"
+	NodeEnv = hostpaths.NodeEnv
 )
 
 // Configuration bounds. These are deliberately small: one advisory call must

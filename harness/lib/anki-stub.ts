@@ -4,6 +4,8 @@
  * so a gate can assert what reached "Anki". Shared by note-smoke (the CLI)
  * and desktop-smoke (the window).
  */
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+
 import { stringField } from "./json.ts";
 
 export interface StubCardTemplate {
@@ -20,6 +22,28 @@ export interface StubModelDesign {
 export interface StubAction {
   action: string;
   params: Record<string, unknown>;
+}
+
+/** The stub's deck state as the state file carries it; arrays of pairs because JSON keys objects by string only. */
+interface StubStateFile {
+  nextNote: number;
+  nextCard: number;
+  notes: Array<[number, Record<string, string>]>;
+  noteDecks: Array<[number, string]>;
+  noteCards: Array<[number, number[]]>;
+  models: string[];
+  modelDesigns: Array<[string, StubModelDesign]>;
+}
+
+export interface AnkiStubOptions {
+  /**
+   * Persist the deck state here, and start from what the file already holds:
+   * note ids, notes, decks, cards and the model design survive the stub's
+   * lifetime, so two sequentially started stubs serve the same deck. The file
+   * is written after every mutating action. Without the option the stub is
+   * the in-memory one every other gate uses.
+   */
+  stateFile?: string;
 }
 
 export interface AnkiStub {
@@ -54,17 +78,63 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-export function startAnkiStub(): AnkiStub {
+/** Reads the state file; malformed content is an error, never a silently empty deck. */
+function readStateFile(file: string): StubStateFile {
+  const state = JSON.parse(readFileSync(file, "utf8")) as Partial<StubStateFile>;
+  if (
+    typeof state.nextNote !== "number" ||
+    typeof state.nextCard !== "number" ||
+    !Array.isArray(state.notes) ||
+    !Array.isArray(state.noteDecks) ||
+    !Array.isArray(state.noteCards) ||
+    !Array.isArray(state.models) ||
+    !Array.isArray(state.modelDesigns)
+  ) {
+    throw new Error(`${file} is not an Anki stub state file`);
+  }
+  return state as StubStateFile;
+}
+
+/** The actions that change the deck; the state file is written after each of them. */
+const MUTATING_ACTIONS: Record<string, true> = {
+  addNote: true,
+  updateNoteFields: true,
+  createModel: true,
+  updateModelStyling: true,
+  updateModelTemplates: true,
+};
+
+export function startAnkiStub(options: AnkiStubOptions = {}): AnkiStub {
+  const stateFile = options.stateFile;
+  const loaded = stateFile !== undefined && existsSync(stateFile) ? readStateFile(stateFile) : null;
   const noteCards = new Map<number, number[]>();
-  let nextID = 101;
-  let nextCard = 501;
+  let nextID = loaded?.nextNote ?? 101;
+  let nextCard = loaded?.nextCard ?? 501;
+  const notes = new Map(loaded?.notes ?? []);
+  const noteDecks = new Map(loaded?.noteDecks ?? []);
+  for (const [id, cards] of loaded?.noteCards ?? []) noteCards.set(id, cards);
+  const models = loaded?.models ?? [];
+  const modelDesigns = new Map(loaded?.modelDesigns ?? []);
+  const save = (): void => {
+    if (stateFile === undefined) return;
+    const state: StubStateFile = {
+      nextNote: nextID,
+      nextCard,
+      notes: [...notes],
+      noteDecks: [...noteDecks],
+      noteCards: [...noteCards],
+      models,
+      modelDesigns: [...modelDesigns],
+    };
+    writeFileSync(stateFile, JSON.stringify(state));
+  };
   const stub: AnkiStub = {
     endpoint: "",
     actions: [],
-    notes: new Map(),
-    noteDecks: new Map(),
-    models: [],
-    modelDesigns: new Map(),
+    notes,
+    noteDecks,
+    models,
+    modelDesigns,
     noteModelName: null,
     duplicate: false,
     misassigned: null,
@@ -182,6 +252,7 @@ export function startAnkiStub(): AnkiStub {
       const params = asRecord(body.params);
       stub.actions.push({ action, params });
       const response = Response.json(answer(action, params));
+      if (MUTATING_ACTIONS[action] === true) save();
       if (stub.afterAction) {
         const after = stub.afterAction;
         queueMicrotask(() => after(action));

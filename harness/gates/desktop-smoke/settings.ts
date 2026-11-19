@@ -77,7 +77,13 @@ return { leaks };
         provider.received.some((request) => request.authorization === `Bearer ${key}`),
         "settings: the provider call after entering the key did not carry it (OS store path)",
       );
-      const scanned = [...filesUnder(s.dataDir), launched.resultPath];
+      // The data directory, the launch's result and, for the package smoke,
+      // the installed tree: no credential may reach any of them.
+      const scanned = [
+        ...filesUnder(s.dataDir),
+        launched.resultPath,
+        ...(s.shared.secretScanRoots ?? []).flatMap((root) => filesUnder(root)),
+      ];
       const holders = scanned.filter((file) => containsSecret(readFileSync(file), key)).map((file) => path.relative(s.dir, file));
       if (containsSecret(Buffer.from(launched.output), key)) holders.push("app output");
       s.check(holders.length === 0, `settings: the key bytes are in ${holders.join(", ")}`);

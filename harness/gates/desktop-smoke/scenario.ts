@@ -21,6 +21,31 @@ export interface Shared {
   cli: string;
   registry: string;
   provider: ProviderStub;
+  /**
+   * The directory every launch runs in. The desktop smoke keeps the
+   * repository root, so the app finds `agent/*.mjs` and runs them under Node
+   * the way the CLI smokes do; the package smoke runs outside the checkout,
+   * where only the installed copy is reachable.
+   */
+  cwd?: string;
+  /**
+   * Environment every launch gets beyond the smoke hook's own variables and
+   * the scenario's. The package smoke strips PATH and points HOME/AppData/
+   * XDG_CONFIG_HOME at a temp tree here.
+   */
+  launchEnv?: Record<string, string | undefined>;
+  /**
+   * Set false to leave PASSQUEST_DESKTOP_DATA unset, so the app resolves its
+   * own per-user data directory (the package smoke, whose data root is what
+   * the default path code produces); the desktop smoke points it at the
+   * scenario's own directory.
+   */
+  dataOverride?: boolean;
+  /**
+   * Extra trees the settings scenario searches for the credential it set. The
+   * package smoke passes the installed tree, which no credential may reach.
+   */
+  secretScanRoots?: readonly string[];
 }
 
 export interface ScenarioRun {
@@ -59,19 +84,21 @@ export function instant(text: string | undefined): number {
 export function launch(s: ScenarioRun, spec: LaunchSpec): Promise<Launched | null> {
   return launchPage({
     binary: s.shared.binary,
-    // The repository root is the working directory, so the app finds
-    // agent/*.mjs and runs them under Node the way the CLI smokes do.
-    cwd: s.shared.ctx.root,
+    // The repository root by default, so the app finds agent/*.mjs and runs
+    // them under Node the way the CLI smokes do; the package smoke runs in a
+    // temp directory, where only the installed copy is reachable.
+    cwd: s.shared.cwd ?? s.shared.ctx.root,
     dir: s.dir,
     label: spec.label,
     header: `desktop-smoke: ${s.id}/${spec.label}`,
     where: spec.label === s.id ? s.id : `${s.id} (${spec.label})`,
     script: spec.script,
     env: {
-      PASSQUEST_DESKTOP_DATA: s.dataDir,
+      ...(s.shared.dataOverride === false ? {} : { PASSQUEST_DESKTOP_DATA: s.dataDir }),
       PASSQUEST_DESKTOP_SECRET_SERVICE: s.service,
       PASSQUEST_PROVIDER_REGISTRY: s.shared.registry,
       PASSQUEST_ANKI_ENDPOINT: UNREACHABLE_ENDPOINT,
+      ...s.shared.launchEnv,
       ...spec.env,
     },
     check: s.check,

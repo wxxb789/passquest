@@ -22,9 +22,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        group: [core, desktop, self-test]
+        group: [core, desktop, package, self-test]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # The package job builds, installs and drives a real package, which takes
+    # longer than a gate group that builds no package; every other group keeps
+    # its 20.
+    timeout-minutes: ${{ matrix.group == 'package' && 60 || 20 }}
     env:
       GATE_GROUP: ${{ matrix.group }}
     steps:
@@ -58,6 +61,7 @@ jobs:
         run: >-
           sudo apt-get update &&
           sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb gnome-keyring libsecret-1-0 dbus-daemon
+          desktop-file-utils
 
       - name: Install harness dependencies
         run: bun install --frozen-lockfile
@@ -99,3 +103,21 @@ jobs:
           path: ${{ runner.temp }}/gate-output.log
           if-no-files-found: ignore
           retention-days: 14
+
+      # The package this run built, kept short-lived beside the gate output:
+      # an Actions artifact for inspection, never a release. It uploads after
+      # the gate step even when that step failed, so a package that failed its
+      # own smoke can be looked at without a re-run. The directories follow the
+      # runner's architecture (build/darwin-arm64 or -amd64), and a missing
+      # package fails this step rather than passing silently.
+      - name: Upload package
+        if: ${{ !cancelled() && matrix.group == 'package' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.os }}
+          path: |
+            build/windows-*/*-setup-*.exe
+            build/darwin-*/*.dmg
+            build/linux-*/*.AppImage
+          if-no-files-found: error
+          retention-days: 7

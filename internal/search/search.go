@@ -16,11 +16,12 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/wxxb789/passquest/internal/hostpaths"
 	"github.com/wxxb789/passquest/internal/hostproc"
 )
 
@@ -36,7 +37,7 @@ const (
 	// HostEnv overrides the search host path.
 	HostEnv = "PASSQUEST_SEARCH_HOST"
 	// NodeEnv overrides the Node executable.
-	NodeEnv = "PASSQUEST_NODE"
+	NodeEnv = hostpaths.NodeEnv
 
 	DefaultTimeoutMS = 10000
 	MinTimeoutMS     = 1000
@@ -237,6 +238,9 @@ type HostTransport struct {
 	Environ    func() []string
 	Getwd      func() (string, error)
 	Executable func() (string, error)
+	// Resources is the packaged resources directory; empty in a source
+	// checkout, where the lookups stay exactly as they were.
+	Resources string
 }
 
 func (t HostTransport) getenv(key string) string {
@@ -267,63 +271,25 @@ func (t HostTransport) executable() (string, error) {
 	return os.Executable()
 }
 
-// ResolveHost finds agent/search-host.mjs. An explicit PASSQUEST_SEARCH_HOST is
-// authoritative; otherwise the working directory, then the executable's
-// directory and its parent are checked. The returned path is absolute.
-func ResolveHost(getenv func(string) string, getwd func() (string, error), executablePath func() (string, error)) (string, error) {
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	if value := strings.TrimSpace(getenv(HostEnv)); value != "" {
-		path, err := filepath.Abs(value)
-		if err != nil {
-			return "", fmt.Errorf("search: resolve %s: %w", HostEnv, err)
-		}
-		if err := requireFile(path); err != nil {
-			return "", err
-		}
-		return path, nil
-	}
-
-	var candidates []string
-	if getwd == nil {
-		getwd = os.Getwd
-	}
-	if cwd, err := getwd(); err == nil {
-		candidates = append(candidates, filepath.Join(cwd, "agent", "search-host.mjs"))
-	}
-	if executablePath == nil {
-		executablePath = os.Executable
-	}
-	if exe, err := executablePath(); err == nil {
-		dir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(dir, "agent", "search-host.mjs"),
-			filepath.Join(dir, "..", "agent", "search-host.mjs"),
-		)
-	}
-	for _, candidate := range candidates {
-		absolute, err := filepath.Abs(candidate)
-		if err != nil {
-			continue
-		}
-		if requireFile(absolute) == nil {
-			return absolute, nil
-		}
-	}
-	return "", fmt.Errorf("search: host not found; set %s to agent/search-host.mjs (looked in %s)",
-		HostEnv, strings.Join(candidates, ", "))
+// searchHost is how the shared resolver names the search host.
+var searchHost = hostpaths.Host{
+	Prefix: "search",
+	Noun:   "host",
+	Env:    HostEnv,
+	Script: "search-host.mjs",
 }
 
-func requireFile(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("search: host %s: %w", path, err)
-	}
-	if info.IsDir() {
-		return fmt.Errorf("search: host %s is a directory", path)
-	}
-	return nil
+// ResolveHost finds agent/search-host.mjs. An explicit PASSQUEST_SEARCH_HOST is
+// authoritative; otherwise the packaged resources directory, the working
+// directory, then the executable's directory and its parent are checked. The
+// returned path is absolute.
+func ResolveHost(getenv func(string) string, getwd func() (string, error), executablePath func() (string, error)) (string, error) {
+	return hostpaths.ResolveHost(searchHost, hostpaths.Source{Getenv: getenv, Getwd: getwd, Executable: executablePath})
+}
+
+// source is the lookup input shared by host and Node resolution.
+func (t HostTransport) source() hostpaths.Source {
+	return hostpaths.Source{Getenv: t.Getenv, Getwd: t.Getwd, Executable: t.Executable, Resources: t.Resources}
 }
 
 // Search validates the request, runs the host with the inherited environment
@@ -348,7 +314,7 @@ func (t HostTransport) Search(ctx context.Context, req Request) (Result, error) 
 	requestSHA := hex.EncodeToString(sum[:])
 	requestBytes := len(body)
 
-	host, err := ResolveHost(t.Getenv, t.Getwd, t.Executable)
+	host, err := hostpaths.ResolveHost(searchHost, t.source())
 	if err != nil {
 		return Result{}, &ProviderError{
 			Code:        "search_unavailable",
@@ -357,10 +323,7 @@ func (t HostTransport) Search(ctx context.Context, req Request) (Result, error) 
 			RequestSize: requestBytes,
 		}
 	}
-	node := strings.TrimSpace(t.getenv(NodeEnv))
-	if node == "" {
-		node = "node"
-	}
+	node := hostpaths.ResolveNode(t.source(), runtime.GOOS)
 	payload, err := json.Marshal(hostRequest{
 		ProtocolVersion: ProtocolVersion,
 		Endpoint:        endpoint,

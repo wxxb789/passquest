@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/wxxb789/passquest/internal/hostpaths"
 	"github.com/wxxb789/passquest/internal/tutor"
 )
 
@@ -33,7 +34,7 @@ const (
 	// StoreEnv selects the Pi runtime SQLite file.
 	StoreEnv = "PASSQUEST_AGENT_STORE"
 	// NodeEnv overrides the Node binary; it is shared with the tutor host.
-	NodeEnv = "PASSQUEST_NODE"
+	NodeEnv = hostpaths.NodeEnv
 	// CredentialEnv is the only provider credential source, shared with the
 	// tutor host so one BYOK setup serves both agent paths.
 	CredentialEnv = tutor.CredentialEnv

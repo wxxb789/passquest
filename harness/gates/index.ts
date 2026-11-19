@@ -17,6 +17,7 @@ import { goldenContract } from "./golden-contract.ts";
 import { importSmoke } from "./import-smoke.ts";
 import { localOnly } from "./local-only.ts";
 import { noteSmoke } from "./note-smoke.ts";
+import { packageSmoke } from "./package-smoke.ts";
 import { portablePaths } from "./portable-paths.ts";
 import { providerSmoke } from "./provider-smoke.ts";
 import { secrets } from "./secrets.ts";
@@ -49,6 +50,7 @@ export const gates: Gate[] = [
   goldenContract,
   desktopSmoke,
   desktopUx,
+  packageSmoke,
   selfTest,
 ];
 
@@ -56,10 +58,13 @@ export const gates: Gate[] = [
  * The CI jobs: `bun run gate --group <name>` runs one group, in `gates` order. Every gate belongs to
  * exactly one group, and the workflow matrix lists exactly these names (both checked by
  * `groupProblems`), so no gate can drop out of CI. `core` needs Go, Bun and Node; `desktop` and
- * `self-test` also need a display and a Secret Service, since self-test feeds the desktop gates too.
+ * `self-test` also need a display and a Secret Service, since self-test feeds the desktop gates too;
+ * `package` builds and installs the platform's package and drives the installed app, so it needs
+ * the desktop prerequisites plus, on Linux, appimagetool's `desktop-file-utils`.
  */
 export const gateGroups: Record<string, readonly Gate[]> = {
-  core: gates.filter((gate) => gate !== desktopSmoke && gate !== desktopUx && gate !== selfTest),
+  core: gates.filter((gate) => gate !== desktopSmoke && gate !== desktopUx && gate !== packageSmoke && gate !== selfTest),
   desktop: [desktopSmoke, desktopUx],
+  package: [packageSmoke],
   "self-test": [selfTest],
 };

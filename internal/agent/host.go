@@ -10,9 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
+	"github.com/wxxb789/passquest/internal/hostpaths"
 	"github.com/wxxb789/passquest/internal/hostproc"
 	"github.com/wxxb789/passquest/internal/provider"
 )
@@ -125,13 +127,9 @@ type HostRunner struct {
 	Environ    func() []string
 	Getwd      func() (string, error)
 	Executable func() (string, error)
-}
-
-func (r HostRunner) getenv(key string) string {
-	if r.Getenv != nil {
-		return r.Getenv(key)
-	}
-	return os.Getenv(key)
+	// Resources is the packaged resources directory; empty in a source
+	// checkout, where the lookups stay exactly as they were.
+	Resources string
 }
 
 func (r HostRunner) environ() []string {
@@ -155,62 +153,24 @@ func (r HostRunner) executable() (string, error) {
 	return os.Executable()
 }
 
-// ResolveHost finds agent/durable-host.mjs. An explicit PASSQUEST_AGENT_HOST is
-// authoritative; otherwise the working directory, the executable's directory
-// and its parent are checked.
-func ResolveHost(getenv func(string) string, getwd func() (string, error), executablePath func() (string, error)) (string, error) {
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	if value := strings.TrimSpace(getenv(HostEnv)); value != "" {
-		path, err := filepath.Abs(value)
-		if err != nil {
-			return "", fmt.Errorf("agent: resolve %s: %w", HostEnv, err)
-		}
-		if err := requireHostFile(path); err != nil {
-			return "", err
-		}
-		return path, nil
-	}
-	var candidates []string
-	if getwd == nil {
-		getwd = os.Getwd
-	}
-	if cwd, err := getwd(); err == nil {
-		candidates = append(candidates, filepath.Join(cwd, "agent", "durable-host.mjs"))
-	}
-	if executablePath == nil {
-		executablePath = os.Executable
-	}
-	if exe, err := executablePath(); err == nil {
-		dir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(dir, "agent", "durable-host.mjs"),
-			filepath.Join(dir, "..", "agent", "durable-host.mjs"),
-		)
-	}
-	for _, candidate := range candidates {
-		absolute, err := filepath.Abs(candidate)
-		if err != nil {
-			continue
-		}
-		if requireHostFile(absolute) == nil {
-			return absolute, nil
-		}
-	}
-	return "", fmt.Errorf("agent: durable host not found; set %s to agent/durable-host.mjs (looked in %s)",
-		HostEnv, strings.Join(candidates, ", "))
+// durableHost is how the shared resolver names the durable agent host.
+var durableHost = hostpaths.Host{
+	Prefix: "agent",
+	Noun:   "durable host",
+	Env:    HostEnv,
+	Script: "durable-host.mjs",
 }
 
-func requireHostFile(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("agent: durable host %s: %w", path, err)
-	}
-	if info.IsDir() {
-		return fmt.Errorf("agent: durable host %s is a directory", path)
-	}
-	return nil
+// ResolveHost finds agent/durable-host.mjs. An explicit PASSQUEST_AGENT_HOST is
+// authoritative; otherwise the packaged resources directory, the working
+// directory, the executable's directory and its parent are checked.
+func ResolveHost(getenv func(string) string, getwd func() (string, error), executablePath func() (string, error)) (string, error) {
+	return hostpaths.ResolveHost(durableHost, hostpaths.Source{Getenv: getenv, Getwd: getwd, Executable: executablePath})
+}
+
+// source is the lookup input shared by host and Node resolution.
+func (r HostRunner) source() hostpaths.Source {
+	return hostpaths.Source{Getenv: r.Getenv, Getwd: r.Getwd, Executable: r.Executable, Resources: r.Resources}
 }
 
 // Run validates the request, starts the host and waits for one JSON document.
@@ -220,14 +180,11 @@ func (r HostRunner) Run(ctx context.Context, request HostRequest) (RunOutcome, e
 	if err := ValidateHostRequest(request); err != nil {
 		return RunOutcome{}, &ProtocolError{Message: err.Error()}
 	}
-	host, err := ResolveHost(r.Getenv, r.Getwd, r.Executable)
+	host, err := hostpaths.ResolveHost(durableHost, r.source())
 	if err != nil {
 		return RunOutcome{}, &UnavailableError{Err: err}
 	}
-	node := strings.TrimSpace(r.getenv(NodeEnv))
-	if node == "" {
-		node = "node"
-	}
+	node := hostpaths.ResolveNode(r.source(), runtime.GOOS)
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return RunOutcome{}, fmt.Errorf("agent: encode host request: %w", err)

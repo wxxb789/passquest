@@ -487,6 +487,11 @@ Entry format:
   material install problem on a target platform.
 - Updated (2026-11-18): the pins are now 1.5.2 (`agent/package.json`); the store location and the
   reversal are unchanged.
+- Revisited (2026-11-19): goal 0013 bundles the pinned Node 22.23.5 runtime, the four host scripts and
+  the hosts' hoisted production `node_modules` (`@earendil-works/*` 1.5.2) into every package; the
+  installed app's coach and refinement calls run through that runtime, and with it deleted every
+  agent surface — the durable brief included — reports `node_unavailable` with one action. The store
+  location and the reversal are unchanged.
 
 ### Q-0006-03 — How is one run paused, resumed and cancelled across processes?
 - Status: decided(default taken)
@@ -736,6 +741,9 @@ Entry format:
   tutor host. Reverse by replacing `anki.HostTransport` behind the same `anki.Transport` interface.
 - Revisit when: goal 0013 packages the desktop app with its own runtime lifecycle, or Node is absent
   on a target platform.
+- Revisited (2026-11-19): each package carries the pinned Node runtime and `agent/anki-host.mjs`; the
+  package smoke pushes a note through the installed app's own bundled runtime and host, and with the
+  runtime deleted the push reports `node_unavailable` with one action while the queue keeps its note.
 
 ### Q-0007-08 — Is every imported source restricted for notes, and may accept write before consent?
 - Status: decided(default taken)
@@ -1177,6 +1185,11 @@ Entry format:
 - Default taken: (A). The CLI default is unchanged. Onboarding and moving an existing CLI database are goal
   0013 work.
 - Revisit when: goal 0013 defines first-run data location.
+- Revisited (2026-11-19): goal 0013 kept the per-user directory (`%APPDATA%\Pass Quest`,
+  `~/Library/Application Support/Pass Quest`, `$XDG_CONFIG_HOME/Pass Quest`) with the
+  `PASSQUEST_DESKTOP_DATA` override, and a default directory that lands inside the app's own files is
+  now refused before anything is written; moving an existing CLI database stays out of scope (the
+  plan's out-of-scope list). See Q-0013-04.
 
 ### Q-0011-05 — What is a "hint" in ordinary practice?
 - Status: decided(default taken)
@@ -1237,6 +1250,10 @@ Entry format:
   different overridden directory is an independent instance, so a smoke run can never hand its commands to the
   learner's window.
 - Revisit when: goal 0013 signs and packages the app, which may fix the identifier for good.
+- Revisited (2026-11-19): the MyGo package build keeps the name "Pass Quest" and the identifier
+  `com.github.wxxb789.passquest` (`mygo.json`, pinned by `TestPackagingIdentity`); the packages ship
+  unsigned, so the identifier is unchanged, and an overridden `PASSQUEST_DESKTOP_DATA` still gets the
+  hash-suffixed instance name.
 
 ### Q-0011-11 — How long does quit wait for in-flight work?
 - Status: decided(default taken)
@@ -1279,6 +1296,10 @@ Entry format:
   (C) GUI binary that attaches to a parent console when one exists.
 - Default taken: (A) for goal 0011, which ships no installer.
 - Revisit when: goal 0013 packages the app.
+- Revisited (2026-11-19): the packaged Windows binary is GUI-subsystem (`-H=windowsgui`) and keeps the
+  CLI branch in the same executable — `agent record-step` through it returns JSON over an inherited
+  pipe (verified on Windows, P4) and the upgrade case runs `note accept`/`note push` through the
+  installed binary — so no second console binary ships and no console is attached.
 
 ### Q-0011-15 — Does the CLI lose an on-screen assessment item when `assess report` runs first after the window elapsed?
 - Status: open
@@ -1415,6 +1436,11 @@ Entry format:
   The owner may rebalance the groups.
 - Revisit when: the first split CI run shows the desktop or self-test builds slower than before (then key the
   cache per group), or the per-gate timings show one group as the bottleneck.
+- Updated (2026-11-18): goal 0013's package gate added a fourth group, `package` (the package smoke, gate 24).
+  Its job builds, installs and drives a real package on its own OS, so the matrix gives it a 60-minute timeout
+  (`timeout-minutes: ${{ matrix.group == 'package' && 60 || 20 }}`) while every other group keeps its 20, and it
+  uploads the package this run built as the 7-day `package-<os>` artifact. The four jobs of one OS still share
+  setup-go's cache key, with the same disclosure as above.
 
 ### Q-0012-09 — Should the gate run independent gates in parallel in one process?
 - Status: decided(default taken)
@@ -1439,3 +1465,165 @@ Entry format:
 - Evidence since (A): `go test ./internal/store -count=20` passed locally (2026-11-17), and the go-test gate passed
   in the first split CI run on ubuntu, macOS and Windows.
 - Revisit when: go-test flakes on Windows CI; then take (B).
+
+### Q-0013-01 — Which Windows installer technology does the package use?
+- Status: decided(default taken)
+- Context: the owner allowed MSI or NSIS (2026-11-18); the choice had to come from the pinned
+  toolchain, install per user without admin rights, and offer CI a silent install to drive.
+- Options considered: (A) the NSIS installer MyGo builds; (B) an MSI through WiX; (C) Inno Setup.
+- Default taken: (A). `go tool mygo build` writes the NSIS installer from `mygo.json` and, on Windows,
+  downloads NSIS 3.13 with its SHA-256 checked; it installs per user to
+  `%LOCALAPPDATA%\Programs\Pass Quest` (`RequestExecutionLevel user`), registers `Uninstall.exe` in
+  Settings > Apps, creates the Start menu shortcut and offers the desktop one, and takes `/S` and
+  `/D=` for the package smoke. An MSI or Inno installer would re-implement what MyGo already ships
+  (shortcuts, the uninstall key, signing and update hooks) and add a tool to every runner. Reverse by
+  building a WiX or Inno installer from MyGo's output; the app, its resources and its data directory
+  do not change.
+- Revisit when: the owner needs an enterprise deployment (MSI/GPO), or MyGo drops or breaks its NSIS
+  output.
+
+### Q-0013-02 — Does uninstalling remove the learner's data?
+- Status: decided(default taken)
+- Context: the uninstaller could delete anything under the install directory, while Done-when 3
+  requires the learner's evidence to survive an uninstall and the guide to say where the data is.
+- Options considered: (A) uninstall keeps the data, and the guide says where it is; (B) the uninstaller
+  prompts before deleting it; (C) the uninstaller deletes it.
+- Default taken: (A). MyGo's Uninstall section removes `$INSTDIR`, its shortcuts and the HKCU uninstall
+  key only (`cmd/mygo/nsis.go`), so `%APPDATA%\Pass Quest` is untouched, and
+  [`install.md`](../install.md) documents the data directory and its removal. The package smoke's
+  uninstall is a cleanup sanity check, not proof — an uninstaller deleting a data directory would
+  resolve `$APPDATA` through the OS shell folders and escape the run's temp root — so the guarantee is
+  the study case plus that uninstall section, as disclosed. Reverse by adding an uninstall hook if the
+  owner wants a delete prompt.
+- Revisit when: the owner wants a delete-on-uninstall choice, or MyGo's uninstall section changes.
+
+### Q-0013-03 — Which Node runtime does a package bundle, and how is it pinned?
+- Status: decided(default taken)
+- Context: the owner chose a bundled Node runtime (2026-11-18) so coach, brief, search and Anki work
+  right after install with no Node present; the build must not resolve a version at build time or
+  trust an unfixed download.
+- Options considered: (A) bundle the official archive per platform with its SHA-256 from
+  `SHASUMS256.txt`; (B) require a system Node; (C) bundle a self-built Node.
+- Default taken: (A). Node 22.23.5 — the newest 22 LTS that `mise.toml` and the hosts' `engines`
+  accept — for `win32-x64`, `darwin-arm64`, `darwin-x64` and `linux-x64` (`NODE_PINS` in
+  `harness/lib/package.ts`); each SHA-256 is nodejs.org's `SHASUMS256.txt` value and is checked again
+  on download, and a target with no pin fails instead of falling back. `PASSQUEST_NODE` still
+  overrides the bundled runtime. Reverse by changing `NODE_PINS` (or dropping `node/` from
+  `mygo.json`'s resources) and re-running the package gate.
+- Revisit when: Node 22 leaves support, another target's pin is added, or the owner decides a system
+  Node is required.
+
+### Q-0013-04 — Where does the packaged app keep its data?
+- Status: decided(default taken)
+- Context: Q-0011-04 left the first-run data location to this goal; the data must be per user, survive
+  a reinstall and an uninstall (Done-when 3), and never sit inside the install, which an upgrade
+  replaces and an uninstall removes.
+- Options considered: (A) `PathUserData` (`os.UserConfigDir()` joined with the app name) with
+  `PASSQUEST_DESKTOP_DATA` overriding; (B) a directory beside the executable; (C) `~/.local/share` on
+  Linux for XDG familiarity.
+- Default taken: (A). `%APPDATA%\Pass Quest` (Roaming) on Windows,
+  `~/Library/Application Support/Pass Quest` on macOS, `$XDG_CONFIG_HOME/Pass Quest` (default
+  `~/.config/Pass Quest`) on Linux; the database is `passquest.sqlite` inside it, with `PASSQUEST_DB`
+  overriding the file. A default directory that lands inside the app's own files (the executable's
+  directory or the resources directory) is refused before anything is created, naming
+  `PASSQUEST_DESKTOP_DATA`; a directory that is the user's home or one of its ancestors is exempt,
+  because a loose binary there is not an install. Reverse by changing the resolver in
+  `internal/desktop/paths.go` and the harness's `dataRootFor`.
+- Revisit when: the owner prefers `~/.local/share` on Linux, or a learner meets a path problem in real
+  use.
+
+### Q-0013-05 — Which tools build the Linux AppImage, and how are they pinned?
+- Status: decided(default taken)
+- Context: MyGo builds no AppImage (the owner chose an extra tool, 2026-11-18); a build-time download
+  must be pinned by version and SHA-256, and appimagetool otherwise downloads the AppImage runtime
+  from the type2-runtime project's rolling "continuous" release at build time.
+- Options considered: (A) appimagetool 1.9.1 with the type2 runtime pinned to its versioned 20251108
+  release asset; (B) the rolling continuous appimagetool; (C) a self-built runtime.
+- Default taken: (A). `harness/lib/appimage.ts` pins appimagetool 1.9.1 (`appimagetool-x86_64.AppImage`)
+  and type2-runtime 20251108 (`runtime-x86_64`), each SHA-256 checked, and passes the runtime with
+  `--runtime-file`, so nothing is fetched unpinned. The step is pinned to linux-x64 and refuses
+  another host or target rather than reporting a silent success; no FUSE is assumed — the tool runs
+  from its own extraction (`APPIMAGE_EXTRACT_AND_RUN=1`), the built image is verified by unpacking
+  it with `--appimage-extract` and checking the tree, and the CI package job launches it with
+  `APPIMAGE_EXTRACT_AND_RUN=1`. Reverse by bumping the two constants.
+- Revisit when: appimagetool publishes a newer versioned release, or a second Linux architecture is
+  claimed.
+
+### Q-0013-06 — What is the "previous build" for the forward-upgrade check before any release exists?
+- Status: decided(default taken)
+- Context: Done-when 5 opens a database written by the build just before this goal; no release is
+  tagged, and a check that built this tree twice would prove nothing.
+- Options considered: (A) one recorded commit — the last `main` commit before this goal's work;
+  (B) the merge base with `main` resolved at run time; (C) skip the check until a release exists.
+- Default taken: (A). `PREVIOUS_RELEASE_COMMIT` in `harness/gates/package-smoke/upgrade.ts` is
+  `357b4c6`, the merge of PR #28 (the MyGo 0.10.0 / Pi 1.5.2 upgrade) and the last `main` commit
+  before goal 0013; the gate builds that commit's CLI in a `git worktree`, fetching the commit by full
+  id when the depth-2 checkout does not hold it, and has it write the learner data. The base and this
+  build both persist schema version 17, so the case proves a same-version reopen by the packaged build
+  — no migration statement runs — and the two `user_version` values are read from the files at run
+  time and printed in the pass line, a disclosure repeated in the evidence record. When a release is
+  tagged, the constant becomes that tag's commit. Reverse by pointing the constant at another base
+  commit.
+- Revisit when: the first release is tagged, or the store's schema changes and a migration must be
+  proven.
+
+### Q-0013-07 — What happens to the package CI artifacts, and when is one a release?
+- Status: decided(default taken)
+- Context: the goal keeps each run's package for evidence, and publishing a GitHub Release or any
+  other public download needs the owner's explicit go-ahead at the time.
+- Options considered: (A) the package job uploads the run's package as a 7-day workflow artifact,
+  never a release; (B) no artifact, rebuilt on demand; (C) a GitHub release per green run.
+- Default taken: (A). The package job uploads `package-windows-latest`, `package-macos-latest` or
+  `package-ubuntu-latest` (`retention-days: 7`, and a missing package fails the upload rather than
+  passing silently); a failed job keeps its full gate output as `gate-output-<os>-<group>` for 14
+  days. Reverse by changing the retention or removing the upload step; (C) needs the owner's
+  go-ahead.
+- Revisit when: the owner authorizes a release, or an artifact must outlive 7 days for an audit.
+
+### Q-0013-08 — Why does the macOS credential case of the package smoke keep the real HOME?
+- Status: decided(default taken)
+- Context: the package smoke launches the installed app with an empty per-user root so the default
+  data path runs; on macOS the login keychain is a file-based store the app finds through the real
+  `~/Library`, and a temp HOME detaches it from that store.
+- Options considered: (A) keep the real HOME for the credential case and move only its data root with
+  `PASSQUEST_DESKTOP_DATA`; (B) redirect HOME there too and drop the macOS credential case;
+  (C) provision a temporary keychain for the run.
+- Default taken: (A). Every other case keeps the redirected HOME; the credential case — which stores a
+  real entry through the window, proves it is in no file under the data root or the installed tree,
+  then clears it — runs with the real HOME and a data root under the gate's temp tree. Its own
+  cleanup deletes the entry on every exit path. Reverse by standing up a temporary keychain before the
+  case.
+- Revisit when: the gate moves to a temporary keychain, or the macOS runner stops exposing a usable
+  login keychain.
+
+### Q-0013-09 — What does the package gate require of a developer's Windows machine?
+- Status: decided(default taken)
+- Context: the NSIS installer writes the same HKCU uninstall key and the same Start menu and desktop
+  shortcuts as a learner's copy, and neither `/D=` nor the run's environment redirection moves the
+  shell folders, so a run could overwrite and then delete a real install's registration and
+  shortcuts.
+- Options considered: (A) refuse to install while a real copy is registered or one of its shortcuts
+  exists; (B) install anyway and let the cleanup remove what it overwrote; (C) install under a
+  machine-wide prefix.
+- Default taken: (A). Before the installer runs, the gate reads
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.github.wxxb789.passquest` — refusing
+  when its `InstallLocation` is outside the run's temp tree — and checks `Pass Quest.lnk` in the real
+  `Programs` and `Desktop` shell folders; either fails the gate with the uninstall instruction, and an
+  unreadable shell folder is a refusal, not an assumption. A temp path that holds a space moves the
+  install prefix to a short directory created under the drive root, because NSIS ignores a quoted
+  `/D=`. The gate's own install is removed on every exit path it controls; a run killed from outside
+  can leave it registered, and the next run then refuses until it is uninstalled. Reverse by making
+  the check advisory.
+- Revisit when: the gate can run in a disposable VM, or the refusal blocks a legitimate developer
+  workflow.
+
+### Q-0013-10 — Which macOS version is the package's minimum?
+- Status: decided(default taken)
+- Context: the Go 1.27 toolchain links darwin binaries with `LC_BUILD_VERSION minos 13.0`, while
+  MyGo 0.10.0 writes `LSMinimumSystemVersion` 12.0 into `Info.plist` unless told otherwise, so a
+  macOS 12 Mac would accept a bundle whose binary it cannot run.
+- Options considered: (A) declare 13.0 in `mygo.json` (`macos.minimumSystemVersion`) and document
+  macOS 13 as the minimum; (B) build with an older Go toolchain to keep 12; (C) leave the default.
+- Default taken: (A). `TestPackagingIdentity` pins the value, `docs/install.md` names macOS 13
+  (Ventura), and CI proves only `macos-latest`. Reverse by building with an older Go toolchain.
+- Revisit when: the Go toolchain raises its macOS minimum again, or a learner needs an older macOS.

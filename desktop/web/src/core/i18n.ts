@@ -315,6 +315,7 @@ const ERRORS: Record<string, Pair> = {
   host_error: ['本地宿主出错', 'The local host failed'],
   host_protocol: ['本地宿主的回复无法读取', 'The local host reply could not be read'],
   storage_error: ['本地存储出错', 'Local storage failed'],
+  database_newer: ['数据来自更新的 Pass Quest', 'This data is from a newer Pass Quest'],
   search_unavailable: ['搜索不可用', 'Search is not available'],
   nothing_to_find: ['没有可查找的内容', 'Nothing to search for'],
   candidate_limit: ['候选结果超出上限', 'Too many candidates'],
@@ -412,6 +413,7 @@ const NEXT: Record<string, Pair> = {
   pool_floor: ['导入并审核更多来源，未见题达到下限后再测评。', 'Import and review more sources until the unseen pool reaches its floor.'],
   pool_short: ['导入并审核更多来源，未见题达到下限后再测评。', 'Import and review more sources until the unseen pool reaches its floor.'],
   credential_store_unavailable: ['这台机器只能用环境变量提供密钥。', 'On this machine a key can only come from an environment variable.'],
+  database_newer: ['安装写入这些数据的更新版本；当前版本不会改动它。', 'Install the newer Pass Quest that wrote this data; this version will not change it.'],
 };
 export const nextStep = (code: string): string | null => (NEXT[code] ? TP(NEXT[code]) : null);
 /** Codes whose next step is in Settings: a failure line offers an "Open Settings" button for them. */

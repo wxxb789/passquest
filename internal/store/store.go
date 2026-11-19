@@ -23,6 +23,23 @@ import (
 // SchemaVersion is the persisted schema this build understands.
 const SchemaVersion = 17
 
+// SchemaNewerError reports a database written by a newer Pass Quest: its
+// schema version is ahead of the highest this build migrates to. The version
+// check runs before any migration, so a refused Open leaves the file as the
+// build that wrote it left it; callers distinguish this from other open
+// failures to say what the learner should do.
+type SchemaNewerError struct {
+	// Version is the schema version the database declares.
+	Version int
+	// Supported is the highest schema version this build supports
+	// (SchemaVersion).
+	Supported int
+}
+
+func (e *SchemaNewerError) Error() string {
+	return fmt.Sprintf("store: database schema version %d is newer than supported version %d", e.Version, e.Supported)
+}
+
 // schemaV1 is the original version-1 shape. Migrations apply each version in
 // order, so a version-0 database gets both steps and a version-1 database gets
 // only the insert guard and the composite index.
@@ -204,7 +221,7 @@ func migrate(db *sql.DB) error {
 	}
 	switch {
 	case version > SchemaVersion:
-		return fmt.Errorf("store: database schema version %d is newer than supported version %d", version, SchemaVersion)
+		return &SchemaNewerError{Version: version, Supported: SchemaVersion}
 	case version == SchemaVersion:
 		return nil
 	}
