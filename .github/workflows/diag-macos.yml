@@ -1,0 +1,39 @@
+name: diag-macos-script-error
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    name: diag (${{ matrix.group }} #${{ matrix.rep }})
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [package, desktop]
+        rep: [1, 2, 3, 4]
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: bun install --frozen-lockfile
+      - name: Gate group
+        shell: bash
+        run: bun run gate --group "${{ matrix.group }}" 2>&1 | tee "$RUNNER_TEMP/gate-output.log"
+      - if: always()
+        shell: bash
+        run: grep -E "Script error|DIAG timer|FAIL  " "$RUNNER_TEMP/gate-output.log" || true

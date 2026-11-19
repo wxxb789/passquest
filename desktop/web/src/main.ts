@@ -30,6 +30,27 @@ function errorBar(message: string): void {
 window.onerror = (msg, _src, line, col) => {
   errorBar(`${String(msg)} @${line ?? 0}:${col ?? 0}`);
 };
+// DIAGNOSTIC (not for merge): MyGo's injected bridge rethrows a Go-event listener's error through
+// setTimeout from its own user script, which WebKit reports as an opaque "Script error.". Catch
+// the original error here, name it with its stack in the bar, then rethrow unchanged.
+{
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  (window as unknown as { setTimeout: unknown }).setTimeout = (handler: unknown, ms?: number, ...rest: unknown[]) =>
+    nativeSetTimeout(
+      typeof handler === 'function'
+        ? () => {
+            try {
+              (handler as (...a: unknown[]) => void)(...rest);
+            } catch (error) {
+              const stack = error instanceof Error ? `${error.name}: ${error.message} | ${(error.stack ?? '').replace(/\s+/g, ' ').slice(0, 220)}` : String(error);
+              errorBar(`DIAG timer: ${stack}`);
+              throw error;
+            }
+          }
+        : (handler as string),
+      ms,
+    );
+}
 window.addEventListener('unhandledrejection', (e) => errorBar(String(e.reason instanceof Error ? e.reason.message : e.reason)));
 
 function delegate(): void {
