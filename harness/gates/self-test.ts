@@ -30,7 +30,12 @@ import { goldenContractCases, goldenContractPassCases } from "./self-test/golden
 import { importSmokeCases } from "./self-test/import-smoke.cases.ts";
 import { localOnlyCases, localOnlyPassCases } from "./self-test/local-only.cases.ts";
 import { noteSmokeCases } from "./self-test/note-smoke.cases.ts";
-import { packageNamingProblem, packageSmokeCases, packageSmokePassCases } from "./self-test/package-smoke.cases.ts";
+import {
+  packageNamingProblem,
+  packageSmokeCases,
+  packageSmokePassCases,
+  upgradeComparisonProblem,
+} from "./self-test/package-smoke.cases.ts";
 import { portablePathsCases } from "./self-test/portable-paths.cases.ts";
 import { providerSmokeCases } from "./self-test/provider-smoke.cases.ts";
 import { secretsCases } from "./self-test/secrets.cases.ts";
@@ -327,6 +332,7 @@ export const selfTest: Gate = {
       pageScriptEscapeProblem,
       uxCoverageProblem,
       packageNamingProblem,
+      upgradeComparisonProblem,
       () => gateGroupProblem(gates, gateGroups, ctx.root),
     ]) {
       const problem = unit();

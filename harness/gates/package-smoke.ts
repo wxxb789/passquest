@@ -54,6 +54,15 @@
  * the install prefix comes from a short directory under the drive root,
  * because NSIS ignores a quoted `/D=`.
  *
+ * The forward-upgrade case (`upgrade`, P7) builds the previous release's CLI,
+ * creates learner data through it, opens that data root with the installed
+ * app, compares every old record field by field, flushes a queued note
+ * through the app's own notes room and revises a pushed note through this
+ * tree's CLI, against an id-persisting Anki stub, and proves a database from
+ * a newer schema is refused with its bytes untouched;
+ * `package-smoke/upgrade.ts` carries the whole sequence, its base-commit
+ * constant and its disclosed limits.
+ *
  * Disclosed limits: on Linux the runner has no libfuse2, so the AppImage runs
  * via `APPIMAGE_EXTRACT_AND_RUN=1` (the runtime's extract-and-run tree is
  * pointed into the gate's temp tree with TMPDIR and kept for the scan by
@@ -83,6 +92,7 @@ import type { InstalledApp } from "./package-smoke/install.ts";
 import { scanPackageContents } from "./package-smoke/contents.ts";
 import type { PackageIdentity } from "./package-smoke/contents.ts";
 import { unavailable } from "./package-smoke/unavailable.ts";
+import { upgradeCase } from "./package-smoke/upgrade.ts";
 import { anki } from "./desktop-smoke/anki.ts";
 import { assess } from "./desktop-smoke/assess.ts";
 import { boot } from "./desktop-smoke/boot.ts";
@@ -98,7 +108,7 @@ import { settings } from "./desktop-smoke/settings.ts";
  * earlier ones proved. The content scan runs first, before any launch, when
  * the tree still holds exactly what the package shipped.
  */
-const CASES = ["contents", "layout", "study", "agents", "anki", "credential", "broken"] as const;
+const CASES = ["contents", "layout", "study", "agents", "anki", "upgrade", "credential", "broken"] as const;
 
 export interface PackageSmokeOptions {
   /**
@@ -278,6 +288,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
   let packageLine = "";
   let studyData = "";
   let scanLine = "";
+  let upgradeLine = "";
   try {
     if (options.installedTree !== undefined) {
       const tree = path.resolve(ctx.root, options.installedTree);
@@ -322,7 +333,8 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       cliBinary = built.binary;
       return true;
     };
-    const needsCli = cases.includes("study") || cases.includes("agents") || cases.includes("anki") || cases.includes("credential") || cases.includes("broken");
+    const needsCli =
+      cases.includes("study") || cases.includes("agents") || cases.includes("anki") || cases.includes("upgrade") || cases.includes("credential") || cases.includes("broken");
     const ready = app !== undefined && (!needsCli || (await ensureCli()));
 
     /** One case's launch site: its own temp cwd, per-user root and credential service. */
@@ -405,6 +417,15 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       anki: async () => {
         await anki.run(siteOf("anki", app!.binary, app!.launchEnv).run);
       },
+      upgrade: async () => {
+        upgradeLine = await upgradeCase({
+          ctx,
+          check,
+          temp,
+          cli: cliBinary,
+          site: (id) => siteOf(id, app!.binary, app!.launchEnv),
+        });
+      },
       credential: async () => {
         // macOS: the credential store is the file-based login keychain, found
         // through ~/Library, so the real HOME stays and only the data root
@@ -464,5 +485,9 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
     if (!(await removeTree(temp))) checks.push(`cleanup: could not remove the temp tree ${temp}`);
   }
   if (checks.length > 0) return fail(checks);
-  return pass(`${assertions} assertions over ${cases.join(", ")}; ${packageLine}${scanLine === "" ? "" : `; ${scanLine}`}`);
+  return pass(
+    `${assertions} assertions over ${cases.join(", ")}; ${packageLine}${scanLine === "" ? "" : `; ${scanLine}`}${
+      upgradeLine === "" ? "" : `; ${upgradeLine}`
+    }`,
+  );
 }
