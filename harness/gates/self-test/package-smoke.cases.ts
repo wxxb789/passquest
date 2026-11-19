@@ -239,7 +239,7 @@ func main() {
 		}
 	}
 	document, _ := json.Marshal(map[string]any{"ok": true, "value": map[string]any{
-		"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": true,
+		"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": true, "probe": "clear", "opaqueErrors": 0,
 	}})
 	_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), document, 0o600)
 }

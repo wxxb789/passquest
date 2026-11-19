@@ -1627,3 +1627,29 @@ Entry format:
 - Default taken: (A). `TestPackagingIdentity` pins the value, `docs/install.md` names macOS 13
   (Ventura), and CI proves only `macos-latest`. Reverse by building with an older Go toolchain.
 - Revisit when: the Go toolchain raises its macOS minimum again, or a learner needs an older macOS.
+
+### Q-0013-11 — How does the window treat an opaque, source-less `Script error.`?
+- Status: decided(default taken)
+- Context: on macOS only, the desktop window intermittently (25-50% of CI runs; diagnosed
+  2026-11-19) showed the red `JS error: Script error. @0:0` bar about 1.5 s after load, failing
+  desktop-ux (`page-error`) and the desktop/package smoke boot check. Diagnostic CI runs on PR #30
+  (44472253919, 44475350810, 44479262910) showed `window.onerror` received `msg="Script error."`,
+  `src=""`, line 0, col 0, `error=null`, while a probe error thrown from our own bundle always
+  reached `onerror` in full and wrapping every listener, observer, timer, rAF and microtask in the
+  bundle caught nothing: the error comes from a script MyGo injects or evaluates (likely its
+  unguarded native `__mygo.receive` eval), which WKWebView reports with no origin. The app kept
+  working, and MyGo 0.10.0 (latest) has no fix.
+- Options considered: (A) classify an opaque, source-less error as a non-app error — counted in
+  `window.__pqErrors.opaque`, no red bar — and guard the classification with a permanent
+  desktop-smoke probe on every OS; (B) keep showing the bar and accept the macOS flake; (C) filter
+  only the exact string with no guard.
+- Default taken: (A). An error is opaque only when the message is exactly `Script error.` (or
+  `Script error`), `src` is empty/undefined, line 0/undefined, col 0/undefined and the error object
+  null/undefined; anything else — including `unhandledrejection` — shows the bar exactly as before.
+  `desktop/web/src/core/errors.ts` owns the classification, the bar and the probe; the desktop
+  smoke (and package smoke, which reuses the boot scenario) calls `window.__pqErrors.startProbe()`
+  on every boot and fails the run unless the bundle's own error reaches `window.onerror` in full,
+  so the classification can never hide a real app error. Reverse by removing the opaque branch; the
+  probe then always arrives in full and stays green.
+- Revisit when: MyGo guards its `__mygo.receive` eval or reports the underlying error, or the smoke
+  probe fails on a platform.

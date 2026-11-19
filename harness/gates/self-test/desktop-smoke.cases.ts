@@ -22,13 +22,26 @@ export function desktopSmokeCases(): BrokenCase[] {
       label: "desktop window whose Today stays blank",
       files: {
         "go.mod": GO_MOD,
-        "cmd/passquest-desktop/main.go": `package main\n\nimport "os"\n\nfunc main() {\n\tblank := \`{"ok":true,"value":{"textLength":0,"stageChildren":0,"stageTextLength":0,"errorBars":0,"ready":null}}\`\n\t_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), []byte(blank), 0o600)\n}\n`,
+        "cmd/passquest-desktop/main.go": `package main\n\nimport "os"\n\nfunc main() {\n\tblank := \`{"ok":true,"value":{"textLength":0,"stageChildren":0,"stageTextLength":0,"errorBars":0,"ready":null,"probe":"clear","opaqueErrors":0}}\`\n\t_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), []byte(blank), 0o600)\n}\n`,
         "desktop/web/src/main.ts": 'document.title = "selftest";\n',
       },
       postFail: (failures) =>
         failures.some((line) => line.startsWith("boot: blank Today"))
           ? null
           : `desktop-smoke: did not report the blank window: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      gate: desktopSmoke,
+      label: "desktop window whose boot probe never reaches window.onerror",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest-desktop/main.go": `package main\n\nimport "os"\n\nfunc main() {\n\tstuck := \`{"ok":true,"value":{"textLength":900,"stageChildren":3,"stageTextLength":800,"errorBars":0,"ready":true,"probe":"pending","opaqueErrors":0}}\`\n\t_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), []byte(stuck), 0o600)\n}\n`,
+        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("boot: the bundle's own error did not reach window.onerror in full"))
+          ? null
+          : `desktop-smoke: did not report the stuck probe: ${failures.slice(0, 3).join("; ")}`,
     },
     {
       gate: desktopSmoke,
@@ -77,7 +90,7 @@ func main() {
 	script, _ := os.ReadFile(os.Getenv("PASSQUEST_DESKTOP_SCRIPT"))
 	switch {
 	case strings.Contains(string(script), "desktop-smoke: boot/"):
-		write(map[string]any{"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": true})
+		write(map[string]any{"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": true, "probe": "clear", "opaqueErrors": 0})
 	case strings.Contains(string(script), "desktop-smoke: practice/"):
 		write(map[string]any{"answers": []any{map[string]any{
 			"item":      map[string]string{"token": "pt-selftest", "question": "q1", "presentedAt": "2026-01-01T00:00:00Z"},
