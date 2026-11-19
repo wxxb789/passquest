@@ -30,7 +30,7 @@ import { goldenContractCases, goldenContractPassCases } from "./self-test/golden
 import { importSmokeCases } from "./self-test/import-smoke.cases.ts";
 import { localOnlyCases, localOnlyPassCases } from "./self-test/local-only.cases.ts";
 import { noteSmokeCases } from "./self-test/note-smoke.cases.ts";
-import { packageNamingProblem, packageSmokeCases } from "./self-test/package-smoke.cases.ts";
+import { packageNamingProblem, packageSmokeCases, packageSmokePassCases } from "./self-test/package-smoke.cases.ts";
 import { portablePathsCases } from "./self-test/portable-paths.cases.ts";
 import { providerSmokeCases } from "./self-test/provider-smoke.cases.ts";
 import { secretsCases } from "./self-test/secrets.cases.ts";
@@ -247,7 +247,7 @@ function brokenCases(): BrokenCase[] {
 
 /** Fixtures the gates must accept; a check that always fails is also a defect. */
 function passCases(): PassCase[] {
-  return [...goldenContractPassCases(), ...localOnlyPassCases()];
+  return [...goldenContractPassCases(), ...localOnlyPassCases(), ...packageSmokePassCases()];
 }
 
 let fixtures = 0;

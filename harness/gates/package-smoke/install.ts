@@ -39,7 +39,7 @@
  *   `--appimage-extract` copy beside the prefix is what the broken-runtime
  *   case edits: the image file itself is read-only.
  */
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readlinkSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import { sleep, tail } from "../../lib/desktop-page.ts";
@@ -49,6 +49,14 @@ import { executable, run } from "../../lib/process.ts";
 
 /** The four host scripts every package carries, as internal/hostpaths looks them up. */
 export const HOSTS = ["tutor-host.mjs", "anki-host.mjs", "search-host.mjs", "durable-host.mjs"] as const;
+
+/** One entry of a mounted image's root, as the content scan checks the listing. */
+export interface DmgRootEntry {
+  /** The entry's name in the image's root. */
+  name: string;
+  /** What a symlink points at; "" for a file or a directory. */
+  link: string;
+}
 
 export interface InstalledApp {
   /** The launcher the smoke hook drives: the installed app itself. */
@@ -73,6 +81,13 @@ export interface InstalledApp {
   breakRuntime: () => string;
   /** Removes the installation; the messages name anything that survived. */
   cleanup: () => Promise<string[]>;
+  /**
+   * macOS: the mounted `.dmg`'s root entries at install time — the `.app`, the
+   * `/Applications` link, and the `.DS_Store` and `.VolumeIcon.icns` MyGo
+   * writes (cmd/mygo/dmg.go). The image is detached after the copy, so the
+   * content scan gets this captured listing, not a second mount.
+   */
+  dmgRoot?: readonly DmgRootEntry[];
 }
 
 /** Polls until `ready` or the deadline passes; true when it became ready. */
@@ -259,12 +274,17 @@ async function installMac(build: PackageBuild, prefix: string, temp: string): Pr
   const dmg = build.dmg;
   if (!dmg) throw new Error(`darwin: ${build.dir} holds no .dmg`);
   const app = path.join(prefix, "Pass Quest.app");
+  let root: DmgRootEntry[] = [];
   const copyOut = async (): Promise<void> => {
     const mount = path.join(temp, "dmg");
     mkdirSync(mount, { recursive: true });
     const attach = await run("hdiutil", ["attach", "-nobrowse", "-readonly", "-mountpoint", mount, dmg.path]);
     if (attach.code !== 0) throw new Error(`darwin: hdiutil attach ${dmg.name} exited ${attach.code}: ${tail(`${attach.stdout}${attach.stderr}`, 4)}`);
     try {
+      root = readdirSync(mount, { withFileTypes: true }).map((entry) => ({
+        name: entry.name,
+        link: entry.isSymbolicLink() ? readlinkSync(path.join(mount, entry.name)) : "",
+      }));
       const bundle = oneFile(mount, `darwin: ${dmg.name} holds no .app`, (name) => name.endsWith(".app"));
       rmSync(app, { recursive: true, force: true });
       mkdirSync(prefix, { recursive: true });
@@ -287,6 +307,7 @@ async function installMac(build: PackageBuild, prefix: string, temp: string): Pr
     launchEnv: {},
     broken: { binary, launchEnv: {} },
     reinstall: copyOut,
+    dmgRoot: root,
     breakRuntime: () => {
       rmSync(runtime, { force: true });
       return runtime;

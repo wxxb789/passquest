@@ -151,6 +151,18 @@ export function packageNaming(raw: string): PackageNaming {
 }
 
 /**
+ * The exact name MyGo writes for a target's installer or disk image
+ * (cmd/mygo/nsis.go installerFileName, cmd/mygo/dmg.go dmgFileName); undefined
+ * where MyGo writes no such artifact (Linux, where the harness wraps an
+ * AppImage itself).
+ */
+export function mygoFileName(naming: PackageNaming, platform: PackageTarget["platform"], goarch: string): string | undefined {
+  if (platform === "win32") return `${naming.slug}-setup-${naming.version}-${goarch}.exe`;
+  if (platform === "darwin") return `${naming.slug}-${naming.version}-${goarch}.dmg`;
+  return undefined;
+}
+
+/**
  * The package of one target. The bundle goes into the embed root the binary is
  * linked with, the staged tree (agent hosts, node_modules, Node runtime, icon)
  * is proved before MyGo copies it, and the AppImage — MyGo builds none — is
@@ -208,17 +220,11 @@ export async function buildPackage(ctx: GateContext, options: PackageBuildOption
   log(`packages in ${targetDir(target)}`);
   for (const file of files) log(`  ${file.name.padEnd(40)} ${size(file.bytes).padStart(10)}`);
 
-  // The exact name MyGo writes for this target (cmd/mygo/nsis.go
-  // installerFileName, cmd/mygo/dmg.go dmgFileName): selecting by it means a
-  // stale package an earlier version left in the output directory can never
-  // be the one installed.
+  // The exact name MyGo writes for this target (mygoFileName): selecting by
+  // it means a stale package an earlier version left in the output directory
+  // can never be the one installed.
   const goarch = goTarget(target).split("/")[1]!;
-  const expectedName =
-    target.platform === "win32"
-      ? `${naming.slug}-setup-${naming.version}-${goarch}.exe`
-      : target.platform === "darwin"
-        ? `${naming.slug}-${naming.version}-${goarch}.dmg`
-        : undefined;
+  const expectedName = mygoFileName(naming, target.platform, goarch);
   const expected = expectedName === undefined ? undefined : files.find((file) => file.name === expectedName);
   if (expectedName !== undefined && expected === undefined) {
     if (target.platform === process.platform) {

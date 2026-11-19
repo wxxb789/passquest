@@ -28,6 +28,17 @@
  * the temp tree, through PASSQUEST_DESKTOP_DATA; the stored credential is
  * deleted again the way the desktop smoke's settings scenario cleans up.
  *
+ * Before any launch the content scan (package-smoke/contents.ts) walks every
+ * file the package installed — the Windows prefix with `Uninstall.exe`, the
+ * whole macOS `.app` plus the mounted image's captured root listing, the
+ * Linux extract tree — and fails on a PDF, a SQLite database, a private path
+ * segment, a `.env` file, the internal-only marker or the committed
+ * baseline's text, with the secrets gate's credential patterns applied
+ * through `scanFiles` to the project-owned files only. The run's artifact
+ * itself must carry the exact expected name and no PDF/database header; a
+ * compressed container is not byte-scanned further, because its extracted
+ * tree is what the scan checks.
+ *
  * The uninstall at the end is a cleanup sanity check, not proof that the
  * uninstaller spares learner data: an uninstaller that deleted a data
  * directory would resolve $APPDATA through the OS shell folders, not this
@@ -53,7 +64,7 @@
  * verified by CI's runners.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -61,13 +72,16 @@ import { desktopSurface, startProviderStub, writeStubRegistry } from "../lib/des
 import type { Check, ProviderStub } from "../lib/desktop-page.ts";
 import { removeTree } from "../lib/desktop.ts";
 import { buildCLI } from "../lib/go.ts";
-import { buildPackage, size } from "../lib/package-build.ts";
+import { buildPackage, packageNaming, size } from "../lib/package-build.ts";
+import type { PackageNaming } from "../lib/package-build.ts";
 import { assertPlatformExecutable } from "../lib/package.ts";
 import { fail, pass, skip } from "../lib/types.ts";
 import type { Gate, GateContext, GateResult } from "../lib/types.ts";
 
 import { installPackage, hostPackageArtifact, HOSTS } from "./package-smoke/install.ts";
 import type { InstalledApp } from "./package-smoke/install.ts";
+import { scanPackageContents } from "./package-smoke/contents.ts";
+import type { PackageIdentity } from "./package-smoke/contents.ts";
 import { unavailable } from "./package-smoke/unavailable.ts";
 import { anki } from "./desktop-smoke/anki.ts";
 import { assess } from "./desktop-smoke/assess.ts";
@@ -79,8 +93,12 @@ import { cli } from "./desktop-smoke/scenario.ts";
 import type { ScenarioRun, Shared } from "./desktop-smoke/scenario.ts";
 import { settings } from "./desktop-smoke/settings.ts";
 
-/** The cases, in the order they run; a later case depends on the app the earlier ones proved. */
-const CASES = ["layout", "study", "agents", "anki", "credential", "broken"] as const;
+/**
+ * The cases, in the order they run; a later case depends on the app the
+ * earlier ones proved. The content scan runs first, before any launch, when
+ * the tree still holds exactly what the package shipped.
+ */
+const CASES = ["contents", "layout", "study", "agents", "anki", "credential", "broken"] as const;
 
 export interface PackageSmokeOptions {
   /**
@@ -128,13 +146,31 @@ function homeEnv(home: string): Record<string, string> {
   return { HOME: home, XDG_CONFIG_HOME: path.join(home, ".config") };
 }
 
-/** The system directories only: the WebView2 loader and the OS tools live there, no developer tool does. */
-function strippedPath(): string {
+/** The developer tools no launch may find on its PATH. */
+const DEVELOPER_TOOLS = ["go", "bun", "node"];
+
+/**
+ * The system directories only: the WebView2 loader and the OS tools live there.
+ * A runner image can also link a developer tool into one of them (ubuntu-latest
+ * has /usr/bin/go), so on macOS and Linux a system directory that holds one is
+ * replaced by a shadow directory under `temp` that links every other entry.
+ */
+function strippedPath(temp: string): string {
   if (process.platform === "win32") {
     const root = process.env.SystemRoot ?? "C:\\Windows";
     return [path.join(root, "System32"), root].join(";");
   }
-  return "/usr/bin:/bin:/usr/sbin:/sbin";
+  return ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    .map((dir, index) => {
+      if (!DEVELOPER_TOOLS.some((tool) => existsSync(path.join(dir, tool)))) return dir;
+      const shadow = path.join(temp, "path", String(index));
+      mkdirSync(shadow, { recursive: true });
+      for (const entry of readdirSync(dir)) {
+        if (!DEVELOPER_TOOLS.includes(entry)) symlinkSync(path.join(dir, entry), path.join(shadow, entry));
+      }
+      return shadow;
+    })
+    .join(":");
 }
 
 /** Every `passquest.sqlite` under a tree; the data must never land under the install. */
@@ -204,13 +240,25 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
   if (cases.length === 0) return fail(["no package-smoke case was selected"]);
   const surface = desktopSurface(ctx);
   if (surface) return surface;
-  let config: { name?: unknown; version?: unknown };
+  let raw: string;
   try {
-    config = JSON.parse(readFileSync(path.resolve(ctx.root, "mygo.json"), "utf8")) as { name?: unknown; version?: unknown };
+    raw = readFileSync(path.resolve(ctx.root, "mygo.json"), "utf8");
   } catch (error) {
     return fail([`mygo.json cannot be read: ${error instanceof Error ? error.message : String(error)}`]);
   }
+  let config: { name?: unknown; version?: unknown };
+  try {
+    config = JSON.parse(raw) as { name?: unknown; version?: unknown };
+  } catch (error) {
+    return fail([`mygo.json is not JSON: ${error instanceof Error ? error.message : String(error)}`]);
+  }
   if (typeof config.name !== "string" || config.name.trim() === "") return fail(["mygo.json carries no name; the app's data directory is named after it"]);
+  let naming: PackageNaming;
+  try {
+    naming = packageNaming(raw);
+  } catch (error) {
+    return fail([`mygo.json cannot name the package: ${error instanceof Error ? error.message : String(error)}`]);
+  }
 
   const temp = mkdtempSync(path.join(tmpdir(), "passquest-package-smoke-"));
   const scratch = path.join(temp, "scratch");
@@ -226,8 +274,10 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
   const registry = path.join(scratch, "registry.json");
   writeStubRegistry(registry, provider.endpoint);
   let app: InstalledApp | undefined;
+  let identity: PackageIdentity | undefined;
   let packageLine = "";
   let studyData = "";
+  let scanLine = "";
   try {
     if (options.installedTree !== undefined) {
       const tree = path.resolve(ctx.root, options.installedTree);
@@ -247,6 +297,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
           const artifact = hostPackageArtifact(built.build);
           app = await installPackage(built.build, temp);
           packageLine = `${artifact.name} ${size(artifact.bytes)} (staged ${built.build.staged.files} files)`;
+          identity = { artifact, naming, config: { name: config.name, version: typeof config.version === "string" ? config.version : "" } };
         } catch (error) {
           checks.push(`installing the package failed: ${error instanceof Error ? error.message : String(error)}`, ...buildLog.slice(-8));
         }
@@ -254,8 +305,8 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
     }
 
     // The PATH handed to every launch: no developer tool may resolve on it.
-    const launchPath = strippedPath();
-    for (const tool of ["go", "bun", "node"]) {
+    const launchPath = strippedPath(temp);
+    for (const tool of DEVELOPER_TOOLS) {
       const resolved = Bun.which(tool, { PATH: launchPath });
       check(resolved === null, `environment: ${tool} resolves on the stripped PATH at ${String(resolved)}`);
     }
@@ -314,6 +365,9 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
     };
 
     const studies: Record<string, () => Promise<void>> = {
+      contents: async () => {
+        scanLine = await scanPackageContents(app!, ctx, check, identity);
+      },
       layout: async () => {
         for (const file of [app!.runtime, ...app!.hosts]) {
           check(existsSync(file), `layout: the installed tree is missing ${file}`);
@@ -410,5 +464,5 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
     if (!(await removeTree(temp))) checks.push(`cleanup: could not remove the temp tree ${temp}`);
   }
   if (checks.length > 0) return fail(checks);
-  return pass(`${assertions} assertions over ${cases.join(", ")}; ${packageLine}`);
+  return pass(`${assertions} assertions over ${cases.join(", ")}; ${packageLine}${scanLine === "" ? "" : `; ${scanLine}`}`);
 }

@@ -8,7 +8,14 @@ import type { Gate, GateContext } from "../lib/types.ts";
 
 const NETWORK_IMPORTS = ["net", "net/http", "net/rpc", "net/smtp"];
 const LINKED_CLIENTS = ["net/http", "net/rpc", "net/smtp"];
-const CONFIDENTIAL_MARKERS = /仅限内部使用|严禁外传/;
+/**
+ * The internal-only source markers. The texts are exported because the package
+ * content scan (gates/package-smoke/contents.ts) searches their UTF-8 bytes in
+ * the installed files, binaries included; this gate matches them per line of
+ * decoded text through the regex built from the same list.
+ */
+export const CONFIDENTIAL_MARKER_TEXTS = ["仅限内部使用", "严禁外传"];
+export const CONFIDENTIAL_MARKERS = new RegExp(CONFIDENTIAL_MARKER_TEXTS.join("|"));
 const SCANNED_EXTENSIONS = /\.(go|json|md|txt)$/;
 /** Desktop frontend source and its embed root: a marker in a bundle input ships inside the binary. */
 const DESKTOP_WEB_ROOTS = ["desktop/web/", "internal/desktop/web/"];

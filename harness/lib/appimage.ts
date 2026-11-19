@@ -56,6 +56,15 @@ export interface PackagingConfig {
   linux?: { comment?: string };
 }
 
+/**
+ * The AppImage's file name: the app's name made a file name, the version, and
+ * the one pinned architecture. Exported so the package gate's content scan can
+ * name the exact artifact this build must have written.
+ */
+export function appImageFileName(config: PackagingConfig): string {
+  return `${config.name.replace(/[^A-Za-z0-9._-]+/g, "_")}-${config.version}-x86_64.AppImage`;
+}
+
 /** MyGo's Linux output as the AppDir takes it: the binary, the entry and the icon. */
 interface LinuxOutput {
   /** The file name MyGo gave the binary and its entry and icon (the slug). */
@@ -102,7 +111,6 @@ export async function buildAppImage(root: string, options: AppImageOptions): Pro
   const pin = nodePin(target.platform, target.arch);
   const config = JSON.parse(await Bun.file(path.join(root, "mygo.json")).text()) as PackagingConfig;
   if (!config.name || !config.version) throw new Error("mygo.json needs a name and a version to name the AppImage after");
-  const appName = config.name.replace(/[^A-Za-z0-9._-]+/g, "_");
 
   const stage = path.join(root, targetDir(target));
   const output = linuxOutput(stage);
@@ -146,7 +154,7 @@ export async function buildAppImage(root: string, options: AppImageOptions): Pro
   });
   chmodSync(runtime, 0o755);
 
-  const file = path.join(stage, `${appName}-${config.version}-x86_64.AppImage`);
+  const file = path.join(stage, appImageFileName(config));
   rmSync(file, { force: true });
   log(`appimage: appimagetool ${APPIMAGETOOL_VERSION}: ${dir} -> ${path.relative(root, file)}`);
   const build = await run(tool, ["--runtime-file", runtime, dir, file], { env: { APPIMAGE_EXTRACT_AND_RUN: "1", ARCH: "x86_64" } });
