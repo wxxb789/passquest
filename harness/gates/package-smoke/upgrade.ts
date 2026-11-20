@@ -4,18 +4,18 @@
  * learner data through that build, opens the data root with the installed
  * package, and proves the new build carried every record forward.
  *
- * - The previous release is PREVIOUS_RELEASE_COMMIT: the merge of PR #28 into
- *   main, the last main commit before this goal. Until a release is tagged
- *   this constant is the recorded base. The commit is fetched (`--depth=1`,
+ * - The previous release is PREVIOUS_RELEASE_COMMIT: the commit of the latest
+ *   published release tag (v0.15.0). Before any release existed it was the
+ *   last main commit before goal 0013 (357b4c6, Q-0013-06); each release moves
+ *   it to the new tag's commit (docs/release.md). The commit is fetched (`--depth=1`,
  *   one commit, not the checkout depth) only when the checkout does not
  *   already hold it, because CI checks out depth 2; a failed fetch fails the
  *   case with the git output.
  * - The old data is made through the base commit's `./cmd/passquest` CLI, not
  *   an old package: at that commit the CLI and the desktop open the same
  *   database through the same `internal/store` (the desktop's workspace calls
- *   the same store.Open; `git diff 357b4c6..HEAD -- internal/store` is only
- *   the typed SchemaNewerError), so the CLI writes exactly the shape the old
- *   desktop wrote — and no package exists at that commit to install.
+ *   the same store.Open), so the CLI writes exactly the shape the old
+ *   desktop wrote, and the case needs no old package to install.
  *   Independent and assisted attempts, a finished and an active assessment
  *   run, a note pushed to the id-persisting Anki stub, and a note accepted
  *   while the stub is stopped all go through the old CLI's real commands.
@@ -55,12 +55,11 @@
  *   byte-identical after the launch (sha256 before and after; a side file that
  *   appears or disappears counts).
  *
- * Disclosed limits: the base commit (357b4c6) and this build persist the same
- * schema version, so no migration statement runs — the case proves a
+ * Disclosed limits: while the base commit and this build persist the same
+ * schema version, no migration statement runs — the case then proves a
  * same-version reopen by the packaged build, not a migration step. The two
  * `user_version` values are read from the old snapshot and the upgraded file
- * at run time and printed in the pass line; when a release is tagged,
- * PREVIOUS_RELEASE_COMMIT is replaced by that tag's commit. The old CLI's
+ * at run time and printed in the pass line. The old CLI's
  * note push runs with the repository as cwd so it finds `agent/anki-host.mjs`
  * and its `node_modules`, exactly as the CLI smokes do; the data itself is
  * created by the base commit's binary.
@@ -83,13 +82,12 @@ import { launch, UNREACHABLE_ENDPOINT } from "../desktop-smoke/scenario.ts";
 import type { ScenarioRun } from "../desktop-smoke/scenario.ts";
 
 /**
- * The previous release: the merge of PR #28 into main (the MyGo 0.10.0 / Pi
- * 1.5.2 upgrade), the last main commit before goal 0013's work — until a
- * release is tagged, this is the build the upgrade check starts from. The full
- * object id, because `git fetch --depth=1 origin <id>` fetches by full id
- * only. Replace it with the released tag's commit when one exists.
+ * The previous release: the commit of tag v0.15.0, the latest published
+ * release, which the upgrade check starts from. The full object id, because
+ * `git fetch --depth=1 origin <id>` fetches by full id only. After each
+ * release, move it to the new tag's commit (docs/release.md).
  */
-export const PREVIOUS_RELEASE_COMMIT = "357b4c64d472ff2206708ffe107fe8d5ef0e37fa";
+export const PREVIOUS_RELEASE_COMMIT = "c9a83a05936de4a5a10aa72999dacaa3418fca3c";
 
 /** One launch site of the installed app: the smoke-hook run and the per-user data root it resolves. */
 export interface UpgradeSite {

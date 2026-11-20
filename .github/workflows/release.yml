@@ -1,0 +1,74 @@
+name: release
+
+# Pushing a `v<version>` tag builds a draft GitHub Release from that commit.
+# The tag must equal mygo.json's version (the version the app compares
+# releases against). The full gate (gate.yml, every group on every OS) must
+# pass on the tagged commit. The packages attached are the ones the gate's
+# own package jobs built, installed and smoke-tested. The release stays a
+# draft: publishing it is the owner's click (docs/release.md).
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: tag matches mygo.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare the tag with mygo.json's version
+        shell: bash
+        run: |
+          want="v$(jq -r .version mygo.json)"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match mygo.json version $want"
+            exit 1
+          fi
+
+  gate:
+    needs: version
+    uses: ./.github/workflows/gate.yml
+
+  release:
+    name: draft release
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+      - name: Collect the three packages and their checksums
+        shell: bash
+        run: |
+          mkdir -p assets
+          find dist -type f \( -name '*-setup-*.exe' -o -name '*.dmg' -o -name '*.AppImage' \) -exec cp {} assets/ \;
+          count=$(find assets -type f | wc -l)
+          if [ "$count" -ne 3 ]; then
+            echo "::error::expected 3 packages, found $count: $(find assets -type f)"
+            exit 1
+          fi
+          (cd assets && sha256sum -- * > SHA256SUMS.txt)
+          cat assets/SHA256SUMS.txt
+      - name: Create the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sed -e "s/{{VERSION}}/$version/g" -e "s/{{TAG}}/$GITHUB_REF_NAME/g" -e "s/{{RUN}}/$GITHUB_RUN_ID/g" \
+            -e "s/{{SHA}}/$GITHUB_SHA/g" .github/release-notes.md > notes.md
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Pass Quest $version" \
+            --notes-file notes.md --generate-notes assets/*
