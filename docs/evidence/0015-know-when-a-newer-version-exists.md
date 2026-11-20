@@ -26,7 +26,7 @@ P1 `1e90997`, P2 `206148b`, P3 `0336e98`, P4 `b6b5bad`, P5 this docs tree.
 | `bun Q:/scratch/pq-harness-run/run.ts docs-links.ts docsLinks` | PASS 254 checked, 0 broken `[0s]` |
 | `gofmt -l internal cmd`; `go vet ./...`; `go build ./...` | No output, exit 0 each |
 | `go test ./internal/... -count=1` | exit 0: 25 packages `ok`, 0 `FAIL`, 0 `SKIP` (slowest: `internal/cli` 31.1s, `internal/store` 12.1s) `[37s]` |
-| CI (`.github/workflows/gate.yml`, four groups × three runners) | TBD (final head) — the coordinator fills this row |
+| CI, run 44639795066 (head `1c64256`, the last code and docs change; the commit after it only fills in this row) | 12/12 jobs on the first attempt, about 13 minutes. `harness self-test`: 74 cases (7 must pass) on every OS; `desktop smoke`: 488 assertions over 13 scenarios on Windows, 487 on macOS and Linux; `desktop ux`: 192 audits over 24 states × 4 modes × 2 sizes, 19 probes, 72 focus checks, 0 allowed, on every OS; `package smoke`: Windows 487 assertions (`pass-quest-setup-0.15.0-amd64.exe`), macOS 486 (`pass-quest-0.15.0-arm64.dmg`), Linux 486 (`Pass_Quest-0.15.0-x86_64.AppImage`); `local-only CLI` passes naming its one allowed network package on every OS |
 
 ## Acceptance → evidence
 
