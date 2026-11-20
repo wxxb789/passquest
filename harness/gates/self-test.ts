@@ -14,7 +14,7 @@ import { coverageProblems, UX_SIZES, UX_STATES } from "./desktop-ux.ts";
 import type { Audited } from "./desktop-ux.ts";
 import { endpointDriftProblems } from "./local-only.ts";
 import { adaptiveSmokeCases } from "./self-test/adaptive-smoke.cases.ts";
-import { agentSmokeCases } from "./self-test/agent-smoke.cases.ts";
+import { agentSmokeCases, plainBundleFaultProblem } from "./self-test/agent-smoke.cases.ts";
 import { assessSmokeCases } from "./self-test/assess-smoke.cases.ts";
 import { baselineCases } from "./self-test/baseline.cases.ts";
 import { desktopSmokeCases } from "./self-test/desktop-smoke.cases.ts";
@@ -32,6 +32,7 @@ import { importSmokeCases } from "./self-test/import-smoke.cases.ts";
 import { localOnlyCases, localOnlyPassCases } from "./self-test/local-only.cases.ts";
 import { noteSmokeCases } from "./self-test/note-smoke.cases.ts";
 import {
+  bundleEntryProblem,
   packageNamingProblem,
   packageSmokeCases,
   packageSmokePassCases,
@@ -413,10 +414,11 @@ export const selfTest: Gate = {
       uxCoverageProblem,
       packageNamingProblem,
       stagingRefusalsProblem,
+      bundleEntryProblem,
       upgradeComparisonProblem,
       () => gateGroupProblem(gates, gateGroups, ctx.root),
     ]) {
-      const problem = unit();
+      const problem = await unit();
       if (problem) problems.push(problem);
     }
     const timings: { label: string; ms: number }[] = [];
@@ -426,6 +428,9 @@ export const selfTest: Gate = {
       timings.push({ label, ms: performance.now() - started });
       if (problem) problems.push(problem);
     };
+    // Before the gate fixtures: the plain bundle is the must-fail input the
+    // bundle pass exists for, and it runs the durable matrix itself.
+    await timed("the plain bundle faults in the durable matrix", () => plainBundleFaultProblem(ctx));
     for (const testCase of cases) await timed(testCase.label, () => runCase(testCase));
     for (const testCase of accepted) await timed(testCase.label, () => runPassCase(testCase));
     const covered = new Set([...cases, ...accepted].map((testCase) => testCase.gate.id));

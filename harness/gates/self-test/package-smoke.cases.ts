@@ -32,7 +32,7 @@ import path from "node:path";
 import { makePackageSmokeGate } from "../package-smoke.ts";
 import { compareDatabases, rowCountProblems } from "../package-smoke/upgrade.ts";
 import { packageNaming } from "../../lib/package-build.ts";
-import { assertLeanAgentTree, runtimeResolutionUses } from "../../lib/package.ts";
+import { AGENT_DIR, assertLeanAgentTree, bundleEntrySource, runtimeResolutionUses, stageAgent } from "../../lib/package.ts";
 import { executable, run } from "../../lib/process.ts";
 import { GO_MOD } from "./fixture.ts";
 import type { BrokenCase, PassCase } from "./fixture.ts";
@@ -221,17 +221,23 @@ export function upgradeComparisonProblem(): string | null {
 /**
  * The staging rules (goal 0016): a host that resolves a module at run time
  * beyond a string-literal specifier — a computed `import()`/`require()`
- * argument, `createRequire`, `require.resolve`, `import.meta.resolve` — must
- * be refused by `runtimeResolutionUses`, while a literal import (static,
- * dynamic, or a template with no substitution) and a plain `import.meta.url`
- * read must not be; and `assertLeanAgentTree` must refuse a staged file that
- * embeds a machine path while ordinary urls and clock-shaped text pass. A
- * host a package cannot resolve must never be staged silently.
+ * argument, an argument concatenated after a quote, `createRequire`,
+ * `require.resolve`, `import.meta.resolve` — must be refused by
+ * `runtimeResolutionUses`, while a literal import (static, dynamic, or a
+ * template with no substitution) and a plain `import.meta.url` read must not
+ * be; and `assertLeanAgentTree` must refuse a staged file that embeds a
+ * machine path while ordinary urls and clock-shaped text pass. The last
+ * fixture drives `stageAgent` itself, so a refusal that stops being applied
+ * in staging fails here: a host a package cannot resolve must never be
+ * staged silently.
  */
-export function stagingRefusalsProblem(): string | null {
+export async function stagingRefusalsProblem(): Promise<string | null> {
   const refused: Array<[string, string]> = [
     ["a computed import argument", `const name = "no-such-package";\nawait import(name);\n`],
     ["a computed require argument", `const name = "no-such-package";\nrequire(name);\n`],
+    ["an import argument concatenated after the quote", `await import("open" + "ai");\n`],
+    ["a require argument built with .concat", `require("pkg-".concat(kind));\n`],
+    ["a template argument concatenated with a variable", "await import(`openai` + kind);\n"],
     ["a template with a substitution", "await import(`pkg-${kind}`);\n"],
     ["a createRequire resolver", `const req = createRequire(import.meta.url);\nconst x = req("openai");\n`],
     ["a require.resolve call", `const p = require.resolve("openai");\n`],
@@ -243,6 +249,7 @@ export function stagingRefusalsProblem(): string | null {
   const accepted: Array<[string, string]> = [
     ["a static literal import", `import { x } from "openai";\n`],
     ["a literal dynamic import", `const m = await import("openai");\n`],
+    ["a literal require argument", `const m = require("openai");\n`],
     ["a substitution-free template import", "const m = await import(`openai`);\n"],
     ["an import.meta.url read", `const here = import.meta.url;\n`],
     ["a url and clock-shaped text", `const u = "https://example.com/v1";\nconst t = "12:30";\n`],
@@ -272,10 +279,85 @@ export function stagingRefusalsProblem(): string | null {
     }
     writeFileSync(host, `const u = "https://example.com/v1";\nconst t = "12:30";\n`);
     assertLeanAgentTree(dir);
-    return null;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+  // The checks above call the rules' functions directly; this fixture drives
+  // staging itself, so it fails when stageAgent stops making either call: the
+  // run-time-resolution refusal, or the lean-tree proof.
+  const root = mkdtempSync(path.join(tmpdir(), "passquest-staging-wiring-"));
+  try {
+    const agentDir = path.join(root, AGENT_DIR);
+    mkdirSync(agentDir, { recursive: true });
+    const stage = path.join(root, "build", "stage");
+    const stageFailure = async (): Promise<string> => {
+      try {
+        await stageAgent(root, stage);
+        return "";
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+    writeFileSync(path.join(agentDir, "durable-host.mjs"), `const name = "no-such-package";\nawait import(name);\n`);
+    let message = await stageFailure();
+    if (!message.includes("resolves a module at run time")) {
+      return `staging rules: stageAgent did not refuse a host that resolves a module at run time (${message === "" ? "no failure" : message})`;
+    }
+    writeFileSync(path.join(agentDir, "durable-host.mjs"), `// built from ${root}/agent/durable-host.mjs\n`);
+    message = await stageFailure();
+    if (!message.includes("embeds the machine path")) {
+      return `staging rules: stageAgent did not refuse a copied host embedding the checkout root (${message === "" ? "no failure" : message})`;
+    }
+    writeFileSync(path.join(agentDir, "durable-host.mjs"), `const u = "https://example.com/v1";\n`);
+    const staged = await stageAgent(root, stage);
+    if (staged.hosts.length !== 1 || !staged.check.includes("is lean")) {
+      return `staging rules: a clean host did not stage as one lean host (${staged.hosts.length} host(s): ${staged.check})`;
+    }
+    return null;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The generated bundle entry (bundleEntrySource, goal 0016 P2): one namespace
+ * import per specifier the host names, each held in the exported `pinned`
+ * array, then the host itself last. The held array is what keeps the
+ * packages' module initialization — their `sideEffects` arrays make bun drop
+ * an init block nothing holds, and the plain `bun build
+ * agent/durable-host.mjs` form then faults on a real brief with `Cannot read
+ * properties of undefined` — so the prelude must not lose a specifier or fall
+ * behind the host unnoticed.
+ */
+export function bundleEntryProblem(): string | null {
+  const base = process.platform === "win32" ? "C:\\x" : "/x";
+  const hostPath = path.join(base, AGENT_DIR, "durable-host.mjs");
+  const pins = [
+    {
+      specifier: "@earendil-works/chord/context",
+      path: path.join(base, AGENT_DIR, "node_modules", "@earendil-works", "chord", "context.js"),
+    },
+    { specifier: "openai", path: path.join(base, AGENT_DIR, "node_modules", "openai", "index.js") },
+  ];
+  const wanted = [
+    "// Generated by the harness for staging: do not edit.",
+    ...pins.map((pin, index) => {
+      const target = JSON.stringify(pin.path.split(path.sep).join("/"));
+      return `import * as pinned${index} from ${target}; // ${pin.specifier}`;
+    }),
+    `export const pinned = [${pins.map((_, index) => `pinned${index}`).join(", ")}];`,
+    `import ${JSON.stringify(hostPath.split(path.sep).join("/"))};`,
+  ];
+  const lines = bundleEntrySource(hostPath, pins).trimEnd().split("\n");
+  if (lines.length !== wanted.length) {
+    return `the bundle entry has ${lines.length} line(s): ${JSON.stringify(lines)}, want ${JSON.stringify(wanted)}`;
+  }
+  for (const [index, line] of wanted.entries()) {
+    if (lines[index] !== line) {
+      return `the bundle entry line ${index + 1} is ${JSON.stringify(lines[index])}, want ${JSON.stringify(line)}`;
+    }
+  }
+  return null;
 }
 
 export function packageSmokeCases(): BrokenCase[] {

@@ -213,7 +213,8 @@ export async function stageResources(root: string, options: StageOptions = {}): 
   mkdirSync(dir, { recursive: true });
   log(`target: ${target.platform}-${target.arch}`);
 
-  const hosts = await stageAgent(root, dir);
+  const staged = await stageAgent(root, dir);
+  const hosts = staged.hosts;
   if (hosts.length === 0) throw new Error("agent/ holds no host scripts to package");
   const bundled = hosts.filter((host) => host.bundled);
   log(`agent: ${hosts.length} host scripts (${bundled.length} bundled, ${hosts.length - bundled.length} copied byte-identical)`);
@@ -224,7 +225,7 @@ export async function stageResources(root: string, options: StageOptions = {}): 
   writeFileSync(icon, iconPng());
   log(`icon: ${STAGE_DIR}/icon.png (${statSync(icon).size} bytes)`);
 
-  const checks = [assertLeanAgentTree(path.join(dir, AGENT_DIR), { root }), ...(await checkStagedFor(dir, pin, target))];
+  const checks = [staged.check, ...(await checkStagedFor(dir, pin, target))];
   for (const line of checks) log(`check: ${line}`);
   const { entries, files, bytes } = summarize(dir);
   return { dir, node, entries, files, bytes, checks };
@@ -257,6 +258,13 @@ export interface StagedHost {
   metafile: string;
 }
 
+/** The staged agent tree: the hosts it carries, and the lean proof staging made. */
+export interface StagedAgentTree {
+  hosts: StagedHost[];
+  /** The lean-tree proof's line (assertLeanAgentTree), which the build log prints. */
+  check: string;
+}
+
 /** Where a bundle's metafile is kept: beside the staged tree, so nothing that copies the tree can carry it. */
 const BUNDLE_DIR = "bundles";
 
@@ -268,12 +276,16 @@ const BUNDLE_DIR = "bundles";
  * specifier fails here (runtimeResolutionUses): a package carries no
  * node_modules for it to resolve against.
  *
+ * The tree is proved lean before this returns (assertLeanAgentTree, with the
+ * checkout root so a build machine's own paths are refused): the hosts and the
+ * notices file only, no node_modules, no symlink, no leftover specifier.
+ *
  * The entries and metafiles go to a run directory beside the staged tree
  * (build/package-cache/bundles), where the notices assembly reads the modules
  * each bundle inlined; the directory is removed first, so a stale file can
  * never be read as this run's.
  */
-export async function stageAgent(root: string, dir: string): Promise<StagedHost[]> {
+export async function stageAgent(root: string, dir: string): Promise<StagedAgentTree> {
   const source = path.join(root, AGENT_DIR);
   const outDir = path.join(dir, AGENT_DIR);
   mkdirSync(outDir, { recursive: true });
@@ -299,7 +311,7 @@ export async function stageAgent(root: string, dir: string): Promise<StagedHost[
     const bundle = await bundleHost(root, host, outDir, { metafile: path.join(metafiles, `${host}.json`) });
     hosts.push({ host, bundled: true, bytes: bundle.bytes, specifiers: bundle.specifiers, metafile: bundle.metafile });
   }
-  return hosts;
+  return { hosts, check: assertLeanAgentTree(outDir, { root }) };
 }
 
 /** One built host bundle: the staged file, what it pinned, and the metafile naming every module it inlined. */
@@ -456,16 +468,29 @@ export function runtimeResolutionUses(source: string): string[] {
 }
 
 /**
- * Whether the text after a call's `(` is an argument hostSpecifiers can read:
- * a quoted string, or a template literal with no substitution.
+ * Whether the text after a call's `(` is exactly one argument hostSpecifiers
+ * can read: a quoted string, or a template literal with no substitution,
+ * followed by only whitespace and the call's `)` or a `,`. A quote at the
+ * start is not enough: `import("open" + "ai")` and
+ * `require("pkg-".concat(x))` begin with one and still name their module only
+ * at run time, so anything else after the closing quote refuses.
  */
 function literalArgument(rest: string): boolean {
   const argument = rest.replace(/^\s*/, "");
   const quote = argument[0];
-  if (quote === `"` || quote === `'`) return true;
-  if (quote !== "`") return false;
-  const end = argument.indexOf("`", 1);
-  return end !== -1 && !argument.slice(1, end).includes("${");
+  if (quote !== `"` && quote !== `'` && quote !== "`") return false;
+  let at = 1;
+  for (; at < argument.length; at++) {
+    const char = argument[at];
+    if (char === "\\") {
+      at++;
+      continue;
+    }
+    if (char === quote) break;
+    if (quote === "`" && char === "$" && argument[at + 1] === "{") return false;
+  }
+  if (at >= argument.length) return false;
+  return /^\s*[),]/.test(argument.slice(at + 1));
 }
 
 /** The one non-host file the staged agent tree may carry: the assembled third-party notices. */
