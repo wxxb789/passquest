@@ -499,7 +499,11 @@ func TestSmokeLoadWatchdogDoesNotRaceALateScript(t *testing.T) {
 	}
 
 	// A page that never loads still gets a failure result from the watchdog.
-	never, err := smokeFromEnv(envOf(map[string]string{EnvScript: script, EnvResult: filepath.Join(dir, "never.json")}), nil)
+	// finish calls quit only after the result is written, so wait on quit: the
+	// file exists before its content does, and a reader polling for it alone
+	// can read it empty.
+	var neverQuits atomic.Int32
+	never, err := smokeFromEnv(envOf(map[string]string{EnvScript: script, EnvResult: filepath.Join(dir, "never.json")}), func() { neverQuits.Add(1) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,10 +512,7 @@ func TestSmokeLoadWatchdogDoesNotRaceALateScript(t *testing.T) {
 		t.Error("evaluated without a load")
 		return nil, nil
 	}})
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if _, err := os.Stat(filepath.Join(dir, "never.json")); err == nil {
-			break
-		}
+	for deadline := time.Now().Add(5 * time.Second); neverQuits.Load() == 0; time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("no watchdog result")
 		}
