@@ -1566,6 +1566,8 @@ Entry format:
   commit.
 - Revisit when: the first release is tagged, or the store's schema changes and a migration must be
   proven.
+- Revisited (2026-11-20): v0.15.0 was published at `c9a83a0`, so `PREVIOUS_RELEASE_COMMIT` now names
+  that commit, and `docs/release.md` moves it to each new tag's commit after publishing.
 
 ### Q-0013-07 — What happens to the package CI artifacts, and when is one a release?
 - Status: decided(default taken)
@@ -1579,6 +1581,9 @@ Entry format:
   days. Reverse by changing the retention or removing the upload step; (C) needs the owner's
   go-ahead.
 - Revisit when: the owner authorizes a release, or an artifact must outlive 7 days for an audit.
+- Revisited (2026-11-20): the owner authorized a release. v0.15.0 was published by hand from the
+  package artifacts of `main`'s CI run 44687477700, and releases are now drafted by `release.yml`
+  (Q-0000-06). The per-run artifacts stay as they were.
 
 ### Q-0013-08 — Why does the macOS credential case of the package smoke keep the real HOME?
 - Status: decided(default taken)
@@ -1765,3 +1770,20 @@ Entry format:
   scenarios then fail loudly against the constant endpoint.
 - Revisit when: another harness needs to script the check, or one of the variables must be honoured
   outside the hook.
+
+### Q-0000-06 — Does a pushed version tag publish a release on its own?
+- Status: decided(default taken)
+- Context: on 2026-11-20 the owner asked for a release pipeline. Publishing is public and cannot
+  be taken back, and project rules make it the owner's decision at the time.
+- Options considered: (A) the tag builds a **draft** release, and the owner presses Publish;
+  (B) the tag publishes directly; (C) manual releases only.
+- Default taken: (A). `.github/workflows/release.yml` runs on `v*` tags:
+  - It checks that the tag equals `mygo.json`'s version.
+  - It runs the full `gate.yml` on the tagged commit (through `workflow_call`).
+  - It attaches the three packages that the gate's `package` jobs built and smoke-tested, plus
+    `SHA256SUMS.txt`.
+  - It creates a draft with the notes header from `.github/release-notes.md` followed by GitHub's
+    generated notes.
+  Only the release job holds `contents: write`. Reverse by dropping `--draft` from the
+  `gh release create` call (B).
+- Revisit when: the owner wants tag-to-public releases, signing, or an update channel.
