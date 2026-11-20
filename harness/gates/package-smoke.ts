@@ -87,7 +87,7 @@ import { removeTree } from "../lib/desktop.ts";
 import { buildCLI } from "../lib/go.ts";
 import { buildPackage, packageNaming, size } from "../lib/package-build.ts";
 import type { PackageNaming } from "../lib/package-build.ts";
-import { assertPlatformExecutable } from "../lib/package.ts";
+import { assertPlatformExecutable, DURABLE_HOST } from "../lib/package.ts";
 import { fail, pass, skip } from "../lib/types.ts";
 import type { Gate, GateContext, GateResult } from "../lib/types.ts";
 
@@ -95,6 +95,7 @@ import { installPackage, hostPackageArtifact, HOSTS } from "./package-smoke/inst
 import type { InstalledApp } from "./package-smoke/install.ts";
 import { scanPackageContents } from "./package-smoke/contents.ts";
 import type { PackageIdentity } from "./package-smoke/contents.ts";
+import { brief } from "./package-smoke/brief.ts";
 import { unavailable } from "./package-smoke/unavailable.ts";
 import { upgradeCase } from "./package-smoke/upgrade.ts";
 import { anki } from "./desktop-smoke/anki.ts";
@@ -112,7 +113,7 @@ import { settings } from "./desktop-smoke/settings.ts";
  * earlier ones proved. The content scan runs first, before any launch, when
  * the tree still holds exactly what the package shipped.
  */
-const CASES = ["contents", "layout", "study", "agents", "anki", "upgrade", "credential", "broken"] as const;
+const CASES = ["contents", "layout", "study", "agents", "brief", "anki", "upgrade", "credential", "broken"] as const;
 
 export interface PackageSmokeOptions {
   /**
@@ -338,7 +339,8 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       return true;
     };
     const needsCli =
-      cases.includes("study") || cases.includes("agents") || cases.includes("anki") || cases.includes("credential") || cases.includes("broken");
+      cases.includes("study") || cases.includes("agents") || cases.includes("brief") || cases.includes("anki") ||
+      cases.includes("credential") || cases.includes("broken");
     const ready = app !== undefined && (!needsCli || (await ensureCli()));
 
     /** One case's launch site: its own temp cwd, per-user root and credential service. */
@@ -365,6 +367,9 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
         launchEnv: { PATH: launchPath, ...(site.keepHome === true ? {} : homeEnv(home)), ...extraEnv },
         dataOverride: site.setData === true,
         secretScanRoots: app!.installDirs,
+        runtime: app!.runtime,
+        // The durable host the installed copy carries, by its agent/ name.
+        durableHost: app!.hosts.find((file) => path.basename(file) === DURABLE_HOST),
       };
       return {
         dataRoot,
@@ -417,6 +422,9 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       },
       agents: async () => {
         await coach.run(siteOf("agents", app!.binary, app!.launchEnv).run);
+      },
+      brief: async () => {
+        await brief.run(siteOf("brief", app!.binary, app!.launchEnv).run);
       },
       anki: async () => {
         await anki.run(siteOf("anki", app!.binary, app!.launchEnv).run);

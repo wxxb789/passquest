@@ -417,6 +417,71 @@ func main() {
           : `package-smoke: did not report the missing runtime: ${failures.slice(0, 3).join("; ")}`,
     },
     {
+      gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["brief"] }),
+      label: "installed brief paused before its durable work was enqueued",
+      files: {
+        ...FIXTURE_FILES,
+        // A fixture cannot run the real host, so the installed binary answers
+        // the case's own calls: the seeding CLI accepts everything, and the
+        // installed binary reports the shape a pause that lands before the
+        // durable submit produces — a paused run whose status snapshot carries
+        // no pending work. The brief case must refuse to resume it: that
+        // snapshot is what the window's Resume relies on, so the case stops at
+        // that precondition and the window never launches — an installed copy
+        // needs no window behaviour here. The fixture never reaches the stub,
+        // so the case asks for no pause either: lib/host-control.ts pauses a
+        // live host only once the stub has recorded its request.
+        "cmd/passquest/main.go": `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == "import" {
+		fmt.Println("{\\"source\\":{\\"id\\":\\"fixture-source\\"}}")
+		return
+	}
+	fmt.Println("{}")
+}
+`,
+        "cmd/passquest-desktop/main.go": `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if len(os.Args) < 3 {
+		return
+	}
+	switch os.Args[2] {
+	case "start":
+		fmt.Println(\`{"state":"paused","run":{"run_id":"run-20261120T000000Z-00000000"}}\`)
+		os.Exit(4)
+	case "status":
+		fmt.Println(\`{"state":"paused","durable":{"snapshot":{"pending_tasks":0,"unsettled_submissions":0}}}\`)
+	}
+}
+`,
+      },
+      prepare: async (root) => {
+        const runtime = fixtureRuntime(root);
+        mkdirSync(path.dirname(runtime), { recursive: true });
+        writeFileSync(runtime, Buffer.from([...runtimeMagic(), 0, 0, 0, 0]));
+        const binary = fixtureBinary(root);
+        mkdirSync(path.dirname(binary), { recursive: true });
+        const build = await run(executable("go"), ["build", "-o", binary, "./cmd/passquest-desktop"], { cwd: root });
+        return build.code === 0 ? null : `the fixture app did not build: ${build.stderr || build.stdout}`;
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("brief: the paused run left no pending durable work"))
+          ? null
+          : `package-smoke: did not report the paused run without durable work: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
       gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),
       label: "installed agent tree carrying node_modules",
       files: {

@@ -1,6 +1,15 @@
 export interface RunOptions {
   cwd?: string;
   env?: Record<string, string>;
+  /**
+   * Hand the child exactly `env` instead of this process's environment with
+   * `env` layered on top; the caller then carries everything the child needs
+   * (PATH, SystemRoot, TEMP, HOME). The desktop launches already work this way
+   * (harness/lib/desktop.ts): a launch must not inherit a PASSQUEST_*
+   * variable the developer's shell happens to carry, which is what cleanEnv
+   * exists for.
+   */
+  replaceEnv?: boolean;
   stdin?: string;
 }
 
@@ -27,7 +36,7 @@ export async function run(cmd: string, args: string[], options: RunOptions = {})
       stdin: options.stdin === undefined ? "ignore" : new TextEncoder().encode(options.stdin),
       stdout: "pipe",
       stderr: "pipe",
-      env: options.env ? { ...process.env, ...options.env } : process.env,
+      env: options.env ? (options.replaceEnv === true ? options.env : { ...process.env, ...options.env }) : process.env,
     });
   } catch (error) {
     return { code: 127, stdout: "", stderr: error instanceof Error ? error.message : String(error) };

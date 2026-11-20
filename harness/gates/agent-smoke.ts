@@ -3,14 +3,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { buildCLI } from "../lib/go.ts";
+import { PAUSE_DEADLINE_SECONDS, startPausedRun } from "../lib/host-control.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { bundleHost, DURABLE_HOST } from "../lib/package.ts";
 import { executable, run } from "../lib/process.ts";
-import { sseText, sseTool } from "../lib/sse.ts";
+import { briefAnswer, sseText, stubMessages } from "../lib/sse.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
-type StubMode = "tools" | "delay" | "auth" | "malformed" | "text";
+type StubMode = "tools" | "delay" | "hold" | "auth" | "malformed" | "text";
 
 interface ReceivedRequest {
   path: string;
@@ -19,6 +20,15 @@ interface ReceivedRequest {
 
 const KEY = "test-key-not-real";
 const MODEL = "smoke-model";
+
+/**
+ * How long the stub may leave one request unanswered before Bun closes the
+ * connection (Bun's own default is 10 seconds). Section 9's held run is parked
+ * here until its pause request lands, which takes PAUSE_DEADLINE_SECONDS in the
+ * worst case: without the longer idle timeout, the hold would end in a provider
+ * network error instead of the pause the section is about.
+ */
+const STUB_IDLE_SECONDS = 120;
 
 function parse(raw: string): unknown {
   try {
@@ -85,6 +95,7 @@ export async function durableMatrix(
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
+    idleTimeout: STUB_IDLE_SECONDS,
     async fetch(request) {
       const raw = await request.text();
       let body: unknown = {};
@@ -104,27 +115,23 @@ export async function durableMatrix(
         await Bun.sleep(15000);
         return sseText("late stub answer", MODEL);
       }
+      if (mode === "hold") {
+        // An answer that never comes: the run can leave this state only
+        // through a pause request or its own deadline, so the pause lands with
+        // the request parked here, however slow the machine is.
+        return new Response(new ReadableStream({ start() {} }), {
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
       if (mode === "text") {
         return sseText("plain stub answer", MODEL);
       }
-      const messages = Array.isArray((body as { messages?: unknown }).messages)
-        ? ((body as { messages: { role?: string; content?: unknown }[] }).messages)
-        : [];
+      const messages = stubMessages(body);
       if (slowTools) await Bun.sleep(300);
       const promptText = messages.map((message) => String(message.content ?? "")).join("\n");
       const runMatch = promptText.match(/run-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}/);
       const label = runMatch ? runMatch[0].slice(-8) : "unknown";
-      const toolText = messages
-        .filter((message) => message.role === "tool")
-        .map((message) => String(message.content ?? ""))
-        .join("\n");
-      if (!/step 1/i.test(toolText)) {
-        return sseTool(1, "diagnosis", `Step 1 diagnosis ${label}`, "The recorded outcome suggests marking the negation before comparing options.", MODEL);
-      }
-      if (!/step 2/i.test(toolText)) {
-        return sseTool(2, "tactic", `Step 2 tactic ${label}`, "Mark NOT or EXCEPT first; a word match alone is not evidence.", MODEL);
-      }
-      return sseText("Two advisory steps recorded; practise the focused tactic next.", MODEL);
+      return briefAnswer(messages, label, MODEL);
     },
   });
 
@@ -442,7 +449,11 @@ export async function durableMatrix(
     }
 
     // 9. Durable counts belong to the requested conversation: a completed
-    // run stays completed while a later run on the same store is paused.
+    // run stays completed while a later run on the same store is paused. The
+    // later run's answer is held and the pause is requested once this stub has
+    // recorded the run's request, so the pause always lands after the durable
+    // submit — even on a loaded machine (lib/host-control.ts) — while
+    // PAUSE_DEADLINE_SECONDS only bounds how long the arrival may take.
     {
       const db = path.join(temp, "app9.sqlite");
       const store = path.join(temp, "agent9.sqlite");
@@ -451,13 +462,24 @@ export async function durableMatrix(
       const first = documentOf(await call(["agent", "start", "--db", db, "--agent-store", store, "--json"]));
       const firstID = stringField(field(first, "run"), "run_id") ?? "";
       check(stringField(first, "state") === "completed", "conversation-scoped status: first run did not complete");
-      mode = "delay";
-      const second = await call(["agent", "start", "--db", db, "--agent-store", store, "--timeout-seconds", "1", "--json"]);
+      mode = "hold";
+      const requestsBefore = received.length;
+      const second = await startPausedRun(
+        () => call([
+          "agent", "start", "--db", db, "--agent-store", store, "--timeout-seconds", String(PAUSE_DEADLINE_SECONDS), "--json",
+        ]),
+        received,
+        store,
+      );
       const secondDoc = documentOf(second);
       const secondID = stringField(field(secondDoc, "run"), "run_id") ?? "";
       check(
         second.code === 4 && stringField(secondDoc, "state") === "paused",
         `conversation-scoped status: second run did not pause (exit ${second.code}: ${second.stderr})`,
+      );
+      check(
+        received.length - requestsBefore === 1,
+        `conversation-scoped status: second run made ${received.length - requestsBefore} provider request(s) before its pause, want 1`,
       );
       const secondStatus = documentOf(await call(["agent", "status", secondID, "--db", db, "--json"]));
       const secondSnapshot = field(field(secondStatus, "durable"), "snapshot");

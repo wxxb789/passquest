@@ -46,6 +46,16 @@ export interface Shared {
    * package smoke passes the installed tree, which no credential may reach.
    */
   secretScanRoots?: readonly string[];
+  /**
+   * The Node runtime and the durable host an installed copy carries. A
+   * scenario that runs the installed binary as its own CLI pins them through
+   * PASSQUEST_NODE and PASSQUEST_AGENT_HOST: the CLI composition root
+   * resolves no resources directory (only the window does, see
+   * docs/harness.md), so unlike the window it cannot find packaged files on
+   * its own. Undefined in the source tree, where both resolve normally.
+   */
+  runtime?: string;
+  durableHost?: string;
 }
 
 export interface ScenarioRun {
