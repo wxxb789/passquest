@@ -14,6 +14,12 @@
  * built it — a path, a temp directory, an account name — reached the files
  * that do.
  *
+ * Nothing about that tree is taken on trust: every package a bundle inlined
+ * is read back out of the metafile and must be one `bun.lock` pins
+ * (bundlePackages, lockProblems), and the licence texts of the packages each
+ * bundle inlined are assembled into agent/THIRD-PARTY-NOTICES.txt beside the
+ * hosts (goal 0016 P4, notices.ts).
+ *
  * The tree lives under build/, which is gitignored: nothing here is committed,
  * and the gates keep building the development app through buildDesktop.
  */
@@ -23,6 +29,7 @@ import {
   closeSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -39,6 +46,8 @@ import path from "node:path";
 import { deflateSync } from "node:zlib";
 
 import { stringField } from "./json.ts";
+import { assembleNotices } from "./notices.ts";
+import type { BundlePackage, NoticeSource, StagedNotices } from "./notices.ts";
 import { executable, run } from "./process.ts";
 
 /** The staged tree, under the gitignored build/ directory. */
@@ -179,6 +188,8 @@ export interface StagedResources {
   dir: string;
   /** The staged runtime's absolute path. */
   node: string;
+  /** The notices the staged bundles required: what agent/THIRD-PARTY-NOTICES.txt carries (goal 0016 P4). */
+  notices: StagedNotices;
   /** The tree, one entry per file and per folded directory, in path order. */
   entries: StageEntry[];
   files: number;
@@ -219,6 +230,10 @@ export async function stageResources(root: string, options: StageOptions = {}): 
   const bundled = hosts.filter((host) => host.bundled);
   log(`agent: ${hosts.length} host scripts (${bundled.length} bundled, ${hosts.length - bundled.length} copied byte-identical)`);
   for (const host of bundled) log(`agent/${host.host}: ${host.specifiers.length} specifiers pinned, ${host.bytes} bytes`);
+  const noticesFile = path.join(dir, AGENT_DIR, NOTICES_FILE);
+  log(
+    `agent/${NOTICES_FILE}: ${staged.notices.packages.length} inlined package(s), ${staged.notices.texts.length} text(s), ${statSync(noticesFile).size} bytes`,
+  );
   const node = await stageNodeRuntime(dir, cacheDir(root), pin, log);
   log(`node ${NODE_VERSION}: ${STAGE_DIR}/${pin.path}`);
   const icon = path.join(dir, "icon.png");
@@ -228,7 +243,7 @@ export async function stageResources(root: string, options: StageOptions = {}): 
   const checks = [staged.check, ...(await checkStagedFor(dir, pin, target))];
   for (const line of checks) log(`check: ${line}`);
   const { entries, files, bytes } = summarize(dir);
-  return { dir, node, entries, files, bytes, checks };
+  return { dir, node, notices: staged.notices, entries, files, bytes, checks };
 }
 
 /**
@@ -254,13 +269,13 @@ export interface StagedHost {
   bytes: number;
   /** The specifiers the generated entry pinned, in the host's order; empty for a copy. */
   specifiers: string[];
-  /** The metafile bun wrote for the bundle (a staging intermediate, never shipped); empty for a copy. */
-  metafile: string;
 }
 
 /** The staged agent tree: the hosts it carries, and the lean proof staging made. */
 export interface StagedAgentTree {
   hosts: StagedHost[];
+  /** The notices the staged bundles required, and the text written to agent/THIRD-PARTY-NOTICES.txt. */
+  notices: StagedNotices;
   /** The lean-tree proof's line (assertLeanAgentTree), which the build log prints. */
   check: string;
 }
@@ -281,9 +296,10 @@ const BUNDLE_DIR = "bundles";
  * notices file only, no node_modules, no symlink, no leftover specifier.
  *
  * The entries and metafiles go to a run directory beside the staged tree
- * (build/package-cache/bundles), where the notices assembly reads the modules
- * each bundle inlined; the directory is removed first, so a stale file can
- * never be read as this run's.
+ * (build/package-cache/bundles); the directory is removed first, so a stale
+ * file can never be read as this run's. The notices file is assembled from
+ * the packages every metafile names (assembleNotices) and written last, so
+ * the lean proof covers it too.
  */
 export async function stageAgent(root: string, dir: string): Promise<StagedAgentTree> {
   const source = path.join(root, AGENT_DIR);
@@ -292,6 +308,7 @@ export async function stageAgent(root: string, dir: string): Promise<StagedAgent
   const metafiles = path.join(cacheDir(root), BUNDLE_DIR);
   rmSync(metafiles, { recursive: true, force: true });
   const hosts: StagedHost[] = [];
+  const inlined = new Map<string, BundlePackage>();
   for (const host of readdirSync(source).filter((name) => name.endsWith(".mjs")).sort()) {
     const from = path.join(source, host);
     const to = path.join(outDir, host);
@@ -305,24 +322,31 @@ export async function stageAgent(root: string, dir: string): Promise<StagedAgent
     const specifiers = hostSpecifiers(text);
     if (specifiers.length === 0) {
       copyFileSync(from, to);
-      hosts.push({ host, bundled: false, bytes: statSync(to).size, specifiers: [], metafile: "" });
+      hosts.push({ host, bundled: false, bytes: statSync(to).size, specifiers: [] });
       continue;
     }
     const bundle = await bundleHost(root, host, outDir, { metafile: path.join(metafiles, `${host}.json`) });
-    hosts.push({ host, bundled: true, bytes: bundle.bytes, specifiers: bundle.specifiers, metafile: bundle.metafile });
+    hosts.push({ host, bundled: true, bytes: bundle.bytes, specifiers: bundle.specifiers });
+    for (const pkg of bundle.packages) inlined.set(`${pkg.name}@${pkg.version}`, pkg);
   }
-  return { hosts, check: assertLeanAgentTree(outDir, { root }) };
+  const assembly = assembleNotices([...inlined.values()], noticeSource());
+  writeFileSync(path.join(outDir, NOTICES_FILE), assembly.text);
+  return {
+    hosts,
+    notices: { packages: assembly.packages, texts: assembly.texts },
+    check: assertLeanAgentTree(outDir, { root }),
+  };
 }
 
-/** One built host bundle: the staged file, what it pinned, and the metafile naming every module it inlined. */
+/** One built host bundle: the staged file, what it pinned, and the packages the metafile names. */
 export interface HostBundle {
   /** The bundle's absolute path inside outDir. */
   file: string;
   bytes: number;
   /** The package specifiers the generated entry pinned, in the host's order. */
   specifiers: string[];
-  /** The metafile bun wrote (a staging intermediate, never shipped). */
-  metafile: string;
+  /** The packages the bundle inlined (bundlePackages), each proved against the lock. */
+  packages: BundlePackage[];
 }
 
 /**
@@ -332,6 +356,12 @@ export interface HostBundle {
  * (so the entry itself may live outside the tree) and pinned as a namespace
  * import, and the host follows. The metafile names every module bun inlined,
  * which is what the notices assembly reads.
+ *
+ * The resolved tree is not taken on trust: bundlePackages reads each inlined
+ * package's own package.json out of the metafile, and every name and version
+ * must be one `bun.lock` pins (lockProblems). Resolution goes through the
+ * checkout's node_modules, so a stale tree there would otherwise ship a
+ * version the committed lock does not pin — the run fails instead.
  *
  * The entry is written beside the metafile — the run's intermediates
  * directory, outside the staged tree, never shipped — so bun's per-module
@@ -386,7 +416,272 @@ export async function bundleHost(
       `bun build ${host} is not reproducible: one source built twice differs (${first.length} vs ${second.length} bytes); something that varies between runs would ship in every package`,
     );
   }
-  return { file, bytes: second.length, specifiers, metafile: options.metafile };
+  const packages = bundlePackages(options.metafile, agentDir);
+  const empty = emptyInlinedSetProblem(host, specifiers, packages);
+  if (empty !== undefined) throw new Error(empty);
+  const lock = path.join(root, LOCK_FILE);
+  let lockText: string;
+  try {
+    lockText = readFileSync(lock, "utf8");
+  } catch (error) {
+    throw new Error(`${host}: cannot read ${LOCK_FILE}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const problems = lockProblems(packages, lockedVersions(lockText));
+  if (problems.length > 0) {
+    throw new Error(`${host}: the bundle does not match ${LOCK_FILE}: ${problems.join("; ")}`);
+  }
+  return { file, bytes: second.length, specifiers, packages };
+}
+
+/** The committed lock, from the checkout root: every package a bundle inlines must be one of its resolutions. */
+export const LOCK_FILE = "bun.lock";
+
+/**
+ * The packages a bundle's metafile names: every input under a `node_modules`
+ * directory belongs to the package its path sits in, read from that package's
+ * own `package.json`. The host script and the generated entry live outside
+ * node_modules and are no packages. Resolution goes through the checkout's
+ * node_modules (Bun's store, installed from the lock), so this is what makes
+ * the bundle's real inputs checkable against `bun.lock` (lockProblems): an
+ * input the tree no longer carries fails here rather than being skipped.
+ */
+export function bundlePackages(metafile: string, cwd: string): BundlePackage[] {
+  let document: unknown;
+  try {
+    document = JSON.parse(readFileSync(metafile, "utf8"));
+  } catch (error) {
+    throw new Error(`${metafile} cannot be read as the bundle's metafile: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const inputs = document !== null && typeof document === "object" && "inputs" in document ? document.inputs : undefined;
+  if (inputs === null || typeof inputs !== "object") throw new Error(`${metafile} names no inputs; bun writes one per module it inlined`);
+  const packages = new Map<string, BundlePackage>();
+  for (const key of Object.keys(inputs)) {
+    const file = path.resolve(cwd, key);
+    const parts = file.split(path.sep);
+    const at = parts.lastIndexOf("node_modules");
+    if (at === -1) continue;
+    const rest = parts.slice(at + 1);
+    // A scoped package's root is the two segments `@scope/name`, a plain one's is the single name.
+    const name = rest.length === 0 ? "" : rest[0].startsWith("@") ? rest.slice(0, 2).join("/") : rest[0];
+    if (name === "") throw new Error(`${metafile}: the input ${key} sits inside a node_modules directory but names no package`);
+    const root = path.join(parts.slice(0, at + 1).join(path.sep), name);
+    const manifest = packageManifest(root);
+    if (manifest.name !== name) {
+      throw new Error(`${root}/package.json declares ${JSON.stringify(manifest.name)}, want ${JSON.stringify(name)}; the input ${key} does not sit in the package it claims`);
+    }
+    packages.set(`${manifest.name}@${manifest.version}`, { name: manifest.name, version: manifest.version, root });
+  }
+  return [...packages.values()].sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
+}
+
+/**
+ * Whether a specifier names a package — a bare name, `openai` or
+ * `@scope/name/subpath` — and not a file the host itself carries: a relative
+ * or absolute path, a `file:` url, or a `#name` a manifest maps. Only a
+ * package is resolved through node_modules, so only a package must appear in
+ * the metafile the checks below read.
+ */
+function namesPackage(specifier: string): boolean {
+  return !/^(?:[.#/\\]|file:|[A-Za-z]:[\\/])/.test(specifier);
+}
+
+/**
+ * Why a bundled host that names a package inlined no package at all, or
+ * undefined (goal 0016 P4). `bundlePackages` reads the metafile bun writes,
+ * so a metafile that names no node_modules input — a bun whose format
+ * changed, an inlined set that went empty — would leave both the `bun.lock`
+ * check and the notices assembly passing over an empty set, and the package
+ * would ship the packages' code with no notice at all. A host that names only
+ * files carries no package, and there is nothing to assert (the same rule for
+ * the gate's bundle pass, which calls bundleHost too).
+ */
+export function emptyInlinedSetProblem(
+  host: string,
+  specifiers: readonly string[],
+  packages: readonly BundlePackage[],
+): string | undefined {
+  const named = specifiers.filter(namesPackage);
+  if (named.length === 0 || packages.length > 0) return undefined;
+  return `${host}: names the package specifier(s) ${named.map((specifier) => JSON.stringify(specifier)).join(", ")} but the bundle inlined no package; the metafile names no node_modules input, so the ${LOCK_FILE} check and the notices assembly would both pass over an empty set`;
+}
+
+/** A package root's package.json, parsed: the name and version one bundle input's package declares. */
+function packageManifest(root: string): { name: string; version: string } {
+  const file = path.join(root, "package.json");
+  let raw: string;
+  try {
+    raw = readFileSync(file, "utf8");
+  } catch (error) {
+    throw new Error(`${file} cannot be read: ${error instanceof Error ? error.message : String(error)}; a bundle inlined a package the tree does not carry`);
+  }
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`${file} is not JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const fields: object = manifest !== null && typeof manifest === "object" ? manifest : {};
+  const name = "name" in fields && typeof fields.name === "string" ? fields.name : "";
+  const version = "version" in fields && typeof fields.version === "string" ? fields.version : "";
+  if (name === "" || version === "") {
+    throw new Error(`${file} declares no name and version (${JSON.stringify(name) || "no name"}@${JSON.stringify(version) || "no version"})`);
+  }
+  return { name, version };
+}
+
+/**
+ * The versions bun.lock pins, by package name, from the text lockfile bun
+ * writes (JSON with trailing commas; Bun.JSON5 reads it). An entry's first
+ * element is its resolved `name@version`; a name only some parents resolve is
+ * keyed `<parent>/<name>`, and its own resolution still names the package, so
+ * every locked version of a name lands here.
+ */
+export function lockedVersions(lockText: string): Map<string, string[]> {
+  let lock: unknown;
+  try {
+    lock = Bun.JSON5.parse(lockText);
+  } catch (error) {
+    throw new Error(`${LOCK_FILE} cannot be read as bun's text lockfile: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const packages = lock !== null && typeof lock === "object" && "packages" in lock ? lock.packages : undefined;
+  if (packages === null || typeof packages !== "object") throw new Error(`${LOCK_FILE} holds no packages section; the lock check cannot read it`);
+  const versions = new Map<string, string[]>();
+  for (const [key, entry] of Object.entries(packages)) {
+    const resolution = Array.isArray(entry) && typeof entry[0] === "string" ? entry[0] : "";
+    const at = resolution.lastIndexOf("@");
+    if (at <= 0 || at === resolution.length - 1) {
+      throw new Error(`${LOCK_FILE}: the entry ${JSON.stringify(key)} is ${JSON.stringify(resolution)}, not a resolved package@version`);
+    }
+    const name = resolution.slice(0, at);
+    const version = resolution.slice(at + 1);
+    const list = versions.get(name) ?? [];
+    if (!list.includes(version)) list.push(version);
+    versions.set(name, list);
+  }
+  return versions;
+}
+
+/**
+ * Every inlined package the lock does not pin at the very version the bundle
+ * inlined: the lock names no such package, or it pins other versions of it.
+ * Empty when the bundle's inputs are exactly what the committed lock resolves.
+ */
+export function lockProblems(packages: readonly BundlePackage[], locked: ReadonlyMap<string, readonly string[]>): string[] {
+  const problems: string[] = [];
+  for (const pkg of packages) {
+    const versions = locked.get(pkg.name);
+    if (versions === undefined) {
+      problems.push(
+        `${pkg.name}@${pkg.version}: ${LOCK_FILE} names no such package; the checkout's node_modules resolved it, so the bundle would ship a package the committed lock does not pin`,
+      );
+      continue;
+    }
+    if (!versions.includes(pkg.version)) {
+      problems.push(`${pkg.name}@${pkg.version}: ${LOCK_FILE} pins ${pkg.name} at ${versions.join(", ")}`);
+    }
+  }
+  return problems;
+}
+
+/** The parts of a path's own entry a licence source reads: enough to tell a regular file from a directory or a link. */
+export interface NoticePathStats {
+  isFile(): boolean;
+  isSymbolicLink(): boolean;
+  isDirectory(): boolean;
+}
+
+/**
+ * The file-system calls the licence source makes. Staging uses the real ones;
+ * the harness self-test drives the source through this seam to fail a path
+ * the way a locked, permissionless or looping one does (EACCES, EBUSY,
+ * ELOOP), which no fixture can produce on demand.
+ */
+export interface NoticeFs {
+  /** One path's own entry, without following a final symlink. */
+  lstat(file: string): NoticePathStats;
+  /** One regular file's text. */
+  readFile(file: string): string;
+  /** One directory's entry names. */
+  readdir(dir: string): string[];
+}
+
+const FILE_SYSTEM: NoticeFs = {
+  lstat: (file) => lstatSync(file),
+  readFile: (file) => readFileSync(file, "utf8"),
+  readdir: (dir) => readdirSync(dir),
+};
+
+/**
+ * Whether a file-system failure means the path is not there — ENOENT, or a
+ * path component that is not a directory, ENOTDIR — and no licence text was
+ * lost. Everything else (EACCES, EPERM, EBUSY, ELOOP, ENAMETOOLONG) is a
+ * failure the source reports rather than reads as an absent path.
+ */
+function pathAbsent(error: unknown): boolean {
+  if (!(error instanceof Error) || !("code" in error)) return false;
+  const code = error.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/** The staging error for a path the source cannot read or list, naming the path, the file-system failure and why the run stops rather than skip it. */
+function unreadable(file: string, operation: "read" | "listed", error: unknown): Error {
+  return new Error(
+    `${file} cannot be ${operation} (${error instanceof Error ? error.message : String(error)}); the licence search fails here rather than report the package's licence texts complete`,
+  );
+}
+
+/**
+ * The licence source staging reads: the packages' own files, through the file
+ * system. A path that is not a regular file (a directory inside
+ * THIRD_PARTY_NOTICES, a symlink) reads as undefined, which the assembly
+ * refuses rather than dropping a notice silently.
+ *
+ * A directory the package does not carry — one not there, or one that is a
+ * file — lists as empty, which is how the assembly asks for a
+ * THIRD_PARTY_NOTICES a package may not have. Only ENOENT and ENOTDIR read as
+ * absent; a path that is there and cannot be read or listed stops the run,
+ * because reading it as empty would drop a licence text the package ships and
+ * the assembly's contract is to fail rather than ship without a notice
+ * (notices.ts). No symlink is followed, so a link cannot lead the search out
+ * of the package, and a linked licence file is refused by name rather than
+ * read from wherever it points.
+ */
+export function noticeSource(fs: NoticeFs = FILE_SYSTEM): NoticeSource {
+  return {
+    read: (file) => {
+      let stats: NoticePathStats;
+      try {
+        stats = fs.lstat(file);
+      } catch (error) {
+        if (pathAbsent(error)) return undefined;
+        throw unreadable(file, "read", error);
+      }
+      if (!stats.isFile()) return undefined;
+      try {
+        return fs.readFile(file);
+      } catch (error) {
+        if (pathAbsent(error)) return undefined;
+        throw unreadable(file, "read", error);
+      }
+    },
+    list: (dir) => {
+      let stats: NoticePathStats;
+      try {
+        stats = fs.lstat(dir);
+      } catch (error) {
+        if (pathAbsent(error)) return [];
+        throw unreadable(dir, "listed", error);
+      }
+      if (stats.isSymbolicLink()) throw new Error(`${dir} is a symlink; the licence search reads a package's own files, and a link can leave the package`);
+      if (!stats.isDirectory()) return [];
+      try {
+        return fs.readdir(dir).sort();
+      } catch (error) {
+        if (pathAbsent(error)) return [];
+        throw unreadable(dir, "listed", error);
+      }
+    },
+  };
 }
 
 /**
@@ -500,18 +795,33 @@ export const NOTICES_FILE = "THIRD-PARTY-NOTICES.txt";
  * The staged agent tree must carry the host scripts and nothing else: no
  * node_modules, no symlink, no file that is not a host script or the notices
  * file, no host that names a package specifier, and no file that embeds a
- * path of the machine that built it (machinePathIn). A bundle is
- * self-contained, so anything else is a tree that cannot run where it ships —
- * or one that names the account and directory it was built in — and the run
- * fails rather than shipping the old tree (goal 0016, default 1). The
- * specifier scan is hostSpecifiers (bun's own parser), so a `.node` or wasm
- * asset a bundle still requires appears here as a specifier that is not a
- * `node:` built-in.
+ * path of the machine that built it (machineShapeIn plus machineLiteralIn;
+ * the notices file, below, has its own rule). A bundle is self-contained, so
+ * anything else is a tree that cannot run where it ships — or one that names
+ * the account and directory it was built in — and the run fails rather than
+ * shipping the old tree (goal 0016, default 1). The specifier scan is
+ * hostSpecifiers (bun's own parser), so a `.node` or wasm asset a bundle
+ * still requires appears here as a specifier that is not a `node:` built-in.
+ *
+ * THIRD-PARTY-NOTICES.txt is exempt from the machine-path *shapes*
+ * (MACHINE_PATH_PATTERNS) and from the temp-directory literal: it copies the
+ * licence texts of the packages the bundles inline, at whatever depth a
+ * package keeps them, and upstream prose may legitimately name `/home/`,
+ * `/tmp/` or a Windows drive path (notices.ts), and `tmpdir()` is
+ * machine-spelled itself ("/tmp" on Linux, a drive path on Windows), so
+ * checking it would refuse one licence text on one OS and accept it on
+ * another. The exemption is earned: every byte of that file but the headers
+ * comes from a package's own licence file or the SPDX fallback, so the one
+ * literal it is refused for is the checkout root in both spellings
+ * (checkoutRootIn) — the same rule on every OS, and one no licence text can
+ * name and the assembly never writes, so a leak from the assembly side, or a
+ * header naming a path, still fails.
  *
  * Exported for a caller that checks a tree outside staging: the package
  * smoke's contents scan over the installed tree, and fixtures that must fail.
- * `root` adds the repository's absolute path to the forbidden text; only
- * staging knows it.
+ * `root` adds the repository's absolute path to the forbidden text, and the
+ * notices file's checkout-root rule rests on it; staging and the contents
+ * scan both know it, fixtures that check a bare tree do not.
  */
 export function assertLeanAgentTree(dir: string, options: { root?: string } = {}): string {
   const offenders: string[] = [];
@@ -535,7 +845,13 @@ export function assertLeanAgentTree(dir: string, options: { root?: string } = {}
       }
       files += 1;
       const text = readFileSync(full, "utf8");
-      const machine = machinePathIn(text, options.root);
+      // The notices file copies the inlined packages' own licence prose,
+      // which may name some machine's /home/, /tmp/ or temp directory
+      // legitimately, so only the checkout root is refused in it, in both
+      // spellings; every other file refuses the shapes and this machine's
+      // own directories.
+      const machine =
+        entry.name === NOTICES_FILE ? checkoutRootIn(text, options.root) : machineShapeIn(text) ?? machineLiteralIn(text, options.root);
       if (machine !== undefined) {
         offenders.push(`${relative}: embeds the machine path ${JSON.stringify(machine)}; a package carries no path of the machine that built it`);
       }
@@ -573,21 +889,48 @@ const MACHINE_PATH_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
- * The first machine-specific path in the text: the shapes above, this
- * machine's temp directory, and — when the caller knows it — the reader's
- * repository root in both spellings.
+ * The first machine-path *shape* in the text (the patterns above): a path
+ * that names some machine, whichever built the file. A licence text may name
+ * one legitimately, so the notices file is not scanned with this.
  */
-function machinePathIn(text: string, root: string | undefined): string | undefined {
+function machineShapeIn(text: string): string | undefined {
   for (const pattern of MACHINE_PATH_PATTERNS) {
     const match = pattern.exec(text);
     // The whole token, not just the shape's first characters, so the
     // offender line names the path a reader must remove.
     if (match !== null) return text.slice(match.index, match.index + 96).split(/\s/)[0];
   }
-  const literals = [tmpdir(), root ?? ""];
-  if (root !== undefined) literals.push(root.split(path.sep).join("/"));
-  for (const literal of literals) {
-    if (literal !== "" && text.includes(literal)) return literal;
+  return undefined;
+}
+
+/**
+ * The first of this machine's own directories the text holds — the temp
+ * directory it was written on, and, when the caller knows it, the checkout
+ * root in both spellings — or undefined. Every file but the notices file is
+ * checked with this; the notices file, whose licence prose may name a temp
+ * path, is checked with checkoutRootIn alone.
+ */
+function machineLiteralIn(text: string, root: string | undefined): string | undefined {
+  const temp = tmpdir();
+  if (temp !== "" && text.includes(temp)) return temp;
+  return checkoutRootIn(text, root);
+}
+
+/**
+ * The checkout root the text holds, in both spellings — the one machine-path
+ * literal a notices file is refused for, and the same rule on every OS.
+ * `tmpdir()` is deliberately not checked beside it: it is machine-spelled
+ * ("/tmp" on Linux, a drive path on Windows), so licence prose naming `/tmp/`
+ * would be refused on one OS and accepted on another. The notices file's
+ * bytes come from the inlined packages' own licence files, at whatever depth
+ * they sit, plus the SPDX fallback (harness/lib/notices.ts) — a package
+ * carries no directory of this machine — so the checkout root is the one
+ * literal an assembly-side leak, or a header naming a path, would carry.
+ */
+function checkoutRootIn(text: string, root: string | undefined): string | undefined {
+  if (root === undefined || root === "") return undefined;
+  for (const literal of [root, root.split(path.sep).join("/")]) {
+    if (text.includes(literal)) return literal;
   }
   return undefined;
 }

@@ -24,6 +24,7 @@
  * the packaged runtime and host must reach the provider.
  */
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 
 import { chatReply, cleanEnv, cliJson, pageScript, parse, SKILL, STUB_CREDENTIAL_ENV, STUB_MODEL, tail } from "../../lib/desktop-page.ts";
 import { PAUSE_DEADLINE_SECONDS, durableStorePath, startPausedRun } from "../../lib/host-control.ts";
@@ -68,19 +69,21 @@ export const brief: Scenario = {
     const { provider } = s.shared;
     const key = `sk-smoke-${randomBytes(12).toString("hex")}`;
     const keyEnv = { [STUB_CREDENTIAL_ENV]: key };
-    const runtime = s.shared.runtime;
-    const durableHost = s.shared.durableHost;
-    // The sibling Anki case fails the same way when the file it needs is
-    // absent (upgrade.ts): an empty PASSQUEST_AGENT_HOST would fall back to
-    // the cwd's and the exe's neighbours, and an empty PASSQUEST_NODE to a
-    // PATH this launch strips, so the real cause would surface as "node not
-    // found" instead of "the package carries no durable host".
-    if (runtime === undefined || durableHost === undefined) {
-      s.check(
-        false,
-        `brief: the installed app carries ${runtime === undefined ? "no Node runtime" : "no agent/durable-host.mjs"}, ` +
-          "so its own CLI cannot run the brief",
-      );
+    // siteOf in the package smoke — this case's only caller — names both from
+    // the installed tree, whose copy always carries the runtime and
+    // agent/durable-host.mjs. A copy that lost either is a broken package, so
+    // it fails by name here instead of letting the missing file reach the
+    // binary: PASSQUEST_AGENT_HOST would fall back to the cwd's and the exe's
+    // neighbours, and PASSQUEST_NODE to a PATH this launch strips, so the real
+    // cause would surface as "node not found" instead of itself. Reachable
+    // the moment a tree lacks one of the two — a fixture that omits the host,
+    // or a package whose agent/ lost it — and the case returns before any
+    // launch, so the failure names the missing file.
+    const runtime = s.shared.runtime ?? "";
+    const durableHost = s.shared.durableHost ?? "";
+    const absent = !existsSync(runtime) ? "no Node runtime" : !existsSync(durableHost) ? "no agent/durable-host.mjs" : "";
+    if (absent !== "") {
+      s.check(false, `brief: the installed app carries ${absent}, so its own CLI cannot run the brief`);
       return;
     }
     const env = installedEnv(s, keyEnv, { runtime, durableHost });

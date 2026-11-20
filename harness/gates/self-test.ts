@@ -33,6 +33,13 @@ import { localOnlyCases, localOnlyPassCases } from "./self-test/local-only.cases
 import { noteSmokeCases } from "./self-test/note-smoke.cases.ts";
 import {
   bundleEntryProblem,
+  bundleLockProblem,
+  bundlePackagesProblem,
+  inlinedSetProblem,
+  licenceNamesProblem,
+  noticesAssemblyProblem,
+  noticesContentsProblem,
+  noticeSourceProblem,
   packageNamingProblem,
   packageSmokeCases,
   packageSmokePassCases,
@@ -415,6 +422,13 @@ export const selfTest: Gate = {
       packageNamingProblem,
       stagingRefusalsProblem,
       bundleEntryProblem,
+      bundleLockProblem,
+      bundlePackagesProblem,
+      inlinedSetProblem,
+      licenceNamesProblem,
+      noticesAssemblyProblem,
+      noticesContentsProblem,
+      noticeSourceProblem,
       upgradeComparisonProblem,
       () => gateGroupProblem(gates, gateGroups, ctx.root),
     ]) {

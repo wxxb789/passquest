@@ -20,7 +20,10 @@ export function agentSmokeCases(): BrokenCase[] {
         // The gate bundles the durable host before the matrix's second pass
         // (goal 0016 P2): the fixture carries a host that names a resolvable
         // package, so it fails on its broken CLI, not on a bundle build that
-        // cannot resolve anything.
+        // cannot resolve anything — and a `bun.lock` pinning that package, as
+        // the checkout root has, because the bundle's inputs are checked
+        // against the lock (goal 0016 P4).
+        "bun.lock": '{\n  "lockfileVersion": 2,\n  "packages": {\n    "tiny-fixture": ["tiny-fixture@0.0.0", "", {}, "sha512-fixture"],\n  },\n}\n',
         "agent/durable-host.mjs": 'import "tiny-fixture";\n',
         "agent/node_modules/tiny-fixture/package.json": '{"name": "tiny-fixture", "version": "0.0.0", "main": "index.mjs"}\n',
         "agent/node_modules/tiny-fixture/index.mjs": "export const marker = 1;\n",

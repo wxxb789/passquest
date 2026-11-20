@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { STUB_IDLE_SECONDS } from "../lib/desktop-page.ts";
 import { buildCLI } from "../lib/go.ts";
 import { PAUSE_DEADLINE_SECONDS, startPausedRun } from "../lib/host-control.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
@@ -20,15 +21,6 @@ interface ReceivedRequest {
 
 const KEY = "test-key-not-real";
 const MODEL = "smoke-model";
-
-/**
- * How long the stub may leave one request unanswered before Bun closes the
- * connection (Bun's own default is 10 seconds). Section 9's held run is parked
- * here until its pause request lands, which takes PAUSE_DEADLINE_SECONDS in the
- * worst case: without the longer idle timeout, the hold would end in a provider
- * network error instead of the pause the section is about.
- */
-const STUB_IDLE_SECONDS = 120;
 
 function parse(raw: string): unknown {
   try {
@@ -95,6 +87,10 @@ export async function durableMatrix(
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
+    // Section 9's held run is parked here until its pause request lands,
+    // which takes PAUSE_DEADLINE_SECONDS in the worst case: under Bun's
+    // default idle timeout the hold would end in a provider network error
+    // instead of the pause the section is about.
     idleTimeout: STUB_IDLE_SECONDS,
     async fetch(request) {
       const raw = await request.text();
@@ -662,7 +658,7 @@ export const agentSmoke: Gate = {
         : `${permissionChecks} permission checks`;
       return pass(
         `${assertions} assertions, 11 scenarios x ${results.length} hosts (${results.map((result) => result.label).join(", ")}), ` +
-          `${requests} provider requests, ${permissionNote}, bundle ${bundle.bytes} bytes`,
+          `${requests} provider requests, ${permissionNote}, bundle ${bundle.bytes} bytes with ${bundle.packages.length} inlined packages`,
       );
     } finally {
       rmSync(temp, { recursive: true, force: true });

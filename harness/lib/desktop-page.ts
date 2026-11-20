@@ -164,9 +164,11 @@ export function chatReply(text: string): Response {
 /**
  * How long the stub may hold one request unanswered before Bun closes the
  * connection (Bun's own default is 10 seconds): the brief case in the package
- * smoke parks a paused run here for its whole deadline (goal 0016 P3).
+ * smoke parks a paused run here for its whole deadline (goal 0016 P3), and
+ * the agent smoke's held run waits out its pause request behind one
+ * (harness/gates/agent-smoke.ts, section 9).
  */
-const STUB_IDLE_SECONDS = 120;
+export const STUB_IDLE_SECONDS = 120;
 
 export function startProviderStub(): ProviderStub {
   const stub: ProviderStub = {
