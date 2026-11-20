@@ -30,3 +30,6 @@ coverage/
 
 # CI watcher scratch output
 ci-watch-*.log
+
+# Regenerable prototype screenshots (bash design/prototypes/shoot.sh); kept out of the repository.
+design/prototypes/_shots/
