@@ -131,9 +131,9 @@ Rules for the harness itself:
 ## Environment
 
 - Toolchain is pinned by `mise.toml` (Go, Node, Bun). A contributor without mise needs matching Go,
-  Node and Bun on `PATH`; `python3` and a POSIX shell are not required. Node is used by the product's
-  tutor and search hosts and by `tutor-smoke`; the rest of the CLI and all local practice tests stay
-  Go-only.
+  Node and Bun on `PATH`; `python3` and a POSIX shell are not required. Node runs the product's
+  four agent hosts (tutor, search, Anki, Pi Durable) and the smokes that drive them; the rest of the
+  CLI and all local practice tests stay Go-only. Packages bundle their own pinned Node.
 - `tutor-smoke`, `find-smoke` and `agent-smoke` start loopback stubs in the gate process. They make no
   external network call and use a generated credential that exists only in the gate's memory.
 - `agent-smoke` also runs the real Node + Pi Durable runtime against a temporary Pi SQLite file. It

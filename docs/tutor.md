@@ -55,8 +55,9 @@ The legacy path reads `PASSQUEST_TUTOR_API_KEY`. A registry provider reads its o
 credential is read by the agent host, never written to SQLite, argv, output, a call record, a
 generated command or the repository. `tutor config` reports `present` or `missing`, never the value.
 
-Until the desktop workspace provides an OS secret store (goal 0011), the learner exports the variable
-in the session that runs `tutor ask`:
+The CLI reads the key from the environment, so the learner exports the variable in the session that
+runs `tutor ask`. The desktop app also accepts a key in Settings and keeps it in the OS credential
+store, with an environment variable still taking precedence ([desktop.md](desktop.md#credentials)):
 
 ```bash
 export PASSQUEST_TUTOR_API_KEY=...   # not committed; not stored by Pass Quest
@@ -187,8 +188,8 @@ before and after the failure. `practice` still records and grades locally.
   ([agent.md](agent.md)), not in `tutor ask`.
 - The registry path requires `model test` verification of `text.chat`; the legacy hand-configured path
   does not. Only `text.chat` is probed in this increment.
-- The credential lives in the environment until goal 0011's OS secret store. A learner must export it
-  in each session or shell profile they control.
+- The CLI reads the credential only from the environment; a learner must export it in each session or
+  shell profile they control. The desktop app can keep it in the OS credential store instead.
 - The model output is stored locally so the learner can reread it. It is not an answer key, a grade,
   a readiness estimate or an exam fact, and it is never exported by `report` or `next`.
 - Consent is per source, not per excerpt. A learner who wants finer control can withhold the whole

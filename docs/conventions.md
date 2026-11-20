@@ -23,8 +23,9 @@ Binding project conventions. Read this before writing code for any goal.
   and every verified local practice path must work with Node absent; only `tutor ask`, `agent` work,
   `note propose --refine`, `note push` when it has pending work, and `find` with a configured search
   endpoint need it.
-- **MyGo + WebView** desktop shell arrives at goal 0011. Until then the access surface is a real,
-  scriptable CLI plus a test harness — screenshots and mock UIs are not evidence.
+- **MyGo + WebView** is the desktop shell (`cmd/passquest-desktop`, `internal/desktop`, the TypeScript
+  frontend in `desktop/web`) beside the scriptable CLI; the gates drive both, and screenshots and mock
+  UIs are not evidence.
 - **Bun + TypeScript** is the harness runtime (`harness/`, gate modules under `harness/gates/`), not
   a product runtime. Chosen for one reason: the owner develops on Linux, macOS and Windows and the
   harness must run on all three without Git Bash or a system Python. The migration landed with goal
@@ -48,14 +49,19 @@ Binding project conventions. Read this before writing code for any goal.
 ## Repository layout
 
 ```text
-cmd/passquest/          CLI entry point (the pre-0011 access surface)
+cmd/passquest/          CLI entry point
+cmd/passquest-desktop/  desktop app entry point (the CLI when given arguments)
 internal/<domain>/      Go packages by domain truth, not by layer
 internal/study/         orchestration per learner workflow (practice, recommend, models, coach, notes,
                         outbox, assessment, brief and the shared kernel), imported by both adapters
 internal/cli/           Go adapter for the CLI surface
 internal/workspace/     Go adapter for the desktop Workspace surface
+internal/studio/        DTOs of the desktop's bound API
+internal/desktop/       MyGo app, data directory, credential store and lifecycle
+internal/update/        the on-demand release check
 internal/cmdline/       shared by both adapters: shell detection/quoting and the generated command
                         builders
+desktop/web/            desktop frontend source (TypeScript + CSS)
 agent/                  Node/TypeScript tutor, search, AnkiConnect and Pi Durable hosts (`docs/agent.md`)
 data/baselines/         owner-directed public parsed text (unreviewed; see its README)
 data/private/, data/local/, local-data/, .passquest/   never committed

@@ -143,8 +143,8 @@ source title, path and full page are never included in the provider payload. See
   text was inspected; `reviewed_by` is a local free-text label, not authentication.
 - The 165-page reviewed conversion remains open-ended content work. Completing it is not claimed by
   this increment.
-- One local learner, no encryption at rest beyond the `0600` database, no accounts, no sync. Those
-  belong to later goals.
+- One local learner, no encryption at rest beyond the `0600` database, no accounts, no sync. No goal
+  covers them; each would need its own goal.
 - POSIX modes only: Windows has no `0600`/`0700` equivalent, and `os.Chmod(0o600)` does not create a
   restrictive ACL there. The import smoke reports its database-mode assertion as skipped on Windows
   rather than counting it. The directory mode is enforced only for the app-owned default path; a

@@ -34,8 +34,9 @@ turns red.
 - Signals are POSIX API. `os.FindProcess` succeeds for any pid on Windows and `Process.Signal` refuses
   everything but `Kill`, so cancellation must travel through the durable control file the host polls
   (`internal/agent`); a signal is an optimisation on POSIX only.
-- There are no process groups or job objects on Windows: no group kill, no negative pid. The bounded
-  `killProcess` fallback exists for exactly this reason.
+- There are no POSIX process groups on Windows: no group kill, no negative pid. The desktop app reaps
+  hosts with a kill-on-close job object (`internal/desktop/children_windows.go`); the CLI's bounded
+  `killProcess` fallback covers the rest.
 
 ## Filesystem semantics
 
@@ -90,7 +91,7 @@ turns red.
     prints a warning when the command it rendered contains `%` and the family is `cmd`. Delayed
     expansion (`!`) is off by default and is not defended against.
 - The Windows forms are pinned by table tests over spaces, `$`, backticks, `"`, `'`, `%`, `!` and
-  non-ASCII text; they are not executed on this Linux host. The 3-OS CI run is what proves the
+  non-ASCII text. The 3-OS CI run is what proves the
   shells, as for every other platform claim here.
 
 ## Packaging

@@ -203,8 +203,9 @@ document carries the state.
   host polls; signal delivery is only an optimisation. The application trail decides liveness, so a
   hard-killed host's leftover heartbeat cannot block `status` or `resume`.
 - Agent runs do not consume the `tutor` daily-call ledger; the run's turn bound and timeout are their
-  cost cap. This is revisited with goal 0010.
-- No streaming UI, background service, OS secret store, Anki note, external resource search,
-  readiness estimate, exam blueprint or pass probability.
+  cost cap; goal 0010 kept this and added per-provider budgets only for single calls.
+- The study brief streams nothing, runs no background service and creates no Anki note or resource
+  search (those are `note` and `find`); it computes no readiness estimate, exam blueprint or pass
+  probability.
 
 Measured behaviour and limitations: [`evidence/0006-resumable-agent-work.md`](evidence/0006-resumable-agent-work.md).

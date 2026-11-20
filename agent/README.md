@@ -77,8 +77,8 @@ while AnkiConnect is an HTTP endpoint. It is a bounded transport, not an Anki cl
 ## `durable-host.mjs` — the Pi Durable study brief
 
 `durable-host.mjs` is the goal-0006 runtime for one bounded multi-step task. It uses
-`@earendil-works/pi-durable` 1.5.1, `@earendil-works/pi-ai` 1.5.1, `@earendil-works/chord` 1.5.1 and
-`@earendil-works/pi-schema` 1.5.1, opened over a separate SQLite file (`openNodeSqliteStorage`). The
+`@earendil-works/pi-durable` 1.5.2, `@earendil-works/pi-ai` 1.5.2, `@earendil-works/chord` 1.5.2 and
+`@earendil-works/pi-schema` 1.5.2, opened over a separate SQLite file (`openNodeSqliteStorage`). The
 application database is never opened by this process.
 
 Modes: `start`, `resume`, `status`, `transcript`.
@@ -112,5 +112,5 @@ platform limits.
 
 ## Boundary
 
-These hosts are replaced by the desktop lifecycle in goal 0011. The versioned JSON documents are the
-contract; provider SDKs stay inside Node and never reach `cmd/` or `internal/`.
+The desktop app spawns these same hosts per call and reaps them on quit, and every package bundles them
+with a pinned Node runtime (goal 0013). The versioned JSON documents are the contract; provider SDKs stay inside Node and never reach `cmd/` or `internal/`.

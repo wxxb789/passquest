@@ -7,9 +7,12 @@ with no Node installed (CI proves this for the coach and Anki; see
 [What CI proves](#what-ci-proves-and-what-is-untested)). Anki, AnkiConnect and any model are **not**
 bundled; a coach call needs a provider key you enter yourself.
 
-The packages are built and smoke-tested by CI ([What CI proves](#what-ci-proves-and-what-is-untested))
-and kept as that run's artifacts for 7 days. No GitHub release is published: the owner hands the
-package over, or you download the run's `package-<os>` artifact.
+The packages are built and smoke-tested by CI ([What CI proves](#what-ci-proves-and-what-is-untested)).
+Download them from the repository's
+[GitHub Releases](https://github.com/wxxb789/passquest/releases/latest): each release carries the
+three packages and a `SHA256SUMS.txt`, and its packages are the ones the gate's `package` jobs built,
+installed and smoke-tested on the tagged commit ([Releasing](release.md)). A CI run's
+`package-<os>` artifact, kept for 7 days, is an untagged build for inspection.
 
 ## Windows
 
@@ -39,7 +42,7 @@ is not produced by CI.
 **Install.** Open the disk image and drag **Pass Quest** into **Applications**.
 
 **Unsigned warning.** The app is ad-hoc signed only and not notarized — the owner's recorded decision
-for this goal, with no certificate and no Apple Developer account. Gatekeeper therefore blocks the
+in goal 0013, with no certificate and no Apple Developer account. Gatekeeper therefore blocks the
 first launch of a downloaded copy. To open it:
 
 1. Right-click (Control-click) the app in Applications, choose **Open**, and confirm the dialog.
@@ -140,8 +143,9 @@ button sends one `GET` request to GitHub Releases for this repository (`api.gith
 no account, no study data and no device identifier, and downloads nothing. The app refuses a redirect
 and does not use a proxy from your environment. If a newer release exists, the row shows its version
 and publication date with a link to its release page, which opens in your browser; you install it the
-normal way, as above. No release has been published for this repository yet, so a check today answers
-*No release has been published for this repository yet, so there is nothing newer to install.* If the
+normal way, as above. If your version is the latest published one, the row says so. Only when the
+repository has no published release does the check answer *No release has been published for this
+repository yet, so there is nothing newer to install.* Drafts and pre-releases are never offered. If the
 request cannot reach GitHub — offline, rate-limited, or a network that requires a proxy — the row says
 *could not check* with a short reason, and study is unaffected.
 
@@ -155,7 +159,9 @@ with `go`, `bun` and `node` absent from `PATH` (asserted), and drives the study 
 features, Anki, the forward upgrade, the credential case and the broken-runtime case through it (the
 `package smoke` gate, cases `contents, layout, study, agents, anki, upgrade, credential, broken`).
 Each run keeps its package as the `package-windows-latest`, `package-macos-latest` or
-`package-ubuntu-latest` artifact for 7 days — an inspection artifact, never a release.
+`package-ubuntu-latest` artifact for 7 days. A run on a version tag hands these same artifacts to the
+release workflow, which publishes them only after the owner reviews the draft
+([Releasing](release.md)).
 
 Only these targets are claimed as supported:
 
@@ -180,7 +186,6 @@ Untested, and therefore not claimed:
 - **Search and the study brief with the bundled runtime.** The package carries their hosts and the
   same resolver finds them, but CI runs only their unavailable path in the installed app; their
   success path is covered by the source-tree smokes, not by the package.
-- **Updates.** No release is published (goal 0015), so a check today answers that there is nothing
-  newer to install. The package smoke does not drive the update check or its browser hand-off; those
+- **Updates.** The package smoke does not drive the update check or its browser hand-off; those
   are covered by `desktop smoke`'s `update` scenario in a source checkout, not by the installed
   package.

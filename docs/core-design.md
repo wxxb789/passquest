@@ -2,7 +2,7 @@
 
 > **Purpose:** Give a person with limited English proficiency the best defensible chance of passing a specific written English examination within a constrained preparation window. Build an agentic, local-first exam coach—not a general English school, a flashcard clone, or a collection of AI features.
 >
-> **Status:** Foundational design for pre-0.1 development. Revisit assumptions when real exam or learner evidence contradicts them. Nothing here implies a guaranteed pass rate.
+> **Status:** Foundational design, binding through v0.15.0 (goals 0001–0015 done). Revisit assumptions when real exam or learner evidence contradicts them. Nothing here implies a guaranteed pass rate.
 
 ## 1. Product taste
 
@@ -68,7 +68,7 @@ Give it narrow, semantic domain tools—e.g. get learner evidence, propose a les
 
 Chosen direction:
 - **MyGo + Go** is the desktop shell and deterministic application core, including scoring, learning evidence/policy, import, resource governance and Anki integration.
-- **Web frontend + TypeScript** provides text-rich reading interactions and polished desktop UX when its later goal is active. MyGo's typed bridge belongs to Go-facing UI actions, not directly to the agent's database.
+- **Web frontend + TypeScript** provides text-rich reading interactions and polished desktop UX (the C · Stage design of goal 0012). MyGo's typed bridge belongs to Go-facing UI actions, not directly to the agent's database.
 - **Pi Durable + pi-ai**, hosted in a private local Node.js/TypeScript process, provides the agent loop, providers, tools and recovery.
 - **SQLite** is the durable store. The Go application owns its application schema; the Pi host owns its own runtime schema, ordinarily in separate SQLite files to avoid co-writer/lifecycle coupling. One process is the writer/authority for each logical state domain.
 - **A versioned, narrow local protocol** connects Go and the Pi host: semantic requests, events, cancellation, timeouts, bounded streaming and restart-safe request identities. Choice of IPC transport is an implementation decision; it must not rely on arbitrary open network exposure.
@@ -105,11 +105,11 @@ A candidate is not a verified exam item. Keep provenance, original vs transforme
 There are two different development stages, deliberately:
 
 1. **Headless functional stages:** a real local user or test harness can import a small source, take a question, receive correct feedback, preserve evidence, run controlled AI coaching, generate an Anki note and verify recovery—without polished UI. A thin CLI/test harness is acceptable as a temporary access surface; screenshots and mock-only demos are not proof.
-2. **Desktop experience stages:** MyGo/WebView supports fluid reading, contextual coaching, Anki previews and examination simulation. The later Opus-led UI pass is free to refine information hierarchy and interaction patterns, without rewriting domain truth.
+2. **Desktop experience stages:** MyGo/WebView supports fluid reading, contextual coaching, Anki previews and examination simulation. The Opus-led UI pass (goal 0012, done) refined information hierarchy and interaction patterns, and any later pass may do the same, without rewriting domain truth.
 
 No agent-generated fluff, congratulatory noise, endless modal dialogs or routine human approval gates. Make the next useful action obvious; expose uncertainty, provenance and costs without making study feel like operations management. The product should gracefully support keyboard-driven study, visual card previews, accessible type, consistent light/dark modes and interruption/resumption.
 
-Every goal must produce an observable capability and evidence, not simply create a database/API/architecture layer. Keep goals in `docs/goals/`, ascending `0001-` filenames, completed ones later archived under `docs/goals/archive/` if the project adopts that convention. Each provisional future goal is refined using feedback before activation. Neither goal files nor this design prescribe a mandatory implementation checklist or a permanent runtime scheduler.
+Every goal must produce an observable capability and evidence, not simply create a database/API/architecture layer. Keep goals in `docs/goals/`, ascending `0001-` filenames, completed ones archived under `docs/goals/archive/`. A new goal is written as provisional and refined using feedback before activation. Neither goal files nor this design prescribe a mandatory implementation checklist or a permanent runtime scheduler.
 
 ## 11. Explicit non-goals (initial product)
 
