@@ -1,6 +1,6 @@
 # Development goals
 
-Work through these **one at a time**, in numeric order, accepting an earlier outcome before beginning a dependent goal. Goals are user-observable advances, **not** architecture-layer tickets or a promise of elapsed-time completion. Default sizing target is one meaningful feedback window of approximately 12 working hours (not a deadline). Goals 0001–0015 are done and archived; 0016–0018 are ready. A new goal is added here as provisional and refined against accumulated evidence *before* activation. Completed goals can be archived in `docs/goals/archive/` without renumbering historical goals.
+Work through these **one at a time**, in numeric order, accepting an earlier outcome before beginning a dependent goal. Goals are user-observable advances, **not** architecture-layer tickets or a promise of elapsed-time completion. Default sizing target is one meaningful feedback window of approximately 12 working hours (not a deadline). Goals 0001–0015 are done and archived; 0016–0019 are ready. A new goal is added here as provisional and refined against accumulated evidence *before* activation. Completed goals can be archived in `docs/goals/archive/` without renumbering historical goals.
 
 | Goal | State | Prerequisite | Intended value |
 |---|---|---|---|
@@ -22,6 +22,7 @@ Work through these **one at a time**, in numeric order, accepting an earlier out
 | [0016 — A lean package that ships only what the app runs](./0016-lean-package.md) | Ready | 0013 — installable personal desktop app | Ship only the agent code the hosts execute, prove the study brief in the installed app, and measure the smaller package. |
 | [0017 — Install on current Windows and macOS without fighting the operating system](./0017-first-tier-install-experience.md) | Ready | None | Windows 11+ and the latest two macOS majors, an accurate English/Chinese install guide for the Open Anyway flow, and a Homebrew tap that installs without Gatekeeper. |
 | [0018 — macOS upgrades keep the learner's Keychain permission](./0018-keychain-survives-upgrade.md) | Ready | None | Establish whether ad-hoc upgrades lose Keychain access and, if so, sign with a stable project identity so they do not. |
+| [0019 — A modern frontend written for the engines Pass Quest supports](./0019-modern-frontend.md) | Ready | 0017 — supported systems | Write the frontend for current WebView2 and macOS 26 WebKit, drop old-engine workarounds, adopt native features where they pay off, and prove performance is no worse. |
 
 ## Constraints
 

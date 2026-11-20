@@ -1834,3 +1834,17 @@ Entry format:
 - Options considered: (A) keep check-only; (B) add in-app download and install as its own goal.
 - Default taken: (A) for now.
 - Revisit when: the owner schedules it, or a release needs learners to upgrade quickly.
+
+### Q-0000-09 — Which engines does the desktop frontend target?
+- Status: resolved
+- Resolution: (owner, 2026-11-20) the frontend is written as modern code for the engines the supported
+  systems run (Q-0000-07): current WebView2 on Windows 11 and WKWebView on macOS 26 and later.
+  Workarounds for older engines go, native platform features are preferred where they simplify the
+  code or improve performance, and performance is measured rather than assumed. Linux's WebKitGTK
+  must keep working as second-tier.
+- Context: goal 0011 targeted ES2022 and the styles carry 135 vendor-prefixed or compatibility
+  constructs; dropping older systems makes them unnecessary.
+- Options considered: (A) keep the goal-0011 feature level; (B) target the supported engines' baseline.
+- Default taken: (B), applied by goal 0019.
+- Revisit when: the supported system pair moves, or a modern feature measurably slows an engine.
+
