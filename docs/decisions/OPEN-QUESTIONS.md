@@ -365,6 +365,8 @@ Entry format:
   keychain/file provider behind the same host request; no stored data changes.
 - Revisit when: goal 0011 provides an OS secret store, or a real learner needs a persisted credential
   without exporting an environment variable each session.
+- Revisited (2026-11-20): goal 0011 added the OS credential store for the desktop app (Q-0011-03); the
+  environment variable still wins, and the CLI still reads only the environment.
 
 ### Q-0005-02 — Which process may contact the provider?
 - Status: decided(default taken)
@@ -381,6 +383,9 @@ Entry format:
   with a recorded decision.
 - Revisit when: goal 0006 integrates Pi Durable, or a supported provider requires a transport that
   the single-shot host cannot express.
+- Revisited (2026-11-20): goal 0006 added the Pi Durable host beside the single-shot tutor host rather
+  than replacing it; Node hosts remain the only provider egress. Goal 0015 added one recorded Go
+  exception, `internal/update`, which the `local-only` gate pins to the release-check endpoint.
 
 ### Q-0005-03 — Is imported source text sent to the provider by default?
 - Status: resolved
@@ -416,6 +421,8 @@ Entry format:
   adapter under the same host protocol in goal 0010.
 - Revisit when: goal 0010 starts provider choice, or the owner's authorized endpoint is not
   chat-completions compatible.
+- Revisited (2026-11-20): goal 0010's provider registry kept this one request shape for every provider,
+  including the custom endpoint (`docs/providers.md`); no provider SDK was added.
 
 ### Q-0005-05 — Should the Node host enforce the same request bounds as the Go client?
 - Status: decided(default taken)
@@ -470,6 +477,8 @@ Entry format:
   new task kind and tool; stored steps and attempts are unaffected.
 - Revisit when: goal 0007 or 0008 introduces a note/resource effect, or real use shows the brief is
   not useful enough to keep as the durable task.
+- Revisited (2026-11-20): goals 0007 and 0008 gave notes and found resources their own commands and
+  records (`note`, `find`); the study brief stays the durable task with its one tool.
 
 ### Q-0006-02 — Is Pi Durable worth a product-runtime dependency now, and where does its state live?
 - Status: decided(default taken)
@@ -510,6 +519,8 @@ Entry format:
   replacing the signalling layer with a service; the event trail remains authoritative.
 - Revisit when: goal 0011 introduces a desktop lifecycle, or a target platform cannot stop a child
   promptly.
+- Revisited (2026-11-20): goal 0011's desktop lifecycle kept this protocol and ends every host on quit
+  (Q-0011-11); the durable host pauses on SIGTERM, so a brief interrupted by quit resumes later.
 
 ### Q-0006-04 — Which failures are `failed` and which are `needs_action`, and do agent calls count against the tutor budget?
 - Status: decided(default taken)
@@ -527,6 +538,8 @@ Entry format:
   ledger. Reverse by changing the classifier and adding a run-level reservation.
 - Revisit when: goal 0010 adds provider capabilities/budgets, or a real learner needs one spend cap
   across tutor and agent calls.
+- Revisited (2026-11-20): goal 0010 made the daily budget one counter per provider for single calls
+  (Q-0010-04); agent runs are still capped by their turn bound and timeout, not the ledger.
 
 ### Q-0006-05 — Does a resumed run use the current model or the recorded one?
 - Status: decided(default taken)
@@ -540,6 +553,8 @@ Entry format:
   configuring the conversation to the current model before resume; the transcript records the model
   per answer.
 - Revisit when: goal 0010 exposes provider/model choice or a run needs planned model hand-off.
+- Revisited (2026-11-20): goal 0010 kept (A): agent runs keep their recorded provider and model, and
+  `resume` is their retry path (Q-0010-08).
 
 ### Q-0006-06 — Is a copied `next` command POSIX shell text or per-platform shell text?
 - Status: resolved
@@ -789,6 +804,8 @@ Entry format:
   transaction. `tutor history` reports the shared daily count but lists coaching calls only. Reverse
   by adding a dedicated note budget display or removing the flag; deterministic drafts are unaffected.
 - Revisit when: goal 0010 introduces provider/capability choice or per-task budgets.
+- Revisited (2026-11-20): goal 0010 kept the shared ledger; note refinements now count against the
+  per-provider counter of the provider they reached (Q-0010-04, `docs/providers.md`).
 
 ### Q-0009-01 — What item count and time window does an assessment use?
 - Status: resolved
@@ -895,7 +912,7 @@ Entry format:
 - Default taken: (B). Reverse by disabling the retry branch in the host; the ledger keeps every attempt.
 
 ### Q-0010-06 — What does the desktop learner see when every provider is unusable?
-- Status: open
+- Status: decided(default taken)
 - Context: clause 5 requires one action per failure type, but a learner can be in a state where all configured
   providers are `no_credential` or over budget. The goal does not yet say whether that state is one aggregated
   message or a per-provider list.
@@ -904,6 +921,8 @@ Entry format:
 - Default taken: (C) — the short line stays actionable, the table stays inspectable. Revisit when goal 0011
   renders this in the desktop workspace.
 - Revisit when: the desktop workspace lands, or a learner reports the aggregate line as unclear.
+- Revisited (2026-11-20): goal 0011 rendered this state in the desktop workspace and kept (C); see
+  Q-0011-09, which now carries the decision.
 
 ### Q-0009-06 — Does `next` spend the assessment unit it names?
 - Status: decided(default taken)
