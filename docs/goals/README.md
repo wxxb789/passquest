@@ -1,6 +1,6 @@
 # Development goals
 
-Work through these **one at a time**, in numeric order, accepting an earlier outcome before beginning a dependent goal. Goals are user-observable advances, **not** architecture-layer tickets or a promise of elapsed-time completion. Default sizing target is one meaningful feedback window of approximately 12 working hours (not a deadline). Every goal listed below is done; a new goal is added here as provisional and refined against accumulated evidence *before* activation. Completed goals can be archived in `docs/goals/archive/` without renumbering historical goals.
+Work through these **one at a time**, in numeric order, accepting an earlier outcome before beginning a dependent goal. Goals are user-observable advances, **not** architecture-layer tickets or a promise of elapsed-time completion. Default sizing target is one meaningful feedback window of approximately 12 working hours (not a deadline). Goals 0001–0015 are done and archived; 0016–0018 are ready. A new goal is added here as provisional and refined against accumulated evidence *before* activation. Completed goals can be archived in `docs/goals/archive/` without renumbering historical goals.
 
 | Goal | State | Prerequisite | Intended value |
 |---|---|---|---|
@@ -19,6 +19,9 @@ Work through these **one at a time**, in numeric order, accepting an earlier out
 | [0013 — Install and recover Pass Quest as a personal desktop app](./archive/0013-reliable-personal-desktop-distribution.md) | Done | 0011 — functional desktop workspace, 0012 — visual refinement | Unsigned installers for Windows, macOS and Linux, proven on CI, that let a nondeveloper study with no developer tools and keep their evidence across relaunch, reinstall and forward upgrade. |
 | [0014 — A pushed note lands in the deck the CLI claims](./archive/0014-note-lands-in-the-declared-deck.md) | Done | 0007 — Anki notes | Turn the deck claim `note push` already prints into a checked claim: either the card is in the named deck or the push says which deck it reached, keeps the note id and exits non-zero. |
 | [0015 — Know when a newer Pass Quest exists](./archive/0015-know-when-a-newer-version-exists.md) | Done | 0013 — installable personal desktop app | A learner-controlled check against this repository's GitHub Releases that names a newer version and where to get it, under one enforced, documented network exception; nothing is downloaded or installed automatically. |
+| [0016 — A lean package that ships only what the app runs](./0016-lean-package.md) | Ready | 0013 — installable personal desktop app | Ship only the agent code the hosts execute, prove the study brief in the installed app, and measure the smaller package. |
+| [0017 — Install on current Windows and macOS without fighting the operating system](./0017-first-tier-install-experience.md) | Ready | None | Windows 11+ and the latest two macOS majors, an accurate English/Chinese install guide for the Open Anyway flow, and a Homebrew tap that installs without Gatekeeper. |
+| [0018 — macOS upgrades keep the learner's Keychain permission](./0018-keychain-survives-upgrade.md) | Ready | None | Establish whether ad-hoc upgrades lose Keychain access and, if so, sign with a stable project identity so they do not. |
 
 ## Constraints
 
