@@ -16,6 +16,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/wxxb789/passquest/internal/hostproc"
+	"github.com/wxxb789/passquest/internal/update"
 	"github.com/wxxb789/passquest/internal/workspace"
 )
 
@@ -102,6 +103,9 @@ func start(deps appDeps) int {
 	}
 
 	study := newStudy(func(e BriefEvent) { _ = BriefChanged.Broadcast(e) })
+	// A scripted launch may point the update check at its loopback stub; a
+	// packaged run reads neither override variable (goal 0015).
+	study.target = update.TargetFor(getenv, smoke != nil)
 	mygo.BindAs("Study", study)
 
 	if !generating {

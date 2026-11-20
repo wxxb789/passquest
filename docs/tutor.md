@@ -158,7 +158,8 @@ provider recorded at start. Details: [providers.md](providers.md#bounded-failove
 
 ## Runtime boundary
 
-The Go core never imports a network package. `tutor ask` spawns the Node host
+The Go core imports no network package; its only exception is the desktop app's on-demand release
+check ([core-design.md](core-design.md) §6). `tutor ask` spawns the Node host
 `agent/tutor-host.mjs` (override `PASSQUEST_TUTOR_HOST`; node binary override `PASSQUEST_NODE`) and
 exchanges one versioned JSON document over stdin/stdout. The host validates the endpoint, adds the
 bearer header, enforces the timeout and size bounds, and returns a structured result. If Node or the

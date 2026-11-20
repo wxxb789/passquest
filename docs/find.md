@@ -74,8 +74,9 @@ request's `limit`, not as query text.
 With no endpoint, `find` prints `no provider configured`, makes **zero network calls**, stores no query
 and exits 0. Evidence is resolved first: when there is no eligible skill and no wrong answer with a
 tactic there is no query to send, so an empty database reports `nothing_to_find` even if the endpoint is
-also unset. With an intent and no endpoint, the message is `no provider configured`. The Go core never
-imports a network package; `agent/search-host.mjs` is the only search egress.
+also unset. With an intent and no endpoint, the message is `no provider configured`. The Go core imports
+no network package (its only exception is the desktop app's on-demand release check,
+[core-design.md](core-design.md) §6); `agent/search-host.mjs` is the only search egress.
 
 The host posts this exact body, built in Go, and refuses a request whose `body` does not match the typed
 `query` and `limit`:

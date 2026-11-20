@@ -1,12 +1,14 @@
 package desktop
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"sync"
 	"time"
 
 	"github.com/wxxb789/passquest/internal/studio"
+	"github.com/wxxb789/passquest/internal/update"
 	"github.com/wxxb789/passquest/internal/workspace"
 )
 
@@ -45,12 +47,16 @@ type Study struct {
 	inFlight  sync.WaitGroup
 	resuming  bool
 	emitBrief func(BriefEvent)
+	// target is where the update check goes and how long it may take: the
+	// constants, or the smoke-only loopback stub of a scripted launch. It is
+	// set once, before the window exists.
+	target update.Target
 }
 
 // newStudy returns a service with no workspace yet: calls fail with
 // "starting" until open succeeds.
 func newStudy(emitBrief func(BriefEvent)) *Study {
-	return &Study{emitBrief: emitBrief, openErr: &studio.Error{Code: "starting", Message: "the study workspace is still opening"}}
+	return &Study{emitBrief: emitBrief, target: update.DefaultTarget(), openErr: &studio.Error{Code: "starting", Message: "the study workspace is still opening"}}
 }
 
 // open binds the workspace; a failure is what every later call reports.
@@ -63,14 +69,16 @@ func (s *Study) open(options workspace.Options) error {
 }
 
 // begin registers one call. It fails once the app started quitting, so the
-// drain in drain is bounded by the calls already running.
-func (s *Study) begin() (*workspace.Workspace, error) {
+// drain in drain is bounded by the calls already running. needWorkspace is
+// false for a call that works without the learner's data (CheckForUpdate),
+// which may run while the workspace is still opening or after it failed.
+func (s *Study) begin(needWorkspace bool) (*workspace.Workspace, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closing {
 		return nil, &studio.Error{Code: "quitting", Message: "Pass Quest is closing"}
 	}
-	if s.ws == nil {
+	if needWorkspace && s.ws == nil {
 		return nil, s.openErr
 	}
 	s.calls++
@@ -139,13 +147,24 @@ func errorJSON(e *studio.Error) []byte {
 
 // call runs fn on the workspace as one tracked call.
 func call[T any](s *Study, fn func(*workspace.Workspace) (T, error)) (T, error) {
-	ws, err := s.begin()
+	ws, err := s.begin(true)
 	if err != nil {
 		var zero T
 		return zero, callError(err)
 	}
 	defer s.end()
 	value, err := fn(ws)
+	return value, callError(err)
+}
+
+// callSolo runs fn as one tracked call that needs no workspace.
+func callSolo[T any](s *Study, fn func() (T, error)) (T, error) {
+	if _, err := s.begin(false); err != nil {
+		var zero T
+		return zero, callError(err)
+	}
+	defer s.end()
+	value, err := fn()
 	return value, callError(err)
 }
 
@@ -345,6 +364,23 @@ func (s *Study) ClearCredential(providerID string) (studio.CredentialStatus, err
 // Services reports Node, AnkiConnect, search, the credential store and the database path.
 func (s *Study) Services() (studio.Services, error) { return call(s, (*workspace.Workspace).Services) }
 
+// Version is the running app version the Updates row shows. It is the same
+// constant the check compares a release tag against, so the version the row
+// shows and the version the check used can never differ.
+func (s *Study) Version() (string, error) {
+	return callSolo(s, func() (string, error) { return update.Version, nil })
+}
+
+// CheckForUpdate asks this repository's GitHub Releases once, on the
+// learner's request, whether a newer release exists. It sends nothing about
+// the learner, downloads nothing and writes nothing, and needs no workspace;
+// a failure is a result, never an error.
+func (s *Study) CheckForUpdate() (update.Result, error) {
+	return callSolo(s, func() (update.Result, error) {
+		return update.Check(context.Background(), update.NewClient(), s.target, update.Version), nil
+	})
+}
+
 // BriefStatus reports the latest study brief; it may start the durable host for up to 20 s.
 func (s *Study) BriefStatus() (studio.BriefStatus, error) {
 	return call(s, (*workspace.Workspace).BriefStatus)
@@ -354,7 +390,7 @@ func (s *Study) BriefStatus() (studio.BriefStatus, error) {
 // brief:changed reports when the host starts and when it returns. A second resume while one
 // runs fails with brief_running.
 func (s *Study) ResumeBrief() error {
-	ws, err := s.begin()
+	ws, err := s.begin(true)
 	if err != nil {
 		return callError(err)
 	}

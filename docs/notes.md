@@ -154,7 +154,8 @@ the database.
 
 ## AnkiConnect push
 
-The Go core never imports a network package. `note push` spawns the Node host `agent/anki-host.mjs`,
+The Go core imports no network package; its only exception is the desktop app's on-demand release
+check ([core-design.md](core-design.md) §6). `note push` spawns the Node host `agent/anki-host.mjs`,
 which is the only Anki egress. Override the host with `PASSQUEST_ANKI_HOST` and the Node binary with
 `PASSQUEST_NODE`.
 

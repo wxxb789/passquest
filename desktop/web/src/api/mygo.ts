@@ -988,6 +988,9 @@ export interface PrepStatus {
   pass_threshold: string;
 }
 
+/** Reason is why a check could not answer. It is empty whenever one did. */
+export type Reason = "timeout" | "offline" | "rate_limited" | "server_error" | "unexpected" | "redirect" | "too_large" | "malformed" | "invalid_tag";
+
 /**
  * Recommendation is the adaptive policy's choice. Target is what the window
  * opens; Command is the equivalent CLI line for transparency.
@@ -1002,6 +1005,30 @@ export interface Recommendation {
   command: string;
   follow_up_command?: string;
   evidence_attempt_ids: number[];
+}
+
+/** Result is one check's outcome, and the only thing the window shows. */
+export interface Result {
+  /** State is what the check found, one of the Status values. */
+  state: Status;
+  /** Version is the newest release's tag, as published (e.g. "v0.15.1"). */
+  version?: string;
+  /** Published is that release's publication date, UTC, YYYY-MM-DD. */
+  published?: string;
+  /**
+   * NotesURL is the release's notes page, built from the tag and never
+   * taken from the response: whatever html_url the document carries, the
+   * window gets this repository's release URL.
+   */
+  notes_url?: string;
+  /**
+   * DownloadURL is the release page built from the tag, where the release
+   * and its files are listed; the same page as NotesURL. The app downloads
+   * nothing from it.
+   */
+  download_url?: string;
+  /** Reason is why the check could not answer, empty when it did. */
+  reason?: Reason;
 }
 
 /** Services reports the local helpers the window depends on. */
@@ -1043,6 +1070,9 @@ export interface SourceLabel {
   title: string;
   rights: string;
 }
+
+/** Status is what one check found. */
+export type Status = "newer" | "current" | "no_release" | "unavailable";
 
 /** TacticLink points from feedback to the tactic lesson. */
 export interface TacticLink {
@@ -1119,6 +1149,13 @@ export const Study = {
   budget: bind<[], Budget>("Study.Budget", () => []),
   /** CancelBrief cancels the latest unfinished brief. */
   cancelBrief: bind<[], BriefStatus>("Study.CancelBrief", () => []),
+  /**
+   * CheckForUpdate asks this repository's GitHub Releases once, on the
+   * learner's request, whether a newer release exists. It sends nothing about
+   * the learner, downloads nothing and writes nothing, and needs no workspace;
+   * a failure is a result, never an error.
+   */
+  checkForUpdate: bind<[], Result>("Study.CheckForUpdate", () => []),
   /** ClearCredential removes a provider key from the OS credential store. */
   clearCredential: bind<[string], CredentialStatus>("Study.ClearCredential", (providerID: string) => [providerID]),
   /** CoachAsk sends the coach request through the Node host and waits for the advisory reply. */
@@ -1183,6 +1220,12 @@ export const Study = {
   today: bind<[], Today>("Study.Today", () => []),
   /** UseModel selects "provider/model" as the coach model. */
   useModel: bind<[string, string], ModelUse>("Study.UseModel", (id: string, endpoint: string) => [id, endpoint]),
+  /**
+   * Version is the running app version the Updates row shows. It is the same
+   * constant the check compares a release tag against, so the version the row
+   * shows and the version the check used can never differ.
+   */
+  version: bind<[], string>("Study.Version", () => []),
 } as const;
 
 // ---- Events ----

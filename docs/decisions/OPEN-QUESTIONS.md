@@ -1653,3 +1653,115 @@ Entry format:
   probe then always arrives in full and stays green.
 - Revisit when: MyGo guards its `__mygo.receive` eval or reports the underlying error, or the smoke
   probe fails on a platform.
+
+### Q-0015-01 — Does the app check for updates on its own, or only when the learner asks?
+- Status: decided(default taken)
+- Context: Done-when 1 allows either an opt-in switch or an on-demand check and asks for the default
+  taken; the plan left frequency open. A scheduled check needs a stored preference, runs while the
+  learner is not there and would turn the app's one network request into a background behaviour.
+- Options considered: (A) on demand only, with no stored preference and no timer; (B) an opt-in
+  toggle that schedules a periodic check; (C) a check on every start-up.
+- Default taken: (A). Settings holds one "Updates" row (the one-line disclosure, the running version
+  and a "Check for updates" button) and nothing is scheduled: `desktop/web/src/views/settings.ts`
+  (`updateRow`, `updateChip`) and `desktop/web/src/core/state.ts` ("driven by the learner
+  (Q-0015-01): a fresh window starts idle"). The state before the first check is "not checked in this
+  session", and nothing is persisted, so a relaunch starts idle again. Reverse by adding a preference
+  and a scheduler; the request itself does not change.
+- Revisit when: a learner misses a release because they never open Settings, or the owner wants a
+  start-up check.
+
+### Q-0015-02 — What exactly does one update check send, and what bounds it?
+- Status: decided(default taken)
+- Context: the local-only exception has to be exact and provable: one request that says nothing about
+  the learner, with bounds that make a hung or oversized answer harmless.
+- Options considered: (A) `GET` the constant endpoint with the app's two headers, a 10 s deadline, a
+  1 MiB cap, redirects refused and the environment's proxy ignored; (B) a wider header set (a version
+  in `User-Agent`); (C) follow redirects and let proxy settings apply.
+- Default taken: (A). `internal/update` holds the whole request: `Endpoint`
+  (`https://api.github.com/repos/wxxb789/passquest/releases/latest`), `Accept:
+  application/vnd.github+json`, `User-Agent: PassQuest` (no version), no query, no body, no cookie;
+  Go's transport adds the host (`Host` over HTTP/1.1, the `:authority` pseudo-header over HTTP/2)
+  and `Accept-Encoding: gzip`, and nothing else leaves the app.
+  The target (endpoint and timeout) is unexported, so no caller outside the package can name a URL of
+  its own: `DefaultTarget` returns the constant pair, and `TargetFor` only honours the smoke
+  overrides (Q-0015-06). `NewClient` sets `Proxy: nil` and refuses a redirect
+  (`http.ErrUseLastResponse`), so the request reaches the named endpoint or nowhere; `Check` applies
+  `DefaultTimeout` (10 s) as the request context and reads one byte past `maxBody` (1 MiB) before
+  reporting `too_large`. `TestCheckCapturesTheRequest` fails on any other method, path, header or a
+  body, and `TestCheckTimeout`, `TestCheckCapsTheBody` and `TestCheckRefusesRedirects` pin the
+  bounds; Go adding a transport header fails the capture test loudly instead of passing silently.
+  Reverse by changing the constants.
+- Revisit when: GitHub requires another header, the endpoint redirects for real, or a rate-limited
+  learner would need an authenticated request (which would change the exception itself).
+
+### Q-0015-03 — How does the check classify what it found, and is "no release yet" its own state?
+- Status: decided(default taken)
+- Context: Done-when 3 asks for distinct, readable states; this repository has no published release,
+  so the everyday answer is a fact to state rather than a failure to report.
+- Options considered: (A) four states — `newer`, `current`, `no_release`, `unavailable` — with a
+  coded reason naming a failure; (B) fold HTTP 404 into "could not check" as one more reason; (C) a
+  boolean "newer or not".
+- Default taken: (A). 404 is `no_release` on its own (`update.StatusNoRelease`): nothing is published
+  yet. A draft or pre-release entry and an older or equal tag are `current` — the first two are
+  defensive, because `/releases/latest` already excludes them. Offline, timeout, 403/429, 5xx, a
+  refused redirect, an oversized or malformed body and an invalid tag are `unavailable` with one of
+  nine reason codes shown as a short clause (`UPDATE_REASONS` in `desktop/web/src/core/i18n.ts`);
+  study is never blocked. Reverse by dropping `no_release`; the smoke scenario's 404 step and
+  [`install.md`](../install.md) change with it.
+- Revisit when: GitHub returns another status for "no release", or the owner wants the failure detail
+  to say more than the coded clause.
+
+### Q-0015-04 — Are the release links taken from the response or built here?
+- Status: decided(default taken)
+- Context: the window shows a link the learner clicks; the response's `html_url` is data from
+  elsewhere, and the P1 reviews showed a `\..`-style spelling can leave this repository once the
+  browser normalises it.
+- Options considered: (A) build both links from the validated tag under a constant prefix; (B) use
+  `html_url`, possibly after normalising it; (C) use `html_url` for the notes and show no download
+  link.
+- Default taken: (A). `releasesURL` is `https://github.com/wxxb789/passquest/releases/` and both the
+  notes and download links are `<prefix>tag/<tag>`; a tag reaches that point only through
+  `parseVersion`, which restricts it to semver, so it can carry no slash, space, dot segment or
+  escape. `TestLinksComeFromTheRepository` sends a foreign repository, a `\..` spelling and a
+  `javascript:` URL in `html_url` and requires each to be ignored. The link is `target="_blank"
+  rel="noopener"`, so MyGo hands it to the system browser, and the app downloads nothing. Reverse by
+  using `html_url` again; the local-only gate's rule 4 would also lose the prefix literal.
+- Revisit when: GitHub's release pages move off `github.com/<owner>/<repo>/releases/tag/`.
+
+### Q-0015-05 — Where does the running version live, and what keeps the two copies equal?
+- Status: decided(default taken)
+- Context: the check compares the release tag with the version the learner runs; `mygo.json` carries
+  the package version, and no Go constant held it (the plan's facts).
+- Options considered: (A) one `update.Version` constant and `mygo.json` bumped together, held equal
+  by a Go test; (B) inject the version with `-ldflags -X` at build time; (C) read `mygo.json` at run
+  time.
+- Default taken: (A). `mygo.json` and `internal/update.Version` are both `0.15.0`;
+  `TestVersionMatchesMygoJSON` parses `mygo.json` and fails when the two differ, and desktop-ux also
+  compares the version the Updates row shows with `mygo.json`, so a drifting package version fails
+  that gate too. (C) would make the packaged binary depend on a resource file for its own version,
+  and (B) adds a build flag nothing else needs. Reverse by bumping both; the tests fail until they
+  agree.
+- Revisit when: the package version and the running version must differ (a rebuilt release), or MyGo
+  exposes its version to Go directly.
+
+### Q-0015-06 — How does a scripted launch walk every check state without touching the real network?
+- Status: decided(default taken)
+- Context: the smoke gate needs the newer, current, no-release, timeout and offline states; the
+  constant endpoint can serve none of them, and no test may contact the real internet.
+  `PASSQUEST_DESKTOP_CONTENT_SIZE` is the precedent for a variable read only with the smoke hook
+  (Q-0012-05).
+- Options considered: (A) two smoke-only variables, read only while `PASSQUEST_DESKTOP_SCRIPT` is
+  set, accepting only a loopback URL; (B) a build tag that swaps the endpoint; (C) Go tests only,
+  with no scenario for the states.
+- Default taken: (A). `TargetFor(getenv, smokeHook)` returns `DefaultTarget` unless the hook is set,
+  then honours `PASSQUEST_DESKTOP_UPDATE_URL` only when it is exactly `http://127.0.0.1:<port>/...`
+  (checked by `loopbackURL`, which does not use `net`) and `PASSQUEST_DESKTOP_UPDATE_TIMEOUT_MS` only
+  within 1..10000 ms; `TestTargetForSmokeOverride` proves another host, https, a userinfo, a query, a
+  fragment or an out-of-range timeout is ignored. The desktop smoke's `update` scenario points
+  both variables, and desktop-ux the URL variable, at a stub in the harness process
+  (`harness/lib/update-stub.ts`), whose path is read from `internal/update`'s own `Endpoint` literal,
+  so a drifted stub throws instead of serving a request the app would never make. A packaged run
+  reads neither variable and can only reach `Endpoint`. Reverse by deleting the two variables; the
+  scenarios then fail loudly against the constant endpoint.
+- Revisit when: another harness needs to script the check, or one of the variables must be honoured
+  outside the hook.

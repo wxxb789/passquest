@@ -109,5 +109,106 @@ func main() {
           ? null
           : `desktop-smoke: did not report the missing attempt: ${failures.slice(0, 3).join("; ")}`,
     },
+    {
+      // The failure is decided in the update scenario: its own launch deviates
+      // from the allowed request shape and nothing else runs it.
+      gate: makeDesktopSmokeGate(["update"]),
+      label: "desktop window whose update check adds a header",
+      files: {
+        "go.mod": GO_MOD,
+        "mygo.json": '{"name": "selftest", "version": "0.15.0", "main": "./cmd/passquest-desktop"}\n',
+        "internal/update/update.go": `package update
+
+const Endpoint = "https://api.github.com/repos/wxxb789/passquest/releases/latest"
+`,
+        "cmd/passquest-desktop/main.go": `package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"os"
+	"strings"
+)
+
+func write(value any) {
+	document, _ := json.Marshal(map[string]any{"ok": true, "value": value})
+	_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), document, 0o600)
+}
+
+func main() {
+	script, _ := os.ReadFile(os.Getenv("PASSQUEST_DESKTOP_SCRIPT"))
+	switch {
+	case strings.Contains(string(script), "desktop-smoke: boot/"):
+		write(map[string]any{"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": true, "probe": "clear", "opaqueErrors": 0})
+	case strings.Contains(string(script), "desktop-smoke: update/"):
+		request, _ := http.NewRequest("GET", os.Getenv("PASSQUEST_DESKTOP_UPDATE_URL"), nil)
+		request.Header.Set("x-device", "selftest")
+		_, _ = http.DefaultClient.Do(request)
+		write(map[string]any{})
+	}
+}
+`,
+        "cmd/passquest/main.go": "package main\n\nfunc main() {}\n",
+        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("update: request 1 carried header(s) x-device"))
+          ? null
+          : `desktop-smoke: did not report the extra request header: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      // The other half of the update scenario's data-directory check: the
+      // framework's own window-state.json is no longer tolerated, and a file
+      // written into the data directory during the launch must be reported by
+      // name. The launch's PASSQUEST_DESKTOP_CONTENT_SIZE is what keeps the
+      // real app from writing that file; this fake app writes it anyway.
+      gate: makeDesktopSmokeGate(["update"]),
+      label: "desktop window that saves window state into the data directory",
+      files: {
+        "go.mod": GO_MOD,
+        "mygo.json": '{"name": "selftest", "version": "0.15.0", "main": "./cmd/passquest-desktop"}\n',
+        "internal/update/update.go": `package update
+
+const Endpoint = "https://api.github.com/repos/wxxb789/passquest/releases/latest"
+`,
+        "cmd/passquest-desktop/main.go": `package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+func write(value any) {
+	document, _ := json.Marshal(map[string]any{"ok": true, "value": value})
+	_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), document, 0o600)
+}
+
+func main() {
+	script, _ := os.ReadFile(os.Getenv("PASSQUEST_DESKTOP_SCRIPT"))
+	switch {
+	case strings.Contains(string(script), "desktop-smoke: boot/"):
+		write(map[string]any{"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": true, "probe": "clear", "opaqueErrors": 0})
+	case strings.Contains(string(script), "desktop-smoke: update/"):
+		state := filepath.Join(os.Getenv("PASSQUEST_DESKTOP_DATA"), "window-state.json")
+		_ = os.WriteFile(state, []byte("{}\\n"), 0o600)
+		request, _ := http.NewRequest("GET", os.Getenv("PASSQUEST_DESKTOP_UPDATE_URL"), nil)
+		request.Header.Set("Accept", "application/vnd.github+json")
+		request.Header.Set("User-Agent", "PassQuest")
+		_, _ = http.DefaultClient.Do(request)
+		write(map[string]any{})
+	}
+}
+`,
+        "cmd/passquest/main.go": "package main\n\nfunc main() {}\n",
+        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("update: the data directory changed across the checks") && line.includes("added window-state.json"))
+          ? null
+          : `desktop-smoke: did not report the window state written into the data directory: ${failures.slice(0, 3).join("; ")}`,
+    },
   ];
 }

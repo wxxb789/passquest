@@ -22,6 +22,7 @@ import type {
   NoteRefinePreview,
   NoteRefinement,
   PracticeItem,
+  Result as UpdateResult,
   Services,
   StudioError,
   Today,
@@ -53,6 +54,9 @@ export type Loadable<T> =
   | { status: 'error'; error: StudioError; value?: T };
 
 export const idle = <T>(): Loadable<T> => ({ status: 'idle' });
+
+/** The session's update check, driven by the learner (Q-0015-01): a fresh window starts idle. */
+export type UpdateCheck = { status: 'idle' } | { status: 'checking' } | { status: 'done'; result: UpdateResult };
 
 /** A passage selection kept for a later Anki note: UTF-16 offsets within one paragraph, plus its text. */
 export interface Mark {
@@ -152,6 +156,10 @@ export const data = {
   settings: {
     budget: idle<Budget>(),
     consents: idle<Consent[]>(),
+    /** The running app version (the Go constant the update check compares against). */
+    version: idle<string>(),
+    /** This session's update check; nothing is stored, so a reload starts unchecked. */
+    update: { status: 'idle' } as UpdateCheck,
   },
 };
 

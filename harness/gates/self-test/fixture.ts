@@ -32,8 +32,8 @@ export interface PassCase {
 
 /** Product sources a smoke gate builds and drives from the repository root. */
 export const NOTE_SMOKE_SOURCES = ["go.mod", "go.sum", "cmd", "internal", "agent"];
-/** desktop-ux also bundles the frontend and reads its allowlist. */
-export const DESKTOP_UX_SOURCES = [...NOTE_SMOKE_SOURCES, "desktop", "harness/ux-allow.json"];
+/** desktop-ux also bundles the frontend, reads its allowlist and compares the app version the row shows with mygo.json. */
+export const DESKTOP_UX_SOURCES = [...NOTE_SMOKE_SOURCES, "desktop", "harness/ux-allow.json", "mygo.json"];
 
 function copyTree(from: string, to: string): number {
   let copied = 0;

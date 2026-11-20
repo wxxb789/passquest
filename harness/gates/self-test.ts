@@ -12,6 +12,7 @@ import type { Gate, GateContext } from "../lib/types.ts";
 
 import { coverageProblems, UX_SIZES, UX_STATES } from "./desktop-ux.ts";
 import type { Audited } from "./desktop-ux.ts";
+import { endpointDriftProblems } from "./local-only.ts";
 import { adaptiveSmokeCases } from "./self-test/adaptive-smoke.cases.ts";
 import { agentSmokeCases } from "./self-test/agent-smoke.cases.ts";
 import { assessSmokeCases } from "./self-test/assess-smoke.cases.ts";
@@ -162,6 +163,83 @@ export function pageScriptEscapeProblem(): string | null {
     }
   }
   return problems.length > 0 ? `page script escape(s) a plain template literal cooks away: ${problems.join("; ")}` : null;
+}
+
+/**
+ * The local-only gate's pin on the shared endpoint constants: a fixture cannot rewrite a harness
+ * module, so the check runs here directly, with URLs of its own. The shipped constants must be
+ * clean, and every other spelling - another host, a scheme, a query, userinfo (even an empty one)
+ * or a port (even the default one) - must be reported as drift of the constant it touches.
+ */
+export function endpointPinProblem(): string | null {
+  const shipped = endpointDriftProblems();
+  if (shipped.length > 0) return `local-only endpoint pin: the shipped constants drifted: ${shipped.join("; ")}`;
+  const drifted: Array<{ label: string; endpoint: string; prefix: string; expected: string[]; absent?: string[] }> = [
+    {
+      label: "both constants naming another host",
+      endpoint: "https://mirror.example/repos/wxxb789/passquest/releases/latest",
+      prefix: "https://mirror.example/wxxb789/passquest/releases/",
+      expected: ["UPDATE_ENDPOINT drifted", "UPDATE_RELEASES_PREFIX drifted"],
+    },
+    {
+      label: "a downgraded scheme and a query",
+      endpoint: "http://api.github.com/repos/wxxb789/passquest/releases/latest?draft=1",
+      prefix: "https://github.com/wxxb789/passquest/releases/",
+      expected: ["UPDATE_ENDPOINT drifted"],
+      absent: ["UPDATE_RELEASES_PREFIX drifted"],
+    },
+    {
+      label: "a prefix missing its slash",
+      endpoint: "https://api.github.com/repos/wxxb789/passquest/releases/latest",
+      prefix: "https://github.com/wxxb789/passquest/releases",
+      expected: ["UPDATE_RELEASES_PREFIX drifted"],
+      absent: ["UPDATE_ENDPOINT drifted"],
+    },
+    {
+      label: "a constant that is not a URL",
+      endpoint: "not a URL",
+      prefix: "https://github.com/wxxb789/passquest/releases/",
+      expected: ["UPDATE_ENDPOINT drifted"],
+      absent: ["UPDATE_RELEASES_PREFIX drifted"],
+    },
+    {
+      label: "a constant with userinfo",
+      endpoint: "https://user:pass@api.github.com/repos/wxxb789/passquest/releases/latest",
+      prefix: "https://github.com/wxxb789/passquest/releases/",
+      expected: ["UPDATE_ENDPOINT drifted"],
+      absent: ["UPDATE_RELEASES_PREFIX drifted"],
+    },
+    {
+      label: "a constant with an empty userinfo",
+      endpoint: "https://@api.github.com/repos/wxxb789/passquest/releases/latest",
+      prefix: "https://github.com/wxxb789/passquest/releases/",
+      expected: ["UPDATE_ENDPOINT drifted"],
+      absent: ["UPDATE_RELEASES_PREFIX drifted"],
+    },
+    {
+      label: "a constant with the default port spelled out",
+      endpoint: "https://api.github.com:443/repos/wxxb789/passquest/releases/latest",
+      prefix: "https://github.com/wxxb789/passquest/releases/",
+      expected: ["UPDATE_ENDPOINT drifted"],
+      absent: ["UPDATE_RELEASES_PREFIX drifted"],
+    },
+    {
+      label: "a constant with a non-default port",
+      endpoint: "https://api.github.com:8443/repos/wxxb789/passquest/releases/latest",
+      prefix: "https://github.com/wxxb789/passquest/releases/",
+      expected: ["UPDATE_ENDPOINT drifted"],
+      absent: ["UPDATE_RELEASES_PREFIX drifted"],
+    },
+  ];
+  for (const { label, endpoint, prefix, expected, absent = [] } of drifted) {
+    const problems = endpointDriftProblems(endpoint, prefix);
+    const missing = expected.filter((line) => !problems.some((problem) => problem.includes(line)));
+    const wrong = absent.filter((line) => problems.some((problem) => problem.includes(line)));
+    if (missing.length > 0 || wrong.length > 0) {
+      return `local-only endpoint pin: ${label} is not reported right: missing ${missing.join("; ") || "nothing"}, reported although untrue ${wrong.join("; ") || "nothing"} (saw ${problems.join("; ") || "nothing"})`;
+    }
+  }
+  return null;
 }
 
 /** desktop-ux names a skipped or doubled state; a complete audit set has no problem. */
@@ -330,6 +408,7 @@ export const selfTest: Gate = {
     for (const unit of [
       processTreeProblem,
       pageScriptEscapeProblem,
+      endpointPinProblem,
       uxCoverageProblem,
       packageNamingProblem,
       upgradeComparisonProblem,
