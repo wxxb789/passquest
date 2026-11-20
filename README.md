@@ -6,6 +6,7 @@
 [![Gate](https://github.com/wxxb789/passquest/actions/workflows/gate.yml/badge.svg)](https://github.com/wxxb789/passquest/actions/workflows/gate.yml)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational)
 ![Local-first](https://img.shields.io/badge/data-local--first%20SQLite-success)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **Pass Quest is a free, open-source, local-first desktop exam coach.** It helps an adult learner with
 limited English pass one specific **written English exam** (reading comprehension, cloze, vocabulary
@@ -140,6 +141,12 @@ a search you start, or the update check you click. Private source text needs rec
 Agents and humans start from [AGENTS.md](AGENTS.md). Read [cross-platform rules](docs/cross-platform.md)
 before adding paths or shell calls. `bun install && bun run gate` runs locally the same gate CI runs on every pull request.
 [Releasing](docs/release.md) describes how version tags become draft releases.
+
+## License
+
+Pass Quest's code and documentation are released under the [MIT License](LICENSE). The licence does
+**not** cover the material under `data/baselines/`: that text comes from a third-party document marked
+internal-only, and this repository grants no right to use or redistribute it (see below).
 
 ## Confidential baseline material
 

@@ -6,6 +6,7 @@
 [![Gate](https://github.com/wxxb789/passquest/actions/workflows/gate.yml/badge.svg)](https://github.com/wxxb789/passquest/actions/workflows/gate.yml)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational)
 ![Local-first](https://img.shields.io/badge/data-local--first%20SQLite-success)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **Pass Quest 是一款免费、开源、本地优先的桌面应试教练。** 它帮助英语基础薄弱的成年考生，在有限的备考时间内通过某一场特定的**英语笔试**（阅读理解、完形填空、语境词汇，例如职称外语考试）。它不打算教通用英语。
 
@@ -104,6 +105,10 @@ Pass Quest 遵循同一个学习循环：**观察 → 诊断 → 选择 → 辅�
 ## 参与贡献
 
 无论是 agent 还是人类，都请从 [AGENTS.md](AGENTS.md) 开始。新增路径或 shell 调用前请先阅读[跨平台规则](docs/cross-platform.md)。`bun install && bun run gate` 在本地运行与 CI 对每个 pull request 运行的同一套门禁。[发布流程](docs/release.md)说明了版本 tag 如何生成草稿 release。
+
+## 许可证
+
+Pass Quest 的代码和文档以 [MIT 许可证](LICENSE)发布。该许可证**不**覆盖 `data/baselines/` 下的资料：这些文本来自标注"仅限内部使用"的第三方文档，本仓库不授予任何使用或再分发它的权利（见下文）。
 
 ## 保密基线资料
 
