@@ -1,0 +1,1953 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pass Quest — Instrument</title>
+<script>
+/* Visible error bar so headless screenshots expose JS failures. */
+window.onerror = function (msg, src, line, col) {
+  var b = document.getElementById('errbar') || document.createElement('div');
+  b.id = 'errbar';
+  b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;background:#c62828;color:#fff;font:600 13px/20px Consolas,monospace;padding:6px 12px';
+  b.textContent = 'JS ERROR: ' + msg + ' @' + line + ':' + col;
+  (document.body || document.documentElement).appendChild(b);
+};
+</script>
+<style>
+/* =====================================================================
+   DESIGN SYSTEM — "Instrument"
+   Grid: 4px. Hairlines: 1px. Radii: 2 / 3 / 6. Motion: 140ms exact.
+   ===================================================================== */
+:root {
+  --f-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+  --f-label: "Bahnschrift", "DIN Alternate", "Segoe UI Variable Small", -apple-system, "Noto Sans SC", "PingFang SC", sans-serif;
+  --f-mono: "Cascadia Mono", "SF Mono", "JetBrains Mono", Menlo, Consolas, "Noto Sans SC", monospace;
+  --f-read: "Sitka Text", "Iowan Old Style", Charter, Georgia, "Noto Serif SC", "Songti SC", serif;
+
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px; --s10: 40px; --s12: 48px;
+  --r1: 2px; --r2: 3px; --r3: 6px;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --t-fast: 120ms; --t: 150ms; --t-slow: 180ms;
+
+  --rail: 216px; --insp: 328px; --top: 44px; --foot: 28px;
+}
+
+/* ---------- Semantic hue map (locked) ----------
+   amber  = live · timing · attention (clocks, current position, the one next action, assisted/queued warnings)
+   teal   = verified · admitted (reviewed key, verified provider, consent granted, "counts as evidence")
+   red    = error · incorrect · unreachable · conflict · failed
+   violet = AI output only (advisory text and the call that produces it)
+   correct answers, deltas, budgets and selections stay in graphite ink with a glyph or sign.  */
+
+/* ---------- Graphite (dark, hero) ---------- */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0A0C0F;
+  --s-1: #101317;     /* bezel: top bar, rail, status strip */
+  --s-2: #14181D;     /* recessed control field */
+  --s-3: #1B2026;     /* raised field */
+  --s-4: #232930;     /* hover / pressed */
+  --z-work: #0C0F12;  /* work surface: the darkest, quietest well for reading */
+  --z-insp: #13171B;  /* inspector: a lit instrument panel */
+  --well: #11151A;    /* grouped readouts inside the work surface */
+  --card: #1A1F25;    /* readout cards inside the inspector */
+  --paper: #161B20;   /* answer options, primary cards */
+  --lift: inset 0 1px 0 rgba(255, 255, 255, .035);
+  --hair: #222930;
+  --hair-2: #2E363E;
+  --tick: #46505A;
+  --ctl: #59646F;     /* control boundary (letter chips) */
+  --ink: #E6EAEE;
+  --ink-2: #AEB7C0;
+  --ink-3: #87929C;
+  --ink-inv: #0B0E11;
+  --amber: #F0A443;   --amber-bg: rgba(240, 164, 67, .09);  --amber-ln: rgba(240, 164, 67, .42);
+  --teal: #4CCBC0;    --teal-bg: rgba(76, 203, 192, .08);   --teal-ln: rgba(76, 203, 192, .38);
+  --red: #F2766A;     --red-bg: rgba(242, 118, 106, .09);   --red-ln: rgba(242, 118, 106, .42);
+  --violet: #B2A7E4;  --violet-bg: rgba(178, 167, 228, .07); --violet-ln: rgba(178, 167, 228, .34);
+  --hatch: rgba(230, 234, 238, .06);
+  --hl: rgba(76, 203, 192, .15);
+  --mark: rgba(240, 164, 67, .22);
+  --pri: #2A3139; --pri-hi: #323A43; --pri-ln: #4A545E; --pri-ink: #F1F4F6;
+  --shadow-pop: 0 0 0 1px var(--hair-2), 0 24px 64px rgba(0, 0, 0, .6), 0 4px 12px rgba(0, 0, 0, .45);
+}
+/* ---------- Lab white (light) ---------- */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #E2E6EA;
+  --s-1: #ECEFF2;
+  --s-2: #F7F8FA;
+  --s-3: #FFFFFF;
+  --s-4: #E5E9ED;
+  --z-work: #F9FAFB;
+  --z-insp: #F2F4F6;
+  --well: #F0F2F5;
+  --card: #FFFFFF;
+  --paper: #FFFFFF;
+  --lift: 0 1px 0 rgba(17, 22, 27, .035);
+  --hair: #D7DDE3;
+  --hair-2: #C2CAD2;
+  --tick: #98A3AE;
+  --ctl: #8A95A0;
+  --ink: #11161B;
+  --ink-2: #3B4550;
+  --ink-3: #56616C;
+  --ink-inv: #FFFFFF;
+  --amber: #945300;   --amber-bg: rgba(181, 106, 0, .08);   --amber-ln: rgba(148, 83, 0, .40);
+  --teal: #006C68;    --teal-bg: rgba(0, 108, 104, .07);    --teal-ln: rgba(0, 108, 104, .36);
+  --red: #B3322A;     --red-bg: rgba(179, 50, 42, .07);     --red-ln: rgba(179, 50, 42, .38);
+  --violet: #5B4BAA;  --violet-bg: rgba(91, 75, 170, .06);  --violet-ln: rgba(91, 75, 170, .32);
+  --hatch: rgba(17, 22, 27, .06);
+  --hl: rgba(0, 128, 122, .12);
+  --mark: rgba(214, 140, 20, .24);
+  --pri: #151A20; --pri-hi: #2B333C; --pri-ln: #151A20; --pri-ink: #FFFFFF;
+  --shadow-pop: 0 0 0 1px var(--hair-2), 0 24px 56px rgba(22, 32, 44, .18), 0 4px 12px rgba(22, 32, 44, .08);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 400 14px/20px var(--f-ui);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  font-feature-settings: "tnum" 1;
+  text-autospace: normal;
+  overflow: hidden;
+}
+html[lang="zh-CN"] body { letter-spacing: .01em; }
+button, input, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+button { cursor: pointer; }
+::selection { background: var(--mark); color: inherit; }
+:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 2px; border-radius: var(--r1); }
+.read-en { font-variant-numeric: lining-nums proportional-nums; font-feature-settings: "lnum" 1, "pnum" 1; }
+.mono, .num { font-family: var(--f-mono); font-variant-numeric: tabular-nums slashed-zero; letter-spacing: 0; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* ---------- micro-labels ---------- */
+.ml {
+  font: 600 10.5px/16px var(--f-label); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3); font-stretch: 100%;
+}
+html[lang="zh-CN"] .ml { font: 600 11.5px/16px var(--f-ui); letter-spacing: .16em; text-transform: none; font-feature-settings: "tnum" 1; }
+.ml b { color: var(--ink-2); font-weight: 600; }
+.ml .en { font-family: var(--f-label); letter-spacing: .12em; text-transform: uppercase; font-size: 10.5px; }
+
+/* ---------- application frame ---------- */
+.app {
+  display: grid; height: 100vh;
+  grid-template-columns: var(--rail) minmax(0, 1fr) var(--insp);
+  grid-template-rows: var(--top) minmax(0, 1fr) var(--foot);
+  grid-template-areas: "top top top" "rail work insp" "foot foot foot";
+}
+.top { grid-area: top; display: grid; grid-template-columns: var(--rail) minmax(0, 1fr) var(--insp); align-items: center;
+  background: var(--s-1); border-bottom: 1px solid var(--hair); position: relative; }
+.rail { grid-area: rail; background: var(--s-1); border-right: 1px solid var(--hair); display: flex; flex-direction: column; min-height: 0; }
+.work { grid-area: work; background: var(--z-work); min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.insp { grid-area: insp; background: var(--z-insp); border-left: 1px solid var(--hair); min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.foot { grid-area: foot; background: var(--s-1); border-top: 1px solid var(--hair); display: flex; align-items: center; gap: var(--s5); padding: 0 var(--s4); min-width: 0; overflow: hidden; }
+
+/* top bar */
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 var(--s4); height: 100%; border-right: 1px solid var(--hair); }
+.brand svg { color: var(--ink); flex: none; }
+.brand .wm { font: 700 12px/1 var(--f-label); letter-spacing: .2em; text-transform: uppercase; }
+.brand .wm small { display: block; font: 500 9.5px/1 var(--f-label); letter-spacing: .18em; color: var(--ink-3); margin-top: 3px; }
+.top-mid { display: flex; align-items: center; gap: var(--s4); padding: 0 var(--s8); min-width: 0; }
+.cmdk { flex: 1; display: flex; align-items: center; gap: 10px; height: 30px; min-width: 0; padding: 0 6px 0 10px;
+  border: 1px solid var(--hair-2); border-radius: var(--r2); background: var(--s-2); color: var(--ink-3); font-size: 13px; text-align: left;
+  transition: border-color var(--t) var(--ease), background var(--t) var(--ease); }
+.cmdk:hover { border-color: var(--tick); color: var(--ink-2); }
+.cmdk span.grow { flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk .recent { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; justify-content: flex-end; }
+.cmdk .recent .ml { margin-right: 2px; }
+.cmdk .recent .rc { font-size: 12px; color: var(--ink-3); padding: 0 7px; height: 20px; display: inline-flex; align-items: center; border-radius: var(--r1); background: var(--s-4); }
+.cmdk .recent .rc + .rc { margin-left: 0; }
+.cmdk.sealed { border-style: dashed; background: repeating-linear-gradient(135deg, transparent 0 4px, var(--hatch) 4px 5px), var(--s-2); }
+.top-right { display: flex; align-items: center; justify-content: flex-end; gap: var(--s2); padding: 0 var(--s4); height: 100%; border-left: 1px solid var(--hair); }
+.seg { display: inline-flex; border: 1px solid var(--hair-2); border-radius: var(--r2); height: 26px; background: var(--s-2); }
+.seg button { border: 0; background: transparent; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3);
+  font: 600 11px/1 var(--f-label); letter-spacing: .08em; transition: background var(--t) var(--ease), color var(--t) var(--ease); }
+.seg button:first-child { border-radius: 2px 0 0 2px; } .seg button:last-child { border-radius: 0 2px 2px 0; }
+.seg button:focus-visible { outline-offset: -2px; }
+.seg button + button { border-left: 1px solid var(--hair-2); }
+.seg button[aria-pressed="true"] { background: var(--pri); color: var(--pri-ink); }
+[data-theme="dark"] .seg button[aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--pri-ln); }
+.seg button:not([aria-pressed="true"]):hover { color: var(--ink); background: var(--s-4); }
+.seg .zh { font: 600 12px/1 var(--f-ui); letter-spacing: 0; }
+.iconbtn { width: 26px; height: 26px; display: inline-grid; place-items: center; border: 1px solid var(--hair-2); border-radius: var(--r2); background: var(--s-2); color: var(--ink-2); font: 600 12px/1 var(--f-mono); }
+.iconbtn:hover { color: var(--ink); border-color: var(--tick); }
+
+kbd, .kbd {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px;
+  border: 1px solid var(--hair-2); border-bottom-width: 2px; border-radius: var(--r1); background: var(--s-3);
+  font: 500 10.5px/1 var(--f-mono); color: var(--ink-2); letter-spacing: 0; white-space: nowrap;
+}
+.kgrp { display: inline-flex; gap: 3px; align-items: center; }
+
+/* ---------- rail ---------- */
+.rail-sec { padding: var(--s4) 0 var(--s2); }
+.rail-sec + .rail-sec { border-top: 1px solid var(--hair); }
+.rail-h { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--s4) var(--s2); }
+.ch { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; height: 32px; padding: 0 var(--s3) 0 var(--s4);
+  color: var(--ink-2); text-decoration: none; position: relative; transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
+.ch:hover { background: var(--s-4); color: var(--ink); }
+.ch .ix { font: 500 10.5px/1 var(--f-mono); color: var(--ink-3); }
+.ch .lb { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch[aria-current="page"] { color: var(--ink); background: var(--s-3); box-shadow: var(--lift); }
+.ch[aria-current="page"] .lb { font-weight: 600; }
+.ch[aria-current="page"]::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; background: var(--ink); }
+.ch[aria-current="page"] .ix { color: var(--ink); }
+.ch .kgrp kbd { opacity: .75; }
+/* SEALED: channels become inert behind a 45° hatch; only the run itself stays live */
+.sealed-rail { background: repeating-linear-gradient(135deg, transparent 0 5px, var(--hatch) 5px 6px), var(--s-1); }
+.sealed-rail .ch.locked-ch { color: var(--ink-3); cursor: not-allowed; }
+.sealed-rail .ch.locked-ch:hover { background: transparent; color: var(--ink-3); }
+.sealed-rail .ch.locked-ch .lb { font-weight: 400; }
+.ch .lk { color: var(--ink-3); display: inline-flex; align-items: center; gap: 4px; font: 500 9.5px/1 var(--f-label); letter-spacing: .12em; text-transform: uppercase; }
+html[lang="zh-CN"] .ch .lk { font: 500 10.5px/1 var(--f-ui); letter-spacing: .08em; }
+.sealed-rail .ch[aria-current="page"] { background: var(--amber-bg); box-shadow: inset 0 0 0 1px var(--amber-ln); }
+.sealed-rail .ch[aria-current="page"]::before { background: var(--amber); }
+.sealed-rail .ch[aria-current="page"] .ix { color: var(--amber); }
+.rail-seal { margin: 4px var(--s4) 0; padding: 10px 12px; border: 1px dashed var(--amber-ln); border-radius: var(--r2); font-size: 12px; line-height: 18px; color: var(--ink-2); background: var(--s-1); }
+.rail-seal .ml { color: var(--amber); display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+.q-item { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; padding: 7px var(--s4); align-items: start; }
+.q-item .dots { margin-top: 5px; }
+.q-item .dot { width: 7px; height: 7px; }
+.q-item .dot.gap { height: 9px; }
+.q-item .n { font: 500 10.5px/18px var(--f-mono); color: var(--ink-3); }
+.q-item .t { font-size: 12.5px; line-height: 18px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-item .t code { font-family: var(--f-mono); font-size: 11px; color: var(--ink-2); letter-spacing: 0; }
+.q-item.now .t code { color: var(--ink); }
+.q-item .s { font: 500 10.5px/16px var(--f-mono); color: var(--ink-3); display: flex; gap: 6px; align-items: center; }
+.q-item.now .n { color: var(--amber); }
+.rail-foot { margin-top: auto; border-top: 1px solid var(--hair); padding: var(--s3) var(--s4) var(--s4); }
+.dayro { display: flex; align-items: baseline; justify-content: space-between; }
+.dayro .v { font: 300 30px/36px var(--f-mono); letter-spacing: -.02em; }
+.dayro .v small { font: 400 11px/1 var(--f-ui); color: var(--ink-3); letter-spacing: 0; margin-left: 4px; }
+.ruler { height: 8px; margin: 6px 0 6px; background:
+  repeating-linear-gradient(90deg, var(--tick) 0 1px, transparent 1px 8px) bottom / 100% 4px no-repeat,
+  repeating-linear-gradient(90deg, var(--ink-3) 0 1px, transparent 1px 40px) bottom / 100% 8px no-repeat; }
+.rail-foot .meta { font-size: 12px; line-height: 18px; color: var(--ink-3); display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
+.rail-foot .meta b { text-align: right; }
+.rail-foot .meta b { color: var(--ink-2); font-weight: 500; }
+
+/* ---------- status strip ---------- */
+.lampi { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
+.lampi .k { color: var(--ink-3); }
+.lampi .mono { font-size: 11.5px; }
+.foot .div { width: 1px; height: 12px; background: var(--hair-2); flex: none; }
+.foot .right { margin-left: auto; display: flex; gap: var(--s3); align-items: center; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+.lamp { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; position: relative; background: var(--ink-3); }
+.lamp.ok { background: var(--teal); box-shadow: 0 0 0 3px var(--teal-bg); }
+.lamp.warn { background: var(--amber); box-shadow: 0 0 0 3px var(--amber-bg); }
+.lamp.err { background: var(--red); box-shadow: 0 0 0 3px var(--red-bg); }
+.lamp.ai { background: var(--violet); box-shadow: 0 0 0 3px var(--violet-bg); }
+.lamp.off { background: transparent; border: 1px solid var(--ink-3); }
+.lamp.pulse::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid currentColor; animation: pulse .6s var(--ease) 1; opacity: 0; }
+.lamp.ok.pulse { color: var(--teal); } .lamp.warn.pulse { color: var(--amber); } .lamp.err.pulse { color: var(--red); }
+@keyframes pulse { 0% { transform: scale(.6); opacity: .9; } 100% { transform: scale(1.8); opacity: 0; } }
+.chord { font: 500 11px/1 var(--f-mono); color: var(--amber); }
+
+/* ---------- inspector ---------- */
+.insp-h { position: sticky; top: 0; z-index: 2; height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--s4);
+  background: var(--z-insp); border-bottom: 1px solid var(--hair); }
+.insp-h.sealed { background: repeating-linear-gradient(135deg, transparent 0 5px, var(--amber-bg) 5px 6px), var(--z-insp); border-bottom-color: var(--amber-ln); }
+.insp-h .t { display: flex; align-items: center; gap: 8px; }
+.isec { padding: var(--s4); border-bottom: 1px solid var(--hair); }
+.isec-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s3); gap: 8px; }
+.isec-h .ml { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.isec-h > .ml:first-child::before { content: ""; width: 6px; height: 1px; background: var(--ink-3); }
+.isec-h > .ml + .ml { letter-spacing: .06em; color: var(--ink-3); }
+.kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 6px 12px; font-size: 12.5px; line-height: 18px; }
+html[lang="zh-CN"] .kv { grid-template-columns: 76px minmax(0, 1fr); }
+.kv dt { color: var(--ink-3); }
+.kv dd { margin: 0; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.kv dd .mono { font-size: 11.5px; }
+.note { font-size: 12px; line-height: 18px; color: var(--ink-3); margin: var(--s2) 0 0; text-wrap: pretty; }
+.cond-sub, .reply p, .fopt .ex, .kv dd, .qcell .d, .dlg-b, .tactic { text-wrap: pretty; }
+html[lang="zh-CN"] .note { line-height: 20px; }
+
+/* condition panel — the reading everybody asks for */
+.cond { border: 1px solid var(--hair-2); border-radius: var(--r2); background: var(--card); box-shadow: var(--lift); position: relative; overflow: hidden; }
+.cond-top { display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px; }
+.cond-top .name { font-weight: 600; font-size: 15px; letter-spacing: .005em; }
+.cond-top .tag { margin-left: auto; }
+.cond-sub { padding: 0 12px 12px 29px; font-size: 12.5px; color: var(--ink-2); line-height: 18px; }
+.cond.counts { border-color: var(--teal-ln); }
+.cond.counts::before, .cond.assisted::before, .cond.sealed::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--teal); }
+.cond.assisted { border-color: var(--amber-ln); } .cond.assisted::before { background: var(--amber); }
+.cond.sealed { border-color: var(--amber-ln); } .cond.sealed::before { background: var(--amber); }
+.cond-scale { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--hair); }
+.cond-scale span { font: 500 10px/1 var(--f-label); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 7px 0 7px; text-align: center; position: relative; white-space: nowrap; }
+html[lang="zh-CN"] .cond-scale span { font: 500 11px/1 var(--f-ui); letter-spacing: .04em; }
+.cond-scale span + span { border-left: 1px solid var(--hair); }
+.cond-scale span.on { color: var(--ink); background: var(--s-3); }
+.cond-scale span.on::after { content: ""; position: absolute; left: 50%; top: -1px; width: 7px; height: 4px; transform: translateX(-50%); background: currentColor; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+
+/* readouts */
+.ros { display: grid; border: 1px solid var(--hair-2); border-radius: var(--r2); background: var(--card); box-shadow: var(--lift); }
+.ros > .ro { padding: 10px 12px 11px; min-width: 0; }
+.ros > .ro + .ro { border-left: 1px solid var(--hair); }
+.ro .v { font: 400 20px/28px var(--f-mono); letter-spacing: -.01em; white-space: nowrap; }
+.ro .v small { font-size: 12px; color: var(--ink-3); letter-spacing: 0; }
+.ro .n { font-size: 11.5px; line-height: 16px; color: var(--ink-3); margin-top: 2px; }
+.ro.live .v { color: var(--amber); }
+
+/* tags */
+.tag { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 6px; border-radius: var(--r1); border: 1px solid var(--hair-2);
+  font: 500 11px/1 var(--f-mono); color: var(--ink-2); white-space: nowrap; letter-spacing: 0; background: var(--s-2); }
+.tag.t-teal { color: var(--teal); border-color: var(--teal-ln); background: var(--teal-bg); }
+.tag.t-amber { color: var(--amber); border-color: var(--amber-ln); background: var(--amber-bg); }
+.tag.t-red { color: var(--red); border-color: var(--red-ln); background: var(--red-bg); }
+.tag.t-violet { color: var(--violet); border-color: var(--violet-ln); background: var(--violet-bg); }
+.tag.t-ghost { border-style: dashed; color: var(--ink-3); background: transparent; }
+.tag.t-word { font-family: var(--f-ui); font-size: 11.5px; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: var(--r2); border: 1px solid var(--hair-2);
+  background: var(--s-3); color: var(--ink); font-size: 13px; font-weight: 500; white-space: nowrap;
+  transition: background var(--t) var(--ease), border-color var(--t) var(--ease), transform var(--t-fast) var(--ease); }
+.btn:hover { border-color: var(--tick); background: var(--s-4); }
+.btn:active { transform: translateY(1px); }
+.btn.pri { background: var(--pri); color: var(--pri-ink); border-color: var(--pri-ln); }
+.btn.pri:hover { background: var(--pri-hi); border-color: var(--pri-ln); }
+.btn.pri kbd { background: transparent; color: var(--pri-ink); border-color: color-mix(in srgb, var(--pri-ink) 34%, transparent); }
+[data-theme="dark"] .btn.pri { box-shadow: var(--lift); }
+.btn.pri.next-go { box-shadow: inset 2px 0 0 var(--amber), var(--lift); padding-left: 14px; }
+.btn.sm { height: 26px; padding: 0 9px; font-size: 12px; gap: 6px; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+.btn.ghost:hover { background: var(--s-4); color: var(--ink); }
+.btn.warn { color: var(--amber); border-color: var(--amber-ln); background: var(--amber-bg); }
+.btn.danger { color: var(--red); border-color: var(--red-ln); background: transparent; }
+.btn.ai { color: var(--violet); border-color: var(--violet-ln); background: var(--violet-bg); }
+.btn[disabled] { opacity: .42; cursor: not-allowed; }
+.btn.pri[disabled] { background: var(--s-4); color: var(--ink-3); border-color: var(--hair-2); opacity: 1; }
+.btn.pri[disabled] kbd { color: var(--ink-3); border-color: var(--hair-2); }
+.link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--tick); text-underline-offset: 3px; background: none; border: 0; padding: 0; font: inherit; }
+.link:hover { text-decoration-color: var(--ink); }
+
+/* ---------- work area ---------- */
+.wk-h { flex: none; height: 52px; display: flex; align-items: center; gap: var(--s4); padding: 0 var(--s8); border-bottom: 1px solid var(--hair); min-width: 0; }
+.wk-h h1 { margin: 0; font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+html[lang="zh-CN"] .wk-h h1 { letter-spacing: .03em; }
+.wk-h .ml { white-space: nowrap; }
+.crumb { display: flex; align-items: center; gap: 8px; white-space: nowrap; flex: none; }
+.crumb .cp { font: 400 11.5px/16px var(--f-mono); color: var(--ink-3); letter-spacing: 0; }
+.crumb .sep { width: 10px; height: 1px; background: var(--tick); flex: none; }
+.wk-h .vr { width: 1px; height: 20px; background: var(--hair-2); flex: none; }
+.wk-h .aside { margin-left: auto; display: flex; align-items: center; gap: var(--s3); white-space: nowrap; }
+.wk-b { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.pad { padding: var(--s5) var(--s8) var(--s8); }
+.sec-h { display: flex; align-items: center; gap: 10px; margin: 0 0 var(--s3); }
+.sec-h .ml { white-space: nowrap; }
+.sec-h .rule { flex: 1; height: 1px; background: var(--hair); }
+.sec-h .aside { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+
+/* ---------- today ---------- */
+.unkline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--hair); border-radius: var(--r2); background: var(--well); }
+.unkline > div { padding: 8px 16px 9px; min-width: 0; }
+.unkline > div + div { border-left: 1px solid var(--hair); }
+.unkline .h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.unkline .h .link { font-size: 12px; }
+.unkline .v { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; line-height: 20px; color: var(--ink); font-weight: 600; white-space: nowrap; min-width: 0; }
+.unkline .v span.n { font-weight: 400; color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.unkbox { display: inline-block; flex: none; width: 28px; height: 12px; border: 1px dashed var(--tick); border-radius: 1px;
+  background: repeating-linear-gradient(135deg, transparent 0 3px, var(--hair) 3px 4px); }
+
+/* the one next action — a policy-trace readout, not a callout */
+.next { margin-top: var(--s4); border: 1px solid var(--hair-2); border-radius: var(--r2); background: var(--paper); box-shadow: var(--lift); position: relative; overflow: hidden; }
+.next-h { display: flex; align-items: center; gap: 12px; height: 34px; padding: 0 16px 0 20px; border-bottom: 1px solid var(--hair); position: relative; }
+.next-h::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 5px; pointer-events: none;
+  background: repeating-linear-gradient(90deg, var(--tick) 0 1px, transparent 1px 8px) bottom / 100% 3px no-repeat,
+              repeating-linear-gradient(90deg, var(--ink-3) 0 1px, transparent 1px 40px) bottom / 100% 5px no-repeat; opacity: .7; }
+.next-h .ml.go-l { color: var(--amber); display: inline-flex; align-items: center; gap: 6px; }
+.next-h .grow { flex: 1; }
+.next-b { display: grid; grid-template-columns: minmax(0, 1fr) 300px; }
+.next-main { padding: 16px 24px 18px 20px; min-width: 0; }
+.next-main h2 { margin: 0 0 8px; font-size: 26px; line-height: 32px; font-weight: 600; letter-spacing: -.012em; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+html[lang="zh-CN"] .next-main h2 { letter-spacing: .02em; }
+.next-main .ids { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.next-main .reason { margin: 12px 0 16px; font-size: 14.5px; line-height: 24px; color: var(--ink-2); max-width: 60ch; text-wrap: pretty; }
+html[lang="zh-CN"] .next-main .reason { line-height: 26px; letter-spacing: .02em; }
+.next-main .reason .num { color: var(--ink); font-weight: 600; }
+.next-main .go { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.forecast { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
+.next-trace { border-left: 1px solid var(--hair); padding: 14px 18px 14px; background: var(--well); display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.trace-rank { display: grid; gap: 8px; }
+.trace-rank .r { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--ink-3); }
+.trace-rank .r .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--f-mono); font-size: 11px; display: flex; align-items: center; gap: 6px; }
+.trace-rank .r.sel { color: var(--ink); }
+.trace-rank .r .v { font-family: var(--f-mono); font-size: 11.5px; text-align: right; }
+.trace-rank .r .v small { color: var(--ink-3); font-size: 10.5px; margin-left: 6px; }
+.meter { grid-column: 1 / -1; height: 8px; position: relative; background: repeating-linear-gradient(90deg, var(--tick) 0 1px, transparent 1px 25%) bottom / 100% 8px no-repeat; border-bottom: 1px solid var(--hair-2); }
+.meter i { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--ink-3); }
+.sel .meter i { background: var(--amber); }
+.sel .meter b { position: absolute; bottom: -5px; width: 0; height: 0; border: 4px solid transparent; border-bottom-color: var(--amber); transform: translateX(-4px); }
+
+.skills { margin-top: var(--s4); }
+.stable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.stable th { text-align: left; font-weight: 400; padding: 0 12px 8px 0; border-bottom: 1px solid var(--hair-2); white-space: nowrap; }
+.stable td { padding: 6px 12px 6px 0; border-bottom: 1px solid var(--hair); vertical-align: middle; }
+.stable tr:last-child td { border-bottom: 0; }
+.stable .sk { display: grid; gap: 0; line-height: 18px; }
+.stable .sk b { font-weight: 600; font-size: 13.5px; }
+.stable .sk span { font: 400 11.5px/16px var(--f-mono); color: var(--ink-3); }
+.stable .num { font-size: 12.5px; }
+.stable .dim { color: var(--ink-3); }
+
+.dots { display: inline-flex; gap: 3px; align-items: center; vertical-align: middle; }
+.dot { width: 10px; height: 10px; border-radius: 1px; display: inline-block; flex: none; }
+.dot.ic { background: var(--teal); }                                   /* independent · correct */
+.dot.im { box-shadow: inset 0 0 0 1.5px var(--teal); }                 /* independent · miss */
+.dot.ac { background: var(--ink-3); opacity: .55; }                    /* assisted (not counted) */
+.dot.am { box-shadow: inset 0 0 0 1.5px var(--ink-3); opacity: .7; }
+.dot.re { background: repeating-linear-gradient(135deg, var(--ink-3) 0 1.5px, transparent 1.5px 3.5px); opacity: .8; }
+.dot.gap { width: 1px; height: 14px; background: var(--hair-2); margin: 0 4px; border-radius: 0; }
+.legend { display: flex; gap: 14px; align-items: center; font-size: 11.5px; color: var(--ink-3); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+.quiet { margin-top: var(--s4); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--hair); border-radius: var(--r2); background: var(--well); }
+.qcell { padding: 9px 16px 10px; min-width: 0; border-right: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+.qcell:nth-child(3n) { border-right: 0; }
+.qcell:nth-last-child(-n+3) { border-bottom: 0; }
+.qcell .qh { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 2px; }
+.qcell .qh .ml { min-width: 0; }
+.qcell .qh .link { font-size: 12px; white-space: nowrap; }
+.qcell .qv { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.qcell .qv .units, .qcell .qv .steps6 { flex: 1; min-width: 72px; margin: 0; }
+.qcell .big { font: 400 17px/24px var(--f-mono); white-space: nowrap; }
+.steps6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px; }
+.steps6 i { height: 4px; background: var(--hair-2); }
+.steps6 i.d { background: var(--ink-3); }
+.steps6 i.p { background: var(--amber); }
+.qcell .big small { font: 400 12px/1 var(--f-ui); color: var(--ink-3); margin-left: 2px; }
+.qcell .d { font-size: 12px; line-height: 18px; color: var(--ink-3); margin-top: 2px; }
+html[lang="zh-CN"] .qcell .d { line-height: 19px; }
+.qcell .d b { color: var(--ink-2); font-weight: 500; }
+.qcell .acts { display: flex; gap: 6px; margin-top: 8px; }
+/* unit strip: one segment per assessment unit; hatched = spent */
+.units { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; align-items: end; }
+.units i { height: 10px; background: var(--ink-3); opacity: .8; }
+.units i.sp { opacity: 1; background: repeating-linear-gradient(135deg, var(--tick) 0 1.5px, transparent 1.5px 4px); box-shadow: inset 0 0 0 1px var(--hair-2); }
+.units i.run { opacity: 1; background: repeating-linear-gradient(135deg, var(--ink-3) 0 1.5px, transparent 1.5px 4px); box-shadow: inset 0 0 0 1px var(--ink-3); }
+.units-lg { display: flex; gap: 12px; margin-top: 6px; font-size: 11px; color: var(--ink-3); flex-wrap: wrap; }
+.units-lg span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.units-lg i { width: 8px; height: 8px; display: inline-block; }
+
+/* ---------- reading ---------- */
+.read { display: grid; grid-template-columns: minmax(0, 1.22fr) minmax(0, 1fr); min-height: 100%; }
+.passage { padding: var(--s5) var(--s8) var(--s8) var(--s12); border-right: 1px solid var(--hair); min-width: 0; position: relative; }
+.passage .src { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.passage h2 { font: 600 20px/26px var(--f-read); margin: 0; letter-spacing: -.003em; color: var(--ink); text-wrap: balance; }
+.passage .disc { font-size: 11.5px; line-height: 16px; color: var(--ink-3); margin: 6px 0 14px; display: flex; gap: 6px; align-items: center; }
+.para { position: relative; margin: 0 0 14px; font: 400 16px/26px var(--f-read); color: var(--ink); hyphens: manual; text-wrap: pretty; font-variant-numeric: lining-nums; font-feature-settings: "lnum" 1, "pnum" 1; }
+.para .pn { position: absolute; left: -32px; top: 8px; font: 500 10px/1 var(--f-mono); color: var(--ink-3); width: 14px; text-align: right; }
+.para .pn::after { content: ""; position: absolute; left: 20px; top: -3px; width: 1px; height: 16px; background: var(--tick); }
+.ev { background: var(--hl); box-shadow: inset 0 -1.5px 0 var(--teal); padding: 1px 0; border-radius: 1px; }
+.ev b { font-weight: 700; }
+mark.mk { background: var(--mark); color: inherit; border-radius: 1px; box-shadow: inset 0 -1px 0 var(--amber); }
+.item { padding: var(--s5) var(--s8) var(--s8) var(--s6); min-width: 0; display: flex; flex-direction: column; }
+.item-h { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.stem { font: 500 16px/24px var(--f-ui); margin: 0 0 16px; color: var(--ink); letter-spacing: -.003em; font-feature-settings: "lnum" 1; text-wrap: pretty; }
+.stem b { font-weight: 700; letter-spacing: .02em; }
+.opts { display: grid; gap: 6px; }
+.opt { display: grid; grid-template-columns: 24px minmax(0, 1fr) 12px; gap: 12px; align-items: center; padding: 9px 12px 9px 10px; border: 1px solid var(--hair-2); border-radius: var(--r2);
+  background: var(--paper); box-shadow: var(--lift); text-align: left; font: 400 15px/22px var(--f-ui); color: var(--ink); width: 100%; min-height: 44px;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease); }
+.opt:hover { border-color: var(--ctl); }
+.opt .L { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--ctl); border-radius: var(--r1); background: var(--s-2);
+  font: 600 12px/1 var(--f-mono); color: var(--ink); transition: all var(--t-fast) var(--ease); }
+.opt .k2 { font: 500 11px/1 var(--f-mono); color: var(--ink-3); text-align: right; }
+.opt[aria-checked="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.opt[aria-checked="true"] .L { background: var(--ink); color: var(--ink-inv); border-color: var(--ink); }
+.actbar { margin-top: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
+.actbar .navgrp { display: inline-flex; gap: 4px; flex: none; }
+/* the passage's other items — a quiet list, no correctness */
+.sibs { margin-top: 28px; border-top: 1px solid var(--hair); padding-top: 12px; }
+.sibs .sec-h { margin-bottom: 6px; }
+.sib { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px dashed var(--hair); font-size: 12.5px; color: var(--ink-2); }
+.sib:last-child { border-bottom: 0; }
+.sib .q { font: 600 11px/1 var(--f-mono); color: var(--ink-3); }
+.sib.now .q { color: var(--ink); }
+.sib .tx { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sib .mono { font-size: 11px; color: var(--ink-3); }
+.actbar .sp { flex: 1; }
+.hintbox { margin-top: 12px; border: 1px dashed var(--hair-2); border-radius: var(--r2); padding: 10px 12px; font-size: 13px; line-height: 20px; color: var(--ink-2); background: repeating-linear-gradient(135deg, transparent 0 5px, var(--hatch) 5px 6px); }
+.hintbox .ml { color: var(--ink-2); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+.markpop { position: absolute; z-index: 30; display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 10px; border-radius: var(--r2);
+  background: var(--ink); color: var(--ink-inv); font-size: 12.5px; box-shadow: var(--shadow-pop); transform: translate(-50%, -100%); margin-top: -8px; white-space: nowrap; }
+.markpop button { border: 0; background: transparent; color: inherit; display: inline-flex; gap: 6px; align-items: center; height: 24px; padding: 0 6px; border-radius: var(--r1); }
+.markpop button:hover { background: color-mix(in srgb, var(--ink-inv) 14%, transparent); }
+.markpop kbd { background: transparent; color: inherit; border-color: color-mix(in srgb, var(--ink-inv) 40%, transparent); }
+
+/* feedback */
+.verdict { display: grid; grid-template-columns: 1.25fr 1fr .85fr; gap: 0; border: 1px solid var(--hair-2); border-radius: var(--r2); margin-bottom: 14px; background: var(--well); }
+.verdict > div { padding: 8px 12px 9px; border-right: 1px solid var(--hair); min-width: 0; }
+.verdict .ml { white-space: nowrap; }
+.verdict > div:nth-child(3) { border-right: 0; }
+.verdict > .vc { grid-column: 1 / -1; border-right: 0; border-top: 1px solid var(--hair); display: flex; align-items: center; gap: 10px; padding: 7px 12px; font-size: 12.5px; color: var(--ink-2); }
+.verdict > .vc b { color: var(--ink); font-weight: 600; }
+.verdict .v { font: 500 15px/22px var(--f-mono); display: flex; align-items: center; gap: 6px; white-space: nowrap; min-width: 0; }
+.verdict .v small { font: 400 12px/1 var(--f-ui); color: var(--ink-3); }
+.verdict .v.bad { color: var(--red); }
+.verdict .v.good { color: var(--ink); }
+.fopt { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 4px 12px; padding: 10px 12px 11px 10px; border: 1px solid var(--hair-2); border-radius: var(--r2); background: var(--paper); box-shadow: var(--lift); }
+.fopt + .fopt { margin-top: 6px; }
+.fopt .L { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--ctl); border-radius: var(--r1); background: var(--s-2); font: 600 12px/1 var(--f-mono); color: var(--ink); }
+.fopt .tx { font: 400 14.5px/24px var(--f-ui); }
+.fopt .ex { grid-column: 2; font-size: 12.5px; line-height: 19px; color: var(--ink-2); display: flex; gap: 8px; align-items: baseline; }
+html[lang="zh-CN"] .fopt .ex { line-height: 20px; }
+.fopt .ex .tv { font: 600 10px/1 var(--f-label); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); flex: none; width: 34px; }
+html[lang="zh-CN"] .fopt .ex .tv { font: 600 11px/1 var(--f-ui); letter-spacing: .04em; }
+.fopt .flags { display: inline-flex; gap: 6px; margin-left: 8px; vertical-align: 2px; }
+.fopt.key { border-color: var(--teal-ln); background: linear-gradient(90deg, var(--teal-bg), transparent 70%), var(--paper); }
+.fopt.key .L { background: var(--teal); color: var(--ink-inv); border-color: var(--teal); }
+.fopt.key .ex .tv { color: var(--teal); }
+.fopt.mine { border-color: var(--red-ln); }
+.fopt.mine .L { border-color: var(--red); color: var(--red); }
+.tactic { margin-top: 14px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 12px 14px; border: 1px solid var(--hair); border-radius: var(--r2); background: var(--well); font-size: 13px; line-height: 20px; color: var(--ink-2); }
+.tactic svg { color: var(--ink-3); margin-top: 2px; }
+.tactic b { color: var(--ink); font-weight: 600; }
+
+/* AI coach (inspector) */
+.coach { border: 1px solid var(--violet-ln); border-radius: var(--r2); background: var(--violet-bg); }
+.coach-h { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid var(--violet-ln); }
+.coach-h .who { display: flex; gap: 6px; align-items: center; min-width: 0; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.coach-h .who > span { overflow: hidden; text-overflow: ellipsis; }
+.coach-h .who svg { flex: none; color: var(--violet); }
+.coach-h .mono { font-size: 11px; }
+.modes { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--violet-ln); }
+.modes button { border: 0; background: transparent; padding: 8px 4px; font-size: 12.5px; color: var(--ink-3); display: flex; gap: 6px; justify-content: center; align-items: center; position: relative; white-space: nowrap; min-width: 0; }
+.modes button:focus-visible { outline-offset: -2px; }
+.modes button + button { border-left: 1px solid var(--violet-ln); }
+.modes button[aria-selected="true"] { color: var(--ink); font-weight: 600; background: color-mix(in srgb, var(--violet-bg) 100%, var(--s-3) 40%); }
+.modes button[aria-selected="true"]::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; background: var(--violet); }
+.modes .mk3 { font: 500 10px/1 var(--f-mono); color: var(--ink-3); border: 1px solid var(--hair-2); border-radius: 1px; padding: 2px 3px; }
+.modes button[aria-selected="true"] .mk3 { color: var(--violet); border-color: var(--violet-ln); }
+.reply { padding: 12px 12px 10px; font-size: 13px; line-height: 21px; color: var(--ink); }
+html[lang="zh-CN"] .reply { line-height: 23px; }
+.reply p { margin: 0 0 8px; }
+.reply .q { color: var(--violet); font-weight: 600; }
+.reply-f { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px 9px; font: 400 11.5px/16px var(--f-ui); white-space: nowrap; color: var(--ink-3); border-top: 1px dashed var(--violet-ln); }
+.manifest { margin-top: 12px; border: 1px solid var(--hair-2); border-radius: var(--r2); background: var(--card); box-shadow: var(--lift); font-size: 12px; }
+.manifest .row { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; padding: 7px 10px; border-bottom: 1px solid var(--hair); line-height: 18px; }
+html[lang="en"] .manifest .row { grid-template-columns: 70px minmax(0, 1fr); }
+.manifest .row:last-child { border-bottom: 0; }
+.manifest .row > span:first-child { color: var(--ink-3); }
+.payload { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.payload li { display: inline-flex; gap: 4px; align-items: baseline; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+.payload li svg { flex: none; position: relative; top: 1px; }
+.payload li.meta { display: block; flex-basis: 100%; color: var(--ink-3); font: 400 10.5px/15px var(--f-mono); margin-top: 3px; overflow-wrap: anywhere; white-space: normal; }
+.payload li.wh { color: var(--ink-3); }
+.payload li.wh svg { color: var(--red); }
+.budget { display: flex; gap: 2px; margin-top: 4px; }
+.budget i { flex: 1; height: 6px; background: var(--hair-2); }
+.budget i.u { background: var(--ink-2); }
+.budget i.nx { background: transparent; box-shadow: inset 0 0 0 1px var(--ink-3); }
+
+/* ---------- assessment ---------- */
+.sealband { flex: none; display: flex; align-items: center; gap: 16px; height: 64px; padding: 0 var(--s8); border-bottom: 1px solid var(--amber-ln);
+  background: repeating-linear-gradient(135deg, transparent 0 6px, var(--amber-bg) 6px 7px), var(--z-work); position: relative; }
+.sealband::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--amber); opacity: .7; }
+.sealband h1 { margin: 0; font-size: 16px; line-height: 22px; font-weight: 600; white-space: nowrap; }
+.sb-t { display: grid; gap: 2px; min-width: 0; }
+.sb-t .ml { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-r { margin-left: auto; display: flex; gap: 0; align-items: stretch; min-width: 0; height: 44px; }
+.sb-ro { display: grid; align-content: center; padding: 0 18px; border-left: 1px solid var(--hair-2); min-width: 0; }
+.sb-ro .ml { line-height: 14px; }
+.sb-ro .v { font: 400 24px/28px var(--f-mono); letter-spacing: -.02em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sb-ro .v small { font-size: 13px; color: var(--ink-3); letter-spacing: 0; }
+.sb-ro.live .v { color: var(--amber); font-size: 28px; }
+.sb-leave { display: grid; align-content: center; padding-left: 18px; border-left: 1px solid var(--hair-2); }
+.sealmark { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border: 1px solid var(--amber); color: var(--amber); border-radius: var(--r1);
+  font: 700 10.5px/1 var(--f-label); letter-spacing: .18em; white-space: nowrap; flex: none; }
+html[lang="zh-CN"] .sealmark { font: 700 11.5px/1 var(--f-ui); letter-spacing: .2em; }
+.nav40 { padding: 12px var(--s8) 10px; border-bottom: 1px solid var(--hair); background: var(--z-work); }
+.nav40 .cells { display: grid; grid-template-columns: repeat(40, minmax(0, 1fr)); gap: 3px; }
+.nav40 .c { height: 22px; border: 1px solid var(--hair-2); border-radius: 1px; background: transparent; padding: 0; position: relative; }
+.nav40 .c.ans { background: var(--ink-3); border-color: var(--ink-3); opacity: .7; }
+.nav40 .c.to { background: linear-gradient(to top right, transparent calc(50% - .75px), var(--ink-2) calc(50% - .75px), var(--ink-2) calc(50% + .75px), transparent calc(50% + .75px)); border-color: var(--ink-3); }
+.nav40 .c.cur { border-color: var(--amber); background: var(--amber-bg); box-shadow: inset 0 0 0 1px var(--amber); }
+.nav40 .c:hover { border-color: var(--ink); }
+.nav40 .scale { display: grid; grid-template-columns: repeat(40, minmax(0, 1fr)); gap: 3px; margin-top: 4px; }
+.nav40 .scale span { font: 500 9.5px/12px var(--f-mono); color: var(--ink-3); text-align: center; position: relative; }
+.nav40 .scale span.tk::before { content: ""; position: absolute; left: 50%; top: -3px; width: 1px; height: 3px; background: var(--tick); }
+.nav40 .lg { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.sealed-item .opt[aria-checked="true"] { border-color: var(--amber); box-shadow: inset 0 0 0 1px var(--amber); }
+.sealed-item .opt[aria-checked="true"] .L { background: var(--amber); border-color: var(--amber); color: var(--ink-inv); }
+.locked { display: grid; gap: 0; border: 1px solid var(--hair-2); border-radius: var(--r2); background: var(--card); box-shadow: var(--lift); }
+.locked > div { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; font-size: 12.5px; color: var(--ink-3); }
+.locked.seal > div { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--hatch) 3px 4px); }
+.locked.seal .sl { font: 600 9.5px/1 var(--f-label); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); border: 1px solid var(--hair-2); padding: 3px 5px; border-radius: 1px; background: var(--card); }
+html[lang="zh-CN"] .locked.seal .sl { font: 500 10.5px/1 var(--f-ui); letter-spacing: .08em; }
+.locked > div + div { border-top: 1px solid var(--hair); }
+.locked .mono { font-size: 10.5px; }
+.clockwrap { display: grid; grid-template-columns: 156px minmax(0, 1fr); gap: 14px; align-items: center; }
+.clockwrap svg text { font-family: var(--f-mono); }
+.bigclock { font: 300 40px/44px var(--f-mono); letter-spacing: -.03em; color: var(--ink); }
+.runbar { display: flex; gap: 1px; margin-top: 8px; }
+.runbar i { flex: 1; height: 8px; background: var(--hair-2); }
+.runbar i.u { background: var(--ink-3); }
+.runbar i.n { background: var(--amber); }
+
+/* ---------- report ---------- */
+.headline { display: grid; grid-template-columns: 1.1fr 1fr 1fr; border: 1px solid var(--hair-2); border-radius: var(--r2); background: var(--paper); box-shadow: var(--lift); }
+.headline > div { padding: 14px 18px 16px; min-width: 0; }
+.headline > div + div { border-left: 1px solid var(--hair); }
+.headline .hv { font: 300 44px/52px var(--f-mono); letter-spacing: -.04em; display: flex; align-items: baseline; gap: 6px; }
+.headline .hv small { font-size: 18px; color: var(--ink-3); letter-spacing: -.02em; }
+.headline .hv.unk { font: 500 18px/52px var(--f-ui); letter-spacing: 0; color: var(--ink-2); display: flex; align-items: center; gap: 10px; }
+.headline .hv .delta { color: var(--ink); }
+.headline .n { font-size: 12px; color: var(--ink-3); line-height: 18px; }
+.cols2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s8); margin-top: var(--s6); }
+.skrow { display: grid; grid-template-columns: 150px minmax(0, 1fr) 44px; gap: 12px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--hair); }
+html[lang="zh-CN"] .skrow { grid-template-columns: 150px minmax(0, 1fr) 44px; }
+.skrow:last-child { border-bottom: 0; }
+.skrow .nm { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.skrow .nm span { display: block; font: 400 10.5px/14px var(--f-mono); color: var(--ink-3); }
+.skrow .v { font: 500 13px/1 var(--f-mono); text-align: right; }
+.cellbar { display: flex; gap: 2px; }
+.cellbar i { width: 12px; height: 14px; border: 1px solid var(--hair-2); border-radius: 1px; }
+.cellbar i.c { background: var(--ink-2); border-color: var(--ink-2); }
+.histo svg { display: block; width: 100%; height: auto; overflow: visible; }
+.histo text { font-family: var(--f-mono); font-size: 10px; fill: var(--ink-3); }
+.histo .bar { fill: var(--ink-3); opacity: .55; }
+.histo .bar.hi { fill: var(--ink-2); opacity: .9; }
+.cmp { margin-top: var(--s6); border: 1px solid var(--hair); border-radius: var(--r2); background: var(--well); }
+.cmp-main { padding: 14px 18px 12px; }
+.cmp-side { border-top: 1px solid var(--hair); padding: 10px 18px 12px; display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: center; background: var(--z-work); }
+.cmp-side > .ml { margin-right: 4px; }
+.cmp-side .note { flex-basis: 100%; margin: 0 !important; }
+.cmp-bars { display: grid; gap: 10px; margin-top: 10px; }
+.cmp-bars .r { display: grid; grid-template-columns: 88px minmax(0, 1fr) 56px; gap: 12px; align-items: center; font-size: 12.5px; }
+.cmp-bars .r .v { font: 500 13px/1 var(--f-mono); text-align: right; }
+.track40 { display: grid; grid-template-columns: repeat(40, 1fr); gap: 2px; }
+.track40 i { height: 12px; background: var(--hair); border-radius: 0; }
+.track40 i.c { background: var(--ink-3); opacity: .55; }
+.track40.now i.c { opacity: .9; }
+.track40 i.dl { background: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ink-2); position: relative; }
+.track40 i.dl::after { content: ""; position: absolute; left: 0; right: 0; top: -5px; height: 2px; background: var(--ink-2); }
+.track40 i.dl + i.dl::after { left: -2px; }
+.chk { display: inline-grid; grid-template-columns: 14px auto auto; gap: 6px; align-items: center; font-size: 12px; }
+.chk .mono { font-size: 11px; color: var(--ink-2); }
+.items40 { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 3px; }
+.items40 button { height: 30px; padding: 0 0 0 1px; border: 1px solid var(--hair-2); border-radius: 1px; background: var(--paper); font: 500 10.5px/1 var(--f-mono); color: var(--ink-2); position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.items40 button svg { width: 9px; height: 9px; }
+.items40 button.c svg { color: var(--ink-3); }
+.items40 button.x { border-color: var(--red-ln); color: var(--red); background: var(--red-bg); }
+.items40 button.to { color: var(--ink-3); background: repeating-linear-gradient(135deg, transparent 0 3px, var(--hair) 3px 4px); }
+.items40 button.to .g { font: 600 8px/1 var(--f-mono); }
+.items40 button[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink), 0 2px 0 -1px var(--ink); color: var(--ink); }
+.items40 button:hover { border-color: var(--ctl); }
+.annot { margin-top: 12px; border: 1px solid var(--hair-2); border-radius: var(--r2); background: var(--paper); box-shadow: var(--lift); padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; font-size: 12.5px; line-height: 19px; }
+.annot .ml { margin-bottom: 4px; }
+.annot .rd { font: 400 14px/22px var(--f-read); color: var(--ink); font-feature-settings: "lnum" 1; }
+.annot .q { font: 500 13.5px/21px var(--f-ui); color: var(--ink); }
+
+/* ---------- anki ---------- */
+.anki-grid { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: var(--s6); }
+.field { display: grid; gap: 6px; margin-bottom: 14px; }
+.field label { display: flex; justify-content: space-between; align-items: center; }
+.field input, .field textarea { width: 100%; border: 1px solid var(--hair-2); border-radius: var(--r2); background: var(--paper); box-shadow: var(--lift); padding: 7px 10px; font-size: 14px; line-height: 22px; resize: none; color: var(--ink); text-overflow: ellipsis;
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease); }
+.field textarea { font-size: 14px; line-height: 22px; field-sizing: content; min-height: calc(2 * 22px + 16px); overflow: hidden; }
+.field input.mono { font-size: 12.5px; font-family: var(--f-mono); }
+.field input:focus, .field textarea:focus { outline: none; border-color: var(--ink-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-2) 16%, transparent); }
+.field .cnt { font: 400 10.5px/1 var(--f-mono); color: var(--ink-3); letter-spacing: 0; }
+.field .s1 { display: inline-flex; gap: 6px; align-items: center; }
+.field input[readonly] { background: var(--s-1); color: var(--ink-2); }
+.previewbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.stage { border: 1px solid var(--hair); border-radius: var(--r2); padding: 20px; display: grid; place-items: center; min-height: 300px; position: relative;
+  background: repeating-linear-gradient(90deg, var(--hair) 0 1px, transparent 1px 16px), repeating-linear-gradient(0deg, var(--hair) 0 1px, transparent 1px 16px), var(--s-1); background-blend-mode: normal; }
+.stage .dim { position: absolute; left: 10px; bottom: 8px; font: 500 10px/1 var(--f-mono); color: var(--ink-3); }
+/* the Anki card — its own small design: a "calibration slip" */
+.card { --c-bg: #FBFBF8; --c-ink: #15191D; --c-mute: #5B646D; --c-line: #DCE0E3; --c-acc: #9A5600; --c-key: #006E6A;
+  width: 100%; max-width: 460px; background: var(--c-bg); color: var(--c-ink); border-radius: 4px; box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 10px 30px rgba(20,30,40,.12), 0 0 0 1px var(--c-line);
+  font-family: var(--f-ui); overflow: hidden; transition: max-width var(--t-slow) var(--ease); }
+.card.dark { --c-bg: #161A1F; --c-ink: #E9ECEF; --c-mute: #9AA4AE; --c-line: #2A3138; --c-acc: #F2A541; --c-key: #4ACFC4; box-shadow: 0 10px 30px rgba(0,0,0,.4), 0 0 0 1px var(--c-line); }
+.card.phone { max-width: 300px; }
+.card .ct { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--c-line); font: 600 9.5px/1 var(--f-label); letter-spacing: .16em; text-transform: uppercase; color: var(--c-mute); }
+.card .ct i { font-style: normal; color: var(--c-acc); }
+.card .cticks { height: 6px; background: repeating-linear-gradient(90deg, var(--c-line) 0 1px, transparent 1px 8px); }
+.card .cf { padding: 22px 20px 24px; font: 500 22px/30px var(--f-read); letter-spacing: -.005em; }
+.card.phone .cf { font-size: 19px; line-height: 27px; padding: 18px 16px 20px; }
+.card .cf .pol { color: var(--c-acc); font-weight: 700; letter-spacing: .02em; }
+.card .cb { padding: 0 20px 18px; border-top: 1px solid var(--c-line); }
+.card.phone .cb { padding: 0 16px 16px; }
+.card .cb p { margin: 14px 0 0; font-size: 13.5px; line-height: 21px; }
+.card .cb .eg { font-family: var(--f-read); font-size: 14px; line-height: 22px; padding-left: 12px; border-left: 2px solid var(--c-key); color: var(--c-ink); }
+.card .cb .eg b { color: var(--c-key); }
+.card .cs { display: flex; justify-content: space-between; padding: 9px 16px; border-top: 1px solid var(--c-line); font: 500 10.5px/1 var(--f-mono); color: var(--c-mute); }
+.notes { margin-top: var(--s6); }
+.nrow { display: grid; grid-template-columns: 22px minmax(0, 1.4fr) minmax(0, .9fr) 96px 190px; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--hair); font-size: 12.5px; }
+.nrow .f { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13.5px; color: var(--ink); }
+.nrow .src { font: 400 11.5px/1 var(--f-mono); color: var(--ink-3); }
+.nrow .st { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.nrow > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nrow .ix { font: 500 10.5px/1 var(--f-mono); color: var(--ink-3); }
+.conflict { margin: 6px 0 4px 34px; border: 1px solid var(--red-ln); border-radius: var(--r2); display: grid; grid-template-columns: 1fr 1fr; }
+.conflict > div { padding: 10px 12px; min-width: 0; }
+.conflict > div + div { border-left: 1px solid var(--red-ln); }
+.conflict .tx { font: 400 13.5px/20px var(--f-ui); margin: 4px 0 10px; }
+.conflict .tx del { color: var(--red); text-decoration-thickness: 1px; }
+.conflict .tx ins { text-decoration: underline; text-decoration-color: var(--ink-3); text-underline-offset: 3px; color: var(--ink); font-weight: 600; }
+.conflict .chosen { box-shadow: inset 0 0 0 2px var(--ink-2); }
+
+/* ---------- settings ---------- */
+.reg { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.reg th { text-align: left; font-weight: 400; padding: 0 10px 8px 0; border-bottom: 1px solid var(--hair-2); white-space: nowrap; vertical-align: bottom; }
+.reg td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--hair); vertical-align: middle; white-space: nowrap; }
+.reg tr.inuse td { background: var(--teal-bg); }
+.reg tr.inuse td:first-child { box-shadow: inset 2px 0 0 var(--teal); padding-left: 10px; }
+.reg td:first-child, .reg th:first-child { padding-left: 10px; }
+.reg .pv { font-weight: 600; font-size: 13px; }
+.reg .md { font: 400 12px/1 var(--f-mono); }
+.caps { display: inline-grid; grid-template-columns: repeat(5, 34px); gap: 2px; justify-items: center; }
+.cap { width: 14px; height: 14px; border-radius: 1px; border: 1px solid var(--hair-2); position: relative; }
+.cap.v { background: var(--teal); border-color: var(--teal); }
+.cap.d { border-color: var(--ink-3); border-style: dashed; }
+.cap.u { background: linear-gradient(to top right, transparent calc(50% - .5px), var(--tick) calc(50% - .5px), var(--tick) calc(50% + .5px), transparent calc(50% + .5px)); }
+.cap.f { border-color: var(--red); background: var(--red-bg); }
+.capsh { display: inline-grid; grid-template-columns: repeat(5, 34px); gap: 2px; }
+.capsh span { font: 500 10px/14px var(--f-mono); color: var(--ink-3); text-align: center; letter-spacing: 0; cursor: help; }
+.cred { display: inline-flex; align-items: center; gap: 6px; font: 400 11.5px/1 var(--f-mono); }
+.set-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s8); margin-top: var(--s6); }
+.ledger { border: 1px solid var(--hair); border-radius: var(--r2); background: var(--well); }
+.ledger .lev { display: grid; grid-template-columns: 76px 14px minmax(0, 1fr); gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--hair); font-size: 12.5px; line-height: 18px; align-items: start; }
+.ledger .lev:last-of-type { border-bottom: 0; }
+.ledger .lev .t { font: 400 11px/18px var(--f-mono); color: var(--ink-3); }
+.ledger .lev .ln { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; }
+.ledger .foot2 { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-top: 1px solid var(--hair); background: var(--z-work); gap: 10px; }
+.bud { display: grid; gap: 8px; }
+.bud .r { display: grid; grid-template-columns: 76px minmax(0, 1fr) 52px; gap: 12px; align-items: center; font-size: 12.5px; }
+.bud .r .v { font: 400 12px/1 var(--f-mono); text-align: right; }
+.bud .ticks20 { display: grid; grid-template-columns: repeat(20, 1fr); gap: 2px; }
+.bud .ticks20 i { height: 10px; background: var(--hair); }
+.bud .ticks20 i.u { background: var(--ink-2); }
+.bud .ticks20 i.ov { background: var(--red); }
+.bud .ticks20.na i { background: transparent; border-bottom: 1px dashed var(--hair-2); height: 10px; }
+.svc { display: grid; gap: 0; border: 1px solid var(--hair); border-radius: var(--r2); background: var(--well); }
+.svc > div { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 12px; font-size: 12.5px; }
+.svc > div + div { border-top: 1px solid var(--hair); }
+.svc .mono { font-size: 11.5px; color: var(--ink-3); }
+
+/* ---------- overlays ---------- */
+.scrim { position: fixed; inset: 0; z-index: 50; background: color-mix(in srgb, var(--bg) 55%, transparent); backdrop-filter: blur(2px);
+  display: grid; justify-items: center; align-items: start; padding-top: 96px; animation: fade var(--t) var(--ease); }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rise { from { opacity: 0; transform: translateY(-4px) scale(.995); } to { opacity: 1; transform: none; } }
+.pal { width: 600px; max-width: calc(100vw - 48px); background: var(--s-3); border-radius: var(--r3); box-shadow: var(--shadow-pop); overflow: hidden; animation: rise var(--t-slow) var(--ease); }
+.pal-in { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px; border-bottom: 1px solid var(--hair); }
+.pal-in input { flex: 1; border: 0; background: transparent; font-size: 15px; outline: none; color: var(--ink); caret-color: var(--amber); }
+.pal-in .ctx { font: 500 10.5px/1 var(--f-mono); color: var(--ink-3); border: 1px solid var(--hair-2); padding: 4px 6px; border-radius: var(--r1); white-space: nowrap; }
+.pal-list { max-height: 420px; overflow: auto; padding: 6px 0 8px; }
+.pal-g { padding: 10px 16px 4px; }
+.pal-i { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 12px; align-items: center; height: 36px; padding: 0 16px; font-size: 13.5px; color: var(--ink-2); cursor: pointer; position: relative; }
+.pal-i .d { color: var(--ink-3); font-size: 12px; margin-left: 8px; }
+.pal-i em { font-style: normal; color: var(--amber); font-weight: 700; }
+.pal-i[aria-selected="true"] { background: var(--s-4); color: var(--ink); }
+.pal-i[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--amber); }
+.pal-i svg { color: var(--ink-3); }
+.pal-f { display: flex; gap: 16px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--hair); background: var(--s-2); font-size: 11.5px; color: var(--ink-3); }
+.pal-f span { display: inline-flex; gap: 6px; align-items: center; }
+.pal-empty { padding: 24px 16px; color: var(--ink-3); font-size: 13px; }
+.dlg { width: 480px; max-width: calc(100vw - 48px); background: var(--s-3); border-radius: var(--r3); box-shadow: var(--shadow-pop); overflow: hidden; animation: rise var(--t-slow) var(--ease); margin-top: 60px; }
+.dlg-h { padding: 18px 20px 6px; display: flex; align-items: center; gap: 10px; }
+.dlg-h h2 { margin: 0; font-size: 16px; line-height: 22px; font-weight: 600; }
+.dlg-b { padding: 4px 20px 16px; font-size: 13.5px; line-height: 21px; color: var(--ink-2); }
+html[lang="zh-CN"] .dlg-b { line-height: 23px; }
+.dlg-shift { display: grid; grid-template-columns: 1fr 24px 1fr; align-items: center; gap: 8px; margin: 14px 0 4px; }
+.dlg-shift > div { border: 1px solid var(--hair-2); border-radius: var(--r2); padding: 8px 10px; font-size: 12.5px; }
+.dlg-shift .from { border-color: var(--teal-ln); }
+.dlg-shift .to { border-color: var(--amber-ln); background: var(--amber-bg); }
+.dlg-f { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--hair); background: var(--s-2); }
+.sheet { width: 820px; max-width: calc(100vw - 48px); background: var(--s-3); border-radius: var(--r3); box-shadow: var(--shadow-pop); overflow: hidden; animation: rise var(--t-slow) var(--ease); }
+.sheet-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--hair); }
+.sheet-h h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.sheet-b { display: grid; grid-template-columns: repeat(3, 1fr); }
+.sheet-b > div { padding: 14px 20px 18px; }
+.sheet-b > div + div { border-left: 1px solid var(--hair); }
+.sk-r { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 5px 0; font-size: 12.5px; color: var(--ink-2); border-bottom: 1px dashed var(--hair); }
+.sk-r:last-child { border-bottom: 0; }
+.toast { position: fixed; right: calc(var(--insp) + 16px); bottom: calc(var(--foot) + 14px); z-index: 60; display: flex; gap: 10px; align-items: center; padding: 9px 14px; background: var(--ink); color: var(--ink-inv); border-radius: var(--r2); font-size: 12.5px; box-shadow: var(--shadow-pop); animation: rise var(--t) var(--ease); max-width: 440px; }
+
+/* tick animation for live readouts */
+.tickv { display: inline-block; }
+.tickv.flip { animation: tick var(--t-fast) var(--ease); }
+@keyframes tick { from { opacity: .45; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+
+/* shot mode & reduced motion */
+.shot *, .shot *::before, .shot *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* 1280 × 800 */
+@media (max-width: 1360px) {
+  :root { --rail: 200px; --insp: 292px; }
+  .top-mid { padding: 0 var(--s5); }
+  .cmdk .recent { display: none; }
+  .pad { padding: var(--s5) var(--s6) var(--s6); }
+  .wk-h, .sealband, .nav40 { padding-left: var(--s6); padding-right: var(--s6); }
+  .crumb .cp, .crumb .sep { display: none; }
+  .passage { padding: var(--s4) var(--s5) var(--s6) var(--s10); }
+  .item { padding: var(--s4) var(--s6) var(--s6) var(--s5); }
+  .para { font-size: 15.5px; line-height: 25px; margin-bottom: 12px; }
+  .stem { font-size: 15.5px; }
+  .opt { font-size: 14.5px; }
+  .next-b { grid-template-columns: minmax(0, 1fr) 248px; }
+  .next-main h2 { font-size: 23px; }
+  .cmp-side { gap: 6px 14px; }
+  .anki-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .anki-two { grid-template-columns: 1fr !important; gap: 0 !important; }
+  .nrow { grid-template-columns: 22px minmax(0, 1.3fr) minmax(0, .9fr) 92px 150px; }
+  .sb-ro { padding: 0 12px; }
+  .sb-t .ml { display: none; }
+  .skrow { grid-template-columns: 140px minmax(0, 1fr) 40px; }
+  .cellbar i { width: 10px; }
+  .headline .hv { font-size: 38px; }
+  .rail-h .ml + .ml { display: none; }
+  .verdict { grid-template-columns: 1.1fr .9fr .7fr 1.2fr; }
+  .verdict > div { padding-left: 10px; padding-right: 8px; }
+  .modes .mk3 { display: none; }
+  .reply-f { white-space: normal; }
+  .foot { gap: var(--s3); }
+  .foot .lampi .mono.addr, .foot .right .lbl { display: none; }
+  .clockwrap { grid-template-columns: 132px minmax(0, 1fr); gap: 10px; }
+  .clockwrap svg { width: 132px; height: 132px; }
+  .kv { grid-template-columns: 84px minmax(0, 1fr); }
+  .caps, .capsh { grid-template-columns: repeat(5, 26px); }
+  .reg td, .reg th { padding-right: 8px; }
+  .reg .md { font-size: 11px; }
+  .reg .tag { font-size: 10.5px; padding: 0 5px; }
+  .verdict .v { font-size: 14px; }
+  .verdict .v.bad svg { display: none; }
+}
+@media (max-height: 820px) {
+  .wk-h { height: 48px; }
+  .sealband { height: 58px; }
+  .q-item { padding-top: 5px; padding-bottom: 5px; }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="top" id="top"></header>
+  <nav class="rail" id="rail" aria-label="Channels"></nav>
+  <main class="work" id="work"></main>
+  <aside class="insp" id="insp" aria-label="Evidence inspector"></aside>
+  <footer class="foot" id="foot"></footer>
+</div>
+<div id="layer"></div>
+
+<script>
+(function () {
+'use strict';
+
+/* ------------------------------------------------------------------ state */
+var qs = new URLSearchParams(location.search);
+var stored = {};
+try { stored = JSON.parse(localStorage.getItem('pq-instrument') || '{}'); } catch (e) {}
+var S = {
+  theme: qs.get('theme') || stored.theme || 'light',
+  lang: qs.get('lang') || stored.lang || 'zh',
+  shot: qs.get('shot') === '1',
+  route: 'today',
+  practice: { sel: null, assisted: false, hint: false, elapsed: 47, marks: [] },
+  fb: { mode: 'probe', choice: 'A', elapsed: 108, assisted: false, asked: { probe: true } },
+  calls: 4,
+  recent: [{ zh: '开始下一步', en: 'Start next action' }, { zh: '前往：测评报告', en: 'Go to Report' }, { zh: '切换主题', en: 'Toggle theme' }],
+  assess: { cur: 17, sel: {}, answered: [1,2,3,4,5,6,7,8,10,11,12,13,14,15,16,18], to: [9], left: 34 * 60 + 12, item: 52 },
+  report: { item: 17 },
+  consent: true,
+  ledger: [{ t: '11-12 20:41', kind: 'grant' }],
+  anki: { front: 'all of the following are true EXCEPT', back1: 'Three options match the passage; the answer is the one that does not. Check each option against the text — do not pick the one that repeats the most words.', back2: 'Engineers will replace two of the four main pumps…', tactic: 'NOT/EXCEPT polarity', face: 'back', ctheme: 'auto', width: 'desktop', accepted: false, skipped: false, conflict: null },
+  pal: null, sheet: false, dlg: null, chord: false
+};
+if (S.theme !== 'dark') S.theme = 'light';
+if (S.lang !== 'en') S.lang = 'zh';
+function persist() {
+  try { localStorage.setItem('pq-instrument', JSON.stringify({ theme: S.theme, lang: S.lang })); } catch (e) {}
+  var p = new URLSearchParams(location.search);
+  p.set('theme', S.theme); p.set('lang', S.lang);
+  history.replaceState(null, '', location.pathname + '?' + p.toString() + location.hash);
+}
+function T(zh, en) { return S.lang === 'zh' ? zh : en; }
+function $(s, r) { return (r || document).querySelector(s); }
+function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+function mmss(s) { var m = Math.floor(s / 60), x = s % 60; return m + ':' + (x < 10 ? '0' : '') + x; }
+
+/* ------------------------------------------------------------------ icons (hand-drawn, 16px grid) */
+var I = {
+  brand: '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3.2 15.5a8.2 8.2 0 1 1 15.6 0"/><path d="M11 3v2M4.6 6.1l1.4 1.4M17.4 6.1 16 7.5M2.8 12.4h2M17.2 12.4h2" stroke-linecap="square"/><path d="M11 13.2 14.6 8" stroke-linecap="round" stroke-width="1.6"/><circle cx="11" cy="13.4" r="1.5" fill="currentColor" stroke="none"/><path d="M5 18.5h12" /></svg>',
+  prompt: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m3 4 4 4-4 4M9 12h4"/></svg>',
+  sun: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/></svg>',
+  moon: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.2 10.2A5.6 5.6 0 0 1 5.8 2.8a5.6 5.6 0 1 0 7.4 7.4Z"/></svg>',
+  lock: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="7" width="10" height="7" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>',
+  check: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 8.5 3.2 3L13 4.5"/></svg>',
+  cross: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m4 4 8 8M12 4l-8 8"/></svg>',
+  ext: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5"/></svg>',
+  local: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="3" width="11" height="8" rx="1"/><path d="M5.5 13.5h5M8 11v2.5"/></svg>',
+  key: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5.5" cy="8" r="2.8"/><path d="M8.3 8H14M12 8v2.5M14 8v2"/></svg>',
+  warn: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2.2 14.3 13H1.7Z" stroke-linejoin="round"/><path d="M8 6.5v3.2M8 11.2v.6"/></svg>',
+  rule: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="5" width="13" height="6" rx=".5"/><path d="M4 5v2.5M6.5 5v1.5M9 5v2.5M11.5 5v1.5"/></svg>',
+  pause: '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="3" width="2.5" height="10"/><rect x="9.5" y="3" width="2.5" height="10"/></svg>',
+  arrow: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8h10M9 4l4 4-4 4"/></svg>',
+  doc: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 1.8h5.5L12.5 5v9.2H4Z"/><path d="M9.3 1.8V5.2h3.2M6 8h4.5M6 10.5h4.5"/></svg>',
+  hint: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5.6 10.6a4.3 4.3 0 1 1 4.8 0V12H5.6Z"/><path d="M6 14h4"/></svg>',
+  dot: '<svg width="12" height="12" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.5" fill="currentColor"/></svg>',
+  nav: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 8h10M9 4l4 4-4 4"/></svg>',
+  act: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg>',
+  mark: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 13h10M5 10.5 10.8 4.7l1.5 1.5L6.5 12H5Z"/></svg>'
+};
+
+/* ------------------------------------------------------------------ routes / channels */
+var ROUTES = [
+  { id: 'today',    zh: '今日',     en: 'Today',      k: 'T' },
+  { id: 'practice', zh: '阅读练习', en: 'Practice',   k: 'P' },
+  { id: 'feedback', zh: '批改反馈', en: 'Feedback',   k: 'F' },
+  { id: 'assess',   zh: '计时测评', en: 'Assessment', k: 'A' },
+  { id: 'report',   zh: '测评报告', en: 'Report',     k: 'R' },
+  { id: 'anki',     zh: 'Anki 卡片', en: 'Anki notes', k: 'N' },
+  { id: 'settings', zh: '设置', en: 'Settings', k: 'S' }
+];
+function rname(id) { var r = ROUTES.filter(function (x) { return x.id === id; })[0]; return T(r.zh, r.en); }
+function go(id) { location.hash = '#/' + id; }
+
+/* ------------------------------------------------------------------ shared fragments */
+function lamp(cls, extra) { return '<i class="lamp ' + cls + (extra ? ' ' + extra : '') + '"></i>'; }
+function kbds(keys) { return '<span class="kgrp">' + keys.map(function (k) { return '<kbd>' + k + '</kbd>'; }).join('') + '</span>'; }
+function mod() { return /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl'; }
+function isecH(zh, en, aside) { return '<div class="isec-h"><span class="ml">' + T(zh, en) + '</span>' + (aside || '') + '</div>'; }
+
+var CONDS = [
+  { id: 'ind', zh: '独立', en: 'Indep.' },
+  { id: 'ast', zh: '辅助', en: 'Assist' },
+  { id: 'rex', zh: '重复', en: 'Re-exp' },
+  { id: 'rev', zh: '重做', en: 'Revisit' },
+  { id: 'asm', zh: '测评', en: 'Assess' }
+];
+function condScale(on) {
+  return '<div class="cond-scale">' + CONDS.map(function (c) { return '<span class="' + (c.id === on ? 'on' : '') + '">' + T(c.zh, c.en) + '</span>'; }).join('') + '</div>';
+}
+
+/* ------------------------------------------------------------------ top / rail / foot */
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function dots(spec) { return '<span class="dots" aria-hidden="true">' + spec.map(function (d) { return d === '|' ? '<i class="dot gap"></i>' : '<i class="dot ' + d + '"></i>'; }).join('') + '</span>'; }
+var HIST = { // attempt history per skill, in order (ic independent correct · im independent miss · ac assisted · re re-exposure)
+  'not-except-polarity': ['ic', 'ac', 'im', 'ac', 're', 'im'],
+  'vocabulary-in-context': ['ic', 'ic', 'im', 'ic', 'ac', 'ic', 'im', 'ic'],
+  'sentence-structure': ['ic', 'im', 'ic', 'ic']
+};
+/* the work-surface header: route + path as a crumb, then the page title (one bar, no second crumb) */
+function wkH(path, title, aside) {
+  return '<div class="wk-h"><nav class="crumb" aria-label="' + T('位置', 'Location') + '"><span class="ml">' + rname(S.route) + '</span>' +
+    (path || []).map(function (p) { return '<span class="sep"></span><span class="cp">' + p + '</span>'; }).join('') + '</nav>' +
+    '<span class="vr" aria-hidden="true"></span><h1>' + title + '</h1>' + (aside ? '<div class="aside">' + aside + '</div>' : '') + '</div>';
+}
+function renderTop() {
+  var sealed = S.route === 'assess';
+  var recent = sealed ? '' : '<span class="recent" aria-hidden="true"><span class="ml">' + T('最近', 'Recent') + '</span>' + S.recent.slice(0, 3).map(function (r) { return '<span class="rc">' + T(r.zh, r.en) + '</span>'; }).join('') + '</span>';
+  $('#top').innerHTML =
+    '<div class="brand">' + I.brand + '<div class="wm">Pass Quest<small>' + T('备考仪表', 'Study instrument') + '</small></div></div>' +
+    '<div class="top-mid">' +
+    '<button class="cmdk' + (sealed ? ' sealed' : '') + '" id="cmdk" aria-label="' + T('打开命令栏', 'Open command bar') + '">' + (sealed ? I.lock : I.prompt) + '<span class="grow">' + (sealed ? T('已封存 · 仅限本轮命令', 'Sealed · run commands only') : T('输入命令、跳转或操作…', 'Type a command, jump or act…')) + '</span>' + recent + kbds([mod(), 'K']) + '</button></div>' +
+    '<div class="top-right">' +
+      '<div class="seg" role="group" aria-label="' + T('界面语言', 'Interface language') + '"><button data-lang="zh" lang="zh-CN" aria-label="中文" aria-pressed="' + (S.lang === 'zh') + '"><span class="zh">中</span></button><button data-lang="en" lang="en" aria-label="English" aria-pressed="' + (S.lang === 'en') + '">EN</button></div>' +
+      '<div class="seg" role="group" aria-label="' + T('主题', 'Theme') + '"><button data-theme="light" aria-pressed="' + (S.theme === 'light') + '" aria-label="' + T('浅色', 'Light') + '" title="' + T('浅色', 'Light') + '">' + I.sun + '</button><button data-theme="dark" aria-pressed="' + (S.theme === 'dark') + '" aria-label="' + T('深色', 'Dark') + '" title="' + T('深色', 'Dark') + '">' + I.moon + '</button></div>' +
+      '<button class="iconbtn" id="helpbtn" title="' + T('快捷键 ?', 'Shortcuts ?') + '" aria-label="' + T('快捷键', 'Shortcuts') + '">?</button>' +
+    '</div>';
+}
+
+function renderRail() {
+  var sealed = S.route === 'assess';
+  var ch = ROUTES.map(function (r, i) {
+    var locked = sealed && r.id !== 'assess';
+    return '<a class="ch' + (locked ? ' locked-ch' : '') + '" href="#/' + r.id + '"' + (r.id === S.route ? ' aria-current="page"' : '') + (locked ? ' aria-disabled="true" tabindex="-1"' : '') + '><span class="ix">0' + (i + 1) + '</span><span class="lb">' + T(r.zh, r.en) + '</span>' +
+      (locked ? '<span class="lk">' + I.lock + T('已封存', 'sealed') + '</span>' : kbds(['G', r.k])) + '</a>';
+  }).join('');
+  var qi = function (n, id, act, extra, now) {
+    return '<div class="q-item' + (now ? ' now' : '') + '"><span class="n">' + n + '</span><div style="min-width:0"><div class="t"><code>' + id + '</code></div><div class="s">' + act + (extra ? ' · ' + extra : '') + '</div>' + dots(HIST[id]) + '</div></div>';
+  };
+  var queue = sealed
+    ? '<div class="rail-seal"><div class="ml">' + I.lock + T('已封存', 'Sealed') + '</div>' + T('学习队列、提示与 AI 在本轮结束前暂停。', 'Study queue, hints and AI are paused until the run ends.') + '</div>'
+    : qi(1, 'not-except-polarity', 'practice_new', T('新文章', 'fresh'), true) + qi(2, 'vocabulary-in-context', 'review') + qi(3, 'sentence-structure', 'practice_new') +
+      '<div class="q-item"><span class="n">' + I.pause.replace('width="12" height="12"', 'width="9" height="9"') + '</span><div style="min-width:0"><div class="t"><code>brief-7</code> ' + T('研读简报', 'study brief') + '</div><div class="s">' + T('暂停于 3/6', 'paused 3/6') + '</div></div></div>';
+  var rail = $('#rail');
+  rail.className = 'rail' + (sealed ? ' sealed-rail' : '');
+  rail.setAttribute('aria-label', T('通道', 'Channels'));
+  rail.innerHTML =
+    '<div class="rail-sec"><div class="rail-h"><span class="ml">' + T('通道', 'Channels') + '</span></div>' + ch + '</div>' +
+    '<div class="rail-sec"><div class="rail-h"><span class="ml">' + T('学习队列', 'Study queue') + '</span>' + (sealed ? '' : '<span class="ml" style="letter-spacing:.04em" title="' + T('按独立正确率升序', 'ascending independent accuracy') + '">' + T('策略顺序', 'policy order') + '</span>') + '</div>' + queue + '</div>' +
+    '<div class="rail-foot">' +
+      '<div class="dayro"><span class="ml">' + T('备考第', 'Prep day') + '</span><span class="v num">23<small>' + T('天', '') + '</small></span></div>' +
+      '<div class="ruler" aria-hidden="true"></div>' +
+      '<div class="meta"><span>' + T('始于', 'Since') + '</span><b class="num">2026-10-22</b><span>' + T('考试日期', 'Exam date') + '</span><b>' + T('未设置', 'not set') + '</b></div>' +
+    '</div>';
+}
+
+function renderFoot() {
+  var sealed = S.route === 'assess';
+  $('#foot').innerHTML =
+    '<span class="lampi">' + lamp('ok') + '<span class="k">' + T('智能体主机', 'Agent host') + '</span>' + T('运行中', 'running') + '</span><span class="div"></span>' +
+    '<span class="lampi">' + lamp('err') + '<span class="k">AnkiConnect</span><span class="mono addr">127.0.0.1:8765</span>' + T('不可达', 'unreachable') + '</span><span class="div"></span>' +
+    '<span class="lampi">' + lamp('off') + '<span class="k">' + T('搜索', 'Search') + '</span>' + T('未配置 · 0 次网络调用', 'not configured · 0 network calls') + '</span><span class="div"></span>' +
+    '<span class="lampi">' + lamp(sealed ? 'off' : 'ok') + '<span class="k">' + T('模型', 'Model') + '</span><span class="mono">deepseek/deepseek-chat</span>' + (sealed ? T('已封存', 'sealed') : T('已验证', 'verified')) + '</span>' +
+    '<span class="right"><span id="chordind"></span><span class="mono">' + T('今日调用', 'calls') + ' ' + S.calls + '/20</span><span class="div"></span><span class="lampi">' + kbds([mod(), 'K']) + '<span class="lbl">' + T('命令', 'commands') + '</span>' + '</span><span class="lampi">' + kbds(['?']) + '<span class="lbl">' + T('快捷键', 'shortcuts') + '</span>' + '</span></span>';
+}
+
+/* ------------------------------------------------------------------ TODAY */
+function qcell(label, action, big, aside, detail) {
+  return '<div class="qcell"><div class="qh"><span class="ml">' + label + '</span>' + action + '</div>' +
+    '<div class="qv"><span class="big">' + big + '</span>' + aside + '</div><div class="d">' + detail + '</div></div>';
+}
+function unitStrip(spent, run, left) {
+  var h = '', i;
+  for (i = 0; i < spent; i++) h += '<i class="sp"></i>';
+  for (i = 0; i < run; i++) h += '<i class="run"></i>';
+  for (i = 0; i < left; i++) h += '<i></i>';
+  return '<div class="units" aria-hidden="true">' + h + '</div>';
+}
+function vToday() {
+  var unk = function (label, v, n, action) {
+    return '<div><div class="h"><span class="ml">' + label + '</span>' + (action || '') + '</div><div class="v"><span class="unkbox" aria-hidden="true"></span>' + v + '<span class="n">· ' + n + '</span></div></div>';
+  };
+  var trow = function (id, c, n, sel) {
+    var pct = Math.round(c / n * 100);
+    return '<div class="r' + (sel ? ' sel' : '') + '"><span class="nm">' + id + '</span><span class="v">' + c + '/' + n + '<small>' + pct + '%</small></span><div class="meter"><i style="width:' + (c / n * 100).toFixed(1) + '%"></i>' + (sel ? '<b style="left:' + (c / n * 100).toFixed(1) + '%"></b>' : '') + '</div></div>';
+  };
+  var work =
+    wkH(null, T('下一步', 'What’s next')) +
+    '<div class="wk-b"><div class="pad">' +
+      '<div class="unkline" role="group" aria-label="' + T('已知的未知', 'Known unknowns') + '">' +
+        unk(T('考试日期', 'Exam date'), T('未设置', 'Not set'), T('不推算倒计时', 'no countdown'), '<button class="link" data-act="setdate">' + T('设置', 'Set') + '</button>') +
+        unk(T('每日预算', 'Daily budget'), T('未设置', 'Not set'), T('学习时长由你决定', 'your time, your call'), '<button class="link" data-act="setbudget">' + T('设置', 'Set') + '</button>') +
+        unk(T('及格线', 'Pass threshold'), T('未知', 'Unknown'), T('不估算，不预测分数', 'not estimated')) +
+      '</div>' +
+      '<section class="next" aria-label="' + T('下一步', 'Next action') + '">' +
+        '<div class="next-h"><span class="ml go-l">' + lamp('warn') + T('下一步', 'Next') + ' ▸</span><span class="tag">practice_new</span><span class="grow"></span><span class="ml">' + T('透明策略 · 不调用模型', 'Deterministic policy · no model call') + '</span></div>' +
+        '<div class="next-b"><div class="next-main">' +
+          '<h2>' + T('NOT/EXCEPT 极性', 'NOT/EXCEPT polarity') + '</h2>' +
+          '<div class="ids"><span class="tag">not-except-polarity</span><span class="tag t-word">' + T('得分技能', 'scoring skill') + '</span></div>' +
+          '<p class="reason">' + T('独立迁移 <span class="num">3</span> 次，答对 <span class="num">1</span> 次；最近一次错误选了与原文重复词最多的选项。', '<span class="num">3</span> independent transfers, <span class="num">1</span> correct; the last miss picked the option that reuses the most passage words.') + '</p>' +
+          '<div class="go"><button class="btn pri next-go" data-go="practice">' + T('开始练习', 'Start practice') + ' <kbd>↵</kbd></button>' +
+            '<span class="forecast">' + lamp('ok') + T('新文章 — 本次可计入独立迁移', 'Fresh passage — this attempt can count') + '</span></div>' +
+        '</div>' +
+        '<div class="next-trace">' +
+          '<div class="ml">' + T('策略依据 · 独立正确率', 'Policy trace · indep. accuracy') + '</div>' +
+          '<div class="trace-rank">' + trow('not-except-polarity', 1, 3, true) + trow('vocabulary-in-context', 5, 7) + trow('sentence-structure', 3, 4) + '</div>' +
+          '<div class="note" style="margin:0">' + T('按升序排列，与学习队列一致。只计独立作答。', 'Ascending, same order as the study queue. Independent attempts only.') + '</div>' +
+        '</div></div>' +
+      '</section>' +
+      '<section class="skills">' +
+        '<div class="sec-h"><span class="ml">' + T('技能证据 · 仅三项', 'Skill evidence · three skills') + '</span><span class="rule"></span><span class="aside legend">' +
+          '<span><i class="dot ic"></i>' + T('独立 · 对', 'indep. correct') + '</span><span><i class="dot im"></i>' + T('独立 · 错', 'indep. miss') + '</span><span><i class="dot ac"></i>' + T('辅助', 'assisted') + '</span><span><i class="dot re"></i>' + T('重复接触', 're-exposure') + '</span></span></div>' +
+        '<table class="stable"><thead><tr>' +
+          '<th class="ml">' + T('技能', 'Skill') + '</th><th class="ml">' + T('作答记录（时间顺序）', 'Attempts (in order)') + '</th><th class="ml">' + T('独立', 'Indep.') + '</th><th class="ml">' + T('辅助', 'Assist') + '</th><th class="ml">' + T('重复', 'Re-exp') + '</th><th class="ml" title="' + T('证据不足以说明原因时显示“未定”，系统不做猜测', 'Shown as unresolved until the evidence supports a cause; none is guessed') + '">' + T('诊断', 'Diagnosis') + '</th><th class="ml">' + T('动作', 'Action') + '</th></tr></thead><tbody>' +
+          '<tr><td><div class="sk"><b>' + T('NOT/EXCEPT 极性', 'NOT/EXCEPT polarity') + '</b><span>not-except-polarity · ' + T('得分', 'scoring') + '</span></div></td><td>' + dots(HIST['not-except-polarity']) + '</td><td class="num">1/3</td><td class="num">2</td><td class="num">1</td><td class="dim">' + T('未定', 'unresolved') + '</td><td><span class="tag">practice_new</span></td></tr>' +
+          '<tr><td><div class="sk"><b>' + T('语境词义', 'Vocabulary in context') + '</b><span>vocabulary-in-context · ' + T('语言', 'language') + '</span></div></td><td>' + dots(HIST['vocabulary-in-context']) + '</td><td class="num">5/7</td><td class="num">1</td><td class="num dim">0</td><td class="dim">' + T('未定', 'unresolved') + '</td><td><span class="tag">review</span></td></tr>' +
+          '<tr><td><div class="sk"><b>' + T('句子结构', 'Sentence structure') + '</b><span>sentence-structure · ' + T('语言', 'language') + '</span></div></td><td>' + dots(HIST['sentence-structure']) + '</td><td class="num">3/4</td><td class="num dim">0</td><td class="num dim">0</td><td class="dim">' + T('未定', 'unresolved') + '</td><td><span class="tag">practice_new</span></td></tr>' +
+        '</tbody></table>' +
+      '</section>' +
+      '<section class="quiet" aria-label="' + T('其他状态', 'Other state') + '">' +
+        qcell(T('未见测评题池', 'Unseen assessment pool'), '',
+          '63 <small>' + T('题', 'items') + ' /</small> 17 <small>' + T('单元', 'units') + '</small>', unitStrip(4, 0, 17),
+          T('已用 <b>4</b> 单元 · 每轮至少 <b>20</b> 题', '<b>4</b> units spent · a run needs ≥ <b>20</b> items')) +
+        qcell(T('上次测评', 'Last assessment'), '<button class="link" data-go="report">' + T('报告', 'Report') + '</button>', '#2 <small>· 11-11</small>', '', T('40 题 · 60 分钟 · <b>22/40</b>', '40 items · 60 min · <b>22/40</b>')) +
+        qcell(T('Anki 卡片', 'Anki notes'), '<button class="link" data-go="anki">' + T('处理冲突', 'Resolve') + '</button>', '6 <small>' + T('已接受', 'accepted') + '</small>', '', T('<b>1</b> 排队（Anki 未运行）· <b style="color:var(--red)">1</b> 冲突', '<b>1</b> queued (Anki not running) · <b style="color:var(--red)">1</b> conflict')) +
+        qcell(T('研读简报 · brief-7', 'Study brief · brief-7'), '<span style="display:flex;gap:12px"><button class="link" data-act="resume">' + T('继续', 'Resume') + '</button><button class="link" data-act="cancelbrief" style="color:var(--ink-3)">' + T('取消', 'Cancel') + '</button></span>', '3<small>/6</small>', '<div class="steps6" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="p"></i><i></i><i></i><i></i></div>', T('暂停于第 3 步 · 可恢复，不丢失进度', 'paused at step 3 · resumable, nothing lost')) +
+        qcell(T('查找练习材料', 'Find practice'), '', '0 <small>' + T('次网络调用', 'network calls') + '</small>', '', T('未配置搜索服务；只用本地已审核材料', 'No search provider; local reviewed material only')) +
+        qcell(T('辅导模型', 'Tutor model'), '<button class="link" data-go="settings">' + T('设置', 'Settings') + '</button>', '<span style="font-size:13px">deepseek/deepseek-chat</span>', '', T('已验证 <b class="num">11-13 09:12</b> · 今日 <b class="num">' + S.calls + '/20</b>', 'verified <b class="num">11-13 09:12</b> · today <b class="num">' + S.calls + '/20</b>')) +
+      '</section>' +
+    '</div></div>';
+
+  var insp =
+    inspHead(T('读数', 'Reading')) +
+    '<div class="isec">' + isecH('什么会被计入', 'What counts') +
+      '<div class="locked">' +
+        '<div style="color:var(--ink)">' + lamp('ok') + '<span>' + T('独立迁移 · 新文章', 'Independent transfer · fresh') + '</span><span class="tag t-teal">' + T('计入', 'counts') + '</span></div>' +
+        '<div>' + lamp('off') + '<span>' + T('有辅助 · 看过提示或讲解', 'Assisted · hint or walkthrough seen') + '</span><span class="tag t-ghost">' + T('不计入', 'never') + '</span></div>' +
+        '<div>' + lamp('off') + '<span>' + T('重复接触 · 文章已见过', 'Re-exposure · passage seen') + '</span><span class="tag t-ghost">' + T('不计入', 'never') + '</span></div>' +
+        '<div>' + lamp('off') + '<span>' + T('重做 · 同一题再答', 'Revisit · same item again') + '</span><span class="tag t-ghost">' + T('不计入', 'never') + '</span></div>' +
+        '<div>' + lamp('warn') + '<span>' + T('测评 · 计时、无辅助', 'Assessment · timed, unassisted') + '</span><span class="tag">' + T('另计', 'separate') + '</span></div>' +
+      '</div></div>' +
+    '<div class="isec">' + isecH('推荐来源', 'Recommendation provenance') +
+      '<dl class="kv">' +
+        '<dt>' + T('来源', 'Source') + '</dt><dd>' + T('透明策略（确定性）', 'Transparent policy (deterministic)') + '</dd>' +
+        '<dt>' + T('输入', 'Inputs') + '</dt><dd>' + T('<span class="num">14</span> 次独立作答，<span class="num">3</span> 次辅助，<span class="num">1</span> 次重复接触', '<span class="num">14</span> independent, <span class="num">3</span> assisted, <span class="num">1</span> re-exposure attempts') + '</dd>' +
+        '<dt>' + T('规则', 'Rule') + '</dt><dd>' + T('独立正确率最低的得分技能优先', 'lowest independent accuracy on a scoring skill first') + '</dd>' +
+        '<dt>' + T('诊断', 'Diagnosis') + '</dt><dd>' + T('三项均“未定”：证据不足以说明失误原因，不做猜测', 'all three “unresolved”: evidence does not support a cause, none is guessed') + '</dd>' +
+        '<dt>' + T('模型调用', 'Model call') + '</dt><dd>' + T('无', 'None') + '</dd>' +
+        '<dt>' + T('文章', 'Passage') + '</dt><dd>' + T('S1 中未见过的一篇', 'An unseen passage from S1') + '</dd>' +
+      '</dl></div>' +
+    '<div class="isec">' + isecH('已知的未知', 'Known unknowns') +
+      '<dl class="kv">' +
+        '<dt>' + T('及格线', 'Pass line') + '</dt><dd>' + T('未知', 'unknown') + '</dd>' +
+        '<dt>' + T('考试日期', 'Exam date') + '</dt><dd>' + T('未设置', 'not set') + '</dd>' +
+        '<dt>' + T('考试结构', 'Blueprint') + '</dt><dd>' + T('不可得', 'not available') + '</dd>' +
+        '<dt>' + T('通过概率', 'Pass chance') + '</dt><dd>' + T('不计算', 'not computed') + '</dd>' +
+      '</dl><p class="note">' + T('仪表只显示实测值：正确率、用时、失误类型与覆盖面。', 'The instrument shows measured values only: accuracy, time, failure modes, coverage.') + '</p></div>';
+  return { work: work, insp: insp };
+}
+
+function inspHead(reading, mode) {
+  var sealed = mode === 'sealed';
+  return '<div class="insp-h' + (sealed ? ' sealed' : '') + '"><span class="t"><span class="ml">' + T('证据检视器', 'Evidence inspector') + '</span></span>' +
+    (sealed ? '<span class="sealmark">' + I.lock + ' ' + T('已封存', 'SEALED') + '</span>' : '<span class="ml" style="display:flex;gap:6px;align-items:center">' + lamp('ok') + reading + '</span>') + '</div>';
+}
+
+/* ------------------------------------------------------------------ passage */
+var PARAS = [
+  'From Monday, 4 March, the North Pump Station will be closed for maintenance for about three weeks. During this period, water for the eastern district will be supplied by the South Station. Residents may notice lower water pressure between 6 a.m. and 9 a.m., when demand is highest. The lower pressure will not affect drinking-water quality, which is tested twice a day.',
+  'Engineers will replace two of the four main pumps and install a new control system. The old pumps have been in service since 1998 and use nearly 30 percent more electricity than modern models. Once the work is finished, the station is expected to run more quietly and to need fewer repairs.',
+  'Visitors are not allowed on site while the work is under way. Delivery vehicles must use the west gate, and all workers must wear helmets and reflective vests. Questions about the project should be sent to the district office rather than to the station itself, because the station\'s phone line will be disconnected until the work is complete.'
+];
+/* marks are stored as character offsets per paragraph, so they survive every re-render */
+function markedText(text, marks) {
+  if (!marks || !marks.length) return esc(text);
+  var out = '', at = 0;
+  marks.slice().sort(function (a, b) { return a.s - b.s; }).forEach(function (m) {
+    if (m.s < at) return;
+    out += esc(text.slice(at, m.s)) + '<mark class="mk">' + esc(text.slice(m.s, m.e)) + '</mark>'; at = m.e;
+  });
+  return out + esc(text.slice(at));
+}
+function passage(opts) {
+  opts = opts || {};
+  var ps = PARAS.map(function (p, i) {
+    var h = opts.marks ? markedText(p, opts.marks.filter(function (m) { return m.p === i; })) : p;
+    if (opts.evidence && i === 1) h = h.replace('Engineers will replace two of the four main pumps', '<span class="ev">Engineers will replace <b>two of the four</b> main pumps</span>');
+    return '<p class="para"><span class="pn" aria-hidden="true">' + (i + 1) + '</span><span class="pt" data-p="' + i + '">' + h + '</span></p>';
+  }).join('');
+  return '<article class="passage" id="passage" aria-label="' + T('文章', 'Passage') + '">' +
+    '<div class="src">' + (opts.src || '') + '</div>' +
+    '<h2 lang="en">Notice: Temporary Closure of the North Pump Station</h2>' +
+    '<div class="disc">' + I.doc + T('原型文本为原创占位内容，并非真实考试材料。', 'Prototype text is an original placeholder, not real exam material.') + '</div>' +
+    '<div lang="en">' + ps + '</div></article>';
+}
+function srcTags() {
+  return '<span class="tag">' + I.local + T('本地导入', 'Local import') + '</span><span class="tag">S1 · ' + T('第 24 页', 'p.24') + '</span><span class="tag t-teal">' + I.check + T('已审核', 'reviewed') + '</span>';
+}
+function optButtons(q, sel, attr) {
+  var focusL = sel || 'A';
+  return q.opts.map(function (o, i) {
+    var L = 'ABCD'[i];
+    return '<button class="opt" role="radio" aria-checked="' + (sel === L) + '" tabindex="' + (L === focusL ? 0 : -1) + '" ' + attr + '="' + L + '"><span class="L" aria-hidden="true">' + L + '</span><span lang="en">' + o + '</span><span class="k2" aria-hidden="true">' + (i + 1) + '</span></button>';
+  }).join('');
+}
+
+var Q1 = { stem: 'According to the notice, all of the following are true EXCEPT that ____.', opts: [
+  'the South Station will supply water to the eastern district',
+  'drinking-water quality is tested twice a day',
+  'all four main pumps will be replaced',
+  'delivery vehicles must enter through the west gate'] };
+var Q2 = { stem: 'The phrase “under way” in Paragraph 3 most probably means ____.', opts: ['in progress', 'on the road', 'delayed', 'being planned'] };
+var SIBS = [
+  ['Q1', 'not-except-polarity', 'all of the following are true EXCEPT that …'],
+  ['Q2', 'vocabulary-in-context', 'The phrase “under way” in Paragraph 3 …'],
+  ['Q3', 'sentence-structure', 'Why should questions be sent to the district office?'],
+  ['Q4', 'unclassified', 'What is one expected result of the project?']
+];
+
+/* ------------------------------------------------------------------ PRACTICE */
+function vPractice() {
+  var P = S.practice;
+  var sibs = SIBS.map(function (q, i) {
+    return '<div class="sib' + (i === 0 ? ' now' : '') + '"><span class="q">' + q[0] + '</span><span class="tx" lang="en">' + q[2] + '</span><span class="mono">' + (i === 0 ? T('当前', 'now') : q[1]) + '</span></div>';
+  }).join('');
+  var work =
+    wkH(['S1 · ' + T('第 24 页', 'p.24'), 'Q1'], T('NOT/EXCEPT 极性', 'NOT/EXCEPT polarity'),
+      '<span class="ml">' + T('第 1 题 / 共 4 题', 'Item 1 of 4') + '</span><span class="tag ' + (P.assisted ? '' : 't-teal') + '">' + lamp(P.assisted ? 'warn' : 'ok') + (P.assisted ? T('有辅助 · 不计入', 'assisted · won’t count') : T('独立 · 可计入', 'independent · can count')) + '</span>') +
+    '<div class="wk-b"><div class="read">' + passage({ src: srcTags(), marks: P.marks }) +
+      '<section class="item" aria-label="Q1">' +
+        '<div class="item-h"><span class="ml">Q1</span><span class="tag">not-except-polarity</span></div>' +
+        '<p class="stem" lang="en">' + Q1.stem.replace('EXCEPT', '<b>EXCEPT</b>') + '</p>' +
+        '<div class="opts" role="radiogroup" aria-label="' + T('选项', 'Options') + '">' + optButtons(Q1, P.sel, 'data-opt') + '</div>' +
+        (P.hint ? '<div class="hintbox"><div class="ml">' + I.hint + T('提示 · 本地编写', 'Hint · authored, local') + '</div>' + T('这是 EXCEPT 题：有三项能在原文中找到依据。逐项回到原文核对，尤其注意数量词。', 'This is an EXCEPT item: three options are supported by the text. Check each one against the passage, especially quantity words.') + '</div>' : '') +
+        '<div class="actbar">' +
+          '<button class="btn pri" data-act="submit" id="submitbtn"' + (P.sel ? '' : ' disabled') + '>' + T('提交', 'Submit') + ' <kbd>↵</kbd></button>' +
+          '<button class="btn" data-act="hint" id="hintbtn"' + (P.hint ? ' disabled' : '') + '>' + I.hint + (P.hint ? T('提示已打开', 'Hint open') : T('提示', 'Hint')) + ' <kbd>H</kbd></button>' +
+          '<span class="sp"></span>' +
+          '<button class="btn ghost" data-act="skip">' + T('跳过', 'Skip') + ' <kbd>S</kbd></button>' +
+        '</div>' +
+        '<p class="note" style="margin-top:12px">' + T('用 <kbd>A</kbd>–<kbd>D</kbd> 或 <kbd>1</kbd>–<kbd>4</kbd> 选择。选中原文文字可按 <kbd>M</kbd> 标记，供之后制作 Anki 卡片。', 'Choose with <kbd>A</kbd>–<kbd>D</kbd> or <kbd>1</kbd>–<kbd>4</kbd>. Select passage text and press <kbd>M</kbd> to mark it for a later Anki note.') + '</p>' +
+        '<div class="sibs"><div class="sec-h"><span class="ml">' + T('本文的 4 道题', 'This passage · 4 items') + '</span><span class="rule"></span></div>' + sibs + '</div>' +
+      '</section></div></div>';
+
+  var insp =
+    inspHead(T('作答中', 'Attempt open')) +
+    '<div class="isec">' + isecH('本次作答条件', 'Attempt condition', '<span class="ml">' + T('答题前即可知', 'pre-answer') + '</span>') +
+      '<div class="cond ' + (P.assisted ? 'assisted' : 'counts') + '" id="condpanel"><div class="cond-top">' + lamp(P.assisted ? 'warn' : 'ok', 'pulse') + '<span class="name">' + (P.assisted ? T('有辅助', 'Assisted') : T('独立迁移', 'Independent transfer')) + '</span><span class="tag ' + (P.assisted ? '' : 't-teal') + '">' + (P.assisted ? T('不计入', 'won’t count') : T('可计入', 'can count')) + '</span></div>' +
+        '<div class="cond-sub">' + (P.assisted ? T('提示已显示。本次结果会被记录，但不作为独立证据。', 'A hint was shown. The result is recorded, but not as independent evidence.') : T('新文章，从未见过。提示会把本次变为有辅助。', 'Fresh passage, never seen. A hint would turn this into assisted.')) + '</div>' +
+        condScale(P.assisted ? 'ast' : 'ind') + '</div></div>' +
+    '<div class="isec">' + isecH('计时', 'Clock') +
+      '<div class="ros" style="grid-template-columns:1fr 1fr"><div class="ro live"><div class="ml">' + T('本题用时', 'Elapsed') + '</div><div class="v"><span class="tickv" id="pclock">' + mmss(P.elapsed) + '</span></div><div class="n">' + T('你自己的时间，不是考试限时', 'your own time, not an exam limit') + '</div></div>' +
+      '<div class="ro"><div class="ml">' + T('接触次数', 'Exposure') + '</div><div class="v">0 <small>' + T('次', 'prior') + '</small></div><div class="n">' + T('首次见到本文', 'first sight of this passage') + '</div></div></div></div>' +
+    '<div class="isec">' + isecH('来源', 'Provenance') +
+      '<dl class="kv">' +
+        '<dt>' + T('材料', 'Material') + '</dt><dd>' + T('本地导入 · S1 · 第 24 页', 'Local import · S1 · p.24') + '</dd>' +
+        '<dt>' + T('审核', 'Review') + '</dt><dd style="color:var(--teal)">' + T('已审核 · 答案已核实', 'reviewed · key verified') + '</dd>' +
+        '<dt>' + T('评分', 'Grading') + '</dt><dd>' + T('确定性，对照答案', 'deterministic, against key') + '</dd>' +
+        '<dt>' + T('标记', 'Marks') + '</dt><dd><span class="num" id="markcount">' + P.marks.length + '</span> ' + T('处，供 Anki 卡片', 'for an Anki note') + '</dd>' +
+      '</dl></div>' +
+    '<div class="isec">' + isecH('外部调用', 'External calls') +
+      '<div class="locked">' +
+        '<div style="color:var(--ink-2)">' + I.local + '<span>' + T('提示为本地编写内容', 'Hint is authored, local') + '</span><span class="mono">' + T('0 次调用', '0 calls') + '</span></div>' +
+        '<div style="color:var(--ink-2)">' + I.ext + '<span>' + T('AI 教练仅在作答后可用', 'AI coach opens after answering') + '</span><span class="mono">—</span></div>' +
+      '</div><p class="note">' + T('作答期间不会向任何服务发送数据。', 'Nothing leaves this machine while you answer.') + '</p></div>';
+  return { work: work, insp: insp };
+}
+
+/* ------------------------------------------------------------------ FEEDBACK */
+var EXPL = {
+  A: { tv: ['真', 'True'], zh: '第 1 段说南站向东区供水。它与原文重复的词最多——这正是 EXCEPT 题里“词语重合”会误导人的原因。', en: 'Paragraph 1 says the South Station supplies the eastern district. It repeats the most passage words, which is exactly why keyword overlap misleads in an EXCEPT item.' },
+  B: { tv: ['真', 'True'], zh: '原文：“tested twice a day”。', en: '“tested twice a day”.' },
+  C: { tv: ['假', 'False'], zh: '只更换四台主泵中的两台。这是唯一与原文不符的说法 → 答案。', en: 'Only two of the four pumps are replaced. This is the odd statement → the key.' },
+  D: { tv: ['真', 'True'], zh: '原文：“Delivery vehicles must use the west gate”。', en: '“Delivery vehicles must use the west gate”.' }
+};
+/* advisory replies are built from what the learner actually chose */
+function reply(mode, ch) {
+  var key = ch === 'C';
+  if (mode === 'probe') {
+    var why = key ? T('你选对了。换个角度检查一遍：', 'You chose the key. Check the reasoning once more: ')
+      : ch === 'A' ? T('A 看起来稳妥，是因为它与第 1 段重复的词最多；', 'A felt safe because it reuses the most words from paragraph 1; ')
+      : T(ch + ' 在原文中有依据；', ch + ' is supported by the notice; ');
+    return T('<p><span class="q">先别看答案：选项 C 里哪个词值得回到原文核对？</span></p><p>找数字。通知写的是 “two of the four” main pumps，所以 “all four” 是原文唯一不支持的说法。' + why + '在 EXCEPT 题里，词语重合只说明用词相同，不说明内容为真。</p>',
+      '<p><span class="q">Before you look at the key: which word in option C would you check against the passage?</span></p><p>Look for a number. The notice says “two of the four” main pumps, so “all four” is the one statement the text does not support. ' + why + 'in an EXCEPT item, overlap measures vocabulary, not truth.</p>');
+  }
+  if (mode === 'explain') {
+    return T('<p>A、B、D 都能在原文找到对应句子。C 说四台主泵全部更换，而第 2 段写的是 “two of the four”。答案是原文不支持的那一项。</p><p>' + (key ? '你选的 C 正是那一项。' : '你选的 ' + ch + ' 本身是真的——这正是它在本题里错的原因。') + '</p>',
+      '<p>A, B and D each match a sentence in the notice. C says all four pumps will be replaced; paragraph 2 says “two of the four”. The key is the statement the passage does not support.</p><p>' + (key ? 'Your choice, C, is that statement.' : 'Your choice, ' + ch + ', is true — which is exactly why it is wrong here.') + '</p>');
+  }
+  return T('<p><b>规则：</b>EXCEPT 题里，三项有依据，答案是“找不到依据”的那一项。</p><p><b>步骤：</b>每个选项只对照一句原文，能定位就打勾；特别留意 all、only、two of 这类数量词。</p><p><b>边界：</b>若两项都找不到依据，回到题干重读极性词。</p>',
+    '<p><b>Rule:</b> in an EXCEPT item, three options are supported; the key is the one you cannot locate.</p><p><b>Step:</b> check each option against one sentence and tick it when found; watch quantity words such as all, only, two of.</p><p><b>Boundary:</b> if two options seem unsupported, re-read the polarity word in the stem.</p>');
+}
+function replyBody() {
+  var F = S.fb;
+  if (F.asked[F.mode]) return reply(F.mode, F.choice);
+  return '<div class="ask"><p class="note" style="margin:0 0 10px">' + T('尚未询问。询问会向 DeepSeek 发起 1 次外部调用，内容见下方清单。', 'Not asked yet. Asking makes one external call to DeepSeek with the payload listed below.') + '</p>' +
+    '<button class="btn sm ai" data-act="ask">' + I.ext + T('询问 · 1 次调用 → ' + (S.calls + 1) + '/20', 'Ask · 1 call → ' + (S.calls + 1) + '/20') + '</button></div>';
+}
+function vFeedback() {
+  var F = S.fb, ok = F.choice === 'C';
+  var fopts = Q1.opts.map(function (o, i) {
+    var L = 'ABCD'[i], e = EXPL[L], key = L === 'C', mine = L === F.choice;
+    var flags = (mine ? '<span class="tag ' + (ok ? '' : 't-red') + '">' + T('你的选择', 'your choice') + '</span>' : '') + (key ? '<span class="tag t-teal">' + I.check + T('答案 · 已核实', 'key · verified') + '</span>' : '');
+    return '<div class="fopt' + (key ? ' key' : '') + (mine && !key ? ' mine' : '') + '"><span class="L" aria-hidden="true">' + L + '</span><div class="tx"><span lang="en">' + o + '</span><span class="flags">' + flags + '</span></div>' +
+      '<div class="ex"><span class="tv">' + T(e.tv[0], e.tv[1]) + '</span><span>' + T(e.zh, e.en) + '</span></div></div>';
+  }).join('');
+  var work =
+    wkH([T('已记录', 'recorded')], 'Q1 · ' + T('NOT/EXCEPT 极性', 'NOT/EXCEPT polarity'),
+      '<button class="btn sm" data-go="anki">' + (ok ? T('制作 Anki 卡片', 'Propose a note') : T('从失误制作卡片', 'Note from this miss')) + ' <kbd>N</kbd></button><button class="btn sm pri" data-act="nextitem">' + T('下一题 · 新文章', 'Next · fresh passage') + ' <kbd>↵</kbd></button>') +
+    '<div class="wk-b"><div class="read">' + passage({ evidence: true, src: srcTags() }) +
+      '<section class="item">' +
+        '<div class="verdict">' +
+          '<div><div class="ml">' + T('评分', 'Grade') + '</div><div class="v ' + (ok ? 'good' : 'bad') + '">' + (ok ? I.check : I.cross) + (ok ? T('正确', 'correct') : T('错误', 'incorrect')) + '</div></div>' +
+          '<div><div class="ml">' + T('作答', 'Answer') + '</div><div class="v">' + F.choice + ' <span style="color:var(--ink-3)">→</span> <span style="color:var(--teal)">C</span></div></div>' +
+          '<div><div class="ml">' + T('用时', 'Elapsed') + '</div><div class="v">' + mmss(F.elapsed) + '</div></div>' +
+          '<div class="vc"><span class="ml">' + T('条件', 'Condition') + '</span>' + lamp(F.assisted ? 'warn' : 'ok') + '<b>' + (F.assisted ? T('有辅助', 'Assisted') : T('独立迁移', 'Independent transfer')) + '</b><span>· ' + (F.assisted ? T('不计入独立证据', 'not counted as independent') : T('已计入', 'counted')) + '</span></div>' +
+        '</div>' +
+        '<p class="stem" lang="en" style="font-size:14.5px;line-height:22px;color:var(--ink-2);font-weight:400;margin-bottom:12px">' + Q1.stem.replace('EXCEPT', '<b style="color:var(--ink)">EXCEPT</b>') + '</p>' +
+        fopts +
+        '<div class="tactic">' + I.rule + '<div><b>' + T('战术 · NOT/EXCEPT 极性', 'Tactic · NOT/EXCEPT polarity') + '</b> — ' + T('三项有原文依据，答案是不合群的那一项；词语重合衡量的是用词重复，不是真假。', 'three options are supported, the key is the odd one; word overlap measures vocabulary reuse, not truth.') + ' <button class="link" data-act="tactic">' + T('打开战术卡', 'Open tactic') + '</button></div></div>' +
+      '</section></div></div>';
+
+  var payload = S.consent
+    ? [['题干', 'stem'], ['4 个选项', '4 options'], ['你的选择', 'your choice'], ['已核实答案', 'verified key'], ['证据句', 'evidence sentence']].map(function (x) { return '<li>' + I.check + T(x[0], x[1]) + '</li>'; }).join('')
+    : '<li>' + I.check + T('作答事实（状态、选项字母、用时、条件）', 'attempt facts (status, labels, elapsed, condition)') + '</li><li>' + I.check + T('技能课', 'skill lessons') + '</li>' + [['题干', 'stem'], ['选项文字', 'option text'], ['证据句', 'evidence sentence']].map(function (x) { return '<li class="wh">' + I.cross + T(x[0], x[1]) + ' · ' + T('扣留', 'withheld') + '</li>'; }).join('');
+  var before = 1, after = F.assisted ? 1 : (ok ? 2 : 1), nAfter = F.assisted ? 3 : 4;
+  var budget = Array.apply(null, Array(20)).map(function (_, i) { return '<i class="' + (i < S.calls ? 'u' : i === S.calls ? 'nx' : '') + '"></i>'; }).join('');
+  var insp =
+    inspHead(T('已记录', 'Recorded')) +
+    '<div class="isec" style="padding-bottom:14px">' + isecH('这次作答改变了什么', 'What this attempt changed') +
+      '<div class="ros" style="grid-template-columns:1.25fr 1fr"><div class="ro"><div class="ml">' + T('独立证据', 'Evidence') + '</div><div class="v">' + before + '/3 <small>→</small> ' + after + '/' + nAfter + '</div><div class="n">' + (F.assisted ? T('有辅助 · 不计入', 'assisted · not counted') : T('第 4 次独立作答', '4th independent try')) + '</div></div>' +
+      '<div class="ro"><div class="ml">' + T('接触', 'Exposure') + '</div><div class="v">1 <small>' + T('次', 'seen') + '</small></div><div class="n">' + T('再答 = 重复接触', 'next = re-exposure') + '</div></div></div></div>' +
+    '<div class="isec">' + isecH('AI 教练', 'AI coach', '<span style="display:flex;gap:6px"><span class="tag">' + T('外部调用', 'External') + '</span><span class="tag t-violet">' + T('建议性', 'Advisory') + '</span></span>') +
+      '<div class="coach"><div class="coach-h"><span class="who">' + I.ext + '<span>DeepSeek · <span class="mono">deepseek-chat</span></span></span><span style="font-size:12px;color:var(--teal);flex:none">' + T('已验证', 'verified') + '</span></div>' +
+        '<div class="modes" role="tablist" aria-label="' + T('教练模式', 'Coach mode') + '">' +
+        [['explain', '解释', 'Explain', '1'], ['probe', '追问', 'Probe', '2'], ['lesson', '微课', 'Micro-lesson', '3']].map(function (m) { return '<button role="tab" id="tab-' + m[0] + '" aria-controls="reply" data-mode="' + m[0] + '" aria-selected="' + (F.mode === m[0]) + '" tabindex="' + (F.mode === m[0] ? 0 : -1) + '"><span class="mk3" aria-hidden="true">' + m[3] + '</span>' + T(m[1], m[2]) + '</button>'; }).join('') +
+        '</div><div class="reply" id="reply" role="tabpanel" aria-labelledby="tab-' + F.mode + '">' + replyBody() + '</div>' +
+        '<div class="reply-f"><span>' + T('建议性文字，不改变评分', 'Advisory; never changes the grade') + '</span><span class="mono" style="font-size:10.5px" id="replystamp">' + (F.asked[F.mode] ? (F.mode === 'probe' ? '11-13 10:24' : T('刚刚', 'just now')) : '—') + '</span></div></div>' +
+      '<div class="manifest">' +
+        '<div class="row"><span>' + T('发送内容', 'Payload') + '</span><ul class="payload">' + payload + '<li class="meta">' + T('来源', 'source') + ' S1 p.24 · ' + (S.consent ? '1.9 KB · sha256 7c41…e09a' : '0.6 KB · sha256 2b0d…41f7') + '</li></ul></div>' +
+        '<div class="row"><span>' + T('授权', 'Consent') + '</span><span>' + (S.consent ? '<span style="color:var(--teal)">' + T('S1 已授权 DeepSeek', 'S1 granted for DeepSeek') + '</span><br><span style="color:var(--ink-3)">' + T('Han · 11-12 · 可撤销', 'by Han · 11-12 · revocable') + '</span>' : '<span style="color:var(--amber)">' + T('已撤销 · 题目内容被扣留', 'revoked · question content withheld') + '</span>') + ' <button class="link" data-act="consent" style="font-size:12px;margin-left:4px">' + (S.consent ? T('撤销', 'Revoke') : T('授权', 'Grant')) + '</button></span></div>' +
+        '<div class="row"><span>' + T('预算', 'Budget') + '</span><span><span class="mono">' + S.calls + '/20 ' + T('今日', 'today') + '</span><span class="budget">' + budget + '</span></span></div>' +
+      '</div></div>';
+  return { work: work, insp: insp };
+}
+
+/* ------------------------------------------------------------------ ASSESS */
+function vAssess() {
+  var A = S.assess;
+  var cells = '', scale = '';
+  for (var i = 1; i <= 40; i++) {
+    var st = A.to.indexOf(i) >= 0 ? 'to' : (A.answered.indexOf(i) >= 0 || A.sel[i] ? 'ans' : '');
+    var cls = st + (i === A.cur ? ' cur' : '');
+    var stl = st === 'to' ? T('超时', 'timed out') : st === 'ans' ? T('已答', 'answered') : T('未答', 'pending');
+    cells += '<button class="c ' + cls + '" data-item="' + i + '" aria-label="' + T('第 ' + i + ' 题 · ' + stl, 'Item ' + i + ' · ' + stl) + (i === A.cur ? T(' · 当前', ' · current') : '') + '"' + (i === A.cur ? ' aria-current="step"' : '') + '></button>';
+    scale += '<span class="' + (i % 5 === 0 || i === 1 ? 'tk' : '') + '">' + (i % 5 === 0 || i === 1 ? i : '') + '</span>';
+  }
+  var sel = A.sel[A.cur];
+  var answeredN = A.answered.length + Object.keys(A.sel).filter(function (k) { return A.answered.indexOf(+k) < 0; }).length;
+  var elapsed = 3600 - A.left;
+  var work =
+    '<div class="sealband"><span class="sealmark">' + I.lock + ' ' + T('已封存', 'SEALED') + '</span><div class="sb-t"><h1>' + T('计时测评 · 第 3 轮', 'Timed assessment · run #3') + '</h1>' +
+      '<span class="ml">' + T('40 题 · 60 分钟 · 注释：无', '40 items · 60 min · annotations: none') + '</span></div>' +
+      '<div class="sb-r"><div class="sb-ro"><span class="ml">' + T('题目', 'Item') + '</span><span class="v" id="acur">' + A.cur + '<small> / 40</small></span></div>' +
+        '<div class="sb-ro live"><span class="ml">' + T('本轮剩余', 'Run left') + '</span><span class="v tickv" id="rclock">' + mmss(A.left) + '</span></div>' +
+        '<div class="sb-leave"><button class="btn sm" data-go="today" title="' + T('离开后可恢复，计时不暂停', 'You can resume later; the clock keeps running') + '">' + T('离开', 'Leave') + '</button></div></div></div>' +
+    '<div class="nav40"><div class="lg"><span class="ml">' + T('题目导航 · 不显示对错', 'Item navigator · no correctness shown') + '</span><span class="legend"><span><i class="dot" style="background:var(--ink-3);opacity:.7"></i>' + T('已答', 'answered') + '</span><span><i class="dot" style="box-shadow:inset 0 0 0 1.5px var(--amber);background:var(--amber-bg)"></i>' + T('当前', 'current') + '</span><span><i class="dot" style="box-shadow:inset 0 0 0 1px var(--tick)"></i>' + T('未答', 'pending') + '</span><span><i class="dot" style="background:linear-gradient(to top right,transparent 45%,var(--ink-2) 45%,var(--ink-2) 55%,transparent 55%);box-shadow:inset 0 0 0 1px var(--ink-3)"></i>' + T('超时', 'timed out') + '</span></span></div>' +
+      '<div class="cells" role="group" aria-label="' + T('题目导航', 'Item navigator') + '">' + cells + '</div><div class="scale" aria-hidden="true">' + scale + '</div></div>' +
+    '<div class="wk-b"><div class="read">' + passage({ src: '<span class="tag">' + T('第 ' + A.cur + ' 题 / 40', 'Item ' + A.cur + ' / 40') + '</span><span class="tag t-ghost">' + I.lock + T('无词汇表', 'no glossary') + '</span>' }) +
+      '<section class="item sealed-item" aria-label="' + T('第 ' + A.cur + ' 题', 'Item ' + A.cur) + '">' +
+        '<div class="item-h"><span class="ml">' + T('第 ' + A.cur + ' 题', 'Item ' + A.cur) + '</span><span class="tag">' + lamp('warn') + T('测评 · 无辅助', 'assessment · unassisted') + '</span></div>' +
+        '<p class="stem" lang="en">' + Q2.stem + '</p>' +
+        '<div class="opts" role="radiogroup" aria-label="' + T('选项', 'Options') + '">' + optButtons(Q2, sel, 'data-aopt') + '</div>' +
+        '<div class="actbar"><button class="btn pri" data-act="aconfirm">' + T('确认并继续', 'Confirm & continue') + ' <kbd>↵</kbd></button><span class="sp"></span><span class="navgrp"><button class="btn sm ghost" data-act="aprev" aria-label="' + T('上一题', 'Previous item') + '">' + kbds(['←']) + T('上一题', 'Prev') + '</button><button class="btn sm ghost" data-act="anext" aria-label="' + T('下一题', 'Next item') + '">' + T('下一题', 'Next') + kbds(['→']) + '</button></span></div>' +
+        '<p class="note" style="margin-top:14px">' + T('答完不显示对错。证据、解析与词汇表在本轮结束后的报告中开放。', 'No feedback after answering. Evidence, reasoning and glossary open in the report once the run ends.') + '</p>' +
+      '</section></div></div>';
+
+  var R = 60, C = 2 * Math.PI * R, frac = A.item / 90, cx = 78;
+  var ticks = '';
+  for (var t = 0; t < 90; t += 5) {
+    var a = (t / 90) * 2 * Math.PI - Math.PI / 2, big = t % 15 === 0, r1 = 70, r2 = big ? 77 : 74;
+    ticks += '<line x1="' + (cx + r1 * Math.cos(a)).toFixed(2) + '" y1="' + (cx + r1 * Math.sin(a)).toFixed(2) + '" x2="' + (cx + r2 * Math.cos(a)).toFixed(2) + '" y2="' + (cx + r2 * Math.sin(a)).toFixed(2) + '" stroke="' + (big ? 'var(--ink-2)' : 'var(--ink-3)') + '" stroke-width="' + (big ? 1.5 : 1) + '"/>';
+  }
+  var clock = '<svg width="156" height="156" viewBox="0 0 156 156" role="img" aria-label="' + T('单题时钟', 'Item clock') + ' ' + mmss(A.item) + ' / 1:30">' + ticks +
+    '<circle cx="' + cx + '" cy="' + cx + '" r="' + R + '" fill="none" stroke="var(--hair-2)" stroke-width="6"/>' +
+    '<circle id="arc" cx="' + cx + '" cy="' + cx + '" r="' + R + '" fill="none" stroke="var(--amber)" stroke-width="6" stroke-linecap="butt" stroke-dasharray="' + (C * frac).toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(-90 ' + cx + ' ' + cx + ')"/>' +
+    '<text id="iclock" x="' + cx + '" y="' + (cx + 4) + '" text-anchor="middle" font-size="30" fill="var(--ink)" style="font-weight:300;letter-spacing:-1px">' + mmss(A.item) + '</text>' +
+    '<text x="' + cx + '" y="' + (cx + 26) + '" text-anchor="middle" font-size="12" fill="var(--ink-2)">/ 1:30</text></svg>';
+  var used = Math.floor(elapsed / 60);
+  var runbar = ''; for (var m = 0; m < 60; m++) runbar += '<i class="' + (m < used ? 'u' : (m === used ? 'n' : '')) + '"></i>';
+  var insp =
+    inspHead('', 'sealed') +
+    '<div class="isec">' + isecH('单题时钟', 'Item clock', '<span class="ml" style="letter-spacing:.04em;text-transform:none">3600 s ÷ 40 = 90 s</span>') +
+      '<div class="clockwrap">' + clock + '<div class="ros" style="grid-template-columns:1fr">' +
+        '<div class="ro"><div class="ml">' + T('已答', 'Answered') + '</div><div class="v">' + answeredN + '<small> / 40</small></div></div>' +
+        '<div class="ro" style="border-left:0;border-top:1px solid var(--hair)"><div class="ml">' + T('超时', 'Timed out') + '</div><div class="v">' + A.to.length + '</div></div></div></div></div>' +
+    '<div class="isec">' + isecH('本轮时钟', 'Run clock', '<span class="ml">60:00</span>') +
+      '<div class="runbar" aria-hidden="true">' + runbar + '</div>' +
+      '<div class="note" style="display:flex;justify-content:space-between;margin-top:6px"><span>' + T('已用 ', 'elapsed ') + '<span class="num" id="relapsed">' + mmss(elapsed) + '</span></span><span>' + T('剩余 ', 'left ') + '<span class="num" id="rleft2">' + mmss(A.left) + '</span></span></div>' +
+      '<p class="note" style="color:var(--ink-2)">' + T('离开后可恢复，计时不暂停。', 'You can resume later; the clock keeps running.') + '</p></div>' +
+    '<div class="isec">' + isecH('本次作答条件', 'Attempt condition') +
+      '<div class="cond sealed"><div class="cond-top">' + lamp('warn') + '<span class="name">' + T('测评 · 无辅助', 'Assessment · unassisted') + '</span><span class="tag">' + T('另计', 'separate') + '</span></div><div class="cond-sub">' + T('题目来自未见题池；作答不显示对错。', 'Items from the unseen pool; no correctness shown.') + '</div>' + condScale('asm') + '</div></div>' +
+    '<div class="isec">' + isecH('已封存的通道', 'Sealed channels') +
+      '<div class="locked seal">' +
+        '<div>' + I.lock + '<span>' + T('AI 教练', 'AI coach') + '</span><span class="sl">' + T('0 次调用', '0 calls') + '</span></div>' +
+        '<div>' + I.lock + '<span>' + T('提示', 'Hints') + '</span><span class="sl">' + T('已封存', 'sealed') + '</span></div>' +
+        '<div>' + I.lock + '<span>' + T('词汇表', 'Glossary') + '</span><span class="sl">' + T('已封存', 'sealed') + '</span></div>' +
+        '<div>' + I.lock + '<span>' + T('逐题反馈', 'Per-item feedback') + '</span><span class="sl">' + T('报告后', 'after run') + '</span></div>' +
+        '<div>' + I.lock + '<span>' + T('证据与解析', 'Evidence & reasoning') + '</span><span class="sl">' + T('暂扣', 'withheld') + '</span></div>' +
+      '</div></div>';
+  return { work: work, insp: insp };
+}
+
+/* ------------------------------------------------------------------ REPORT */
+/* One array drives every report figure: c correct · x incorrect · t timed out.
+   Timed-out items (9, 26, 32) agree with the assessment screen, where only item 9 had passed at item 17. */
+var RES = 'ccxcccxctcccxcccccxcxcxcctccxcxtccxcxccc'.split('');
+var SKILL_OF = 'NVNSNVVSSVUNNVSNVSVVSUVNVUSNNVVSSVVUSNSS'.split(''); // per item: N not-except · V vocabulary · S sentence · U unclassified
+var TIMES = [22,28,31,35,38,41,44,47,49,52,54,56,58,59,60,61,62,63,63,64,64,66,68,71,73,76,79,83,88,90,90,90,101,105,108,112,118,124,131,138];
+function quant() {
+  var t = TIMES.slice().sort(function (a, b) { return a - b; }), n = t.length;
+  return { median: (t[n / 2 - 1] + t[n / 2]) / 2, p90: t[Math.ceil(0.9 * n) - 1] };
+}
+var TALLY = (function () {
+  var r = { c: 0, x: 0, t: 0, sk: {} };
+  RES.forEach(function (v, i) { r[v]++; var k = SKILL_OF[i]; r.sk[k] = r.sk[k] || [0, 0]; r.sk[k][1]++; if (v === 'c') r.sk[k][0]++; });
+  return r;
+})();
+(function checkReport() { // hidden sum check: every report figure must agree with RES, or the error bar shows
+  var q = quant(), sk = TALLY.sk;
+  var want = { c: 27, x: 10, t: 3, N: '7/10', V: '9/14', S: '8/12', U: '3/4', median: 64, p90: 112 };
+  var got = { c: TALLY.c, x: TALLY.x, t: TALLY.t, N: sk.N.join('/'), V: sk.V.join('/'), S: sk.S.join('/'), U: sk.U.join('/'), median: q.median, p90: q.p90 };
+  Object.keys(want).forEach(function (k) { if (String(want[k]) !== String(got[k])) throw new Error('report mismatch ' + k + ': ' + got[k] + ' ≠ ' + want[k]); });
+  S.assess.to.forEach(function (n) { if (RES[n - 1] !== 't') throw new Error('assessment timeout ' + n + ' missing from report'); });
+})();
+function histo() {
+  var q = quant();
+  var bins = []; for (var b = 0; b < 14; b++) bins.push(0);
+  TIMES.forEach(function (t) { bins[Math.min(13, Math.floor(t / 10))]++; });
+  var W = 400, H = 104, bw = W / 14, maxN = 10, sc = function (s) { return (s / 140) * W; };
+  var g = '';
+  for (var y = 5; y <= maxN; y += 5) g += '<line x1="0" x2="' + W + '" y1="' + (H - y / maxN * H) + '" y2="' + (H - y / maxN * H) + '" stroke="var(--hair)" stroke-dasharray="1 3"/>';
+  bins.forEach(function (n, i) { if (!n) return; var h = n / maxN * H; g += '<rect class="bar' + (i === Math.floor(q.median / 10) ? ' hi' : '') + '" x="' + (i * bw + 1.5).toFixed(1) + '" y="' + (H - h).toFixed(1) + '" width="' + (bw - 3).toFixed(1) + '" height="' + h.toFixed(1) + '"/>'; });
+  g += '<line x1="0" x2="' + W + '" y1="' + H + '" y2="' + H + '" stroke="var(--ink-3)"/>';
+  for (var s = 0; s <= 140; s += 10) g += '<line x1="' + sc(s) + '" x2="' + sc(s) + '" y1="' + H + '" y2="' + (H + (s % 30 === 0 ? 5 : 3)) + '" stroke="var(--ink-3)"/>' + (s % 30 === 0 ? '<text x="' + sc(s) + '" y="' + (H + 16) + '" text-anchor="' + (s ? 'middle' : 'start') + '">' + s + 's</text>' : '');
+  var mk = function (s, label, col, dash, anchorEnd) { return '<line x1="' + sc(s) + '" x2="' + sc(s) + '" y1="-4" y2="' + H + '" stroke="' + col + '" stroke-width="1.25"' + (dash ? ' stroke-dasharray="3 2"' : '') + '/><text x="' + (sc(s) + (anchorEnd ? -4 : 4)) + '" y="2"' + (anchorEnd ? ' text-anchor="end"' : '') + ' style="fill:' + col + ';font-weight:600">' + label + '</text>'; };
+  g += mk(90, T('单题 1:30', 'item 1:30'), 'var(--ink-3)', true);
+  g += mk(q.median, T('中位 ', 'median ') + q.median + 's', 'var(--ink)', false, true);
+  g += mk(q.p90, 'p90 ' + q.p90 + 's', 'var(--amber)');
+  // descriptive speed bands (fixed definitions): comfortable < 50% of item clock, steady 50–74%, pressed ≥ 75%
+  var by = H + 26, band = function (a, b, label, op) { return '<rect x="' + sc(a) + '" y="' + by + '" width="' + (sc(b) - sc(a) - 1) + '" height="4" fill="var(--ink-3)" opacity="' + op + '"/><text x="' + sc(a) + '" y="' + (by + 16) + '" style="font-family:var(--f-ui);font-size:10.5px">' + label + '</text>'; };
+  g += band(0, 45, T('从容 < 45s', 'comfortable <45s'), .25) + band(45, 67.5, T('稳定', 'steady'), .5) + band(67.5, 140, T('吃紧 ≥ 67.5s（单题时钟的 75%）', 'pressed ≥67.5s (75% of item clock)'), .8);
+  return '<svg viewBox="-1 -12 ' + (W + 2) + ' ' + (H + 60) + '" role="img" aria-label="' + T('用时分布', 'Timing histogram') + '">' + g + '</svg>';
+}
+var ANN = {
+  17: { stem: Q2.stem, key: 'A · in progress', ev: '“Visitors are not allowed on site while the work is under way.”', rs: ['“under way” 描述的是施工正在进行的状态，与 while 引导的时间相符。', '“under way” describes the work as ongoing, matching the time sense of “while”.'] }
+};
+function resLabel(r) { return r === 'c' ? T('正确', 'correct') : r === 'x' ? T('错误', 'incorrect') : T('超时', 'timed out'); }
+function vReport() {
+  var q = quant(), nC = TALLY.c, sk = TALLY.sk;
+  var cells = RES.map(function (r, i) { var n = i + 1; return '<button class="' + (r === 'c' ? 'c' : r === 'x' ? 'x' : 'to') + '" data-ritem="' + n + '" aria-pressed="' + (S.report.item === n) + '" aria-label="' + T('第 ' + n + ' 题 · ', 'Item ' + n + ' · ') + resLabel(r) + '"><span>' + n + '</span>' + (r === 'c' ? I.check : r === 'x' ? I.cross : '<span class="g">—</span>') + '</button>'; }).join('');
+  var a = ANN[S.report.item];
+  var r = RES[S.report.item - 1];
+  var annot = a ? '<div class="annot"><div><div class="ml">' + T('第 ' + S.report.item + ' 题 · 题干', 'Item ' + S.report.item + ' · stem') + '</div><div class="q" lang="en">' + a.stem + '</div><div class="ml" style="margin-top:8px">' + T('答案', 'Key') + ' · ' + resLabel(r) + '</div><div class="mono" style="color:var(--teal)">' + a.key + '</div></div><div><div class="ml">' + T('证据', 'Evidence') + '</div><div class="rd" lang="en">' + a.ev + '</div><div class="ml" style="margin-top:8px">' + T('解析', 'Reasoning') + '</div><div>' + T(a.rs[0], a.rs[1]) + '</div></div></div>'
+    : '<div class="annot"><div><div class="ml">' + T('第 ' + S.report.item + ' 题', 'Item ' + S.report.item) + '</div><div style="color:var(--ink-2)">' + (r === 't' ? T('超时 · 按 1:30 计入用时', 'timed out · counted at 1:30') : resLabel(r)) + '</div></div><div><div class="ml">' + T('注释', 'Annotations') + '</div><div style="color:var(--ink-2)">' + T('证据、解析已开放（原型中仅第 17 题填写了内容）。', 'Evidence and reasoning now open (only item 17 is filled in this prototype).') + '</div></div></div>';
+  var tr = function (n, base, cls) { var s = ''; for (var i = 0; i < 40; i++) s += '<i class="' + (i < Math.min(n, base) ? 'c' : i < n ? 'dl' : '') + '"></i>'; return '<div class="track40 ' + cls + '">' + s + '</div>'; };
+  var skill = function (nm, id, k) { var c = sk[k][0], n = sk[k][1], cb = ''; for (var i = 0; i < n; i++) cb += '<i class="' + (i < c ? 'c' : '') + '"></i>'; return '<div class="skrow"><div class="nm">' + nm + '<span>' + id + '</span></div><div class="cellbar" aria-hidden="true">' + cb + '</div><div class="v">' + c + '/' + n + '</div></div>'; };
+  var pct = Math.round(nC / 40 * 1000) / 10;
+  var work =
+    wkH([T('对比第 2 轮', 'vs run #2')], T('第 3 轮 · 已完成', 'Run #3 · complete'), '<span class="tag">40 ' + T('题', 'items') + ' · ' + T('60 分钟', '60 min') + ' · 11-13</span><span class="tag t-teal">' + I.check + T('污染 0', 'contaminated 0') + '</span>') +
+    '<div class="wk-b"><div class="pad">' +
+      '<div class="headline">' +
+        '<div><div class="ml">' + T('正确数 · 实测', 'Correct · observed') + '</div><div class="hv">' + nC + '<small>/40</small></div><div class="n">' + T('错误 ' + TALLY.x + ' · 超时 ' + TALLY.t + ' · 跳过 0', TALLY.x + ' incorrect · ' + TALLY.t + ' timed out · 0 skipped') + '</div></div>' +
+        '<div><div class="ml">' + T('及格线', 'Pass threshold') + '</div><div class="hv unk"><span class="unkbox" style="width:56px;height:18px"></span>' + T('未知', 'Unknown') + '</div><div class="n">' + T('不给出通过概率，也不下结论', 'No probability, no verdict') + '</div></div>' +
+        '<div><div class="ml">' + T('对比第 2 轮 · 同条件', 'vs run #2 · like-for-like') + '</div><div class="hv"><span class="delta">+' + (nC - 22) + '</span><small>' + T('题', 'items') + '</small></div><div class="n">22/40 → ' + nC + '/40 · ' + T('不归因于任何原因', 'no cause is claimed') + '</div></div>' +
+      '</div>' +
+      '<div class="cols2">' +
+        '<section><div class="sec-h"><span class="ml">' + T('分技能', 'Per skill') + '</span><span class="rule"></span></div>' +
+          skill('NOT/EXCEPT', 'not-except-polarity', 'N') + skill(T('语境词义', 'Vocab in context'), 'vocabulary-in-context', 'V') + skill(T('句子结构', 'Sentence structure'), 'sentence-structure', 'S') + skill(T('未分类', 'Unclassified'), 'unclassified', 'U') +
+        '</section>' +
+        '<section class="histo"><div class="sec-h"><span class="ml">' + T('单题用时', 'Time per item') + '</span><span class="rule"></span><span class="aside"><span class="mono">' + T('中位', 'median') + ' ' + q.median + 's · p90 ' + q.p90 + 's · ' + T('超时', 'timed out') + ' ' + TALLY.t + '</span></span></div>' + histo() + '</section>' +
+      '</div>' +
+      '<section class="cmp"><div class="cmp-main"><div class="sec-h" style="margin:0"><span class="ml">' + T('同条件对比', 'Like-for-like comparison') + '</span><span class="rule"></span><span class="aside">' + T('每格 1 题 · 上标线为差值', 'one cell per item · overline = difference') + '</span></div>' +
+        '<div class="cmp-bars"><div class="r"><span class="mono" style="color:var(--ink-3)">#2 · 11-11</span>' + tr(22, 40, '') + '<span class="v" style="color:var(--ink-3)">22/40</span></div>' +
+        '<div class="r"><span class="mono">#3 · 11-13</span>' + tr(nC, 22, 'now') + '<span class="v">' + nC + '/40</span></div></div>' +
+        '<p class="note">' + T('两轮都是本地抽样；对比只陈述差值，不声称是 AI、辅导或本应用造成的。', 'Both runs are local samples; the comparison states the difference and never claims AI, coaching or the app caused it.') + '</p></div>' +
+        '<div class="cmp-side"><div class="ml">' + T('可比性检查', 'Comparability checks') + '</div>' +
+          '<div class="chk"><span style="color:var(--teal)">' + I.check + '</span><span>' + T('题数', 'Item count') + '</span><span class="mono">40 = 40</span></div>' +
+          '<div class="chk"><span style="color:var(--teal)">' + I.check + '</span><span>' + T('时间窗', 'Window') + '</span><span class="mono">60 = 60 min</span></div>' +
+          '<div class="chk"><span style="color:var(--teal)">' + I.check + '</span><span>' + T('题池家族', 'Pool family') + '</span><span class="mono">9e1f…c2 =</span></div>' +
+          '<div class="chk"><span style="color:var(--teal)">' + I.check + '</span><span>' + T('两轮均已完成', 'Both completed') + '</span><span class="mono">ok</span></div>' +
+          '<p class="note" style="margin:2px 0 0">' + T('任一项不同则拒绝对比，并指出第一个不同之处。', 'Any mismatch refuses the comparison and names the first difference.') + '</p></div></section>' +
+      '<section style="margin-top:24px"><div class="sec-h"><span class="ml">' + T('逐题 · 已开放的注释', 'Per item · annotations now open') + '</span><span class="rule"></span><span class="aside legend"><span>' + I.check + T('正确', 'correct') + '</span><span style="color:var(--red)">' + I.cross + T('错误', 'incorrect') + '</span><span><i class="dot re"></i>' + T('超时', 'timed out') + '</span></span></div>' +
+        '<div class="items40">' + cells + '</div>' + annot + '</section>' +
+    '</div></div>';
+  var insp =
+    inspHead(T('已完成', 'Complete')) +
+    '<div class="isec">' + isecH('本轮来源', 'Run provenance') +
+      '<dl class="kv"><dt>' + T('轮次', 'Run') + '</dt><dd><span class="num">#3</span> · ' + T('已完成 11-13', 'completed 11-13') + '</dd><dt>' + T('条件', 'Condition') + '</dt><dd>' + T('计时 · 无辅助 · 未见题', 'timed · unassisted · unseen') + '</dd><dt>' + T('选题', 'Selection') + '</dt><dd>' + T('按来源顺序的前若干未见单元，非随机', 'first unseen units in source order, not random') + '</dd><dt>' + T('AI 调用', 'AI calls') + '</dt><dd class="num">0</dd></dl></div>' +
+    '<div class="isec">' + isecH('污染检查', 'Contamination', '<span class="tag t-teal">0</span>') +
+      '<p class="note" style="margin:0">' + T('若有题目在本轮前被见过、出现过变体、或在测评中途被提示，会逐题列出并从总分与分技能中剔除，绝不被平均掉。', 'Items seen before the run, repeated variants, or hints during the run would be listed here and excluded from the headline and per-skill counts — never averaged away.') + '</p></div>' +
+    '<div class="isec">' + isecH('描述性区段', 'Descriptive bands') +
+      '<dl class="kv"><dt>' + T('正确率', 'Accuracy') + '</dt><dd><span class="num">' + nC + '/40 = ' + pct + '%</span> → ' + T('混合', 'mixed') + ' <span style="color:var(--ink-3)">(50–69%)</span></dd><dt>' + T('速度', 'Speed') + '</dt><dd>' + T('中位', 'median') + ' <span class="num">' + q.median + 's = ' + Math.round(q.median / 90 * 100) + '%</span> ' + T('单题时钟', 'of item clock') + ' → ' + T('稳定', 'steady') + ' <span style="color:var(--ink-3)">(50–74%)</span></dd></dl><p class="note">' + T('区段是固定定义的显示分组，只描述本轮；不是备考就绪信号，也不预测考试。', 'Bands are fixed display groupings describing this run only — not a readiness signal, no exam prediction.') + '</p></div>' +
+    '<div class="isec">' + isecH('明确的未知', 'Explicit unknowns') +
+      '<dl class="kv"><dt>' + T('及格线', 'Pass line') + '</dt><dd>' + T('未知', 'unknown') + '</dd><dt>' + T('真实题量', 'Real items') + '</dt><dd>' + T('未知', 'unknown') + '</dd><dt>' + T('真实时限', 'Real limit') + '</dt><dd>' + T('未知', 'unknown') + '</dd><dt>' + T('通过概率', 'Readiness') + '</dt><dd>' + T('不计算', 'not computed') + '</dd></dl></div>' +
+    '<div class="isec">' + isecH('测评后题池', 'Pool after run') +
+      '<div class="ros" style="grid-template-columns:1fr 1fr"><div class="ro"><div class="ml">' + T('未见题', 'Unseen') + '</div><div class="v">23 <small>' + T('题', 'items') + '</small></div></div><div class="ro"><div class="ml">' + T('单元', 'Units') + '</div><div class="v">7 <small>/ 21</small></div></div></div>' +
+      '<div style="margin-top:12px">' + unitStrip(4, 10, 7) + '<div class="units-lg"><span><i style="background:repeating-linear-gradient(135deg,var(--tick) 0 1.5px,transparent 1.5px 4px);box-shadow:inset 0 0 0 1px var(--hair-2)"></i>' + T('此前已用', 'spent before') + '</span><span><i style="background:repeating-linear-gradient(135deg,var(--ink-3) 0 1.5px,transparent 1.5px 4px);box-shadow:inset 0 0 0 1px var(--ink-3)"></i>' + T('第 3 轮', 'run #3') + '</span><span><i style="background:var(--ink-3);opacity:.8"></i>' + T('未见', 'unseen') + '</span></div></div>' +
+      '<p class="note">' + T('23 题 ≥ 每轮下限 20：还够一轮；之后需导入并审核更多材料。', '23 items ≥ the 20-item floor: one more run fits; after that, import and review more material.') + '</p></div>';
+  return { work: work, insp: insp };
+}
+
+/* ------------------------------------------------------------------ ANKI */
+function cardTheme() { return S.anki.ctheme === 'auto' ? S.theme : S.anki.ctheme; }
+function cardHTML() {
+  var A = S.anki;
+  var front = esc(A.front).replace(/\b(EXCEPT|NOT)\b/g, '<span class="pol">$1</span>');
+  var eg = esc(A.back2).replace('two of the four', '<b>two of the four</b>');
+  return '<div class="card ' + (cardTheme() === 'dark' ? 'dark ' : '') + (A.width === 'phone' ? 'phone' : '') + '" id="card" lang="en">' +
+    '<div class="ct"><span>' + esc(A.tactic) + '</span><i>Pass Quest</i></div><div class="cticks"></div>' +
+    '<div class="cf">' + front + '</div>' +
+    (A.face === 'back' ? '<div class="cb"><p>' + esc(A.back1) + '</p><p class="eg">' + eg + '</p></div>' : '') +
+    '<div class="cs"><span>S1 · p024 · q1</span><span>rev 1</span></div></div>';
+}
+function vAnki() {
+  var A = S.anki;
+  var segb = function (key, val, label, aria) { var on = key === 'ctheme' ? cardTheme() === val : A[key] === val; return '<button data-ak="' + key + '" data-av="' + val + '" aria-pressed="' + on + '"' + (aria ? ' aria-label="' + aria + '" title="' + aria + '"' : '') + '>' + label + '</button>'; };
+  var row = function (i, f, src, st, extra) { return '<div class="nrow"><span class="ix">' + i + '</span><span class="f" lang="en">' + f + '</span><span class="src">' + src + '</span><span class="st">' + st + '</span><span style="text-align:right">' + (extra || '') + '</span></div>'; };
+  var cf = A.conflict;
+  var nQueued = 1 + (A.accepted ? 1 : 0);
+  var work =
+    wkH(['S1 · p024 · q1'], T('来自 Q1 失误的卡片草稿', 'Draft from the Q1 miss'),
+      (A.accepted ? '<span class="tag t-teal">' + I.check + T('已接受 · 修订 1 · 排队中', 'accepted · revision 1 · queued') + '</span>' : A.skipped ? '<span class="tag t-ghost">' + T('已跳过', 'skipped') + '</span>' : '') +
+      '<button class="btn sm ai" data-act="refine">' + I.ext + T('用 AI 润色', 'Refine with AI') + '<span class="mono" style="font-size:10px;opacity:.8">' + T('建议性', 'advisory') + '</span></button>' +
+      '<button class="btn sm ghost" data-act="askip">' + T('跳过', 'Skip') + '</button><button class="btn sm pri" data-act="accept">' + T('接受', 'Accept') + ' <kbd>' + mod() + '</kbd><kbd>↵</kbd></button>') +
+    '<div class="wk-b"><div class="pad">' +
+      '<div class="anki-grid">' +
+        '<section><div class="sec-h"><span class="ml">' + T('字段 · 可编辑', 'Fields · editable') + '</span><span class="rule"></span></div>' +
+          '<div class="field"><label for="f-front"><span class="ml">' + T('正面', 'Front') + '</span><span class="cnt"><span id="c-front">' + A.front.length + '</span> / 120 ' + T('字符', 'chars') + '</span></label><input id="f-front" data-af="front" lang="en" maxlength="120" value="' + esc(A.front) + '"></div>' +
+          '<div class="field"><label for="f-b1"><span class="ml">' + T('背面 · 解释', 'Back · explanation') + '</span></label><textarea id="f-b1" data-af="back1" lang="en" rows="3">' + esc(A.back1) + '</textarea></div>' +
+          '<div class="field"><label for="f-b2"><span class="ml s1">' + T('背面 · 例句', 'Back · example') + '<span class="tag" style="height:18px;font-size:10px">' + T('S1 原文摘录', 'S1 excerpt') + '</span></span></label><textarea id="f-b2" data-af="back2" lang="en" rows="1">' + esc(A.back2) + '</textarea></div>' +
+          '<div class="anki-two" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+          '<div class="field"><label for="f-t"><span class="ml">' + T('战术', 'Tactic') + '</span></label><input id="f-t" data-af="tactic" lang="en" value="' + esc(A.tactic) + '"></div>' +
+          '<div class="field"><label for="f-s"><span class="ml">' + T('来源', 'Source') + '</span>' + I.lock + '</label><input id="f-s" class="mono" value="S1 · p024 · q1" readonly></div></div>' +
+          '<p class="note" style="margin-top:0">' + T('来源只写编号，不写书名。卡片为离线安全的 HTML/CSS。', 'Source is an id, never the title. The card is offline-safe HTML/CSS.') + '</p>' +
+        '</section>' +
+        '<section><div class="sec-h"><span class="ml">' + T('预览 · 实时', 'Preview · live') + '</span><span class="rule"></span></div>' +
+          '<div class="previewbar"><div class="seg" role="group" aria-label="' + T('卡面', 'Card face') + '">' + segb('face', 'front', T('正面', 'Front')) + segb('face', 'back', T('背面', 'Back')) + '</div>' +
+            '<div class="seg" role="group" aria-label="' + T('卡片主题', 'Card theme') + '">' + segb('ctheme', 'light', I.sun, T('浅色卡片', 'Light card')) + segb('ctheme', 'dark', I.moon, T('深色卡片', 'Dark card')) + '</div>' +
+            '<div class="seg" role="group" aria-label="' + T('预览宽度', 'Preview width') + '">' + segb('width', 'desktop', T('桌面', 'Desktop')) + segb('width', 'phone', T('手机', 'Phone')) + '</div></div>' +
+          '<div class="stage" id="stage">' + cardHTML() + '<span class="dim">' + (A.width === 'phone' ? '300' : '460') + ' px</span></div>' +
+        '</section>' +
+      '</div>' +
+      '<section class="notes"><div class="sec-h"><span class="ml">' + T('卡片与同步状态', 'Notes & sync state') + '</span><span class="rule"></span><span class="aside"><span class="mono">6 ' + T('已推送', 'pushed') + ' · ' + nQueued + ' ' + T('排队', 'queued') + ' · 1 ' + T('冲突', 'conflict') + ' · 1 ' + T('已存在', 'present') + '</span></span></div>' +
+        row('10', esc(A.front), 'S1 · p024 · q1', A.accepted ? lamp('warn') + T('排队 · 待推送', 'queued') : '<span style="color:var(--ink-3)">' + T('草稿', 'draft') + '</span>', '<span class="note" style="margin:0">' + T('当前草稿', 'this draft') + '</span>') +
+        row('09', 'which word does “it” refer to', 'S1 · p019 · q3', lamp('warn') + T('排队', 'queued'), '<span class="note" style="margin:0">' + T('可达时推送一次', 'pushes once reachable') + '</span>') +
+        row('08', 'rather than: which side is chosen', 'S1 · p022 · q2', lamp('err') + '<span style="color:var(--red)">' + T('冲突', 'conflict') + '</span>', '<span class="note" style="margin:0">' + T('你在 Anki 中改过', 'edited in Anki') + '</span>') +
+        '<div class="conflict"><div class="' + (cf === 'mine' ? 'chosen' : '') + '"><div class="ml">' + T('Pass Quest 版本 · 修订 2', 'Pass Quest version · rev 2') + '</div><div class="tx" lang="en">“A rather than B” — the sentence chooses <del>B</del> <ins>A</ins>.</div><button class="btn sm" data-act="keepmine"' + (cf === 'mine' ? ' aria-pressed="true"' : '') + '>' + T('保留此版', 'Keep yours') + '</button></div>' +
+          '<div class="' + (cf === 'anki' ? 'chosen' : '') + '"><div class="ml">' + T('Anki 中的版本 · 11-12 编辑', 'Version in Anki · edited 11-12') + '</div><div class="tx" lang="en">“A rather than B” — chosen: A. Not B. <ins>(see p.22)</ins></div><button class="btn sm" data-act="keepanki"' + (cf === 'anki' ? ' aria-pressed="true"' : '') + '>' + T('保留 Anki 版', 'Keep Anki\'s') + '</button></div></div>' +
+        row('07', 'the word “it” usually points back', 'S1 · p017 · q1', lamp('off') + T('已存在', 'already present'), '<span class="note" style="margin:0">' + T('未重复创建', 'not duplicated') + '</span>') +
+        row('06', 'not only … but also', 'S1 · p015 · q4', lamp('ok') + T('已推送', 'pushed'), '<span class="mono" style="font-size:11px;color:var(--ink-3)">11-10</span>') +
+        row('01–05', T('另 5 张已推送', '5 more pushed'), '—', lamp('ok') + T('已推送', 'pushed'), '<span class="mono" style="font-size:11px;color:var(--ink-3)">10-24 → 11-08</span>') +
+      '</section>' +
+    '</div></div>';
+  var refinePayload = S.consent
+    ? '<li>' + I.check + T('正面、解释、战术', 'Front, explanation, tactic') + '</li><li>' + I.check + T('例句（S1 摘录，已授权）', 'Example (S1 excerpt, consented)') + '</li>'
+    : '<li>' + I.check + T('正面、解释、战术', 'Front, explanation, tactic') + '</li><li class="wh">' + I.cross + T('例句（S1 摘录）· 扣留', 'Example (S1 excerpt) · withheld') + '</li>';
+  var insp =
+    inspHead(T('草稿', 'Draft')) +
+    '<div class="isec">' + isecH('同步通道', 'Sync channel') +
+      '<div class="cond" style="border-color:var(--red-ln)"><div class="cond-top">' + lamp('err') + '<span class="name">AnkiConnect</span><span class="tag t-red">' + T('不可达', 'unreachable') + '</span></div><div class="cond-sub"><span class="mono" style="font-size:11.5px">127.0.0.1:8765</span> · ' + T('Anki 未运行。接受的卡片会排队，可达时只推送一次。', 'Anki is not running. Accepted notes queue and push once when reachable.') + '</div></div>' +
+      '<p class="note">' + T('Pass Quest 不是第二个记忆系统：复习安排完全交给 Anki。', 'Pass Quest is not a second SRS: scheduling stays in Anki.') + '</p></div>' +
+    '<div class="isec">' + isecH('这张卡片的来源', 'Note provenance') +
+      '<dl class="kv"><dt>' + T('起因', 'From') + '</dt><dd>' + (S.fb.choice === 'C' ? T('Q1 作答', 'Q1 attempt') : T('Q1 失误', 'Q1 miss')) + ' · ' + (S.fb.assisted ? T('有辅助', 'assisted') : T('独立迁移', 'independent')) + '</dd><dt>' + T('内容', 'Content') + '</dt><dd>' + T('已核实的解释 + 证据句', 'verified explanation + evidence') + '</dd><dt>' + T('修订', 'Revision') + '</dt><dd class="num">1 ' + T('（接受后生效）', '(on accept)') + '</dd><dt>' + T('AI 参与', 'AI used') + '</dt><dd>' + T('否', 'no') + '</dd></dl></div>' +
+    '<div class="isec">' + isecH('“用 AI 润色”将发送', '“Refine with AI” would send', '<span class="tag t-violet">' + T('建议性', 'advisory') + '</span>') +
+      '<div class="manifest" style="margin-top:0"><div class="row"><span>' + T('路径', 'Route') + '</span><span style="color:var(--violet);display:flex;gap:6px;align-items:center">' + I.ext + T('外部 · DeepSeek', 'External · DeepSeek') + '</span></div><div class="row"><span>' + T('内容', 'Payload') + '</span><ul class="payload">' + refinePayload + '</ul></div><div class="row"><span>' + T('预算', 'Budget') + '</span><span class="mono">1 ' + T('次', 'call') + ' → ' + (S.calls + 1) + '/20</span></div></div>' +
+      '<p class="note">' + T('润色结果作为可编辑建议出现，需你确认。', 'The result appears as an editable suggestion you must confirm.') + '</p></div>' +
+    '<div class="isec">' + isecH('手机同步', 'Phone sync') + '<p class="note" style="margin:0">' + T('通过 AnkiWeb 同步到手机由你在 Anki 中手动完成；Pass Quest 不代为登录。', 'Syncing to your phone via AnkiWeb is your own action in Anki; Pass Quest never signs in for you.') + '</p>' +
+      '<p class="note" style="color:var(--amber);display:flex;gap:6px;align-items:flex-start">' + I.warn + '<span>' + T('这张卡片含 S1 原文摘录。经 AnkiWeb 同步会把它发送到 AnkiWeb，不在服务商授权范围内。', 'This card contains an S1 excerpt. Syncing via AnkiWeb sends it to AnkiWeb, which provider consent does not cover.') + '</span></p></div>';
+  return { work: work, insp: insp };
+}
+
+/* ------------------------------------------------------------------ SETTINGS */
+function vSettings() {
+  var CAPT = { v: T('已验证', 'verified'), d: T('已声明，未验证', 'declared, unverified'), u: T('不支持', 'unsupported'), f: T('失败', 'failed') };
+  var cap = function (spec) { return '<span class="caps">' + spec.split('').map(function (c) { return '<i class="cap ' + c + '" title="' + CAPT[c] + '" aria-label="' + CAPT[c] + '"></i>'; }).join('') + '</span>'; };
+  var cred = function (ok) { return '<span class="cred" style="color:' + (ok ? 'var(--ink-2)' : 'var(--ink-3)') + '">' + I.key + (ok ? T('有', 'present') : T('缺失', 'missing')) + '</span>'; };
+  var rows = [
+    ['DeepSeek', 'deepseek-chat', 'vudud', '<span class="tag t-teal">' + I.check + 'verified@11-13 09:12</span>', cred(true), '<span class="tag t-teal">' + T('使用中', 'in use') + '</span>', 'inuse'],
+    ['OpenAI', 'gpt-4o-mini', 'ddddu', '<span class="tag t-ghost">declared, unverified</span>', '<span class="cred" style="color:var(--ink-3)">' + I.key + 'no_credential</span>', '<button class="btn sm ghost" data-act="addkey">' + T('添加密钥', 'Add key') + '</button>'],
+    ['Qwen', 'qwen-plus', 'dduuu', '<span class="tag t-ghost">declared, unverified</span>', cred(true), '<button class="btn sm" data-act="test">' + T('测试', 'Test') + '</button>'],
+    ['Gemini', 'gemini-2.0-flash', 'fdduu', '<span class="tag t-red">failed:auth@11-12 21:40</span>', cred(true), '<button class="btn sm danger" data-act="checkkey">' + T('检查密钥', 'Check key') + '</button>'],
+    ['Doubao', '—', 'duuuu', '<span class="tag t-ghost">declared, unverified</span>', '<span class="cred" style="color:var(--ink-3)">' + I.key + 'no_credential</span>', '<button class="btn sm ghost" data-act="addkey">' + T('添加密钥', 'Add key') + '</button>'],
+    [T('自定义端点', 'Custom endpoint'), T('未配置', 'not configured'), 'uuuuu', '<span style="color:var(--ink-3)">—</span>', '<span style="color:var(--ink-3)">—</span>', '<button class="btn sm ghost" data-act="custom">' + T('配置', 'Configure') + '</button>']
+  ];
+  var capH = [['chat', 'text.chat'], ['tools', 'tool.calls'], ['vis', 'vision'], ['srch', 'search'], ['tts', 'speech.synthesis']];
+  var tbl = '<table class="reg"><thead><tr><th class="ml">' + T('服务商', 'Provider') + '</th><th class="ml">' + T('模型', 'Model') + '</th><th><span class="capsh">' + capH.map(function (c) { return '<span title="' + c[1] + '">' + c[0] + '</span>'; }).join('') + '</span></th><th class="ml">' + T('text.chat 状态', 'text.chat state') + '</th><th class="ml">' + T('授权', 'Authorization') + '</th><th></th></tr></thead><tbody>' +
+    rows.map(function (r) { return '<tr class="' + (r[6] || '') + '"><td class="pv">' + r[0] + '</td><td class="md">' + r[1] + '</td><td>' + cap(r[2]) + '</td><td>' + r[3] + '</td><td>' + r[4] + '</td><td style="text-align:right">' + r[5] + '</td></tr>'; }).join('') + '</tbody></table>';
+  var t20 = function (n, na) { var s = ''; for (var i = 0; i < 20; i++) s += '<i class="' + (i < n ? 'u' : '') + '"></i>'; return '<div class="ticks20' + (na ? ' na' : '') + '" aria-hidden="true">' + s + '</div>'; };
+  var ledger = S.ledger.map(function (e) {
+    return '<div class="lev"><span class="t">' + e.t + '</span><span class="ln" style="background:' + (e.kind === 'grant' ? 'var(--teal)' : 'var(--amber)') + '"></span><span>' + (e.kind === 'grant' ? T('<b>授权</b> · S1 → DeepSeek · 记录人 Han', '<b>Granted</b> · S1 → DeepSeek · by Han') : T('<b>扣留</b> · S1 → DeepSeek · 撤销事件已追加', '<b>Withheld</b> · S1 → DeepSeek · revoke event appended')) + '</span></div>';
+  }).join('');
+  var work =
+    wkH(null, T('模型、凭据、授权与预算', 'Models, credentials, consent, budget'), '<span class="tag t-word">' + I.lock + T('凭据存于系统密钥库，只显示有无', 'Credentials: OS secret store · present / missing') + '</span>') +
+    '<div class="wk-b"><div class="pad">' +
+      '<section><div class="sec-h"><span class="ml">' + T('服务商注册表 · 四项独立事实', 'Provider registry · four separate facts') + '</span><span class="rule"></span><span class="aside legend"><span><i class="cap v" style="width:10px;height:10px"></i>' + CAPT.v + '</span><span><i class="cap d" style="width:10px;height:10px"></i>' + CAPT.d + '</span><span><i class="cap u" style="width:10px;height:10px"></i>' + CAPT.u + '</span><span><i class="cap f" style="width:10px;height:10px"></i>' + CAPT.f + '</span></span></div>' + tbl +
+        '<p class="note">' + T('只有 text.chat 会被实际验证；其余能力仅为声明。能力列：chat = text.chat · tools = tool.calls · vis = vision · srch = search · tts = speech.synthesis。', 'Only text.chat is ever verified; other capabilities are declarations. Columns: chat = text.chat · tools = tool.calls · vis = vision · srch = search · tts = speech.synthesis.') + '</p></section>' +
+      '<div class="set-grid">' +
+        '<section><div class="sec-h"><span class="ml">' + T('每日预算 · 每家上限 20', 'Daily budget · limit 20 each') + '</span><span class="rule"></span></div><div class="bud">' +
+          '<div class="r"><span>DeepSeek</span>' + t20(S.calls) + '<span class="v">' + S.calls + '/20</span></div>' +
+          '<div class="r"><span>Qwen</span>' + t20(0) + '<span class="v">0/20</span></div>' +
+          '<div class="r"><span>Gemini</span>' + t20(0) + '<span class="v">0/20</span></div>' +
+          '<div class="r" style="color:var(--ink-3)"><span>OpenAI</span>' + t20(0, true) + '<span class="v">—</span></div>' +
+          '<div class="r" style="color:var(--ink-3)"><span>Doubao</span>' + t20(0, true) + '<span class="v">—</span></div>' +
+          '<div class="r" style="border-top:1px solid var(--hair-2);padding-top:8px"><span style="font-weight:600">' + T('合计', 'Sum') + '</span><span style="font-size:12px;color:var(--ink-3)">' + T('真实上限 = 有密钥的 <span class="num">3</span> 家 × <span class="num">20</span>', 'ceiling = <span class="num">3</span> keyed providers × <span class="num">20</span>') + '</span><span class="v" style="font-weight:600">' + S.calls + '/60</span></div>' +
+        '</div></section>' +
+        '<section><div class="sec-h"><span class="ml">' + T('授权账本 · 私有来源 S1', 'Consent ledger · private source S1') + '</span><span class="rule"></span></div><div class="ledger">' + ledger +
+          '<div class="foot2"><span style="font-size:12.5px;display:flex;gap:8px;align-items:center">' + lamp(S.consent ? 'ok' : 'warn') + (S.consent ? T('当前：DeepSeek 可接收 S1 内容', 'Now: DeepSeek may receive S1 content') : T('当前：S1 内容对所有服务商扣留', 'Now: S1 content withheld from all providers')) + '</span>' +
+          '<button class="btn sm ' + (S.consent ? 'danger' : '') + '" data-act="consent">' + (S.consent ? T('撤销授权', 'Revoke') : T('重新授权', 'Grant again')) + '</button></div></div>' +
+          '<p class="note">' + T('自编的第一方练习无需授权。撤销只追加事件，不删除历史。', 'First-party authored exercises need no consent. Revoking appends an event; history is never erased.') + '</p></section>' +
+      '</div>' +
+      '<section style="margin-top:24px"><div class="sec-h"><span class="ml">' + T('本地服务', 'Local services') + '</span><span class="rule"></span></div><div class="svc" style="grid-template-columns:1fr 1fr 1fr;display:grid">' +
+        '<div>' + lamp('ok') + '<span>' + T('智能体主机 (Node)', 'Agent host (Node)') + '</span><span class="mono">' + T('运行中', 'running') + '</span></div>' +
+        '<div style="border-top:0;border-left:1px solid var(--hair)">' + lamp('err') + '<span>AnkiConnect <span class="mono">127.0.0.1:8765</span></span><span class="mono" style="color:var(--red)">' + T('不可达', 'unreachable') + '</span></div>' +
+        '<div style="border-top:0;border-left:1px solid var(--hair)">' + lamp('off') + '<span>' + T('搜索服务', 'Search provider') + '</span><span class="mono">' + T('未配置', 'not configured') + '</span></div>' +
+      '</div></section>' +
+    '</div></div>';
+  var insp =
+    inspHead(T('路由', 'Routing')) +
+    '<div class="isec">' + isecH('text.chat 当前路由', 'text.chat route now') +
+      '<div class="cond ' + (S.consent ? 'counts' : 'assisted') + '"><div class="cond-top">' + lamp(S.consent ? 'ok' : 'warn') + '<span class="name" style="font-family:var(--f-mono);font-size:13px;font-weight:500">deepseek/deepseek-chat</span></div><div class="cond-sub">' +
+        (S.consent ? T('已验证 · 有密钥 · 有预算 · S1 已授权', 'verified · key present · budget left · S1 consented') : T('已验证 · 有密钥 · 有预算 · S1 扣留：只发送第一方内容与作答事实', 'verified · key present · budget left · S1 withheld: only first-party content and attempt facts are sent')) + '</div></div></div>' +
+    '<div class="isec">' + isecH('故障转移候选', 'Failover candidates', '<span class="tag t-ghost">' + T('无', 'none') + '</span>') +
+      '<div class="locked">' +
+        '<div>' + I.cross + '<span>Qwen</span><span class="mono">' + T('未验证', 'unverified') + '</span></div>' +
+        '<div>' + I.cross + '<span>Gemini</span><span class="mono">failed:auth</span></div>' +
+        '<div>' + I.cross + '<span>OpenAI · Doubao</span><span class="mono">no_credential</span></div>' +
+      '</div><p class="note">' + T('只转移到：已验证、有预算、且授权范围完全相同的服务商。没有符合者时，调用失败并告知你。', 'Fails over only to a verified provider with budget and an exactly equal consent scope. With none eligible, the call fails and tells you.') + '</p></div>' +
+    '<div class="isec">' + isecH('最近一次调用', 'Last call trace') +
+      '<dl class="kv"><dt>' + T('时间', 'At') + '</dt><dd class="num">11-13 10:24</dd><dt>' + T('用途', 'For') + '</dt><dd>' + T('AI 教练 · 追问', 'AI coach · probe') + '</dd><dt>' + T('路由', 'Route') + '</dt><dd><span class="mono">text.chat → deepseek-chat</span></dd><dt>' + T('内容', 'Sent') + '</dt><dd><span class="num">1.9 KB</span> · ' + T('含 S1（已授权）', 'incl. S1 (consented)') + '</dd><dt>' + T('结果', 'Result') + '</dt><dd><span style="color:var(--teal)">' + T('成功', 'ok') + '</span> · ' + T('占用 1 次', '1 slot') + ' · <span class="num">4/20</span></dd></dl></div>' +
+    '<div class="isec">' + isecH('凭据', 'Credentials') +
+      '<dl class="kv"><dt>' + T('存放', 'Stored in') + '</dt><dd>' + T('系统密钥库', 'OS secret store') + '</dd><dt>' + T('显示', 'Shown as') + '</dt><dd>' + T('有 / 缺失', 'present / missing') + '</dd><dt>' + T('从不', 'Never') + '</dt><dd>' + T('写入数据库、日志或命令行', 'written to DB, logs or argv') + '</dd></dl></div>';
+  return { work: work, insp: insp };
+}
+
+/* ------------------------------------------------------------------ render */
+var VIEWS = { today: vToday, practice: vPractice, feedback: vFeedback, assess: vAssess, report: vReport, anki: vAnki, settings: vSettings };
+var FOCUS_KEYS = ['id', 'data-act', 'data-opt', 'data-aopt', 'data-mode', 'data-item', 'data-ritem', 'data-lang', 'data-theme', 'data-go'];
+function focusKey() { // remember what had focus so a re-render does not drop keyboard users to <body>
+  var a = document.activeElement;
+  if (!a || a === document.body || !a.closest('#app')) return null;
+  for (var i = 0; i < FOCUS_KEYS.length; i++) { var k = FOCUS_KEYS[i], v = a.getAttribute(k); if (v) return '[' + k + '="' + v + '"]' + (a.hasAttribute('data-av') ? '[data-av="' + a.getAttribute('data-av') + '"]' : ''); }
+  return null;
+}
+function render() {
+  var fk = focusKey();
+  var root = document.documentElement;
+  root.setAttribute('data-theme', S.theme);
+  root.setAttribute('lang', S.lang === 'zh' ? 'zh-CN' : 'en');
+  root.classList.toggle('shot', S.shot);
+  document.title = 'Pass Quest — ' + rname(S.route);
+  renderTop(); renderRail(); renderFoot();
+  var v = VIEWS[S.route]();
+  $('#work').innerHTML = v.work;
+  $('#insp').innerHTML = v.insp;
+  $('#insp').setAttribute('aria-label', T('证据检视器', 'Evidence inspector'));
+  renderLayer();
+  if (fk && !S.pal && !S.dlg && !S.sheet) { var el = $('#app ' + fk); if (el) el.focus({ preventScroll: true }); }
+}
+function route() {
+  var r = (location.hash.match(/^#\/(\w+)/) || [])[1];
+  S.route = VIEWS[r] ? r : 'today';
+  hideMarkPop();
+  render();
+  $('#work .wk-b') && ($('#work .wk-b').scrollTop = 0);
+}
+
+/* ------------------------------------------------------------------ overlays: command bar, shortcut sheet, dialogs, toast */
+function commands() {
+  var c = [], here = function (zh, en, k, run) { c.push({ g: 'here', zh: zh, en: en, k: k, run: run }); };
+  var sealed = S.route === 'assess';
+  if (S.route === 'practice') {
+    'ABCD'.split('').forEach(function (L, i) { here('选择 ' + L + '：' + Q1.opts[i], 'Choose ' + L + ': ' + Q1.opts[i], [L], function () { selectOpt(L); }); });
+    here('提交作答', 'Submit answer', ['↵'], submitPractice);
+    here('打开提示（本次将变为有辅助）', 'Open hint (attempt becomes assisted)', ['H'], function () { act('hint'); });
+    here('跳过本题', 'Skip this item', ['S'], function () { act('skip'); });
+  } else if (S.route === 'feedback') {
+    here('AI 教练：解释', 'AI coach: explain', ['1'], function () { setMode('explain'); });
+    here('AI 教练：追问', 'AI coach: probe', ['2'], function () { setMode('probe'); });
+    here('AI 教练：微课', 'AI coach: micro-lesson', ['3'], function () { setMode('lesson'); });
+    here('制作 Anki 卡片', 'Propose an Anki note', ['N'], function () { go('anki'); });
+    here('下一题 · 新文章', 'Next item · fresh passage', ['↵'], function () { act('nextitem'); });
+  } else if (sealed) {
+    here('确认并继续', 'Confirm & continue', ['↵'], function () { act('aconfirm'); });
+    here('上一题', 'Previous item', ['←'], function () { act('aprev'); });
+    here('下一题', 'Next item', ['→'], function () { act('anext'); });
+    here('离开（可恢复，计时不暂停）', 'Leave (resumable; the clock keeps running)', null, function () { go('today'); });
+  } else if (S.route === 'anki') {
+    here('接受草稿（修订 1）', 'Accept draft (revision 1)', [mod(), '↵'], function () { act('accept'); });
+    here('翻转预览正反面', 'Flip preview front/back', ['F'], function () { S.anki.face = S.anki.face === 'front' ? 'back' : 'front'; render(); });
+    here('跳过此草稿', 'Skip this draft', null, function () { act('askip'); });
+  } else if (S.route === 'today') {
+    here('开始下一步：NOT/EXCEPT 极性', 'Start next action: NOT/EXCEPT polarity', ['↵'], function () { go('practice'); });
+  }
+  c.push({ g: 'act', zh: '切换主题', en: 'Toggle theme', k: ['Alt', 'T'], kw: 'dark light', run: function () { setTheme(S.theme === 'dark' ? 'light' : 'dark'); } });
+  c.push({ g: 'act', zh: '切换界面语言', en: 'Switch interface language', k: ['Alt', 'L'], kw: 'zh en language', run: function () { setLang(S.lang === 'zh' ? 'en' : 'zh'); } });
+  var help = { g: 'help', zh: '显示全部快捷键', en: 'Show all shortcuts', k: ['?'], run: function () { S.sheet = true; renderLayer(); } };
+  if (sealed) return c.concat(help); // sealed: no navigation, no AI, no consent changes until the run ends
+  var acts = c.filter(function (x) { return x.g === 'act'; }); c = c.filter(function (x) { return x.g !== 'act'; });
+  ROUTES.forEach(function (r) { c.push({ g: 'nav', zh: '前往：' + r.zh, en: 'Go to ' + r.en, k: ['G', r.k], run: function () { go(r.id); } }); });
+  if (S.route !== 'today') c.push({ g: 'act', zh: '开始下一步', en: 'Start next action', kw: 'practice_new not-except', run: function () { go('practice'); } });
+  c.push({ g: 'act', zh: '继续研读简报 brief-7（3/6）', en: 'Resume study brief brief-7 (3/6)', kw: 'resume', run: function () { toast(T('brief-7 已从第 3 步继续', 'brief-7 resumed at step 3')); } });
+  c.push({ g: 'act', zh: S.consent ? '撤销 S1 对 DeepSeek 的授权' : '重新授权 S1 给 DeepSeek', en: S.consent ? 'Revoke S1 consent for DeepSeek' : 'Grant S1 consent to DeepSeek', kw: 'consent', run: toggleConsent });
+  c.push({ g: 'act', zh: '测试 qwen/qwen-plus 连接', en: 'Test qwen/qwen-plus connection', kw: 'verify', run: function () { toast(T('原型：不会发出网络请求', 'Prototype: no network request is made')); } });
+  c.push({ g: 'act', zh: '设置考试日期', en: 'Set exam date', kw: 'date', run: function () { toast(T('原型：考试日期仍为未设置', 'Prototype: exam date stays not set')); } });
+  c.push({ g: 'act', zh: '回到计时测评（第 3 轮进行中）', en: 'Return to timed assessment (run #3 active)', kw: 'assess', run: function () { go('assess'); } });
+  return c.concat(acts).concat(help);
+}
+function fuzzy(q, s) {
+  if (!q) return { score: 1, html: s };
+  var ql = q.toLowerCase(), sl = s.toLowerCase(), i = 0, j = 0, out = '', score = 0, run = 0;
+  for (; j < s.length; j++) {
+    if (i < ql.length && sl[j] === ql[i]) { out += '<em>' + s[j] + '</em>'; i++; run++; score += 1 + run; } else { out += s[j]; run = 0; }
+  }
+  if (i < ql.length) return null;
+  if (sl.indexOf(ql) >= 0) score += 20;
+  return { score: score, html: out };
+}
+function palItems() {
+  var q = S.pal.q.trim();
+  return commands().map(function (c) {
+    var lbl = T(c.zh, c.en), m = fuzzy(q, lbl);
+    if (!m && q) { var alt = fuzzy(q, (c.kw || '') + ' ' + c.en + ' ' + c.zh); if (alt) m = { score: alt.score / 2, html: lbl }; }
+    return m ? { c: c, m: m } : null;
+  }).filter(Boolean).sort(function (a, b) { return q ? b.m.score - a.m.score : 0; });
+}
+function renderPalList() {
+  var items = palItems(), box = $('#pal-list');
+  if (!box) return;
+  S.pal.n = items.length; if (S.pal.i >= items.length) S.pal.i = Math.max(0, items.length - 1);
+  var G = { here: T('当前页面', 'On this screen'), nav: T('跳转', 'Navigate'), act: T('操作', 'Actions'), help: T('帮助', 'Help') }, last = null, h = '';
+  items.forEach(function (it, idx) {
+    if (!S.pal.q.trim() && it.c.g !== last) { h += '<div class="pal-g ml">' + G[it.c.g] + '</div>'; last = it.c.g; }
+    h += '<div class="pal-i" role="option" id="pal-o' + idx + '" data-pi="' + idx + '" aria-selected="' + (idx === S.pal.i) + '">' + (it.c.g === 'nav' ? I.nav : it.c.g === 'help' ? I.prompt : I.act) + '<span>' + it.m.html + '</span>' + (it.c.k ? kbds(it.c.k) : '<span></span>') + '</div>';
+  });
+  box.innerHTML = h || '<div class="pal-empty">' + T('没有匹配的命令', 'No matching command') + '</div>';
+  S.pal.list = items;
+  var inp = $('#pal-q'); if (inp) inp.setAttribute('aria-activedescendant', 'pal-o' + S.pal.i);
+  var sel = box.querySelector('[aria-selected="true"]'); if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
+}
+function renderLayer() {
+  var L = $('#layer'), h = '';
+  if (S.pal) {
+    h = '<div class="scrim" data-close="pal"><div class="pal" role="dialog" aria-modal="true" aria-label="' + T('命令栏', 'Command bar') + '"><div class="pal-in">' + (S.route === 'assess' ? I.lock : I.prompt) + '<input id="pal-q" role="combobox" aria-expanded="true" aria-controls="pal-list" autocomplete="off" spellcheck="false" placeholder="' + T('输入命令或跳转（支持模糊匹配）', 'Type a command or a place (fuzzy)') + '" value="' + esc(S.pal.q) + '"><span class="ctx">' + rname(S.route) + (S.route === 'assess' ? ' · ' + T('已封存', 'sealed') : '') + '</span></div>' +
+      '<div class="pal-list" id="pal-list" role="listbox"></div>' +
+      '<div class="pal-f"><span>' + kbds(['↑', '↓']) + T('选择', 'select') + '</span><span>' + kbds(['↵']) + T('执行', 'run') + '</span><span>' + kbds(['Esc']) + T('关闭', 'close') + '</span><span style="margin-left:auto">' + (S.route === 'assess' ? T('测评中仅限本轮命令', 'run commands only while sealed') : T('模糊匹配 · 中英文均可', 'fuzzy · matches zh and en')) + '</span></div></div></div>';
+  } else if (S.sheet) {
+    var r = function (l, k) { return '<div class="sk-r"><span>' + l + '</span>' + k + '</div>'; };
+    var or = function (a, b) { return '<span class="kgrp">' + kbds(a) + '<span style="color:var(--ink-3);font-size:11px;margin:0 2px">/</span>' + kbds(b) + '</span>'; };
+    h = '<div class="scrim" data-close="sheet"><div class="sheet" role="dialog" aria-modal="true" aria-label="' + T('快捷键', 'Shortcuts') + '"><div class="sheet-h"><h2>' + T('快捷键', 'Keyboard shortcuts') + '</h2>' + kbds(['Esc']) + '</div><div class="sheet-b">' +
+      '<div><div class="ml" style="margin-bottom:8px">' + T('全局', 'Global') + '</div>' + r(T('命令栏', 'Command bar'), kbds([mod(), 'K'])) + r(T('快捷键表', 'This sheet'), kbds(['?'])) + r(T('切换主题', 'Toggle theme'), kbds(['Alt', 'T'])) + r(T('切换语言', 'Switch language'), kbds(['Alt', 'L'])) +
+        ROUTES.map(function (x) { return r(T('前往', 'Go to') + ' ' + T(x.zh, x.en), kbds(['G', x.k])); }).join('') + '</div>' +
+      '<div><div class="ml" style="margin-bottom:8px">' + T('练习', 'Practice') + '</div>' + r(T('选择选项', 'Choose option'), or(['A–D'], ['1–4'])) + r(T('提交', 'Submit'), kbds(['↵'])) + r(T('提示（变为有辅助）', 'Hint (becomes assisted)'), kbds(['H'])) + r(T('跳过', 'Skip'), kbds(['S'])) + r(T('标记选中文字', 'Mark selected text'), kbds(['M'])) +
+        '<div class="ml" style="margin:14px 0 8px">' + T('反馈', 'Feedback') + '</div>' + r(T('解释 / 追问 / 微课', 'Explain / probe / lesson'), kbds(['1', '2', '3'])) + r(T('制作 Anki 卡片', 'Propose Anki note'), kbds(['N'])) + r(T('下一题', 'Next item'), kbds(['↵'])) + '</div>' +
+      '<div><div class="ml" style="margin-bottom:8px">' + T('测评', 'Assessment') + '</div>' + r(T('选择选项', 'Choose option'), or(['A–D'], ['1–4'])) + r(T('确认并继续', 'Confirm & continue'), kbds(['↵'])) + r(T('上一题 / 下一题', 'Previous / next'), kbds(['←', '→'])) + r(T('离开 · 经命令栏', 'Leave · via command bar'), kbds([mod(), 'K'])) +
+        '<p class="note" style="margin:6px 0 0">' + I.lock + ' ' + T('封存期间：跳转、提示与 AI 快捷键不可用。', 'While sealed: navigation, hint and AI shortcuts are off.') + '</p>' +
+        '<div class="ml" style="margin:14px 0 8px">Anki</div>' + r(T('接受草稿', 'Accept draft'), kbds([mod(), '↵'])) + r(T('翻转预览', 'Flip preview'), kbds(['F'])) +
+        '<div class="ml" style="margin:14px 0 8px">' + T('对话框', 'Dialogs') + '</div>' + r(T('关闭', 'Close'), kbds(['Esc'])) + '</div>' +
+      '</div></div></div>';
+  } else if (S.dlg === 'hint') {
+    h = '<div class="scrim" data-close="dlg"><div class="dlg" role="alertdialog" aria-modal="true" aria-labelledby="dh" aria-describedby="dd"><div class="dlg-h"><span style="color:var(--amber)">' + I.warn + '</span><h2 id="dh">' + T('打开提示会让本次作答变为“有辅助”', 'Opening the hint makes this attempt assisted') + '</h2></div>' +
+      '<div class="dlg-b" id="dd">' + T('结果仍会记录，但不会计入独立迁移。NOT/EXCEPT 极性目前只有 3 次独立证据，本次是第 4 次的机会。', 'The result is still recorded, but it will not count as independent transfer. NOT/EXCEPT polarity has 3 independent attempts so far; this is the chance for a 4th.') +
+        '<div class="dlg-shift"><div class="from">' + lamp('ok') + ' ' + T('独立 · 可计入', 'Independent · counts') + '</div><span style="color:var(--ink-3);text-align:center">' + I.arrow + '</span><div class="to">' + lamp('warn') + ' ' + T('有辅助 · 不计入', 'Assisted · won\'t count') + '</div></div></div>' +
+      '<div class="dlg-f"><button class="btn pri" data-act="dlgcancel" id="dlg-keep">' + T('保持独立', 'Stay independent') + ' <kbd>Esc</kbd></button><button class="btn warn" data-act="dlghint" id="dlg-open">' + T('仍要打开提示', 'Open hint anyway') + ' <kbd>H</kbd></button></div></div></div>';
+  }
+  L.innerHTML = h;
+  if (S.pal) { renderPalList(); var inp = $('#pal-q'); inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  if (S.dlg === 'hint') $('#dlg-keep').focus();
+}
+var toastT;
+function toast(msg) {
+  var t = $('#toast'); if (t) t.remove();
+  t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); t.innerHTML = I.check + '<span>' + msg + '</span>';
+  document.body.appendChild(t); clearTimeout(toastT); toastT = setTimeout(function () { t.remove(); }, 2600);
+}
+
+/* ------------------------------------------------------------------ actions */
+function setTheme(t) { S.theme = t; persist(); render(); }
+function setLang(l) { S.lang = l; persist(); render(); }
+function toggleConsent() {
+  S.consent = !S.consent;
+  S.ledger.push({ t: '11-13 ' + (S.shot ? '10:31' : new Date().toTimeString().slice(0, 5)), kind: S.consent ? 'grant' : 'withhold' });
+  render();
+  toast(S.consent ? T('已追加授权事件', 'Grant event appended') : T('已追加扣留事件：S1 内容不再发送', 'Withholding event appended: S1 content no longer sent'));
+}
+function selectOpt(L, focus) {
+  var attr = S.route === 'practice' ? 'data-opt' : S.route === 'assess' ? 'data-aopt' : null;
+  if (!attr) return;
+  if (S.route === 'practice') S.practice.sel = L; else S.assess.sel[S.assess.cur] = L;
+  $$('[' + attr + ']').forEach(function (b) { var on = b.getAttribute(attr) === L; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; if (on && focus) b.focus(); });
+  var sb = $('#submitbtn'); if (sb) sb.disabled = false;
+}
+function submitPractice() {
+  if (!S.practice.sel) { toast(T('先选一个选项', 'Choose an option first')); return; }
+  S.fb.choice = S.practice.sel; S.fb.elapsed = S.practice.elapsed; S.fb.assisted = S.practice.assisted;
+  go('feedback');
+}
+function assessGo(n) {
+  var A = S.assess; n = Math.max(1, Math.min(40, n));
+  if (A.cur !== n) { A.cur = n; A.item = 0; }
+  render();
+}
+function closeHint(open) {
+  S.dlg = null;
+  if (open) { S.practice.assisted = true; S.practice.hint = true; render(); }
+  else renderLayer();
+  var hb = $('#hintbtn'); if (hb && !hb.disabled) hb.focus(); else { var sb = $('#submitbtn'); if (sb) sb.focus(); }
+}
+function act(name) {
+  switch (name) {
+    case 'submit': submitPractice(); break;
+    case 'hint': if (!S.practice.hint) { S.dlg = 'hint'; renderLayer(); } break;
+    case 'dlghint': closeHint(true); break;
+    case 'dlgcancel': closeHint(false); break;
+    case 'skip': toast(T('已跳过 · 记为未作答，不计入正确', 'Skipped · recorded as not answered')); break;
+    case 'nextitem': S.practice = { sel: null, assisted: false, hint: false, elapsed: 0, marks: [] }; go('practice'); break;
+    case 'consent': toggleConsent(); break;
+    case 'aconfirm':
+      if (!S.assess.sel[S.assess.cur]) { toast(T('尚未选择。按 → 先跳过，本题仍可返回作答。', 'Nothing selected. Press → to move on; you can come back to this item.')); break; }
+      if (S.assess.answered.indexOf(S.assess.cur) < 0) S.assess.answered.push(S.assess.cur); assessGo(S.assess.cur + 1); break;
+    case 'aprev': assessGo(S.assess.cur - 1); break;
+    case 'anext': assessGo(S.assess.cur + 1); break;
+    case 'ask': S.fb.asked[S.fb.mode] = true; S.calls++; render(); toast(T('已发送 1 次外部调用 · DeepSeek · ' + S.calls + '/20', '1 external call sent · DeepSeek · ' + S.calls + '/20')); break;
+    case 'accept': S.anki.accepted = true; S.anki.skipped = false; render(); toast(T('已接受 · 修订 1 · Anki 未运行，已排队', 'Accepted · revision 1 · Anki not running, queued')); break;
+    case 'askip': S.anki.skipped = true; S.anki.accepted = false; render(); break;
+    case 'refine': toast(T('原型：将按右侧清单向 DeepSeek 发送 1 次调用', 'Prototype: would send 1 call to DeepSeek per the manifest')); break;
+    case 'keepmine': S.anki.conflict = 'mine'; render(); toast(T('下次推送时你的版本会替换 Anki 中的修改；Anki 版本保留在历史中。', 'Your version replaces the Anki edit on next push; the Anki version is kept in history.')); break;
+    case 'keepanki': S.anki.conflict = 'anki'; render(); toast(T('已采用 Anki 中的版本', 'Adopted the version in Anki')); break;
+    case 'resume': toast(T('brief-7 已从第 3 步继续', 'brief-7 resumed at step 3')); break;
+    case 'cancelbrief': toast(T('原型：brief-7 取消需确认', 'Prototype: cancelling brief-7 needs confirmation')); break;
+    case 'setdate': case 'setbudget': toast(T('原型：仍为未设置', 'Prototype: stays not set')); break;
+    case 'test': toast(T('原型：不会发出网络请求', 'Prototype: no network request is made')); break;
+    case 'checkkey': case 'addkey': case 'custom': toast(T('密钥只写入系统密钥库，从不显示', 'Keys go to the OS secret store and are never shown')); break;
+    case 'tactic': toast(T('战术卡：NOT/EXCEPT 极性', 'Tactic: NOT/EXCEPT polarity')); break;
+  }
+}
+function sealedNotice() { toast(T('测评已封存：先离开本轮（计时不暂停）', 'Assessment is sealed: leave the run first (the clock keeps running)')); }
+
+/* text selection → mark (mouse or keyboard selection; stored as offsets) */
+function hideMarkPop() { var p = $('#markpop'); if (p) p.remove(); }
+var pendingMark = null;
+function offsetIn(pt, node, off) { var r = document.createRange(); r.setStart(pt, 0); r.setEnd(node, off); return r.toString().length; }
+function showMarkPop() {
+  var sel = window.getSelection();
+  if (S.route !== 'practice' || !sel || sel.isCollapsed || !sel.rangeCount) { pendingMark = null; hideMarkPop(); return; }
+  var r = sel.getRangeAt(0), pass = $('#passage');
+  if (!pass || !pass.contains(r.commonAncestorContainer)) { pendingMark = null; hideMarkPop(); return; }
+  var a = r.startContainer.parentElement && r.startContainer.parentElement.closest('.pt'), b = r.endContainer.parentElement && r.endContainer.parentElement.closest('.pt');
+  if (r.startContainer.nodeType === 1) a = r.startContainer.closest && r.startContainer.closest('.pt');
+  pendingMark = (a && a === b) ? { p: +a.getAttribute('data-p'), s: offsetIn(a, r.startContainer, r.startOffset), e: offsetIn(a, r.endContainer, r.endOffset) } : { bad: true };
+  var rect = r.getBoundingClientRect(), host = $('#work').getBoundingClientRect();
+  hideMarkPop();
+  var p = document.createElement('div'); p.id = 'markpop'; p.className = 'markpop'; p.setAttribute('role', 'status');
+  p.style.left = (rect.left + rect.width / 2 - host.left) + 'px'; p.style.top = (rect.top - host.top) + 'px';
+  p.innerHTML = '<span>' + T('标记，供 Anki 卡片', 'Mark for an Anki note') + '</span><button data-act2="mark">' + I.mark + kbds(['M']) + '</button>';
+  $('#work').appendChild(p);
+}
+function doMark() {
+  if (!pendingMark) return;
+  if (pendingMark.bad || pendingMark.e <= pendingMark.s) toast(T('请在同一段落内选择', 'Select within one paragraph'));
+  else { S.practice.marks.push(pendingMark); render(); toast(T('已标记 · 可在 Anki 草稿中使用', 'Marked · available to an Anki draft')); }
+  pendingMark = null; window.getSelection().removeAllRanges(); hideMarkPop();
+}
+
+/* ------------------------------------------------------------------ events */
+document.addEventListener('click', function (e) {
+  var t = e.target.closest && e.target.closest('button, a, [data-pi], .scrim');
+  if (!t) return;
+  if (t.matches('.scrim') && e.target === t) { S.pal = null; S.sheet = false; if (S.dlg) closeHint(false); else renderLayer(); return; }
+  if (t.matches('.locked-ch')) { e.preventDefault(); sealedNotice(); return; }
+  if (t.id === 'cmdk') { openPal(); return; }
+  if (t.id === 'helpbtn') { S.sheet = true; renderLayer(); return; }
+  if (t.hasAttribute('data-lang')) { setLang(t.getAttribute('data-lang')); return; }
+  if (t.hasAttribute('data-theme')) { setTheme(t.getAttribute('data-theme')); return; }
+  if (t.hasAttribute('data-pi')) { runPal(+t.getAttribute('data-pi')); return; }
+  if (t.hasAttribute('data-opt')) { selectOpt(t.getAttribute('data-opt')); return; }
+  if (t.hasAttribute('data-aopt')) { selectOpt(t.getAttribute('data-aopt')); return; }
+  if (t.hasAttribute('data-item')) { assessGo(+t.getAttribute('data-item')); return; }
+  if (t.hasAttribute('data-ritem')) { S.report.item = +t.getAttribute('data-ritem'); render(); return; }
+  if (t.hasAttribute('data-mode')) { setMode(t.getAttribute('data-mode')); return; }
+  if (t.hasAttribute('data-ak')) { S.anki[t.getAttribute('data-ak')] = t.getAttribute('data-av'); var keep = $('#work .wk-b').scrollTop; render(); $('#work .wk-b').scrollTop = keep; return; }
+  if (t.getAttribute('data-act2') === 'mark') { doMark(); return; }
+  if (t.hasAttribute('data-act')) act(t.getAttribute('data-act'));
+  if (t.hasAttribute('data-go')) go(t.getAttribute('data-go'));
+});
+var selT;
+document.addEventListener('selectionchange', function () { clearTimeout(selT); selT = setTimeout(showMarkPop, 140); });
+document.addEventListener('input', function (e) {
+  var f = e.target.getAttribute && e.target.getAttribute('data-af');
+  if (f) { S.anki[f] = e.target.value; $('#stage').firstElementChild.outerHTML = cardHTML(); if (f === 'front') $('#c-front').textContent = e.target.value.length; autosize(e.target); return; }
+  if (e.target.id === 'pal-q') { S.pal.q = e.target.value; S.pal.i = 0; renderPalList(); }
+});
+function autosize(el) { if (el.tagName !== 'TEXTAREA' || CSS.supports('field-sizing', 'content')) return; el.style.height = 'auto'; el.style.height = el.scrollHeight + 2 + 'px'; }
+function setMode(m) { S.fb.mode = m; render(); }
+function openPal() { S.pal = { q: '', i: 0 }; S.sheet = false; renderLayer(); }
+function runPal(i) {
+  var it = S.pal && S.pal.list && S.pal.list[i]; S.pal = null; renderLayer();
+  if (!it) return;
+  if (it.c.g !== 'help') { S.recent = [{ zh: it.c.zh, en: it.c.en }].concat(S.recent.filter(function (r) { return r.en !== it.c.en; })).slice(0, 3); }
+  it.c.run(); renderTop();
+}
+/* Enter belongs to a focused control; the screen shortcut only fires from the page itself or an option */
+function enterIsFree() {
+  var a = document.activeElement;
+  return !a || a === document.body || a.matches('.opt, #work, .wk-b, .read, .passage, .item');
+}
+
+var chordT;
+document.addEventListener('keydown', function (e) {
+  var k = e.key, a = document.activeElement, typing = /^(INPUT|TEXTAREA)$/.test(a && a.tagName);
+  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'k') { e.preventDefault(); S.pal ? (S.pal = null, renderLayer()) : openPal(); return; }
+  if (S.pal) {
+    if (k === 'Escape') { S.pal = null; renderLayer(); }
+    else if (k === 'ArrowDown') { e.preventDefault(); S.pal.i = Math.min(S.pal.i + 1, (S.pal.n || 1) - 1); renderPalList(); }
+    else if (k === 'ArrowUp') { e.preventDefault(); S.pal.i = Math.max(S.pal.i - 1, 0); renderPalList(); }
+    else if (k === 'Enter') { e.preventDefault(); runPal(S.pal.i); }
+    else if (k === 'Tab') e.preventDefault();
+    return;
+  }
+  if (S.dlg) { // Enter activates whichever button has focus (native); H is the only key that opens the hint
+    if (k === 'Escape') { e.preventDefault(); closeHint(false); }
+    else if (k.toLowerCase() === 'h' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); closeHint(true); }
+    else if (k === 'Tab') { e.preventDefault(); var f = [$('#dlg-keep'), $('#dlg-open')], ix = f.indexOf(a); f[(ix + (e.shiftKey ? f.length - 1 : 1)) % f.length].focus(); }
+    return;
+  }
+  if (S.sheet) { if (k === 'Escape' || k === '?') { S.sheet = false; renderLayer(); } else if (k === 'Tab') e.preventDefault(); return; }
+  if (S.route === 'anki' && (e.ctrlKey || e.metaKey) && k === 'Enter') { e.preventDefault(); act('accept'); return; }
+  if (typing) return;
+  if (e.altKey && k.toLowerCase() === 't') { e.preventDefault(); setTheme(S.theme === 'dark' ? 'light' : 'dark'); return; }
+  if (e.altKey && k.toLowerCase() === 'l') { e.preventDefault(); setLang(S.lang === 'zh' ? 'en' : 'zh'); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (k === '?') { S.sheet = true; renderLayer(); return; }
+  if (S.chord) {
+    S.chord = false; clearTimeout(chordT); $('#chordind').textContent = '';
+    var r = ROUTES.filter(function (x) { return x.k.toLowerCase() === k.toLowerCase(); })[0];
+    if (r) { if (S.route === 'assess' && r.id !== 'assess') sealedNotice(); else go(r.id); return; }
+  }
+  if (k === 'g' || k === 'G') { S.chord = true; $('#chordind').innerHTML = '<span class="chord">G …</span>'; chordT = setTimeout(function () { S.chord = false; $('#chordind').textContent = ''; }, 1200); return; }
+  var up = k.toUpperCase(), idx = '1234'.indexOf(k);
+  // roving radio group: arrows move within the options when one has focus
+  if (a && a.matches('.opt') && (k === 'ArrowDown' || k === 'ArrowUp')) {
+    e.preventDefault(); var attr = a.hasAttribute('data-opt') ? 'data-opt' : 'data-aopt', cur = 'ABCD'.indexOf(a.getAttribute(attr));
+    return selectOpt('ABCD'[(cur + (k === 'ArrowDown' ? 1 : 3)) % 4], true);
+  }
+  if (S.route === 'practice') {
+    if ('ABCD'.indexOf(up) >= 0 && k.length === 1) return selectOpt(up);
+    if (idx >= 0) return selectOpt('ABCD'[idx]);
+    if (k === 'Enter' && enterIsFree()) { e.preventDefault(); if (a && a.matches('[data-opt]') && !S.practice.sel) return selectOpt(a.getAttribute('data-opt')); return submitPractice(); }
+    if (up === 'H') return act('hint');
+    if (up === 'S') return act('skip');
+    if (up === 'M') return doMark();
+  } else if (S.route === 'assess') {
+    if ('ABCD'.indexOf(up) >= 0 && k.length === 1) return selectOpt(up);
+    if (idx >= 0) return selectOpt('ABCD'[idx]);
+    if (k === 'Enter' && enterIsFree()) { e.preventDefault(); if (a && a.matches('[data-aopt]') && !S.assess.sel[S.assess.cur]) return selectOpt(a.getAttribute('data-aopt')); return act('aconfirm'); }
+    if (k === 'ArrowLeft') return act('aprev');
+    if (k === 'ArrowRight') return act('anext');
+  } else if (S.route === 'feedback') {
+    if ('123'.indexOf(k) >= 0 && k.length === 1) return setMode(['explain', 'probe', 'lesson']['123'.indexOf(k)]);
+    if (a && a.matches('[role=tab]') && (k === 'ArrowLeft' || k === 'ArrowRight')) { var ms = ['explain', 'probe', 'lesson'], mi = ms.indexOf(S.fb.mode); setMode(ms[(mi + (k === 'ArrowRight' ? 1 : 2)) % 3]); var tb = $('#tab-' + S.fb.mode); if (tb) tb.focus(); return; }
+    if (up === 'N') return go('anki');
+    if (k === 'Enter' && enterIsFree()) { e.preventDefault(); return act('nextitem'); }
+  } else if (S.route === 'today') {
+    if (k === 'Enter' && enterIsFree()) return go('practice');
+  } else if (S.route === 'anki') {
+    if (up === 'F') { S.anki.face = S.anki.face === 'front' ? 'back' : 'front'; render(); }
+  }
+});
+
+/* ------------------------------------------------------------------ live clocks (frozen in ?shot=1) */
+function flip(el, txt) { if (!el || el.textContent === txt) return; el.textContent = txt; el.classList.remove('flip'); void el.offsetWidth; el.classList.add('flip'); }
+if (!S.shot) setInterval(function () {
+  if (S.route === 'practice' && !S.dlg) { S.practice.elapsed++; flip($('#pclock'), mmss(S.practice.elapsed)); }
+  // the assessment run clock never pauses, wherever you are
+  var A = S.assess;
+  if (A.left > 0) A.left--;
+  if (A.item < 90) A.item++;
+  else if (A.to.indexOf(A.cur) < 0 && A.answered.indexOf(A.cur) < 0) { // item deadline: a late answer is ignored, the item is recorded as timed out
+    A.to.push(A.cur); delete A.sel[A.cur];
+    if (S.route === 'assess') { toast(T('第 ' + A.cur + ' 题超时，已记录', 'Item ' + A.cur + ' timed out and was recorded')); assessGo(A.cur + 1); }
+    else { A.cur = Math.min(40, A.cur + 1); A.item = 0; }
+    return;
+  }
+  if (S.route === 'assess') {
+    flip($('#rclock'), mmss(A.left));
+    var el2 = $('#rleft2'); if (el2) el2.textContent = mmss(A.left);
+    var el3 = $('#relapsed'); if (el3) el3.textContent = mmss(3600 - A.left);
+    var ic = $('#iclock'); if (ic) ic.textContent = mmss(A.item);
+    var arc = $('#arc'); if (arc) { var C = 2 * Math.PI * 60; arc.setAttribute('stroke-dasharray', (C * A.item / 90).toFixed(1) + ' ' + C.toFixed(1)); }
+  }
+}, 1000);
+
+window.addEventListener('hashchange', route);
+if (!location.hash) history.replaceState(null, '', location.pathname + location.search + '#/today');
+persist();
+route();
+/* Review hook (screenshots/design review only; not part of the brief's contract):
+   ?open=cmd[&q=text] opens the command bar · ?open=keys the shortcut sheet · ?open=hint the hint gate (practice)
+   ?open=assisted shows practice after the hint was opened · ?card=dark-phone-front sets the Anki preview · ?revoke=1 revokes consent */
+(function () {
+  var cd = qs.get('card'); if (cd) { cd.split('-').forEach(function (v) { if (v === 'dark' || v === 'light') S.anki.ctheme = v; if (v === 'phone' || v === 'desktop') S.anki.width = v; if (v === 'front' || v === 'back') S.anki.face = v; }); render(); }
+  if (qs.get('revoke') === '1') { S.consent = false; S.ledger.push({ t: '11-13 10:31', kind: 'withhold' }); render(); }
+  var o = qs.get('open');
+  if (o === 'cmd') { S.pal = { q: qs.get('q') || '', i: 0 }; renderLayer(); }
+  else if (o === 'keys') { S.sheet = true; renderLayer(); }
+  else if (o === 'hint' && S.route === 'practice') { S.dlg = 'hint'; renderLayer(); }
+  else if (o === 'assisted' && S.route === 'practice') { closeHint(true); selectOpt('C'); }
+})();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1586 @@
+<!doctype html>
+<html lang="zh-Hans" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pass Quest — Folio</title>
+<style>
+/* =====================================================================
+   FOLIO — design tokens
+   One leaf on a desk: an inner margin (paragraph numbers, proof marks),
+   one text block at a reading measure, a gutter, and an outer margin
+   where notes live. Nothing else.
+   ===================================================================== */
+:root{
+  /* colour — light: warm paper on a slightly darker desk, true ink,
+     one proofreader vermilion, a muted indigo for advisory AI */
+  --desk:#ECE8E0; --paper:#FBF9F5; --paper-sunk:#F4F1EA; --paper-raised:#FFFEFB;
+  --ink:#1C1A17; --ink-2:#47423B; --ink-3:#655E54; --ink-4:#A39B8E;
+  --rule:#E3DDD2; --rule-2:#CBC3B5; --edge:rgba(60,40,20,.11);
+  --verm:#B3341D; --verm-wash:rgba(179,52,29,.10);
+  --indigo:#34407A; --indigo-rule:rgba(52,64,122,.55);
+  --ev-dot:#8A7A66; --moss:#47652F; --pen:rgba(28,26,23,.065);
+  --leaf-shadow:-22px 0 40px -38px rgba(60,40,20,.45), 22px 0 40px -38px rgba(60,40,20,.45);
+  --shadow-sheet:0 1px 0 rgba(60,44,24,.05), 0 22px 44px -26px rgba(60,44,24,.32);
+  --grain:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .32  0 0 0 0 .24  0 0 0 0 .14  0 0 0 .11 0'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>");
+  /* type */
+  --serif:"Sitka Text","Iowan Old Style","Charter","Georgia","Noto Serif SC","Songti SC","Source Han Serif SC","SimSun",serif;
+  --serif-sm:"Sitka Small","Sitka Text","Iowan Old Style","Georgia","Noto Serif SC","Songti SC","SimSun",serif;
+  --serif-hd:"Sitka Heading","Sitka Text","Iowan Old Style","Georgia","Noto Serif SC","Songti SC","SimSun",serif;
+  --serif-dp:"Sitka Display","Sitka Heading","Iowan Old Style","Georgia","Noto Serif SC","Songti SC",serif;
+  --kai:"Sitka Text","Iowan Old Style","Georgia","KaiTi","STKaiti","Kaiti SC","Noto Serif SC",serif;
+  --cjk:"Noto Serif SC","Songti SC","Source Han Serif SC","SimSun",serif;
+  --mono:"Cascadia Mono","SF Mono","Menlo","Consolas","Noto Sans SC",monospace;
+  /* space (4-based) */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:64px;
+  --r1:2px;
+  /* motion */
+  --ease:cubic-bezier(.3,0,.12,1); --d1:160ms; --d2:320ms; --d3:640ms; --d-ink:900ms;
+  /* the leaf */
+  --head-h:52px; --foot-h:42px;
+  --in:clamp(60px,5vw,76px);          /* inner margin: paragraph numbers, proof marks */
+  --tb:clamp(556px,41vw,590px);       /* text block, ~35em of the reading serif */
+  --gt:clamp(36px,3vw,44px);          /* gutter — no rule */
+  --mg:clamp(262px,22vw,316px);     /* outer margin: notes */
+  --out:clamp(30px,2.8vw,40px);       /* fore-edge */
+  --leaf:calc(var(--in) + var(--tb) + var(--gt) + var(--mg) + var(--out));
+  color-scheme:light;
+}
+[data-theme="dark"]{
+  --desk:#17120E; --paper:#231C16; --paper-sunk:#1D1712; --paper-raised:#2A221B;
+  --ink:#E6DCCB; --ink-2:#CDC1AE; --ink-3:#A89A86; --ink-4:#6E6252;
+  --rule:rgba(230,220,203,.13); --rule-2:rgba(230,220,203,.26); --edge:rgba(0,0,0,.5);
+  --verm:#E07A5F; --verm-wash:rgba(224,122,95,.15);
+  --indigo:#A9B3E6; --indigo-rule:rgba(169,179,230,.55);
+  --ev-dot:#93856F; --moss:#A8C088; --pen:rgba(230,220,203,.075);
+  --leaf-shadow:-26px 0 44px -36px rgba(0,0,0,.9), 26px 0 44px -36px rgba(0,0,0,.9);
+  --shadow-sheet:0 1px 0 rgba(0,0,0,.25), 0 24px 48px -24px rgba(0,0,0,.7);
+  --grain:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .95  0 0 0 0 .88  0 0 0 0 .76  0 0 0 .055 0'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>");
+  color-scheme:dark;
+}
+[data-route="assess"] .rh{border-bottom:0}
+/* the exam paper: cooler, plainer stock; no grain; no outer margin */
+[data-route="assess"]{--paper:#FCFCFA;--paper-sunk:#F3F3F0;--desk:#E4E3DF;--grain:none;--leaf:760px;--in:60px;--out:60px}
+[data-route="assess"][data-theme="dark"]{--paper:#1E1C1A;--paper-sunk:#191715;--desk:#121110}
+
+/* =====================================================================
+   base
+   ===================================================================== */
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--desk); color:var(--ink);
+  font-family:var(--serif); font-size:16px; line-height:1.55;
+  font-variant-numeric:lining-nums tabular-nums;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  font-kerning:normal; text-autospace:normal; text-spacing-trim:normal;
+  overflow:hidden;
+}
+html[lang="zh-Hans"] body{line-height:1.75}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0}
+button[disabled]{cursor:not-allowed}
+a{color:inherit}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--ink);outline-offset:3px;border-radius:var(--r1)}
+::selection{background:color-mix(in srgb,var(--verm) 18%,transparent)}
+p{text-wrap:pretty}
+.tn{font-variant-numeric:lining-nums tabular-nums}
+.mono{font-family:var(--mono);font-size:.86em;letter-spacing:0}
+.nw{white-space:nowrap}
+/* eyebrow labels: small caps in English, set solid (no tracking) in Chinese */
+.micro{
+  font-family:var(--serif-sm);font-size:11.5px;line-height:1.35;color:var(--ink-3);
+  font-variant-caps:all-small-caps;letter-spacing:.08em;font-weight:500;font-size:12.5px;
+}
+:lang(zh) .micro,.micro:lang(zh){font-family:var(--cjk);font-variant-caps:normal;letter-spacing:0;font-size:12px;font-weight:600}
+.micro[lang="en"]{font-family:var(--serif-sm);font-variant-caps:all-small-caps;letter-spacing:.08em;font-size:12.5px;font-weight:500}
+.muted{color:var(--ink-3)}
+.verm{color:var(--verm)}
+.vh{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+kbd{
+  font-family:var(--mono);font-size:10.5px;line-height:1;color:var(--ink-2);
+  display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 4px;
+  border:1px solid var(--rule-2);border-radius:2px;background:transparent;
+  vertical-align:1px;letter-spacing:0;font-weight:400;
+}
+.glyph{display:inline-block;vertical-align:-1px;flex:none}
+.tag{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);letter-spacing:0;white-space:nowrap}
+.arrow{font-family:var(--serif);font-feature-settings:normal}
+
+/* =====================================================================
+   frame: running head (书眉) and running foot are printed on the leaf
+   ===================================================================== */
+#app{position:relative;z-index:1;height:100%;display:grid;grid-template-rows:var(--head-h) 1fr var(--foot-h)}
+.frame{width:var(--leaf);margin:0 auto;height:100%;padding:0 var(--out) 0 var(--in);background:var(--grain),var(--paper)}
+body::before{content:"";position:fixed;top:0;bottom:0;left:50%;width:var(--leaf);transform:translateX(-50%);box-shadow:-1px 0 0 var(--edge),1px 0 0 var(--edge),var(--leaf-shadow);pointer-events:none;z-index:0}
+.runhead,.runfoot{position:relative;z-index:5}
+.rh{height:100%;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;column-gap:20px;border-bottom:1px solid var(--rule)}
+.rh-left{display:flex;align-items:baseline;gap:12px;min-width:0;white-space:nowrap}
+.brand{font-family:var(--serif-hd);font-size:15px;letter-spacing:.12em;font-variant-caps:all-small-caps;font-weight:600;color:var(--ink)}
+.rh-sep{width:1px;height:12px;background:var(--rule-2);align-self:center}
+.rh-sec{font-size:14px;color:var(--ink-2)}
+.rh-mid{font-size:13px;color:var(--ink-2);white-space:nowrap;display:flex;gap:9px;align-items:baseline}
+.rh-mid b{font-weight:600;color:var(--ink)}
+.rh-mid .dot{color:var(--ink-3)}
+.rh-right{display:flex;align-items:center;justify-content:flex-end;gap:2px;white-space:nowrap}
+.rh-btn{
+  height:30px;display:inline-flex;align-items:center;gap:6px;padding:0 8px;border-radius:var(--r1);
+  font-size:13px;color:var(--ink-2);transition:background var(--d1),color var(--d1);
+}
+.rh-btn:hover{background:var(--pen);color:var(--ink)}
+.rh-btn svg{width:14px;height:14px}
+.lang-sw span{font-size:13px;color:var(--ink-3);padding:0 2px}
+.lang-sw span.cur{color:var(--ink);font-weight:600}
+.lang-sw [lang="zh-Hans"]{font-family:var(--cjk);font-size:14px;font-weight:600}
+.lang-sw span.cur[lang="zh-Hans"]{font-weight:700}
+.lang-sw i{width:1px;height:11px;background:var(--rule-2);display:inline-block;margin:0 3px}
+.rf{height:100%;display:grid;grid-template-columns:minmax(max-content,1fr) auto 1fr;align-items:center;column-gap:20px;border-top:1px solid var(--rule)}
+.rf-keys{display:flex;gap:14px;align-items:center;font-size:12.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;min-width:0}
+.rf-keys > span{display:inline-flex;gap:5px;align-items:center}
+.folio{font-family:var(--serif-sm);font-size:12.5px;color:var(--ink-3);display:flex;gap:10px;align-items:baseline;white-space:nowrap}
+.folio .rn{letter-spacing:.18em;font-variant-caps:all-small-caps;font-size:14px}
+.folio .pp{font-family:var(--serif);font-size:12.5px}
+.rf-nav{display:flex;justify-content:flex-end;gap:18px;font-size:12.5px;white-space:nowrap}
+.rf-nav a{text-decoration:none;color:var(--ink-3);display:inline-flex;gap:6px;align-items:center}
+.rf-nav a:hover{color:var(--ink)}
+
+main#main{overflow-y:auto;overflow-x:hidden;position:relative;scroll-padding-bottom:24px}
+
+/* =====================================================================
+   the leaf: text block + outer margin. No sidebar, no full-height rules.
+   ===================================================================== */
+.leaf{
+  width:var(--leaf);margin:0 auto;min-height:100%;position:relative;
+  padding:26px var(--out) 64px var(--in);
+  background:var(--grain),var(--paper);
+  display:grid;grid-template-columns:var(--tb) var(--mg);column-gap:var(--gt);align-content:start;
+}
+.tb{grid-column:1;position:relative;min-width:0;isolation:isolate}
+.mg{grid-column:2;position:relative;min-width:0}
+.wide{grid-column:1 / -1;min-width:0}
+svg.leaders{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:0}
+svg.leaders path{fill:none;stroke:var(--rule-2);stroke-width:.75}
+svg.leaders path.k{stroke:var(--verm)}
+svg.leaders circle{fill:var(--rule-2)} svg.leaders circle.k{fill:var(--verm)}
+svg.leaders .hot{stroke:var(--ink)} svg.leaders circle.hot{fill:var(--ink)}
+
+/* margin notes (旁注) */
+.mnote{font-family:var(--serif-sm);font-size:13px;line-height:1.5;color:var(--ink-2);position:absolute;left:0;right:0;transition:color var(--d1)}
+html[lang="zh-Hans"] .mnote{line-height:1.72;font-size:13px}
+.mnote .mh{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
+.mnote p{margin:0}
+.mnote p + p{margin-top:4px}
+.mnote b{font-weight:600;color:var(--ink)}
+.mnote .acts{display:flex;gap:14px;margin-top:3px}
+.mnote.num{display:grid;grid-template-columns:18px 1fr}
+.mnote .nn{font-family:var(--serif-sm);font-size:12px;color:var(--verm);font-weight:600;line-height:1.6}
+.mnote.hot,.mnote:hover{color:var(--ink)}
+/* note reference numerals in running text */
+sup.fn{text-autospace:no-autospace;font-family:var(--serif-sm);font-size:.64em;line-height:0;vertical-align:.62em;padding-left:.06em;color:var(--verm);font-weight:600;font-variant-numeric:lining-nums;cursor:default}
+sup.fn.hot{text-decoration:underline;text-underline-offset:2px}
+
+/* typographic controls — outlined; ink fills are reserved for marks ≤ 24px */
+.btn{
+  text-decoration:none;display:inline-flex;align-items:center;gap:10px;height:36px;padding:0 14px 0 16px;border-radius:var(--r1);
+  font-size:14.5px;font-weight:500;border:1px solid var(--rule-2);color:var(--ink);background:transparent;
+  transition:background var(--d1) var(--ease),border-color var(--d1),color var(--d1),transform var(--d1);
+  white-space:nowrap;
+}
+.btn:hover{border-color:var(--ink-3);background:var(--pen)}
+.btn:active{transform:translateY(1px)}
+.btn.pri{border-color:var(--ink);box-shadow:inset 0 0 0 .5px var(--ink)}
+.btn.pri:hover{background:var(--pen)}
+.btn[disabled]{transform:none;background:transparent;color:var(--ink-3);border-color:var(--rule-2);box-shadow:none}
+.btn.sm{height:30px;padding:0 11px;font-size:13.5px;gap:7px}
+.link{
+  font-size:inherit;color:var(--ink);text-decoration:underline;text-decoration-color:var(--rule-2);
+  text-decoration-thickness:1px;text-underline-offset:3px;transition:text-decoration-color var(--d1);cursor:pointer;
+}
+.link:hover{text-decoration-color:var(--ink)}
+.link.v{color:var(--verm);text-decoration-color:color-mix(in srgb,var(--verm) 45%,transparent)}
+.link.i{color:var(--indigo);text-decoration-color:var(--indigo-rule)}
+/* imperative with a vermilion underline — the one primary act on a page */
+.imp{display:inline-flex;align-items:baseline;gap:10px;text-decoration:none;font-family:var(--serif-hd);font-size:19px;color:var(--ink);padding:2px 0 5px;
+  background:linear-gradient(var(--verm),var(--verm)) 0 100%/100% 1.5px no-repeat;transition:background-size var(--d2) var(--ease)}
+.imp:hover{background-size:100% 3px}
+.imp kbd{transform:translateY(-2px)}
+/* text toggles: options separated by a middle dot, active one underlined */
+.tog{display:inline-flex;gap:0;align-items:baseline;font-size:13px;color:var(--ink-3)}
+.tog button{padding:2px 1px;color:var(--ink-3)}
+.tog button[aria-pressed="true"]{color:var(--ink);text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:4px}
+.tog button:hover{color:var(--ink)}
+.tog .d{margin:0 7px;color:var(--ink-4)}
+
+/* =====================================================================
+   condition glyphs
+   ===================================================================== */
+.cond{display:inline-flex;align-items:baseline;gap:7px}
+.cg{width:9px;height:9px;flex:none;display:inline-block;align-self:center}
+.cg.ind{border-radius:50%;background:var(--ink)}
+.cg.asst{border-radius:50%;border:1.5px solid var(--ink-3);background:linear-gradient(135deg,transparent 42%,var(--ink-3) 42%,var(--ink-3) 60%,transparent 60%)}
+.cg.reex{border-radius:50%;border:1.5px solid var(--ink-3)}
+.cg.assess{border:1.5px solid var(--ink)}
+
+/* =====================================================================
+   passage — the reading column
+   ===================================================================== */
+.p-kicker{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px}
+.p-title{font-family:var(--serif-hd);font-size:27px;line-height:1.2;font-weight:400;letter-spacing:-.005em;margin:0 0 14px;color:var(--ink);text-wrap:balance}
+.passage{font-family:var(--serif);font-size:17.5px;line-height:1.6;color:var(--ink);font-variant-numeric:oldstyle-nums proportional-nums;hyphens:manual}
+.passage p{margin:0;position:relative}
+.passage p + p{text-indent:1.6em}
+.passage .pn{position:absolute;left:-36px;top:.38em;width:20px;text-align:right;font-family:var(--serif-sm);font-size:12px;line-height:1;color:var(--ink-3);text-indent:0;font-variant-numeric:lining-nums tabular-nums}
+.passage mark.pen{background:linear-gradient(transparent 60%,var(--pen) 60%);color:inherit;border-bottom:1px solid var(--ink-3);padding:0 1px}
+/* evidence: supporting spans dotted umber; the key's evidence inked in vermilion */
+.passage .ev{text-decoration:underline dotted 1px var(--ev-dot);text-underline-offset:4px;transition:background-color var(--d2)}
+.passage .ev.hot{background-color:var(--pen)}
+.passage .ev-key{text-decoration:none;padding-bottom:1px;
+  background:linear-gradient(var(--verm),var(--verm)) 0 100%/100% 2px no-repeat,linear-gradient(var(--verm-wash),var(--verm-wash));
+  animation:inkdraw var(--d-ink) var(--ease) 350ms both}
+.passage .ev-key.hot{background-color:transparent}
+.passage .ev-key b{font-weight:600}
+sup.evm{font-family:var(--serif-sm);font-size:.6em;line-height:0;vertical-align:.66em;padding-left:.08em;font-weight:600;color:var(--ink-3);font-variant-numeric:lining-nums}
+.ev-key sup.evm{color:var(--verm)}
+@keyframes inkdraw{from{background-size:0 2px,100% 100%}to{background-size:100% 2px,100% 100%}}
+.p-foot{margin-top:18px;display:flex;gap:8px;font-size:12.5px;color:var(--ink-3);line-height:1.5}
+
+/* selection → mark popover */
+.markpop{position:absolute;z-index:20;transform:translate(-50%,-100%);display:none}
+.markpop.on{display:block}
+.markpop button{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 10px;background:var(--paper-raised);color:var(--ink);border:1px solid var(--ink);border-radius:var(--r1);font-size:13px;box-shadow:var(--shadow-sheet)}
+
+/* =====================================================================
+   question block — set in the text block, under the passage
+   ===================================================================== */
+.qblock{margin-top:22px;border-top:1px solid var(--ink);padding-top:12px;position:relative}
+.qhead{display:flex;align-items:baseline;gap:12px;min-height:30px;position:relative}
+.qn{font-family:var(--serif-dp);font-size:25px;line-height:1;color:var(--ink);font-variant-numeric:lining-nums tabular-nums}
+.qn.hang{position:absolute;right:calc(100% + 12px);top:13px;font-size:24px}
+.qblock > .qn.hang + .stem{margin-top:0}
+.qhead .sp{flex:1}
+.qhead .cond{font-size:14px;color:var(--ink-2)}
+.qhead .cond b{color:var(--ink);font-weight:600}
+.stem{font-family:var(--serif);font-size:17.5px;line-height:1.5;margin:10px 0 8px;color:var(--ink);text-wrap:pretty}
+.opts{list-style:none;margin:0;padding:0}
+.opt{
+  display:grid;grid-template-columns:1fr auto;align-items:baseline;column-gap:6px;
+  padding:4px 8px 4px 0;margin:0;cursor:pointer;position:relative;
+  font-size:16.5px;line-height:1.45;
+}
+.opt::before{content:"";position:absolute;left:-42px;right:0;top:0;bottom:0;border-radius:var(--r1);background:transparent;transition:background var(--d1);z-index:-1}
+.opt:hover::before{background:var(--pen)}
+/* option letter: hangs in the inner margin; plain bold serif before grading,
+   a pencil-filled disc once chosen (one aspect-ratio:1 rule, never squashed) */
+.L{position:absolute;left:-36px;top:4px;display:grid;place-items:center;width:24px;aspect-ratio:1;font-family:var(--serif-sm);font-size:14px;font-weight:700;color:var(--ink);line-height:1;
+  font-variant-numeric:tabular-nums}
+.L::after{content:".";position:absolute;left:17px;bottom:5px;font-weight:700}
+.opt .k{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);opacity:0;transition:opacity var(--d1)}
+.opt:hover .k,.opt:focus-visible .k{opacity:1}
+.opt.sel .L,.omr li.sel .L{background:var(--ink);color:var(--paper);border-radius:50%;width:22px;left:-35px;top:6px;font-size:12.5px}
+.opt.sel .L::after,.omr li.sel .L::after{content:none}
+.opt.sel::before{background:var(--pen)}
+.opt.sel .k{opacity:1}
+.slip-actions{display:flex;align-items:center;gap:10px;margin-top:14px}
+.slip-actions .sp{flex:1}
+.hintbtn{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;color:var(--ink-2);height:36px;padding:0 8px;border-radius:var(--r1)}
+.hintbtn:hover{background:var(--pen);color:var(--ink)}
+.hintbtn svg{width:13px;height:13px}
+/* gate text lives in the condition note */
+.condn{margin:2px 0 0;display:grid;grid-template-columns:16px 1fr;align-items:baseline;font-size:14px;line-height:1.5;color:var(--ink-2)}
+.condn .cg{align-self:start;margin-top:6px}
+.condn b{color:var(--ink);font-weight:600}
+.clockv{font-family:var(--serif-hd);font-size:20px;color:var(--ink);margin-right:6px}
+.hintbox{margin-top:12px;padding:6px 0 6px 14px;border-left:2px solid var(--ink-3);font-size:14.5px;color:var(--ink-2)}
+.confirm-inline{margin-top:10px;padding:10px 0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);font-size:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+
+/* =====================================================================
+   feedback — proof correction
+   ===================================================================== */
+.vword{font-family:var(--serif-hd);font-size:20px;font-weight:600}
+.vword.wrong{color:var(--verm)}
+.vk{font-size:15px;color:var(--ink-2)}
+.vk b{font-weight:700;color:var(--ink)}
+.vt{font-size:14px;color:var(--ink-2)}
+.vt b{font-family:var(--serif-hd);font-size:17px;font-weight:400;color:var(--ink)}
+.vc{margin:6px 0 0;font-size:13.5px;color:var(--ink-2);display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}
+.vc .muted{white-space:nowrap}
+.opt.fb{cursor:default;padding:5px 8px 5px 0}
+.opt.fb:hover::before{background:transparent}
+.opt.fb .L{color:var(--ink-3)}
+.opt.fb .tx{color:var(--ink-2)}
+.opt.fb .an{font-size:12px;color:var(--ink-3);white-space:nowrap;font-family:var(--serif-sm);margin-left:6px}
+html[lang="en"] .opt.fb .an{font-variant-caps:all-small-caps;font-size:13px;letter-spacing:.07em}
+html[lang="zh-Hans"] .opt.fb .an{font-family:var(--cjk);font-weight:600}
+.opt.fb.hot::before{background:var(--pen)}
+.opt.struck .tx s{text-decoration:none;color:var(--ink-3);background-image:linear-gradient(var(--verm),var(--verm));background-repeat:no-repeat;background-position:0 58%;background-size:100% 1.25px;animation:strike 700ms var(--ease) 500ms both;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+@keyframes strike{from{background-size:0 1.25px}to{background-size:100% 1.25px}}
+.opt.struck .an{color:var(--verm)}
+.opt.keyopt .L{color:var(--verm)}
+.opt.keyopt .L::after{content:none}
+.opt.keyopt .tx > span[lang]{color:var(--ink);font-weight:600}
+.opt.keyopt .an{color:var(--verm)}
+.ringmark{position:absolute;left:50%;top:50%;width:30px;height:26px;transform:translate(-50%,-50%) rotate(-4deg);overflow:visible;pointer-events:none}
+.ringmark ellipse{fill:none;stroke:var(--verm);stroke-width:1.25;stroke-linecap:round;stroke-dasharray:100 6;stroke-dashoffset:0;animation:ring 900ms var(--ease) 800ms both}
+@keyframes ring{from{stroke-dashoffset:106}to{stroke-dashoffset:0}}
+.dele{position:absolute;left:-56px;top:5px;width:16px;height:20px;overflow:visible}
+.dele path{fill:none;stroke:var(--verm);stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}
+.tactic{margin-top:16px;padding-top:10px;border-top:1px solid var(--rule);display:grid;grid-template-columns:auto 1fr;column-gap:16px;align-items:baseline}
+.tactic .micro{white-space:nowrap}
+.tactic p{margin:0;font-size:15px;line-height:1.55;color:var(--ink)}
+html[lang="zh-Hans"] .tactic p{line-height:1.75}
+.nextsteps{margin-top:16px;display:flex;gap:24px;flex-wrap:wrap;align-items:baseline}
+.nextsteps .imp{font-size:17px}
+.sect-rule{margin:30px 0 14px;display:flex;align-items:baseline;gap:12px}
+.sect-rule::after{content:"";flex:1;height:1px;background:var(--rule);transform:translateY(-4px)}
+
+/* coach — advisory side-note, indigo, its own voice */
+.coach{padding:0 0 0 14px;border-left:2px solid var(--indigo-rule)}
+.coach .mh{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.coach .mh .micro{color:var(--indigo)}
+.ext{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--indigo);white-space:nowrap}
+.ext svg{width:11px;height:11px}
+.disc{margin:4px 0 0;font-size:12px;line-height:1.5;color:var(--ink-2)}
+html[lang="zh-Hans"] .disc{line-height:1.65}
+.disc .k{color:var(--ink-3)}
+.disc .w{color:var(--verm)}
+.modes{display:flex;gap:2px;margin:8px 0 6px -6px}
+.modes button{font-size:13px;color:var(--ink-3);padding:2px 6px 5px;border-radius:var(--r1);position:relative}
+.modes button .mk{font-family:var(--mono);font-size:10px;color:var(--ink-3);margin-left:4px}
+.modes button[aria-selected="true"]{color:var(--indigo)}
+.modes button[aria-selected="true"]::after{content:"";position:absolute;left:6px;right:6px;bottom:1px;height:1.5px;background:var(--indigo)}
+.modes button:hover{color:var(--indigo)}
+.coach-reply{font-family:var(--serif);font-style:italic;font-size:14.5px;line-height:1.55;color:var(--indigo);margin:0;animation:fadein 600ms var(--ease) both}
+html[lang="zh-Hans"] .coach-reply{font-family:var(--kai);font-style:normal;font-size:15px;line-height:1.75;letter-spacing:0}
+html[lang="zh-Hans"] .coach-reply i{font-style:italic;font-family:var(--serif)}
+.coach-reply.pending{color:var(--ink-3);font-style:normal;font-family:var(--serif-sm);font-size:13px}
+.coach-reply.withheld{color:var(--ink-2);font-style:normal;font-family:var(--serif-sm);font-size:13px}
+.coach-foot{margin:6px 0 0;font-size:12px;color:var(--ink-3)}
+
+/* =====================================================================
+   today — the letter
+   ===================================================================== */
+.dateline{display:flex;justify-content:space-between;align-items:baseline;padding-bottom:9px;border-bottom:1px solid var(--rule)}
+.dateline .d{font-size:13.5px;color:var(--ink-2)}
+.chapter{font-family:var(--serif-hd);font-size:15px;color:var(--ink);font-weight:600;letter-spacing:.01em}
+html[lang="zh-Hans"] .chapter{font-family:var(--cjk);letter-spacing:0}
+.salute{margin:30px 0 4px;font-size:17px;color:var(--ink-2)}
+.headline{font-family:var(--serif-hd);font-size:34px;line-height:1.18;font-weight:400;margin:0 0 18px;letter-spacing:-.01em;text-wrap:balance}
+html[lang="zh-Hans"] .headline{font-weight:500;letter-spacing:0;line-height:1.32;font-size:33px}
+.headline .skillname{white-space:nowrap}
+.letter p{font-size:17px;line-height:1.72;margin:0 0 12px;color:var(--ink);max-width:35em}
+html[lang="zh-Hans"] .letter p{font-size:16.5px;line-height:1.95;text-wrap:wrap}
+.letter p b{font-weight:600}
+.actionrow{display:flex;gap:22px;align-items:baseline;margin:20px 0 0}
+.policy{margin-top:12px;font-size:13.5px;color:var(--ink-2);border-left:1px solid var(--rule-2);padding:2px 0 2px 14px;display:none}
+.policy.on{display:block;animation:fadein 400ms var(--ease) both}
+.policy p{margin:0 0 3px;font-size:13.5px;line-height:1.6}
+.signoff{margin:18px 0 0;font-size:13.5px;color:var(--ink-3);font-style:italic;text-align:right}
+html[lang="zh-Hans"] .signoff{font-style:normal}
+.ledger{margin-top:30px}
+.ledger-h{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--ink);padding-bottom:6px}
+.ledger-h h2,.ledger-h h3{margin:0;font-family:var(--serif-hd);font-size:17px;font-weight:600;letter-spacing:.005em}
+html[lang="zh-Hans"] .ledger-h h2,html[lang="zh-Hans"] .ledger-h h3{font-family:var(--cjk);letter-spacing:0}
+table.tab{width:100%;border-collapse:collapse;font-variant-numeric:lining-nums tabular-nums}
+table.tab th{font-weight:400;text-align:left;padding:7px 20px 5px 0;vertical-align:bottom;border-bottom:1px solid var(--rule);white-space:nowrap}
+table.tab td{padding:9px 20px 9px 0;border-bottom:1px solid var(--rule);vertical-align:baseline;font-size:14.5px}
+table.tab.led td,table.tab.led th{padding-right:14px}
+table.tab.led td:last-child,table.tab.led th:last-child{padding-right:0}
+table.tab.led .skill-n{white-space:nowrap}
+.ticks{margin-right:8px}
+table.tab td:last-child,table.tab th:last-child{padding-right:0}
+table.tab td.r,table.tab th.r{text-align:right}
+table.tab tr:last-child td{border-bottom:1px solid var(--rule-2)}
+.skill-n{font-size:15px;color:var(--ink);display:block;line-height:1.3}
+.skill-s{display:flex;flex-wrap:wrap;column-gap:8px;align-items:baseline;margin-top:2px}
+.ticks{display:inline-block;vertical-align:-1px;margin-right:10px}
+.ticks circle{stroke:var(--ink);stroke-width:1;fill:none}
+.ticks circle.c{fill:var(--ink)}
+.frac{font-size:14.5px;white-space:nowrap}
+.frac b{font-weight:600}
+.frac .of{color:var(--ink-3)}
+.nc{color:var(--ink-2)}
+.act{font-family:var(--mono);font-size:12px;color:var(--ink)}
+.act-l{display:block;font-size:12.5px;color:var(--ink-3);margin-top:1px}
+.ledger-notes{margin-top:10px;font-size:12.5px;color:var(--ink-3);display:grid;gap:3px;line-height:1.6}
+.ledger-notes p{margin:0;display:grid;grid-template-columns:18px 1fr}
+.ledger-notes .ticks{margin:0}
+.ps{margin-top:26px;padding-top:12px;border-top:1px solid var(--rule);font-size:14px;line-height:1.75;color:var(--ink-2)}
+.ps p{margin:0}
+.ps .lbl{font-family:var(--serif-hd);font-weight:600;color:var(--ink);margin-right:6px}
+html[lang="zh-Hans"] .ps .lbl{font-family:var(--cjk)}
+.ps b{font-weight:600;color:var(--ink)}
+
+/* =====================================================================
+   assessment — the exam paper
+   ===================================================================== */
+.leaf.exam{grid-template-columns:1fr;padding-top:22px;isolation:isolate}
+.exhead{border-top:3px double var(--ink);border-bottom:3px double var(--ink);padding:8px 0 9px;display:grid;grid-template-columns:1fr auto;align-items:end;column-gap:24px}
+.ex-run{font-family:var(--serif-hd);font-size:21px;line-height:1.2;font-weight:600}
+html[lang="zh-Hans"] .ex-run{font-family:var(--cjk);font-size:20px}
+.ex-rules{font-size:13px;color:var(--ink-2);margin-top:4px}
+.ex-clocks{display:flex;gap:30px;align-items:flex-end}
+.ck{text-align:right}
+.ck .lbl{display:block;font-size:12px;color:var(--ink-3);margin-bottom:3px}
+.ck .val{font-family:var(--serif-dp);font-size:32px;line-height:.95;font-variant-numeric:lining-nums tabular-nums;letter-spacing:-.01em}
+.ck .val .of{font-size:16px;color:var(--ink-3);font-family:var(--serif-hd);letter-spacing:0}
+.ck.item .val{font-size:24px}
+.ck .bar{display:block;height:1.5px;background:var(--rule-2);margin-top:6px;position:relative}
+.ck .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--ink)}
+.ex-strip{padding:10px 0 8px;border-bottom:1px solid var(--rule)}
+.ex-strip .row1{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.ex-strip .itemno{font-size:13.5px;color:var(--ink-2);display:inline-flex;align-items:baseline;gap:4px}
+.stepb{width:26px;height:24px;border-radius:var(--r1);color:var(--ink-2);font-size:15px}
+.stepb:first-child{margin-left:-7px}
+.stepb:hover{background:var(--pen);color:var(--ink)}
+.stepb[disabled]{color:var(--ink-4)}
+.ex-strip .itemno b{font-family:var(--serif-hd);font-size:17px;font-weight:600;color:var(--ink)}
+.cells{display:grid;grid-template-columns:repeat(20,1fr);row-gap:2px}
+.cell{height:23px;font-size:12px;color:var(--ink-3);display:flex;align-items:center;justify-content:center;font-variant-numeric:lining-nums tabular-nums;position:relative;border-radius:1px}
+.cell:hover{color:var(--ink);background:var(--pen)}
+.cell.ans{color:var(--ink)}
+.cell.ans::after{content:"";position:absolute;left:calc(50% - 4px);bottom:2px;width:8px;height:2px;background:var(--ink-2)}
+.cell.to{color:var(--ink-3);background:repeating-linear-gradient(135deg,transparent 0 3px,var(--rule-2) 3px 4px)}
+.cell.cur{color:var(--ink);font-weight:700}
+.cell.cur::before{content:"";position:absolute;left:50%;top:50%;width:22px;height:22px;transform:translate(-50%,-50%);border:1.25px solid var(--ink);border-radius:50%}
+.legend{display:flex;gap:14px;font-size:12.5px;color:var(--ink-3);align-items:center}
+.legend > span{display:inline-flex;align-items:center;gap:3px}
+.legend b{font-weight:600;color:var(--ink)}
+.legend .cell{width:24px;height:22px;font-style:normal;font-size:11px}
+.legend .cell.cur::before{width:19px;height:19px}
+.exam .passage{font-size:16px;line-height:1.58}
+.ex-k{margin:16px 0 8px;align-items:baseline}
+.exam .ex-k .p-title{font-size:22px;margin:0}
+.exnav{display:flex;gap:10px;align-items:center;margin-top:10px}
+.exnav .nofb{flex:1;margin:0}
+.omr{list-style:none;margin:0;padding:0}
+.omr li{position:relative;padding:4px 8px 4px 0;cursor:pointer;font-size:16px;line-height:1.45}
+.omr li::before{content:"";position:absolute;left:-42px;right:0;top:0;bottom:0;border-radius:var(--r1);transition:background var(--d1);z-index:-1}
+.omr li:hover::before{background:var(--pen)}
+.omr li .L{top:4px}
+.omr li.locked{cursor:not-allowed;color:var(--ink-3)}
+.nofb{margin:8px 0 0;font-size:12.5px;color:var(--ink-3)}
+/* exam nav: see .exnav above */
+
+/* =====================================================================
+   report
+   ===================================================================== */
+.score{display:flex;align-items:flex-end;gap:22px;margin:22px 0 4px}
+.score .big{font-family:var(--serif-dp);font-size:76px;line-height:.82;letter-spacing:-.02em;font-variant-numeric:lining-nums tabular-nums}
+.score .big .of{color:var(--ink-3);font-size:.5em;letter-spacing:0}
+.score .cap{padding-bottom:4px;font-size:14.5px;color:var(--ink-2);line-height:1.5}
+.pass-unknown{font-size:16px;color:var(--ink);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:8px 0;margin:16px 0 0;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.pass-unknown b{font-weight:600}
+.strip{display:inline-flex;gap:3px;align-items:flex-end;height:15px;vertical-align:-2px}
+.strip i{width:3px;height:15px;background:var(--ink);display:block}
+.strip i.x{height:6px;background:var(--ink-3)}
+.strip i.t{height:6px;background:var(--verm)}
+.timeline{margin:18px 0 0;font-size:16px;line-height:1.7}
+html[lang="zh-Hans"] .timeline{line-height:1.9}
+.timeline b{font-weight:600}
+.timeline .u{font-size:.8em;color:var(--ink-3);margin-left:1px}
+.withheld{margin-top:26px}
+.wnums{margin:8px 0 0;font-size:15px;line-height:2;letter-spacing:0}
+.wnums button{padding:0 .26em;color:var(--ink-2);font-variant-numeric:lining-nums tabular-nums;text-underline-offset:5px}
+.wnums button:hover{color:var(--ink)}
+.wnums button[aria-pressed="true"]{color:var(--ink);font-weight:600;text-decoration:underline;text-decoration-color:var(--verm);text-decoration-thickness:1.5px}
+.annot-detail{margin-top:6px;font-size:14px;line-height:1.65;color:var(--ink-2);padding-left:12px;border-left:1px solid var(--rule-2)}
+.annot-detail b{font-weight:600;color:var(--ink)}
+.fnotes{margin-top:28px;padding-top:10px;border-top:1px solid var(--rule);font-size:12.5px;color:var(--ink-2);line-height:1.6;max-width:36em}
+html[lang="zh-Hans"] .fnotes{line-height:1.75}
+.fnotes p{margin:0 0 4px;display:grid;grid-template-columns:16px 1fr}
+.fnotes .fnm{color:var(--verm);font-weight:600;font-family:var(--serif-sm)}
+.cmp-axis{position:relative;height:50px;margin:10px 4px 2px}
+.cmp-axis .ax{position:absolute;left:0;right:0;top:26px;height:1px;background:var(--rule-2)}
+.cmp-axis .tk{position:absolute;top:23px;width:1px;height:7px;background:var(--rule-2)}
+.cmp-axis .tl{position:absolute;top:33px;transform:translateX(-50%);font-size:11px;color:var(--ink-3)}
+.cmp-axis .pt{position:absolute;top:21px;width:11px;height:11px;border-radius:50%;transform:translateX(-50%);border:1.25px solid var(--ink);background:var(--paper)}
+.cmp-axis .pt.n{background:var(--ink)}
+.cmp-axis .pl{position:absolute;top:0;transform:translateX(-50%);font-size:12px;white-space:nowrap;color:var(--ink-2)}
+.cmp-axis .seg{position:absolute;top:26px;height:1.5px;background:var(--ink)}
+.delta{font-family:var(--serif-hd);font-size:28px;line-height:1;font-variant-numeric:lining-nums tabular-nums}
+.checks{list-style:none;padding:0;margin:8px 0 0;font-size:13px}
+.checks li{display:grid;grid-template-columns:16px 1fr auto;gap:6px;padding:3px 0;border-top:1px solid var(--rule);align-items:baseline}
+.checks li:last-child{border-bottom:1px solid var(--rule)}
+.checks .eq{color:var(--ink-3);font-size:12.5px}
+
+/* =====================================================================
+   anki — the printed index card, proof fields, sync ledger
+   ===================================================================== */
+.plate{display:flex;justify-content:center;gap:var(--gt);padding:18px 0 14px;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);margin-top:14px}
+.plate-h{display:flex;justify-content:space-between;align-items:baseline;margin-top:22px}
+.plate-h .ctl{display:flex;gap:22px}
+.cardw{flex:0 1 440px;min-width:0;transition:flex-basis var(--d3) var(--ease)}
+.cardw.phone{flex-basis:300px}
+.cardw .wl{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-3);margin-bottom:6px}
+.cardw .wl .tn{font-family:var(--serif-sm)}
+.plate-cap{font-size:12.5px;color:var(--ink-3);margin:8px 0 0;text-align:center}
+/* the card — self-contained colours so it renders the same in Anki */
+.icard{--c-bg:#FBF8F0;--c-edge:#D9CFBF;--c-ink:#1E1B17;--c-mute:#6B6458;--c-red:#B3341D;--c-blue:rgba(70,100,160,.18);
+  aspect-ratio:5/3;background:var(--c-bg);color:var(--c-ink);border:1px solid var(--c-edge);border-radius:1px;
+  padding:0 26px 10px;font-family:var(--serif);position:relative;
+  background-image:linear-gradient(var(--c-red),var(--c-red)),repeating-linear-gradient(to bottom,transparent 0 21px,var(--c-blue) 21px 22px);
+  background-size:100% 1px,100% calc(100% - 35px);background-position:0 34px,0 35px;background-repeat:no-repeat,no-repeat}
+.icard.dk{--c-bg:#2A241E;--c-edge:#463C31;--c-ink:#EDE3D2;--c-mute:#A99D8A;--c-red:#E07A5F;--c-blue:rgba(150,170,225,.13)}
+.icard .ch{height:34px;display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:6px}
+.icard .ch .t{font-family:var(--serif-sm);font-size:12px;font-variant-caps:all-small-caps;letter-spacing:.1em;color:var(--c-red);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.icard .ch .s{font-family:var(--mono);font-size:10px;color:var(--c-mute);white-space:nowrap}
+.icard .front{font-family:var(--serif-hd);font-size:25px;line-height:44px;padding-top:34px;text-wrap:balance}
+.icard.ph .front{font-size:20px}
+.icard .front em{font-style:normal;font-variant-caps:all-small-caps;letter-spacing:.05em;color:var(--c-red);font-weight:600;font-size:1.08em}
+.icard .cf{position:absolute;left:26px;right:26px;bottom:8px;display:flex;justify-content:space-between;font-size:10.5px;color:var(--c-mute);font-family:var(--serif-sm);line-height:14px}
+.icard .back{padding-top:4px}
+.icard .back p{margin:0;font-size:14px;line-height:22px}
+.icard .back .lab{display:block;font-family:var(--serif-sm);font-size:10.5px;font-variant-caps:all-small-caps;letter-spacing:.12em;color:var(--c-mute);line-height:22px}
+.icard .back .lab:lang(zh){font-family:var(--cjk);font-variant-caps:normal;letter-spacing:0;font-weight:600}
+.icard .back p.ex{font-style:italic}
+.icard .back p.ex b{font-style:normal;font-weight:600;box-shadow:inset 0 -1.5px 0 var(--c-red)}
+.icard.ph .back p{font-size:13px}
+.field{display:grid;grid-template-columns:118px 1fr;column-gap:16px;align-items:baseline;padding:8px 0 9px;border-bottom:1px solid var(--rule)}
+.field:first-of-type{border-top:1px solid var(--ink)}
+.field .fl{padding-top:2px}
+.field input,.field textarea{width:100%;border:0;background:transparent;padding:2px 0 3px;font-family:var(--serif);font-size:15px;line-height:1.55;color:var(--ink);resize:none;border-radius:0;
+  background-image:linear-gradient(to right,var(--ink-3) 0 1px,transparent 1px 4px);background-size:4px 1px;background-repeat:repeat-x;background-position:0 100%;cursor:text;transition:background var(--d1)}
+.field input:hover,.field textarea:hover{background-image:linear-gradient(var(--ink-3),var(--ink-3));background-size:100% 1px}
+.field input:focus,.field textarea:focus{background-image:linear-gradient(var(--ink),var(--ink));background-size:100% 1px;outline:none;caret-color:var(--verm)}
+.field input[disabled],.field textarea[disabled]{background-image:none;color:var(--ink-2);cursor:default}
+.field textarea{height:72px}
+.field textarea.short{height:28px}
+.field .ro{font-family:var(--mono);font-size:13px;color:var(--ink-2)}
+.field .why{font-size:12px;color:var(--ink-3);margin-left:10px}
+.anki-actions{display:flex;gap:22px;margin-top:16px;align-items:baseline}
+.anki-actions .imp{font-size:17px}
+.st{font-size:12.5px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:var(--ink-2)}
+.st svg{width:11px;height:11px;flex:none}
+.st.conflict{color:var(--verm)}
+.notes-list{list-style:none;margin:6px 0 0;padding:0}
+.notes-list li{display:grid;grid-template-columns:1fr auto;gap:10px;padding:5px 0;border-bottom:1px solid var(--rule);font-size:13px;align-items:baseline}
+.notes-list .fr{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--serif)}
+.conflict-box{grid-column:1 / -1;margin:2px 0 4px;display:grid;grid-template-columns:1fr 1fr;column-gap:0}
+.conflict-box .v{font-size:12.5px;line-height:1.5;padding:2px 10px 4px 0}
+.conflict-box .v + .v{padding:2px 0 4px 10px;border-left:1px solid var(--rule-2)}
+.conflict-box .v .micro{display:block}
+.conflict-box ins{text-decoration:none;box-shadow:inset 0 -1px 0 var(--verm)}
+.conflict-box .acts{grid-column:1 / -1;display:flex;gap:16px;margin-top:6px}
+
+/* =====================================================================
+   settings — the colophon
+   ===================================================================== */
+.col-title{display:flex;align-items:baseline;justify-content:space-between;padding-bottom:9px;border-bottom:1px solid var(--rule)}
+.col-title h1{margin:0;font-family:var(--serif-hd);font-size:15px;font-weight:600}
+html[lang="zh-Hans"] .col-title h1{font-family:var(--cjk)}
+.col-toc{display:flex;gap:18px;font-size:13px;color:var(--ink-3)}
+.col-toc a{text-decoration:none;color:var(--ink-2)} .col-toc a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.col-toc .n{color:var(--verm);font-family:var(--serif-sm);font-weight:600;margin-right:5px}
+.col-lede{margin:22px 0 0;font-size:17px;line-height:1.7;max-width:35em}
+html[lang="zh-Hans"] .col-lede{font-size:16.5px;line-height:1.9}
+.sec-h{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--ink);padding-bottom:6px;margin-top:30px}
+.sec-h h2{margin:0;font-family:var(--serif-hd);font-size:18px;font-weight:600;display:flex;gap:10px;align-items:baseline}
+html[lang="zh-Hans"] .sec-h h2{font-family:var(--cjk);font-size:17px}
+.sec-h h2 .sn{font-family:var(--serif-sm);font-size:13px;color:var(--verm);font-weight:600}
+table.tab.reg td{font-size:13.5px;padding:7px 10px 7px 0;vertical-align:baseline}
+table.tab.reg th{padding-right:10px}
+.reg th{font-size:12px;color:var(--ink-3)}
+.reg th.cap{text-align:center;font-family:var(--mono);font-size:10.5px;letter-spacing:0;padding-left:2px;padding-right:2px}
+table.tab.reg td.cap{text-align:center;padding-left:2px;padding-right:2px;vertical-align:baseline}
+table.tab.reg .cs{vertical-align:middle}
+table.tab.reg td.pv{font-size:14.5px;color:var(--ink);white-space:nowrap}
+table.tab.reg td.md{font-family:var(--mono);font-size:12px;color:var(--ink-2);white-space:nowrap}
+.reg tr.use td.pv{font-weight:600}
+.cs{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;color:var(--ink-3);vertical-align:middle}
+.cs svg{width:12px;height:12px}
+.cs.ver{color:var(--ink)}
+.cs.fail{color:var(--verm)}
+.ringg{display:block;width:9px;height:9px;border-radius:50%;border:1.2px solid currentColor}
+.dashg{display:block;width:9px;height:1.2px;background:var(--ink-3)}
+.key{font-size:13px;white-space:nowrap}
+.key .id{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-left:6px}
+.key.m{color:var(--ink-3)}
+.statecell{font-size:13px;color:var(--ink-2);line-height:1.45}
+.statecell > *{white-space:nowrap}
+.statecell .when,.statecell .fail,.statecell .id{font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--ink-3)}
+.statecell .fail{color:var(--verm)}
+.inuse{font-weight:600;color:var(--ink)}
+.cap-legend{display:flex;gap:20px;font-size:12px;color:var(--ink-3);margin:9px 0 0;flex-wrap:wrap;align-items:center}
+.cap-legend span{display:inline-flex;gap:6px;align-items:center}
+.cap-legend .cs{width:auto;height:auto}
+table.tab.bud td{font-size:14px;padding:8px 18px 7px 0;vertical-align:middle}
+.tally{display:inline-flex;gap:3px;vertical-align:middle;height:12px;align-items:stretch}
+.tally i{width:1px;background:var(--rule-2)}
+.tally i.u{background:var(--ink);width:1.5px}
+.bud tr.sum td{border-top:1px solid var(--ink);font-weight:600}
+.small{font-size:13px;color:var(--ink-3);line-height:1.65;margin:8px 0 0}
+html[lang="zh-Hans"] .small{line-height:1.75}
+.consent-state{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:10px 0;border-bottom:1px solid var(--rule)}
+.consent-state .s{font-size:15px}
+.consent-state .s b{font-weight:600}
+.events{list-style:none;margin:0;padding:0;font-size:13.5px}
+.events li{display:grid;grid-template-columns:96px 1fr;gap:8px;padding:6px 0;border-bottom:1px solid var(--rule)}
+.events li .when{font-variant-numeric:lining-nums tabular-nums;color:var(--ink-3);font-size:13px}
+.events li.new{animation:fadein 600ms var(--ease) both}
+.events li .w{color:var(--verm)}
+table.tab.svc td{font-size:14px;padding:8px 18px 7px 0}
+.dotst{display:inline-flex;align-items:center;gap:7px}
+.dotst i{width:7px;height:7px;border-radius:50%}
+.dotst.ok i{background:var(--moss)} .dotst.bad i{border:1.4px solid var(--verm)} .dotst.off i{border:1.4px solid var(--ink-3)}
+.dotst.bad{color:var(--verm)}
+
+/* =====================================================================
+   overlays — contents drawer, dialogs, toast
+   ===================================================================== */
+.scrim{position:fixed;inset:0;background:color-mix(in srgb,var(--desk) 60%,transparent);z-index:40;opacity:0;visibility:hidden;transition:opacity var(--d2) var(--ease),visibility 0s linear var(--d2)}
+.scrim.on{opacity:1;visibility:visible;transition:opacity var(--d2) var(--ease)}
+.drawer,.dlg{visibility:hidden;opacity:0;transition:opacity var(--d2) var(--ease),transform var(--d2) var(--ease),visibility 0s linear var(--d2)}
+.drawer.on,.dlg.on{visibility:visible;opacity:1;transition:opacity var(--d2) var(--ease),transform var(--d2) var(--ease)}
+.drawer{position:fixed;top:var(--head-h);left:50%;transform:translate(-50%,-8px);width:min(540px,90vw);background:var(--paper-raised);z-index:41;
+  box-shadow:var(--shadow-sheet);border:1px solid var(--rule);border-top:0;padding:22px 32px 24px}
+.drawer.on{transform:translate(-50%,0)}
+.drawer h2{margin:0 0 2px;font-family:var(--serif-hd);font-weight:600;font-size:20px}
+html[lang="zh-Hans"] .drawer h2{font-family:var(--cjk)}
+.toc{list-style:none;margin:12px 0 0;padding:0}
+.toc a{display:grid;grid-template-columns:34px auto 1fr auto;align-items:baseline;gap:6px;padding:7px 6px;margin:0 -6px;text-decoration:none;border-radius:var(--r1);font-size:16px}
+.toc a:hover,.toc a:focus-visible{background:var(--pen)}
+.toc a .no{font-family:var(--serif-sm);font-size:13px;color:var(--ink-3);font-variant-caps:all-small-caps;letter-spacing:.06em}
+.toc a .lead{border-bottom:1px dotted var(--ink-4);transform:translateY(-4px);margin:0 4px}
+.toc a.cur{font-weight:600}
+.toc a .d{font-size:12.5px;color:var(--ink-3);font-weight:400;margin-left:6px}
+.dlg{position:fixed;left:50%;top:50%;transform:translate(-50%,-48%);width:min(480px,92vw);background:var(--paper-raised);z-index:42;box-shadow:var(--shadow-sheet);border:1px solid var(--rule);padding:24px 30px 22px}
+.dlg.on{transform:translate(-50%,-50%)}
+.dlg h2{margin:4px 0 10px;font-family:var(--serif-hd);font-size:21px;font-weight:600;line-height:1.3}
+html[lang="zh-Hans"] .dlg h2{font-family:var(--cjk)}
+.dlg p{margin:0 0 10px;font-size:15px;line-height:1.6;color:var(--ink-2)}
+html[lang="zh-Hans"] .dlg p{line-height:1.8}
+.dlg .acts{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
+.dlg.wide{width:min(780px,94vw)}
+.keys{display:grid;grid-template-columns:1fr 1fr;column-gap:34px;margin-top:4px}
+.keys h3{margin:14px 0 4px}
+.keys dl{margin:0;display:grid;grid-template-columns:auto 1fr;column-gap:14px}
+.keys dt,.keys dd{padding:4px 0;border-top:1px solid var(--rule);font-size:13.5px;margin:0}
+.keys dt{display:flex;gap:4px;align-items:center;white-space:nowrap}
+.dlg input[type=date],.dlg input[type=number]{border:0;border-bottom:1px solid var(--ink);background:transparent;padding:6px 0;font-size:17px;width:200px;font-variant-numeric:lining-nums tabular-nums}
+.toast{position:fixed;left:50%;bottom:calc(var(--foot-h) + 18px);transform:translate(-50%,8px);background:var(--paper-raised);color:var(--ink);border:1px solid var(--rule-2);font-size:13.5px;padding:9px 16px;border-radius:var(--r1);z-index:50;opacity:0;pointer-events:none;transition:all var(--d2) var(--ease);box-shadow:var(--shadow-sheet)}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+#errbar{position:fixed;left:0;right:0;top:0;z-index:99;background:#C0141B;color:#fff;font:13px/1.4 var(--mono);padding:8px 14px;display:none;white-space:pre-wrap}
+
+/* =====================================================================
+   motion — slow, quiet, page-like
+   ===================================================================== */
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+@keyframes rise{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.enter{animation:fadein 420ms var(--ease) both}
+.mg .mnote{animation:fadein 700ms var(--ease) both}
+.mg .mnote:nth-of-type(2){animation-delay:140ms}.mg .mnote:nth-of-type(3){animation-delay:280ms}.mg .mnote:nth-of-type(4){animation-delay:420ms}
+.mg .mnote:nth-of-type(5){animation-delay:560ms}.mg .mnote:nth-of-type(6){animation-delay:700ms}.mg .mnote:nth-of-type(7){animation-delay:840ms}
+/* a re-render on the same page never replays ink, rings or note fades */
+main[data-settled] .enter,main[data-settled] .mnote,main[data-settled] .ev-key,main[data-settled] .struck s,main[data-settled] .ringmark ellipse,main[data-settled] .policy{animation:none}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+html.shot *,html.shot *::before,html.shot *::after{animation:none!important;transition:none!important;caret-color:transparent!important}
+</style>
+</head>
+<body>
+<div id="errbar" role="alert"></div>
+<div id="app">
+  <header class="runhead" id="head"></header>
+  <main id="main" tabindex="-1"></main>
+  <footer class="runfoot" id="foot"></footer>
+</div>
+<div class="scrim" id="scrim"></div>
+<nav class="drawer" id="drawer" inert></nav>
+<div class="dlg" id="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title" inert></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ---------- visible error bar so a screenshot exposes JS failures ---------- */
+function showErr(txt){var b=document.getElementById('errbar');b.style.display='block';b.textContent+=txt+'\n';}
+window.onerror=function(msg,src,line,col){showErr('JS error: '+msg+' ('+(src||'').split('/').pop()+':'+line+':'+col+')');};
+window.addEventListener('unhandledrejection',function(e){showErr('Unhandled rejection: '+(e.reason&&e.reason.message||e.reason));});
+
+/* ---------- state ---------- */
+const ROUTES=['today','practice','feedback','assess','report','anki','settings'];
+const qs=new URLSearchParams(location.search);
+const saved=(()=>{try{return JSON.parse(localStorage.getItem('pq-folio')||'{}')}catch(e){return {}}})();
+const S={
+  theme:qs.get('theme')||saved.theme||'light',
+  lang:qs.get('lang')||saved.lang||'zh',
+  shot:qs.get('shot')==='1',
+  choice:null, assisted:false, hintOpen:false, skipAsk:false, pClock:41, marks:[],
+  answered:'A', answeredAt:108, answeredCond:'ind',
+  coach:'probe', coachVisited:{probe:true}, budget:4, pending:null,
+  assess:{cur:17,ans:{},to:new Set([11]),left:34*60+12,item:52},
+  annot:17,
+  anki:{front:'all of the following are true EXCEPT',
+        back1:'Three options match the passage; the answer is the one that does not. Check each option against the text — do not pick the one that repeats the most words.',
+        back2:'Engineers will replace two of the four main pumps…',
+        tactic:'NOT/EXCEPT polarity', width:'desktop', ctheme:null, state:'draft', conflict:'open'},
+  consent:true, revokeAsk:false, events:[{when:'11-12 21:05',kind:'grant'}],
+  examDate:null, dailyMin:null, brief:'paused', policy:false
+};
+if(!['light','dark'].includes(S.theme))S.theme='light';
+if(!['zh','en'].includes(S.lang))S.lang='zh';
+for(let i=1;i<=16;i++){if(i!==11)S.assess.ans[i]='ABCD'[(i*7+3)%4];}
+S.assess.ans[17]='D';
+if(S.shot)document.documentElement.classList.add('shot');
+const persist=()=>{
+  try{localStorage.setItem('pq-folio',JSON.stringify({theme:S.theme,lang:S.lang}))}catch(e){}
+  /* keep the address in step with the toggles so a reload never reverts them */
+  const q=new URLSearchParams(location.search);q.set('theme',S.theme);q.set('lang',S.lang);
+  history.replaceState(null,'',location.pathname+'?'+q.toString()+location.hash);
+};
+const t=(zh,en)=>S.lang==='zh'?zh:en;
+const route=()=>{const r=(location.hash||'').replace(/^#\/?/,'');return ROUTES.includes(r)?r:'today'};
+
+/* ---------- content ---------- */
+const QS=[
+ {skill:'not-except-polarity',stem:'According to the notice, all of the following are true EXCEPT that ____.',
+  opts:['the South Station will supply water to the eastern district','drinking-water quality is tested twice a day','all four main pumps will be replaced','delivery vehicles must enter through the west gate'],key:2},
+ {skill:'vocabulary-in-context',stem:'The phrase “under way” in Paragraph 3 most probably means ____.',opts:['in progress','on the road','delayed','being planned'],key:0},
+ {skill:'sentence-structure',stem:'Why should questions be sent to the district office?',opts:['The district office manages the engineers.','The station’s phone line will not work during the project.','Visitors are not allowed on site.','The station will close permanently.'],key:1},
+ {skill:'unclassified',stem:'What is one expected result of the project?',opts:['Water will taste better.','The station will use less electricity.','The eastern district will get a new station.','Fewer workers will be needed.'],key:1}
+];
+const L4='ABCD';
+const EXPL={
+  A:[ '第 1 段说由南站向东区供水。它重复的原文词最多——这正是 EXCEPT 题里词语重合会误导人的原因。',
+      'Paragraph 1 says the South Station supplies the eastern district. It repeats the most passage words, which is exactly why keyword overlap misleads in an EXCEPT item.'],
+  B:[ '原文说 <q lang="en">tested twice a day</q>。', 'The notice says <q>tested twice a day</q>.'],
+  C:[ '四台主泵只换两台。这是唯一不符的说法，因此是答案。', 'Only two of the four pumps are replaced. This is the odd statement, so it is the key.'],
+  D:[ '原文说 <q lang="en">Delivery vehicles must use the west gate</q>。', 'The notice says <q>Delivery vehicles must use the west gate</q>.']
+};
+const COACH={
+  probe:['再看答案之前：选项 C 里，你会拿哪个词回原文核对？试试 <i>all</i>。第 2 段说的是四台中的两台，所以 C 是唯一没有原文支持的说法。A 让人放心，是因为它重复的原文词最多——但重复只说明词被搬了过来，不说明它成立。',
+         'Before you look at the key again: which word in option C would you check against the passage? Try <i>all</i>. Paragraph 2 says <i>two of the four</i> pumps, so C is the one statement the notice does not support. A felt safe because it reuses the most passage words — but reuse shows copying, not truth.'],
+  probeOk:['你选对了。换个角度验证：如果没有 <i>all</i> 这个词，你还能排除 A、B、D 吗？三项各有一句原文对应，C 的数量词与第 2 段的 <i>two of the four</i> 冲突——这才是它不成立的理由，而不是它“看着陌生”。',
+         'You chose the key. Check the reason, not the result: without the word <i>all</i>, could you still rule out A, B and D? Each matches a sentence; C’s quantity clashes with <i>two of the four</i> in paragraph 2. That clash is why it is false — not that it looked unfamiliar.'],
+  explain:['EXCEPT 题里，三个选项有原文支持，一个没有。A、B、D 各自对应原文中的一句；C 说四台全换，而第 2 段说只换四台中的两台。那个不成立的说法，就是答案。',
+         'In an EXCEPT item, three options are supported by the notice and one is not. A, B and D each match a sentence. C says all four pumps; paragraph 2 says two of the four. The odd statement is the key.'],
+  lesson:['EXCEPT 题三步：一，读题干，圈出 EXCEPT 或 NOT；二，逐个选项回原文找对应句，标“有支持”或“无支持”；三，选唯一无支持的那一项。留意数量词——<i>all</i>、<i>only</i>、<i>two of</i>——说法常在这里悄悄变假。',
+         'EXCEPT items in three moves. One: circle EXCEPT or NOT in the stem. Two: find each option’s sentence and mark it supported or not. Three: choose the only unsupported one. Watch quantity words — <i>all</i>, <i>only</i>, <i>two of</i> — that is where a statement quietly turns false.']
+};
+
+/* ---------- icons (hand-made) ---------- */
+const I={
+  toc:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M2.5 4h2M7 4h6.5M2.5 8h2M7 8h6.5M2.5 12h2M7 12h4.5"/></svg>',
+  theme:'<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor"/></svg>',
+  lock:'<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2.5" y="6.2" width="9" height="6" rx=".8"/><path d="M4.6 6.2V4.4a2.4 2.4 0 0 1 4.8 0v1.8"/></svg>',
+  ext:'<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M5 2.5H2.5v7h7V7M7 2.5h2.5V5M9.3 2.7 5.5 6.5"/></svg>',
+  /* proofreader's deleatur: a looped stroke, drawn by hand */
+  dele:'<svg class="dele" viewBox="0 0 16 20" aria-hidden="true"><path d="M13 2.6C10.4 1 6.6 1.6 7.4 4.2c.6 1.9 4.9 3.6 5 7.6.1 3.2-2.4 5.4-5 5.3-2.7-.1-4.3-2.2-4-4.6.4-2.8 3.3-4.3 6.1-4"/></svg>',
+  ring:'<svg class="ringmark" viewBox="0 0 30 26" aria-hidden="true"><ellipse cx="15" cy="13" rx="13" ry="11" pathLength="100"/></svg>',
+  cross:'<svg class="glyph" viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M3 3l6 6M9 3l-6 6"/></svg>',
+  check:'<svg class="glyph" viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 6.4 4.8 9 9.8 3"/></svg>',
+  clock:'<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="6" cy="6" r="4.6"/><path d="M6 3.4V6l1.8 1.2"/></svg>',
+  eq:'<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M2.5 4.6h7M2.5 7.6h7"/></svg>',
+  neq:'<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M2.5 4.6h7M2.5 7.6h7M8 2 4 10"/></svg>',
+  pencil:'<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M2 10l.6-2.4L8.2 2l1.8 1.8-5.6 5.6z"/></svg>',
+  arrowR:'<span class="arrow">→</span>', arrowL:'<span class="arrow">←</span>'
+};
+const cg=k=>`<i class="cg ${k}" aria-hidden="true"></i>`;
+
+/* ---------- routes meta ---------- */
+const META={
+  today:{zh:'今日一页',en:'Today’s page'},
+  practice:{zh:'阅读练习',en:'Reading practice'},
+  feedback:{zh:'判分与批注',en:'Grading & notes'},
+  assess:{zh:'计时测评',en:'Timed assessment'},
+  report:{zh:'测评报告',en:'Assessment report'},
+  anki:{zh:'Anki 卡片',en:'Anki notes'},
+  settings:{zh:'设置',en:'Settings'}
+};
+const DESC={
+  today:['下一步与证据','What’s next, and why'],practice:['独立作答，尚未判分','Answer before any help'],
+  feedback:['答案键与教练批注','Key, evidence, coach'],assess:['无注释 · 计时','Unassisted · timed'],
+  report:['同条件对比','Like-for-like'],anki:['提议、预览、同步','Propose, preview, sync'],
+  settings:['模型、同意、预算','Models, consent, budget']
+};
+const roman=['i','ii','iii','iv','v','vi','vii'];
+const fmt=s=>{s=Math.max(0,s);const m=Math.floor(s/60),x=s%60;return m+':'+String(x).padStart(2,'0')};
+
+/* =====================================================================
+   running head / foot
+   ===================================================================== */
+function head(r){
+  const h=document.getElementById('head');
+  const lang=`<button class="rh-btn lang-sw" data-act="lang" title="L"><span class="${S.lang==='zh'?'cur':''}" lang="zh-Hans">中</span><i aria-hidden="true"></i><span class="${S.lang==='en'?'cur':''}" lang="en">EN</span><span class="vh">${t('（切换语言）',' (switch language)')}</span></button>`;
+  const theme=`<button class="rh-btn" data-act="theme" title="T">${I.theme}<span>${S.theme==='light'?t('日间','Day'):t('夜读','Night')}</span><span class="vh">${t('（切换明暗）',' (toggle light or dark)')}</span></button>`;
+  if(r==='assess'){
+    h.innerHTML=`<div class="frame"><div class="rh">
+      <div class="rh-left"><span class="brand">Pass Quest</span><span class="rh-sep"></span><span class="rh-sec">${META.assess[S.lang]}</span></div>
+      <div></div>
+      <div class="rh-right">${lang}${theme}<button class="rh-btn" data-act="leave">${t('离开','Leave')} <kbd>Esc</kbd></button></div></div></div>`;
+    return;
+  }
+  const exam=S.examDate?`<b class="tn">${S.examDate}</b>`:`<span>${t('未设置','not set')}</span><span class="dot">·</span><button class="link" data-act="set-exam">${t('去设置','Set it')}</button>`;
+  h.innerHTML=`<div class="frame"><div class="rh">
+    <div class="rh-left"><span class="brand">Pass Quest</span><span class="rh-sep"></span><span class="rh-sec">${META[r][S.lang]}</span></div>
+    <div class="rh-mid"><span>${t('备考第','Prep day')} <b class="tn">23</b>${t(' 天','')}</span><span class="dot">·</span><span>${t('考试日期','Exam date')}</span>${exam}</div>
+    <div class="rh-right">
+      <button class="rh-btn" data-act="toc" aria-haspopup="dialog" title="G">${I.toc}<span>${t('目录','Contents')}</span></button>
+      ${lang}${theme}
+      <button class="rh-btn" data-act="keys" title="?"><kbd>?</kbd><span class="vh">${t('快捷键','Shortcuts')}</span></button>
+    </div></div></div>`;
+}
+function foot(r){
+  const i=ROUTES.indexOf(r), prev=ROUTES[i-1], next=ROUTES[i+1];
+  const K=(k,l)=>`<span>${k}<span>${l}</span></span>`;
+  if(r==='assess'){
+    document.getElementById('foot').innerHTML=`<div class="frame"><div class="rf" style="grid-template-columns:1fr">
+      <div class="rf-keys" style="justify-content:center">${K('<kbd>A</kbd>–<kbd>D</kbd>',t('作答','Answer'))}${K('<kbd>←</kbd><kbd>→</kbd>',t('换题','Move'))}${K('<kbd>Esc</kbd>',t('离开（计时不暂停）','Leave (the clock keeps running)'))}</div></div></div>`;
+    return;
+  }
+  const keys={
+    today:[K('<kbd>↵</kbd>',t('开始练习','Begin')),K('<kbd>G</kbd>',t('目录','Contents'))],
+    practice:[K('<kbd>A</kbd>–<kbd>D</kbd>',t('选择','Choose')),K('<kbd>↵</kbd>',t('提交','Submit')),K('<kbd>H</kbd>',t('提示','Hint')),K('<kbd>M</kbd>',t('标记','Mark'))],
+    feedback:[K('<kbd>1</kbd>–<kbd>3</kbd>',t('批注方式','Coach')),K('<kbd>K</kbd>',t('拟卡片','Note')),K('<kbd>N</kbd>',t('下一题','Next'))],
+    report:[K('<kbd>G</kbd>',t('目录','Contents')),K('<kbd>[</kbd><kbd>]</kbd>',t('翻页','Turn page'))],
+    anki:[K('<kbd>Ctrl</kbd><kbd>↵</kbd>',t('接受','Accept')),K('<kbd>S</kbd>',t('跳过','Skip')),K('<kbd>P</kbd>',t('预览宽度','Width'))],
+    settings:[K('<kbd>G</kbd>',t('目录','Contents')),K('<kbd>[</kbd><kbd>]</kbd>',t('翻页','Turn page'))]
+  }[r];
+  const pp={
+    practice:t('第 1 题 · 共 4 题','item 1 of 4'), feedback:t('第 1 题 · 已判分','item 1 · graded'),
+    report:t('第 3 次 · 已完成','run 3 · complete'), anki:t('9 条笔记 · 1 份草稿','9 notes · 1 draft')
+  }[r];
+  document.getElementById('foot').innerHTML=`<div class="frame"><div class="rf">
+    <div class="rf-keys">${keys.join('')}${K('<kbd>?</kbd>',t('全部','Keys'))}</div>
+    <div class="folio"><span class="rn">— ${roman[i]} —</span>${pp?`<span class="pp">${pp}</span>`:''}</div>
+    <div class="rf-nav">${prev?`<a href="#/${prev}">${I.arrowL} ${META[prev][S.lang]}</a>`:''}${next?`<a href="#/${next}">${META[next][S.lang]} ${I.arrowR}</a>`:''}</div></div></div>`;
+}
+
+/* =====================================================================
+   passage
+   ===================================================================== */
+function passage(mode){
+  const fb=mode==='feedback';
+  const sp=(L,txt)=>fb?`<span class="ev ${L===L4[QS[0].key]?'ev-key':''}" id="ev-${L}" data-opt="${L}">${txt}<sup class="evm">${L}</sup></span>`:txt;
+  const two=fb?'<b>two of the four</b>':'two of the four';
+  return `<div class="passage" lang="en" id="passage">
+  <p id="pa1"><span class="pn" aria-hidden="true">1</span>From Monday, 4 March, the North Pump Station will be closed for maintenance for about three weeks. ${sp('A','During this period, water for the eastern district will be supplied by the South Station.')} Residents may notice lower water pressure between 6 a.m. and 9 a.m., when demand is highest. The lower pressure will not affect drinking-water quality, ${sp('B','which is tested twice a day.')}</p>
+  <p id="pa2"><span class="pn" aria-hidden="true">2</span>${sp('C','Engineers will replace '+two+' main pumps')} and install a new control system. The old pumps have been in service since 1998 and use nearly 30 percent more electricity than modern models. Once the work is finished, the station is expected to run more quietly and to need fewer repairs.</p>
+  <p id="pa3"><span class="pn" aria-hidden="true">3</span>Visitors are not allowed on site while the work is under way. ${sp('D','Delivery vehicles must use the west gate,')} and all workers must wear helmets and reflective vests. Questions about the project should be sent to the district office rather than to the station itself, because the station’s phone line will be disconnected until the work is complete.</p>
+  </div>`;
+}
+const ptitle=(k)=>`<div class="p-kicker"><span class="micro" lang="en">${k||'Notice'}</span><span class="micro">${t('阅读 · 通知类','Reading · notice')}</span></div>
+  <h1 class="p-title" id="p-title" lang="en">Temporary Closure of the North Pump Station</h1>`;
+/* a margin note; anchor = id of the span/line it belongs to */
+const note=(anchor,body,cls='',extra='')=>`<div class="mnote ${cls}" data-for="${anchor}" ${extra}>${body}</div>`;
+
+/* =====================================================================
+   TODAY — a one-page letter from the coach
+   ===================================================================== */
+function today(){
+  const fn=n=>`<sup class="fn" id="fn-${n}" data-fn="${n}">${n}</sup>`;
+  const ticks=s=>{const w=s.length*9-2;return `<svg class="ticks" width="${w}" height="7" viewBox="0 0 ${w} 7" aria-hidden="true">${[...s].map((c,i)=>`<circle class="${c==='1'?'c':''}" cx="${i*9+3.5}" cy="3.5" r="3"/>`).join('')}</svg>`};
+  const row=(name,zh,en,kind,seq,c,n,a,re,act,actzh,acten)=>`<tr>
+    <td><span class="skill-n">${t(zh,en)}</span><span class="skill-s"><span class="tag">${name}</span><span class="micro">${kind}</span></span></td>
+    <td class="nw">${ticks(seq)}<span class="frac"><b>${c}</b><span class="of"> / ${n}</span></span></td>
+    <td class="r nc">${a}</td><td class="r nc">${re}</td>
+    <td class="r"><span class="act">${act}</span><span class="act-l">${t(actzh,acten)}</span></td></tr>`;
+  const brief={paused:`${t('暂停于第 ','paused at step ')}<span class="tn">3/6</span>${t(' 步','')}`,running:`${t('已继续，正在第 ','resumed — running step ')}<span class="tn">3/6</span>${t(' 步','')}`,cancelled:t('已取消；已完成的步骤保留','cancelled; finished steps kept')}[S.brief];
+  const setOr=(v,act,unit)=>v?`<b class="tn">${v}${unit||''}</b> · <button class="link" data-act="${act}">${t('更改','change')}</button>`:`<b>${t('未设置','not set')}</b> · <button class="link" data-act="${act}">${t('去设置','set it')}</button>`;
+  const NB=(n,body)=>note('fn-'+n,`<span class="nn">${n}</span><div>${body}</div>`,'num',`data-fn="${n}"`);
+  return `<div class="leaf enter" id="leaf">
+  <article class="tb letter">
+    <div class="dateline"><span class="chapter">${t('今日一页','Today’s page')}</span><span class="d tn">${t('11 月 13 日，星期五 · 自 10 月 22 日起','Friday 13 November · since 22 October')}</span></div>
+    <p class="salute">${t('今天只做一件事：','Today, only one thing:')}</p>
+    <h1 class="headline">${t('练一篇新文章，<span class="nw">专练 NOT/EXCEPT 极性。</span>','Practise a fresh passage on <span class="skillname">NOT/EXCEPT polarity</span>.')}</h1>
+    <p>${t(`这项计分技能，你独立迁移 3 次，答对 1 次；最近一次错误，选了与原文重复词最多的选项。${fn(1)}这次的文章是新的，你没见过，所以作答<b>可以计入独立迁移</b>。`,
+           `On this scoring skill you have made 3 independent transfers and got 1 right; the last miss picked the option that reuses the most passage words.${fn(1)} The passage will be fresh, so this attempt <b>can count</b> as an independent transfer.`)}</p>
+    <p>${t(`其余的事今天都可以等。测评题库还够用。${fn(2)}Anki 有一处冲突等你决定。${fn(3)}学习简报停在第 3 步。${fn(4)}找练习材料暂时不联网。${fn(5)}辅导模型已验证，<span class="nw">今天用了 ${S.budget} 次。${fn(6)}</span>`,
+           `Everything else can wait. The assessment pool still has room.${fn(2)} Anki has one conflict for you to decide.${fn(3)} The study brief is paused at step 3.${fn(4)} Finding practice uses no network yet.${fn(5)} The tutor model is verified and has made ${S.budget} calls today.${fn(6)}`)}</p>
+    <div class="actionrow">
+      <a class="imp" href="#/practice" data-primary>${t('开始练习','Begin practice')} <kbd>↵</kbd></a>
+      <button class="link" data-act="policy" aria-expanded="${S.policy}">${t('为什么是这一步？','Why this step?')}</button>
+    </div>
+    <div class="policy ${S.policy?'on':''}" id="policy">
+      <p>${t('候选：<span class="tag">not-except-polarity</span> → practice_new；<span class="tag">vocabulary-in-context</span> → review；<span class="tag">sentence-structure</span> → practice_new。','Candidates: <span class="tag">not-except-polarity</span> → practice_new; <span class="tag">vocabulary-in-context</span> → review; <span class="tag">sentence-structure</span> → practice_new.')}</p>
+      <p>${t('选中：计分技能里独立正确率最低的一项（1/3）。只看独立迁移；有辅助与重复接触不参与。','Chosen: the scoring skill with the lowest independent accuracy (1/3). Only independent transfers are read; assisted and re-exposure attempts are not.')}</p>
+    </div>
+    <p class="signoff">${t('—— 依据透明策略排定，不由模型撰写','— set by the transparent policy, not written by a model')}</p>
+    <section class="ledger" id="ledger">
+      <div class="ledger-h"><h2>${t('技能证据簿','Skill evidence ledger')}</h2><span class="micro">${t('三项技能 · 截至今日','three skills · as of today')}</span></div>
+      <table class="tab led">
+        <thead><tr><th><span class="micro">${t('技能','Skill')}</span></th><th><span class="micro">${t('独立迁移 · 答对','Independent')}</span></th><th class="r"><span class="micro">${t('有辅助','Assisted')}</span></th><th class="r"><span class="micro">${t('重复接触','Re-exp.')}</span></th><th class="r"><span class="micro">${t('下一步','Next')}</span></th></tr></thead>
+        <tbody>
+          ${row('not-except-polarity','NOT/EXCEPT 极性','NOT/EXCEPT polarity',t('计分','scoring'),'010',1,3,2,1,'practice_new','练新文章','fresh passage')}
+          ${row('vocabulary-in-context','语境词义','Vocabulary in context',t('语言','language'),'1101101',5,7,1,0,'review','复习','review')}
+          ${row('sentence-structure','句子结构','Sentence structure',t('语言','language'),'1011',3,4,0,0,'practice_new','练新文章','fresh passage')}
+        </tbody>
+      </table>
+      <div class="ledger-notes">
+        <p>${ticks('10')}<span>${t('实心＝答对，空心＝答错。只有独立迁移计入；有辅助与重复接触照实记录，但不计入。','Filled = correct, hollow = missed. Only independent transfers count; assisted and re-exposure are recorded, never counted.')}</span></p>
+        <p><span class="verm">*</span><span>${t('原因诊断：<b style="color:var(--ink-2);font-weight:600">未定</b>。现有证据只说明错在哪里，还不足以说明为什么错。','Causal diagnosis: <b style="color:var(--ink-2);font-weight:600">unresolved</b>. The evidence shows where the misses are, not yet why.')}</span></p>
+      </div>
+    </section>
+    <div class="ps" id="ps"><p><span class="lbl">${t('附：尚未确定','P.S. Not yet known')}</span>
+      ${t('考试日期','Exam date')} ${setOr(S.examDate,'set-exam')}${t('；',';')}
+      ${t('每日学习时长','daily study budget')} ${setOr(S.dailyMin,'set-daily',t(' 分钟',' min'))}${t('；',';')}
+      ${t('及格线','pass threshold')} <b>${t('未知','unknown')}</b>${t('——所以这一页没有通过概率、准备度或预测分数。',' — so this page shows no pass probability, readiness or predicted score.')}</p></div>
+  </article>
+  <aside class="mg" data-notes aria-label="${t('页边注','Margin notes')}">
+    ${NB(1,`<b>${t('最近一次错误','Last miss')}</b> · ${t('独立迁移。选了重复原文词最多的选项；答案是唯一不符的说法。','independent transfer. Picked the option with the most passage words; the key was the one unsupported statement.')}`)}
+    ${NB(2,`<b>${t('测评题库','Assessment pool')}</b> · ${t('未见 <span class="tn">63</span> 题 / <span class="tn">17</span> 个单元；已用 4 个单元，下限 20 题。上次测评：第 2 次，<span class="tn">11-11</span>。','<span class="tn">63</span> items / <span class="tn">17</span> units unseen; 4 units spent, floor 20 items. Last assessment: run 2, <span class="tn">11-11</span>.')}`)}
+    ${NB(3,`<b>Anki</b> · ${t('已接受 6 · 排队 1（Anki 未运行）· ','6 accepted · 1 queued (Anki not running) · ')}<span class="verm nw">${t('冲突 1','1 conflict')}</span><div class="acts"><a class="link" href="#/anki">${t('去处理冲突','Resolve the conflict')}</a></div>`)}
+    ${NB(4,`<b>${t('学习简报','Study brief')}</b> <span class="tag">brief-7</span> · ${brief}${S.brief==='paused'?`<div class="acts"><button class="link" data-act="brief-resume">${t('继续','Resume')}</button><button class="link" data-act="brief-cancel">${t('取消','Cancel')}</button></div>`:''}`)}
+    ${NB(5,`<b>${t('找练习材料','Find practice')}</b> · ${t('未配置搜索提供方；网络调用 0 次。','no search provider configured; 0 network calls.')}`)}
+    ${NB(6,`<b>${t('辅导模型','Tutor model')}</b> <span class="tag">deepseek/deepseek-chat</span> · ${t('已验证 <span class="tn">11-13 09:12</span> · 今日预算 ','verified <span class="tn">11-13 09:12</span> · budget ')}<span class="tn">${S.budget}/20</span>${t('',' today')}`)}
+  </aside>
+  </div>`;
+}
+
+/* =====================================================================
+   PRACTICE — passage, then the question, on one leaf
+   ===================================================================== */
+function practice(){
+  const q=QS[0];
+  const opts=q.opts.map((o,i)=>`<li class="opt ${S.choice===L4[i]?'sel':''}" role="radio" tabindex="${(S.choice?S.choice===L4[i]:i===0)?0:-1}" aria-checked="${S.choice===L4[i]}" data-choose="${L4[i]}">
+     <span class="L">${L4[i]}</span><span class="tx" lang="en">${o}</span><span class="k">${L4[i]} · ${i+1}</span></li>`).join('');
+  const cond=S.assisted
+    ? `<p class="condn">${cg('asst')}<span><b>${t('有辅助','Assisted')}</b><br>${t('提示已显示，本次不计入独立迁移。','A hint was shown; this attempt will not count.')}</span></p>`
+    : `<p class="condn">${cg('ind')}<span><b>${t('独立 · 新文章','Independent · fresh passage')}</b><br>${t('本次可计入独立迁移。','This attempt can count.')}</span></p>`;
+  const marks=S.marks.map((m,i)=>note('mk-'+i,`<div class="mh"><span class="micro">${t('你的标记','Your mark')} ${i+1}</span></div><p><span lang="en">“${esc(m.length>48?m.slice(0,46)+'…':m)}”</span> · ${t('稍后可做成卡片。','can become a note later.')} <button class="link" data-unmark="${i}">${t('取消','Remove')}</button></p>`,'lead')).join('');
+  return `<div class="leaf enter" id="leaf">
+  <article class="tb" id="textcol">
+    ${ptitle()}
+    ${passage('practice')}
+    <div class="markpop" id="markpop"><button data-act="mark">${I.pencil.replace('<svg','<svg width="12" height="12"')} ${t('标记','Mark')} <kbd>M</kbd></button></div>
+    <section class="qblock" id="qblock" aria-label="${t('第 1 题','Item 1')}">
+      <span class="qn hang" aria-hidden="true">1</span>
+      <p class="stem" lang="en" id="stem">${q.stem}</p>
+      <ol class="opts" role="radiogroup" aria-label="${t('选项','Options')}" id="opts">${opts}</ol>
+      ${S.hintOpen?`<div class="hintbox">${t('提示：EXCEPT 题——先找出三个有原文支持的选项，剩下的那个才是答案。','Hint: in an EXCEPT item, first find the three options the notice supports; the one left over is the answer.')}</div>`:''}
+      <div class="slip-actions">
+        <button class="btn pri" data-act="submit" ${S.choice?'':'disabled'}>${t('提交','Submit')} <kbd>↵</kbd></button>
+        <button class="btn" data-act="skip">${t('跳过','Skip')} <kbd>S</kbd></button>
+        <span class="sp"></span>
+        ${S.hintOpen?'':`<button class="hintbtn" data-act="hint">${I.lock}<span>${t('提示','Hint')}</span> <kbd>H</kbd></button>`}
+      </div>
+      ${S.skipAsk?`<div class="confirm-inline"><span>${t('跳过本题？会记为“跳过”，不计分。','Skip this item? It is recorded as skipped and not scored.')}</span><button class="btn sm" data-act="skip-yes">${t('跳过','Skip')}</button><button class="link" data-act="skip-no">${t('取消','Cancel')}</button></div>`:''}
+    </section>
+  </article>
+  <aside class="mg" data-notes aria-label="${t('页边注','Margin notes')}">
+    ${note('p-title',`<div class="mh"><span class="micro">${t('出处','Source')}</span></div><p>${t('本地导入 · S1 · 第 24 页 · 已审核','Local import · S1 · p.24 · reviewed')}</p><p class="muted">${t('原型中的文章与题目是原创占位文本，不是真实考试材料；文章与题目保持英文。','The passage and items here are original placeholder text, not real exam material; they stay in English.')}</p>`)}
+    ${note('pa1',`<p class="muted">${t('页边留给你：在文中选中文字，按 <kbd>M</kbd> 标记。答题前，教练不在这里写字。','The margin is yours: select words in the passage and press <kbd>M</kbd>. Before you answer, the coach writes nothing here.')}</p>`,'',`data-soft`)}
+    ${marks}
+    ${note('stem',`<div class="mh"><span class="micro">${t('第 1 题 · 单选题，四个选项','Item 1 · single choice of four')}</span></div>${cond}<p class="muted" style="margin-top:6px">${S.hintOpen?t('提示已打开：本次记为有辅助。','Hint opened: this attempt is recorded as assisted.'):t('提示可以打开，但会先提醒：打开后本次记为“有辅助”，不再计入。','A hint is available. It asks first: opening it makes this attempt assisted, which does not count.')}</p>`,'condnote')}
+    ${note('opts',`<div class="mh"><span class="micro">${t('用时','Your time')}</span></div><p><span class="tn clockv" id="pclock">${fmt(S.pClock)}</span> <span class="muted">${t('你自己的用时，不是考试限时','yours, not an exam limit')}</span></p>
+      <p style="margin-top:8px"><span class="tag">not-except-polarity</span> · ${t('计分技能；独立 3 次，答对 1 次。','scoring; 3 independent, 1 correct.')}</p><p class="muted">${t('同一篇文章另有第 2–4 题，待答。','Items 2–4 on this passage are still to come.')}</p>`)}
+  </aside>
+  <svg class="leaders" id="leaders" aria-hidden="true"></svg>
+  </div>`;
+}
+
+/* =====================================================================
+   FEEDBACK — the graded item first, then the proofed passage
+   ===================================================================== */
+function feedback(){
+  const q=QS[0], ch=S.answered, key=L4[q.key], ok=ch===key, asst=S.answeredCond==='asst';
+  const opts=q.opts.map((o,i)=>{
+    const L=L4[i], isKey=L===key, isCh=L===ch;
+    let cls='opt fb', an='';
+    if(isKey&&isCh){cls+=' keyopt';an=t('答案 · 已核验 · 你的选择','key · verified · your choice')}
+    else if(isKey){cls+=' keyopt';an=t('答案 · 已核验','key · verified')}
+    else if(isCh){cls+=' struck';an=t('你的选择','your choice')}
+    return `<li class="${cls}" data-opt="${L}">${isCh&&!isKey?I.dele:''}<span class="L">${isKey?I.ring:''}${L}</span><span class="tx"><span lang="en">${isCh&&!isKey?`<s>${o}</s>`:o}</span>${an?` <span class="an">${an}</span>`:''}</span></li>`;
+  }).join('');
+  const notes=L4.split('').map(L=>{
+    const k=L===key;
+    const hd=k?t('不成立 → 答案','Unsupported → the key'):t('成立','Supported');
+    return note('ev-'+L,`<div class="mh"><b>${L}</b><span class="micro">${hd}</span></div><p>${EXPL[L][S.lang==='zh'?0:1]}</p>`,`opt-note lead ${k?'k':''}`,`data-opt="${L}"`);
+  }).join('');
+  const modes=[['explain',t('解释','Explain')],['probe',t('追问','Probe')],['lesson',t('微课','Micro-lesson')]];
+  const ck=S.coach==='probe'&&ok?'probeOk':S.coach;
+  const reply=!S.consent
+    ? `<p class="coach-reply withheld">${t('未发送。S1 的同意已撤回，原文与题目不会发给 DeepSeek，也不扣预算。','Not sent. S1 consent is revoked, so the passage and item are withheld from DeepSeek and no budget is spent.')} <a class="link" href="#/settings">${t('在设置中重新授予','Grant again in Settings')}</a></p>`
+    : S.pending?`<p class="coach-reply pending">${t('正在请求 DeepSeek…（外部调用，计入今日预算）','Asking DeepSeek… (external call, counts against today’s budget)')}</p>`
+    :`<p class="coach-reply" ${S.lang==='zh'?'':'lang="en"'}>${COACH[ck][S.lang==='zh'?0:1]}</p>`;
+  const sends=S.consent?t('题干、4 个选项、你的选择、已核验答案、证据句——来源 S1 第 24 页','stem, 4 options, your choice, verified key, evidence sentence — source S1 p.24'):`<span class="w">${t('不发送（S1 已撤回）','nothing — S1 withheld')}</span>`;
+  const consent=S.consent?t('S1 · 你于 11-12 授予 · <a class="link" href="#/settings">可撤回</a>','S1 · granted by you on 11-12 · <a class="link" href="#/settings">revocable</a>'):`<span class="w">${t('S1 · 已撤回','S1 · revoked')}</span>`;
+  const condTxt=asst?`${cg('asst')}<span>${t('有辅助 · 不计入','Assisted · does not count')}</span><span class="muted">· ${t('作答前显示过提示','a hint was shown before answering')}</span>`
+    :`${cg('ind')}<span>${t('独立迁移 · 计入','Independent transfer · counts')}</span><span class="muted">· ${t('依据已审核答案键判分','graded by the reviewed key')}</span>`;
+  return `<div class="leaf enter" id="leaf">
+  <article class="tb" id="textcol">
+    <section class="qblock" style="margin-top:0" id="verdict" aria-label="${t('判分','Grade')}">
+      <span class="qn hang" aria-hidden="true">1</span>
+      <div class="qhead">${ok?`<span class="vword">${t('答对','Correct')}</span>`:`<span class="vword wrong">${t('答错','Incorrect')}</span>`}<span class="vk">${t('你选','You chose')} <b>${ch}</b> · ${t('答案','Key')} <b>${key}</b></span><span class="sp"></span><span class="vt">${t('用时','Time')} <b class="tn">${fmt(S.answeredAt)}</b></span></div>
+      <p class="vc">${condTxt}</p>
+      <p class="stem" lang="en">${q.stem}</p>
+      <ol class="opts" aria-label="${t('选项与校对','Options, proofed')}">${opts}</ol>
+      <div class="tactic"><span class="micro">${t('解题策略','Tactic')}</span>
+        <p><b style="font-weight:600">NOT/EXCEPT ${t('极性','polarity')}</b> — ${t('三个选项有原文支持，答案是那个不成立的；词语重合衡量的是词汇复用，不是真假。','three options are supported, the key is the odd one; word overlap measures vocabulary reuse, not truth.')}</p></div>
+      <div class="nextsteps">
+        <a class="imp" href="#/practice" data-act="next">${t('下一题 · 新文章，独立','Next · fresh passage, independent')} <kbd>N</kbd></a>
+        <span class="nw"><a class="link" href="#/anki">${t('把这次错误拟成 Anki 卡片','Propose an Anki note')}</a> <kbd>K</kbd></span>
+      </div>
+    </section>
+    <div class="sect-rule"><span class="micro">${t('原文 · 证据已标出','The passage · evidence marked')}</span></div>
+    <h1 class="p-title" id="p-title" lang="en">Temporary Closure of the North Pump Station</h1>
+    ${passage('feedback')}
+  </article>
+  <aside class="mg" data-notes aria-label="${t('页边注','Margin notes')}">
+    ${note('verdict',`<section class="coach" aria-label="${t('教练批注（建议性）','Coach note (advisory)')}">
+      <div class="mh"><span class="micro">${t('教练批注 · 建议性','Coach · advisory')}</span><span class="ext">${I.ext}${t('外部调用','External call')}</span></div>
+      <p class="disc">DeepSeek · <span class="mono">deepseek-chat</span> · ${t('已验证','verified')} · ${t('今日','today')} <span class="tn">${S.budget}/20</span><br><span class="k">${t('发送','Sends')}</span> ${sends}<br><span class="k">${t('同意','Consent')}</span> ${consent}</p>
+      <div class="modes" role="tablist" aria-label="${t('批注方式','Coach mode')}">${modes.map(([k,l],i)=>`<button role="tab" aria-selected="${S.coach===k}" data-mode="${k}">${l}<span class="mk">${i+1}</span></button>`).join('')}</div>
+      ${reply}
+      <p class="coach-foot">${t('仅供参考，不改变判分。','Advisory only. It never changes the grade.')}</p>
+    </section>`,'coachnote')}
+    ${notes}
+  </aside>
+  <svg class="leaders" id="leaders" aria-hidden="true"></svg>
+  </div>`;
+}
+
+/* =====================================================================
+   ASSESS — the exam paper: one column, margins emptied
+   ===================================================================== */
+function assess(){
+  const A=S.assess, n=A.cur, q=QS[n%4], to=A.to.has(n), sel=A.ans[n];
+  const answered=Object.keys(A.ans).length;
+  const cells=Array.from({length:40},(_,i)=>{const k=i+1;const c=['cell'];if(A.ans[k])c.push('ans');if(A.to.has(k))c.push('to');if(k===n)c.push('cur');
+    const st=A.to.has(k)?t('超时','timed out'):A.ans[k]?t('已答','answered'):t('未答','pending');
+    return `<button class="${c.join(' ')}" data-goto="${k}" aria-label="${t('第 '+k+' 题，'+st,'Item '+k+', '+st)}${k===n?t('，当前',', current'):''}">${k}</button>`}).join('');
+  return `<div class="leaf exam enter" id="leaf">
+    <header class="exhead">
+      <div><div class="ex-run">${t('测评 · 第 3 次','Assessment · run 3')}</div>
+        <div class="ex-rules">${t('40 题 · 60 分钟 · 无注释、无提示、无词汇表、无 AI','40 items · 60 min · no annotations, hints, glossary or AI')}</div></div>
+      <div class="ex-clocks">
+        <div class="ck item"><span class="lbl">${t('本题','This item')}</span><span class="val"><span id="iclock">${fmt(A.item)}</span> <span class="of">/ 1:30</span></span><span class="bar"><i id="ibar" style="width:${Math.min(100,A.item/90*100)}%"></i></span></div>
+        <div class="ck"><span class="lbl">${t('全卷剩余','Run time left')}</span><span class="val" id="rclock">${fmt(A.left)}</span><span class="bar"><i style="width:${A.left/3600*100}%"></i></span></div>
+      </div>
+    </header>
+    <div class="ex-strip">
+      <div class="row1"><span class="itemno"><button class="stepb" data-act="aprev" ${n<=1?'disabled':''} aria-label="${t('上一题','Previous item')}">${I.arrowL}</button>${t('第 <b class="tn">'+n+'</b> 题 / 40','Item <b class="tn">'+n+'</b> of 40')}<button class="stepb" data-act="anext" ${n>=40?'disabled':''} aria-label="${t('下一题','Next item')}">${I.arrowR}</button></span>
+        <span class="legend"><span><i class="cell ans">8</i>${t('已答','answered')} <b class="tn">${answered}</b></span><span><i class="cell to">11</i>${t('超时','timed out')} <b class="tn">${A.to.size}</b></span><span><i class="cell">23</i>${t('未答','pending')} <b class="tn">${40-answered-A.to.size}</b></span><span><i class="cell cur">${n}</i>${t('当前','current')}</span></span></div>
+      <div class="cells" role="group" aria-label="${t('答题卡（不显示对错）','Answer sheet (no right or wrong)')}">${cells}</div>
+    </div>
+    <article>
+      <div class="p-kicker ex-k"><h1 class="p-title" lang="en">Temporary Closure of the North Pump Station</h1><span class="micro"><span lang="en">Passage C</span> · ${t('第 17–20 题','items 17–20')}</span></div>
+      ${passage('exam')}
+    </article>
+    <section class="qblock" aria-label="${t('第 '+n+' 题','Item '+n)}">
+      <span class="qn hang" aria-hidden="true">${n}</span>
+      <p class="stem" lang="en">${q.stem}</p>
+      <ol class="omr" role="radiogroup" aria-label="${t('第 '+n+' 题选项','Item '+n+' options')}">${q.opts.map((o,i)=>`<li class="${sel===L4[i]?'sel':''} ${to?'locked':''}" role="radio" aria-checked="${sel===L4[i]}" ${to?'aria-disabled="true"':''} tabindex="${(sel?sel===L4[i]:i===0)?0:-1}" data-ans="${L4[i]}"><span class="L">${L4[i]}</span><span lang="en">${o}</span></li>`).join('')}</ol>
+      <p class="nofb">${to?t('本题已超时，不能再作答。','This item timed out and is closed.'):t('作答后不显示对错；全卷结束后在报告中查看。','No right or wrong is shown after answering; see the report when the run ends.')}</p>
+    </section>
+  </div>`;
+}
+
+/* =====================================================================
+   REPORT — a typeset results table with footnotes
+   ===================================================================== */
+function report(){
+  const strip=(pat)=>`<span class="strip" aria-hidden="true">${[...pat].map(c=>`<i class="${c==='0'?'x':c==='t'?'t':''}"></i>`).join('')}</span>`;
+  const rows=[
+    ['NOT/EXCEPT 极性','NOT/EXCEPT polarity','not-except-polarity',7,10,'1101110t11'],
+    ['语境词义','Vocabulary in context','vocabulary-in-context',9,14,'11011t10101101'],
+    ['句子结构','Sentence structure','sentence-structure',8,12,'1101t1101011'],
+    ['未分类推断','Unclassified inference','unclassified',3,4,'1101']
+  ];
+  const tr=rows.map(r=>`<tr><td><span class="skill-n">${t(r[0],r[1])}</span><span class="tag">${r[2]}</span></td>
+     <td>${strip(r[5])}</td><td class="r"><span class="frac"><b>${r[3]}</b><span class="of"> / ${r[4]}</span></span>${r[4]<10?'<sup class="fn">3</sup>':'<span style="display:inline-block;width:.5em"></span>'}</td></tr>`).join('');
+  const wrong=[3,8,11,14,17,19,22,25,29,31,34,36,39];
+  const X=v=>`${(v/40*100).toFixed(2)}%`;
+  const det={
+    17:t('<b>第 17 题</b> · 证据：第 3 段 <i lang="en">while the work is under way</i> · 推理：<i lang="en">under way</i> 与 <i lang="en">while … the work</i> 连用，指“正在进行”。','<b>Item 17</b> · Evidence: paragraph 3, <i>while the work is under way</i> · Reasoning: paired with <i>while … the work</i>, it means “in progress”.'),
+  };
+  const d=det[S.annot]||t(`<b>第 ${S.annot} 题</b> · 证据句与推理已开放；原型中仅展示第 17 题的全文。`,`<b>Item ${S.annot}</b> · Evidence and reasoning are now open; the prototype shows item 17 in full.`);
+  return `<div class="leaf enter" id="leaf">
+  <article class="tb">
+    <div class="dateline" id="r-date"><span class="chapter">${t('测评报告 · 第 3 次','Assessment report · run 3')}</span><span class="d tn">${t('11 月 13 日','13 November')}</span></div>
+    <div class="score" id="r-score">
+      <span class="big">27<span class="of"> / 40</span></span>
+      <span class="cap">${t('答对 · 计时、无辅助，','correct · timed, unassisted,')}<br>${t('全部为未见过的题','all on unseen items')}</span>
+    </div>
+    <p class="pass-unknown"><span>${t('及格线：<b>未知</b>','Pass threshold: <b>unknown</b>')}<sup class="fn">1</sup></span><span class="muted" style="font-size:13.5px">${t('— 不给出概率，也不下结论','— no probability, no verdict')}</span></p>
+    <table class="tab" style="margin-top:18px" id="r-table">
+      <thead><tr><th><span class="micro">${t('技能','Skill')}</span></th><th><span class="micro">${t('逐题','Per item')}</span></th><th class="r"><span class="micro">${t('答对','Correct')}</span></th></tr></thead>
+      <tbody>${tr}</tbody>
+    </table>
+    <p class="small" style="margin-top:6px">${t('逐题刻度：长＝答对，短＝答错，朱红＝超时。','Per-item ticks: tall = correct, short = missed, vermilion = timed out.')}</p>
+    <p class="timeline" id="r-time">${t(`用时中位数 <b class="tn">64</b><span class="u">秒</span>，p90 <b class="tn">112</b><span class="u">秒</span>；超时 <b class="tn">3</b> 题；污染 <b class="tn">0</b> 题。<sup class="fn">2</sup>`,
+      `Median time <b class="tn">64</b><span class="u">s</span>, p90 <b class="tn">112</b><span class="u">s</span>; <b class="tn">3</b> timed out; <b class="tn">0</b> contaminated.<sup class="fn">2</sup>`)}</p>
+    <section class="withheld" id="r-withheld">
+      <div class="ledger-h"><h2>${t('暂缓的注释，现已开放','Withheld notes, now open')}</h2><span class="micro">${t('答错或超时的 13 题','13 missed or timed out')}</span></div>
+      <p class="wnums">${wrong.map(k=>`<button aria-pressed="${S.annot===k}" data-annot="${k}">${k}</button>`).join('<span aria-hidden="true">&thinsp;</span>')}</p>
+      <div class="annot-detail" aria-live="polite">${d}</div>
+    </section>
+    <div class="fnotes">
+      <p><span class="fnm">1</span><span>${t('真实考试的及格线、题型分布与考试日期都尚未确认。本报告只陈述观测到的正确数、用时与错误类型，不给出通过概率、准备度或预测分数。','The real exam’s pass line, blueprint and date are not confirmed. This report states observed correct counts, time and failure modes only — no pass probability, readiness or predicted score.')}</span></p>
+      <p><span class="fnm">2</span><span>${t('测评开始前已见过的题会在这里逐题列出，并排除出得分。本次没有。','Items seen before the run would be listed here one by one and excluded from the score. There were none.')}</span></p>
+      <p><span class="fnm">3</span><span>${t('n < 10：样本太少，比例不稳定，所以这里只给计数。','n < 10: too few items for a stable proportion, so only the count is given.')}</span></p>
+    </div>
+  </article>
+  <aside class="mg" data-notes aria-label="${t('页边注','Margin notes')}">
+    ${note('r-score',`<div class="mh"><span class="micro">${t('同条件对比 · 与第 2 次（11-11）','Like-for-like · vs run 2 (11-11)')}</span></div>
+      <div class="cmp-axis">
+        <span class="ax"></span>
+        ${[0,10,20,30,40].map(v=>`<span class="tk" style="left:${X(v)}"></span><span class="tl tn" style="left:${X(v)}">${v}</span>`).join('')}
+        <span class="seg" style="left:${X(22)};width:calc(${X(27)} - ${X(22)})"></span>
+        <span class="pt" style="left:${X(22)}"></span><span class="pt n" style="left:${X(27)}"></span>
+        <span class="pl" style="left:${X(18.5)}">${t('第 2 次','Run 2')} <b class="tn">22</b></span><span class="pl" style="left:${X(31.5)}">${t('第 3 次','Run 3')} <b class="tn">27</b></span>
+      </div>
+      <p style="display:flex;gap:10px;align-items:baseline;margin-top:6px"><span class="delta">+5</span><span>${t('题 · 同样题量、同样 60 分钟、同一题库系列','items · same size, same 60-minute window, same pool family')}</span></p>
+      <ul class="checks">
+        <li>${I.check}<span>${t('题量','Size')}</span><span class="eq tn">40 = 40</span></li>
+        <li>${I.check}<span>${t('时长','Window')}</span><span class="eq tn">60 = 60 ${t('分钟','min')}</span></li>
+        <li>${I.check}<span>${t('题库系列','Pool family')}</span><span class="eq">${t('相同','same')}</span></li>
+        <li>${I.check}<span>${t('注释','Annotations')}</span><span class="eq">${t('无 = 无','none = none')}</span></li>
+      </ul>
+      <p class="muted" style="margin-top:6px">${t('两次各用不同的未见题。任一条件不同时，对比会被拒绝，并写明是哪一条。','Each run used different unseen items. If any condition differed, the comparison would be refused, naming which one.')}</p>`)}
+    ${note('r-time',`<div class="mh"><span class="micro">${t('测评后题库','Pool after the run')}</span></div><p>${t('未见 <span class="tn">23</span> 题 / <span class="tn">7</span> 个单元；下限 20 题。','<span class="tn">23</span> items / <span class="tn">7</span> units unseen; floor 20 items.')}</p>`)}
+    ${note('r-withheld',`<div class="mh"><span class="micro">${t('本次测评','This run')}</span></div><p>${t('第 3 次 · 40 题 · 60 分钟 · 测评中无注释、提示、词汇表与 AI。','Run 3 · 40 items · 60 minutes · no annotations, hints, glossary or AI during the run.')}</p>`)}
+  </aside>
+  </div>`;
+}
+
+/* =====================================================================
+   ANKI — a printed index card, proof fields, sync ledger
+   ===================================================================== */
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function cardHTML(){
+  const A=S.anki, dk=(A.ctheme||S.theme)==='dark', ph=A.width==='phone';
+  const front=esc(A.front).replace(/\b(EXCEPT|NOT)\b/g,'<em>$1</em>');
+  const ex=esc(A.back2).replace('two of the four','<b>two of the four</b>');
+  const cls=`icard ${dk?'dk':''} ${ph?'ph':''}`;
+  const w=ph?t('手机 · 卡宽 <span class="tn">300</span> px','Phone · card <span class="tn">300</span> px'):t('桌面 · 卡宽 <span class="tn">440</span> px','Desktop · card <span class="tn">440</span> px');
+  const L=S.lang==='zh'?'zh-Hans':'en';
+  return `<div class="cardw ${ph?'phone':''}"><div class="wl"><span>${t('正面','Front')}</span><span>${w}</span></div>
+    <div class="${cls}" lang="en"><div class="ch"><span class="t" id="cv-tac">${esc(A.tactic)}</span><span class="s">S1 · p024 · q1</span></div>
+      <div class="front" id="cv-front">${front}</div>
+      <div class="cf" lang="${L}"><span>Pass Quest</span><span>${t('先想，再翻面','Think, then turn')}</span></div></div></div>
+  <div class="cardw ${ph?'phone':''}"><div class="wl"><span>${t('背面','Back')}</span><span></span></div>
+    <div class="${cls}" lang="en"><div class="ch"><span class="t">${esc(A.tactic)}</span><span class="s">S1 · p024 · q1</span></div>
+      <div class="back"><span class="lab" lang="${L}">${t('为什么','Why')}</span><p id="cv-b1">${esc(A.back1)}</p><span class="lab" lang="${L}">${t('例句','Example')}</span><p class="ex" id="cv-b2">${ex}</p></div></div></div>`;
+}
+const ST={
+  pushed:()=>`<span class="st">${I.check.replace('class="glyph" ','')}${t('已推送','pushed')}</span>`,
+  queued:(x)=>`<span class="st">${I.clock}${x||t('排队','queued')}</span>`,
+  present:()=>`<span class="st">${I.eq}${t('已存在','already present')}</span>`,
+  conflict:()=>`<span class="st conflict">${I.neq}${t('冲突','conflict')}</span>`,
+  draft:(x)=>`<span class="st">${I.pencil}${x}</span>`
+};
+function anki(){
+  const A=S.anki, dis=A.state!=='draft'?'disabled':'';
+  const stateLine={draft:t('草稿 · 未接受','Draft · not accepted'),accepted:t('已接受 · 修订 1 · 排队中（Anki 未运行）','Accepted · revision 1 · queued (Anki not running)'),skipped:t('已跳过 · 不会创建','Skipped · nothing created')}[A.state];
+  const conflict=A.conflict==='open'?`<li style="border-bottom:0" id="cf-row"><span class="fr" lang="en">when demand is highest</span>${ST.conflict()}
+      <div class="conflict-box">
+        <div class="v"><span class="micro">${t('你的版本','Yours')}</span><span lang="en">demand — the amount people want or use</span></div>
+        <div class="v"><span class="micro">${t('Anki 中（你改过）','In Anki (you edited)')}</span><span lang="en">demand — <ins lang="zh-Hans">需求；用水最多的时候</ins></span></div>
+        <div class="acts"><button class="link" data-conf="mine">${t('保留我的','Keep mine')}</button><button class="link" data-conf="anki">${t('保留 Anki 的','Keep Anki’s')}</button></div>
+      </div></li>`
+    :`<li><span class="fr" lang="en">when demand is highest</span>${A.conflict==='mine'?ST.queued(t('已解决 · 保留我的 · 排队','resolved · mine · queued')):ST.pushed().replace(t('已推送','pushed'),t('已解决 · 保留 Anki 的','resolved · kept Anki’s'))}</li>`;
+  const pushed=['under way → in progress','rather than (A, not B)','in service since 1998','be expected to do','reflective vests','until the work is complete'];
+  const refineSends=S.consent?t('正面、解释、例句、解题策略四个字段','front, explanation, example and tactic'):t('正面、解释、解题策略三个字段（例句出自 S1，同意已撤回，不发送）','front, explanation and tactic (the example comes from S1; consent is revoked, so it is withheld)');
+  return `<div class="leaf enter" id="leaf">
+  <div class="wide">
+    <div class="dateline"><span class="chapter">${t('Anki 卡片 · 来自第 1 题的错误','Anki note · from the item 1 miss')}</span><span class="d">${stateLine}</span></div>
+    <div class="plate-h"><span class="micro">${t('印刷预览','Printed preview')}</span>
+      <span class="ctl">
+        <span class="tog" role="group" aria-label="${t('宽度','Width')}"><button aria-pressed="${A.width==='desktop'}" data-w="desktop">${t('桌面','Desktop')}</button><span class="d">·</span><button aria-pressed="${A.width==='phone'}" data-w="phone">${t('手机','Phone')}</button></span>
+        <span class="tog" role="group" aria-label="${t('卡片明暗','Card theme')}"><button aria-pressed="${(A.ctheme||S.theme)==='light'}" data-ct="light">${t('浅色卡','Light card')}</button><span class="d">·</span><button aria-pressed="${(A.ctheme||S.theme)==='dark'}" data-ct="dark">${t('深色卡','Dark card')}</button></span>
+      </span></div>
+    <div class="plate" id="stage">${cardHTML()}</div>
+  </div>
+  <section class="tb" aria-label="${t('卡片草稿','Note draft')}" style="margin-top:22px">
+    <label class="field"><span class="fl micro">${t('正面','Front')}</span><input id="f-front" lang="en" value="${esc(A.front)}" ${dis}></label>
+    <label class="field"><span class="fl micro">${t('背面 · 解释','Back · explanation')}</span><textarea id="f-b1" lang="en" ${dis}>${esc(A.back1)}</textarea></label>
+    <label class="field"><span class="fl micro">${t('背面 · 例句','Back · example')}</span><textarea id="f-b2" class="short" lang="en" ${dis}>${esc(A.back2)}</textarea></label>
+    <label class="field"><span class="fl micro">${t('解题策略','Tactic')}</span><input id="f-tac" lang="en" value="${esc(A.tactic)}" ${dis}></label>
+    <div class="field"><span class="fl micro">${t('来源','Source')}</span><span><span class="ro">S1 · p024 · q1</span><span class="why">${t('只写编号，从不写来源标题。','identifier only — never the source title')}</span></span></div>
+    <div class="anki-actions">
+      ${A.state==='draft'?`<button class="imp" data-act="accept">${t('接受，写入修订 1','Accept as revision 1')} <kbd>Ctrl ↵</kbd></button><button class="link" data-act="askip">${t('跳过这张','Skip this note')}</button> <kbd>S</kbd>`
+        :`<button class="link" data-act="aundo">${t('撤销','Undo')}</button>`}
+    </div>
+  </section>
+  <aside class="mg" style="margin-top:22px" aria-label="${t('笔记与同步','Notes and sync')}">
+    <div class="ledger-h"><h3>${t('笔记与同步','Notes and sync')}</h3><span class="micro">AnkiConnect</span></div>
+    <p class="small" style="margin-top:6px"><span class="dotst bad"><i></i><span class="mono">127.0.0.1:8765</span>&nbsp;${t('无法连接','unreachable')}</span>${t('：Anki 未运行，排队的笔记会在连上后推送一次。','. Anki is not running; queued notes push once when it is reachable.')}</p>
+    <ul class="notes-list">
+      <li><span class="fr" lang="en">${esc(A.front)}</span>${A.state==='accepted'?ST.queued():ST.draft(A.state==='skipped'?t('已跳过','skipped'):t('草稿','draft'))}</li>
+      ${pushed.map(p=>`<li><span class="fr" lang="en">${p}</span>${ST.pushed()}</li>`).join('')}
+      <li><span class="fr" lang="en">nearly 30 percent more</span>${ST.queued()}</li>
+      <li><span class="fr" lang="en">lower water pressure</span>${ST.present()}</li>
+      ${conflict}
+    </ul>
+    <p class="small">${t('冲突不会被静默覆盖。手机同步（AnkiWeb）由你在 Anki 里自己操作；Pass Quest 不代为同步。','Conflicts are never overwritten silently. Phone sync via AnkiWeb is your own action in Anki; Pass Quest never syncs for you.')}</p>
+    <div class="coach" style="margin-top:14px"><p class="small" style="margin:0"><button class="link i" data-act="refine">${t('用 AI 润色','Refine with AI')}</button> · ${t('建议性 · 外部调用（DeepSeek，预算 +1）。发送：','advisory · external call (DeepSeek, budget +1). Sends: ')}${refineSends}${t('；从不发送来源标题。','; never the source title.')}</p></div>
+  </aside>
+  </div>`;
+}
+
+/* =====================================================================
+   SETTINGS — the colophon
+   ===================================================================== */
+function settings(){
+  const caps=['text.chat','tool.calls','vision','search','speech.synthesis'];
+  const C={v:()=>`<span class="cs ver" title="${t('已验证','verified')}">${I.check}</span>`,
+    d:()=>`<span class="cs dec" title="${t('已声明，未验证','declared, unverified')}"><i class="ringg"></i></span>`,
+    u:()=>`<span class="cs uns" title="${t('不支持','unsupported')}"><i class="dashg"></i></span>`,
+    f:()=>`<span class="cs fail" title="${t('验证失败','failed')} (failed:auth)">${I.cross}</span>`};
+  const KEY={present:`<span class="key p">${t('有','present')}</span>`,
+    no_credential:`<span class="key m">${t('无','missing')}</span>`,
+    none:`<span class="key m">—</span>`};
+  const NC='<span class="id">no_credential</span> · ';
+  const rows=[
+    ['DeepSeek','deepseek/deepseek-chat',[C.v(),C.d(),C.u(),C.u(),C.u()],'present',`<span class="inuse">${t('使用中','In use')}</span> · <span class="when">verified@11-13 09:12</span>`,true],
+    ['OpenAI','openai/gpt-4o-mini',[C.d(),C.d(),C.d(),C.u(),C.u()],'no_credential',`${NC}<button class="link" data-act="addkey">${t('添加密钥','Add key')}</button>`],
+    ['Qwen','qwen/qwen-plus',[C.d(),C.d(),C.u(),C.u(),C.u()],'present',`<span class="when">${t('未验证','unverified')}</span> · <button class="link" data-act="test">${t('测试','Test')}</button>`],
+    ['Gemini','gemini/gemini-2.0-flash',[C.f(),C.d(),C.d(),C.d(),C.u()],'present',`<span class="fail">failed:auth@11-12 21:40</span> · <button class="link v" data-act="checkkey">${t('检查密钥','Check key')}</button>`],
+    ['Doubao','doubao/doubao-pro-32k',[C.d(),C.d(),C.u(),C.u(),C.u()],'no_credential',`${NC}<button class="link" data-act="addkey">${t('添加密钥','Add key')}</button>`],
+    [t('自定义端点','Custom endpoint'),`<span class="muted" style="font-family:var(--serif)">${t('未配置','not configured')}</span>`,[C.u(),C.u(),C.u(),C.u(),C.u()],'none',`<button class="link" data-act="configure">${t('配置','Configure')}</button>`]
+  ];
+  const reg=rows.map(r=>`<tr class="${r[5]?'use':''}"><td class="pv">${r[0]}</td><td class="md">${r[1]}</td>${r[2].map(c=>`<td class="cap">${c}</td>`).join('')}
+    <td>${KEY[r[3]]}</td><td class="statecell">${r[4]}</td></tr>`).join('');
+  const bud=[['DeepSeek',S.budget],['Qwen',0],['Gemini',1]];
+  const sum=bud.reduce((a,b)=>a+b[1],0);
+  const tally=n=>`<span class="tally" aria-hidden="true">${Array.from({length:20},(_,i)=>`<i class="${i<n?'u':''}"></i>`).join('')}</span>`;
+  const ev=S.events.map(e=>`<li class="${e.fresh?'new':''}"><span class="when">${e.when}</span><span>${e.kind==='grant'?t('Han 授予 <b>DeepSeek</b> 使用 S1','Han granted <b>DeepSeek</b> use of S1'):`<span class="w">${t('Han 撤回 DeepSeek 对 S1 的使用——此后不再发送原文','Han revoked DeepSeek’s use of S1 — source text withheld from now on')}</span>`}</span></li>`).join('');
+  const consentCtl=S.revokeAsk
+    ? `<span class="small" style="margin:0">${t('撤回后，S1 原文不再发给 DeepSeek。确定？','After revoking, S1 text is no longer sent to DeepSeek. Revoke?')} <button class="link" data-act="consent">${t('撤回','Revoke')}</button> · <button class="link" data-act="revoke-no">${t('取消','Cancel')}</button></span>`
+    : `<button class="link" data-act="${S.consent?'revoke-ask':'consent'}">${S.consent?t('撤回…','Revoke…'):t('重新授予','Grant again')}</button>`;
+  return `<div class="leaf enter" id="leaf">
+  <div class="wide">
+    <div class="col-title"><h1>${t('设置 · 版本记录','Settings · colophon')}</h1>
+      <nav class="col-toc" aria-label="${t('本页小节','Sections')}"><a href="#reg" data-jump="reg"><span class="n">1</span>${t('模型与提供方','Models')}</a><a href="#bud" data-jump="bud"><span class="n">2</span>${t('每日预算','Budget')}</a><a href="#con" data-jump="con"><span class="n">3</span>${t('同意记录','Consent')}</a><a href="#svc" data-jump="svc"><span class="n">4</span>${t('本地服务','Local services')}</a></nav></div>
+    <p class="col-lede">${t('这一页记录本机如何调用模型：用哪家、能做什么、凭什么授权、每天花多少。凭据存放在系统密钥库，这里只写“有”或“无”，从不显示值。',
+      'This page records how this device calls models: which provider, what it can do, on whose authority, and how much a day. Credentials live in the OS secret store; this page only says present or missing — never the value.')}</p>
+    <div class="sec-h" id="reg"><h2><span class="sn">1</span>${t('模型与提供方','Models & providers')}</h2><span class="micro">${t('提供方 · 模型 · 能力 · 授权：四件事分开记','provider · model · capability · authorization — four separate facts')}</span></div>
+    <table class="tab reg">
+      <thead><tr><th>${t('提供方','Provider')}</th><th>${t('模型','Model')}</th>${caps.map(c=>`<th class="cap">${c}</th>`).join('')}<th>${t('密钥','Key')}</th><th>${t('状态','Status')}</th></tr></thead>
+      <tbody>${reg}</tbody>
+    </table>
+    <div class="cap-legend"><span>${C.v()} ${t('已验证','verified')}</span><span>${C.d()} ${t('已声明，未验证','declared, unverified')}</span><span>${C.u()} ${t('不支持','unsupported')}</span><span class="verm">${C.f()} ${t('验证失败','failed')}</span><span>· ${t('只有 text.chat 会被真正验证。','Only text.chat is ever verified.')}</span></div>
+  </div>
+  <div class="tb" style="margin-top:32px">
+    <div class="sec-h" id="bud" style="margin-top:0"><h2><span class="sn">2</span>${t('每日预算','Daily budget')}</h2><span class="micro">${t('每个提供方每天 20 次','20 per provider per day')}</span></div>
+    <table class="tab bud"><tbody>
+      ${bud.map(b=>`<tr><td>${b[0]}</td><td>${tally(b[1])}</td><td class="r tn">${b[1]} / 20</td></tr>`).join('')}
+      <tr class="sum"><td>${t('合计','Sum')}</td><td class="muted" style="font-weight:400;font-size:13px">${t('上限 = 3 个有密钥的提供方 × 20','ceiling = 3 keyed providers × 20')}</td><td class="r tn">${sum} / 60</td></tr>
+    </tbody></table>
+    <div class="sec-h" id="con"><h2><span class="sn">3</span>${t('同意记录 · S1','Consent ledger · S1')}</h2><span class="micro">${t('私有导入','private import')}</span></div>
+    <div class="consent-state"><span class="s">DeepSeek · ${S.consent?`<b>${t('已授予','Granted')}</b>`:`<b class="verm">${t('已撤回','Revoked')}</b>`}</span>${consentCtl}</div>
+    <ul class="events">${ev}</ul>
+    <div class="sec-h" id="svc"><h2><span class="sn">4</span>${t('本地服务','Local services')}</h2><span class="micro">${t('本机','this device')}</span></div>
+    <table class="tab svc"><tbody>
+      <tr><td>${t('Agent 主机（Node）','Agent host (Node)')}</td><td><span class="dotst ok"><i></i>${t('运行中','Running')}</span></td><td class="muted">${t('本地进程','local process')}</td></tr>
+      <tr><td>AnkiConnect</td><td><span class="dotst bad"><i></i>${t('无法连接','Unreachable')}</span></td><td class="mono muted">127.0.0.1:8765</td></tr>
+      <tr><td>${t('搜索提供方','Search provider')}</td><td><span class="dotst off"><i></i>${t('未配置','Not configured')}</span></td><td class="muted">${t('网络调用 0 次','0 network calls')}</td></tr>
+    </tbody></table>
+  </div>
+  <aside class="mg" data-notes style="margin-top:32px" aria-label="${t('页边注','Margin notes')}">
+    ${note('bud',`<div class="mh"><span class="micro">${t('故障切换','Failover')}</span></div><p>${t('只去向 text.chat 已验证、仍有预算、同意范围完全相同的提供方，最多一次。现在没有候选——只有 DeepSeek 已验证。','Only to a provider with text.chat verified, budget left and an exactly equal consent scope — once. No candidate now: only DeepSeek is verified.')}</p>`)}
+    ${note('con',`<div class="mh"><span class="micro">${t('同意','Consent')}</span></div><p>${t('其他提供方均未授予，S1 原文不会发给它们。撤回只追加一条记录，不改写历史。Pass Quest 自带的第一方内容无需同意。','No other provider is granted, so S1 text never reaches them. Revoking appends an event; history is never rewritten. First-party content needs no consent.')}</p>`)}
+    ${note('svc',`<div class="mh"><span class="micro">AnkiConnect</span></div><p>${t('无法连接时，接受的卡片排队，连上后推送一次。','While unreachable, accepted notes queue and push once on reconnect.')}</p>`)}
+  </aside>
+  </div>`;
+}
+
+/* =====================================================================
+   overlays — inert when closed, focus kept inside while open
+   ===================================================================== */
+const $=s=>document.querySelector(s);
+let lastFocus=null, openEl=null;
+function openLayer(el){
+  if(openEl&&openEl!==el){openEl.classList.remove('on');openEl.inert=true;}
+  if(!openEl)lastFocus=document.activeElement;
+  openEl=el;el.inert=false;$('#scrim').classList.add('on');el.classList.add('on');
+  const f=el.querySelector('[data-autofocus]')||el.querySelector('button,a,input');f&&f.focus();
+}
+function closeLayers(restore=true){
+  ['#drawer','#dlg'].forEach(s=>{$(s).classList.remove('on');$(s).inert=true;});$('#scrim').classList.remove('on');
+  const had=!!openEl;openEl=null;
+  if(restore&&had&&lastFocus&&lastFocus.isConnected&&lastFocus.focus)lastFocus.focus();
+}
+const layerOpen=()=>!!openEl;
+function openToc(){
+  const r=route();
+  if(r==='assess')return;
+  $('#drawer').setAttribute('aria-label',t('目录','Contents'));
+  $('#drawer').innerHTML=`<h2>${t('目录','Contents')}</h2><div class="micro">${t('按 1–7 翻到对应页','Press 1–7 to turn to a page')}</div>
+   <ol class="toc">${ROUTES.map((k,i)=>`<li><a href="#/${k}" class="${k===r?'cur':''}" data-close><span class="no">${roman[i]}</span><span>${META[k][S.lang]}<span class="d">${DESC[k][S.lang==='zh'?0:1]}</span></span><span class="lead"></span><span class="pg"><kbd>${i+1}</kbd></span></a></li>`).join('')}</ol>`;
+  openLayer($('#drawer'));
+}
+function dialog(html,wide){const d=$('#dlg');d.className='dlg'+(wide?' wide':'');d.innerHTML=html;openLayer(d);}
+function hintDialog(){
+  dialog(`<span class="micro">${t('提示','Hint')}</span><h2 id="dlg-title">${t('打开提示？','Open the hint?')}</h2>
+   <p>${t('提示一旦显示，这次作答会记为<b style="color:var(--ink)">“有辅助”</b>，不再计入独立迁移。这条记录不能撤回。','Once a hint is visible, this attempt is recorded as <b style="color:var(--ink)">assisted</b> and no longer counts as an independent transfer. This cannot be undone.')}</p>
+   <p class="cond" style="font-size:13.5px">${cg('ind')}${t('现在：独立 · 可计入','Now: independent · can count')} <span class="arrow" style="margin:0 6px">→</span> ${cg('asst')}${t('打开后：有辅助 · 不计入','After: assisted · does not count')}</p>
+   <div class="acts"><button class="btn" data-act="hint-yes">${t('仍然打开（记为有辅助）','Open anyway (assisted)')}</button><button class="btn pri" data-autofocus data-close>${t('不打开，继续独立作答','Keep answering independently')}</button></div>`);
+}
+function keysDialog(){
+  const g=(title,list)=>`<div><h3 class="micro">${title}</h3><dl>${list.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></div>`;
+  dialog(`<span class="micro">${t('键盘','Keyboard')}</span><h2 id="dlg-title">${t('快捷键一览','Shortcut sheet')}</h2>
+  <div class="keys">
+   <div>${g(t('全局','Everywhere'),[['<kbd>?</kbd>',t('本页','This sheet')],['<kbd>G</kbd>',t('目录（测评中不可用）','Contents (not during an assessment)')],['<kbd>[</kbd> <kbd>]</kbd>',t('上一页 / 下一页','Previous / next page')],['<kbd>T</kbd>',t('日间 / 夜读','Day / night')],['<kbd>L</kbd>',t('中文 / English','中文 / English')],['<kbd>Esc</kbd>',t('关闭','Close')]])}
+   ${g(t('今日一页','Today'),[['<kbd>↵</kbd>',t('开始练习','Begin practice')]])}
+   ${g(t('判分与批注','Grading & notes'),[['<kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>',t('解释 / 追问 / 微课','Explain / probe / micro-lesson')],['<kbd>K</kbd>',t('拟 Anki 卡片','Propose an Anki note')],['<kbd>N</kbd>',t('下一题（新文章，独立）','Next item (fresh, independent)')]])}</div>
+   <div>${g(t('阅读练习','Reading practice'),[['<kbd>A</kbd>–<kbd>D</kbd> · <kbd>1</kbd>–<kbd>4</kbd>',t('选择','Choose')],['<kbd>↑</kbd> <kbd>↓</kbd> · <kbd>Space</kbd>',t('移动 / 选中','Move / choose')],['<kbd>↵</kbd>',t('提交','Submit')],['<kbd>H</kbd>',t('提示（会先提醒）','Hint (asks first)')],['<kbd>S</kbd>',t('跳过','Skip')],['<kbd>M</kbd>',t('标记选中文字','Mark selected words')]])}
+   ${g(t('测评','Assessment'),[['<kbd>A</kbd>–<kbd>D</kbd> · <kbd>1</kbd>–<kbd>4</kbd>',t('作答（不显示对错）','Answer (no feedback)')],['<kbd>←</kbd> <kbd>→</kbd>',t('换题','Move between items')],['<kbd>Esc</kbd>',t('离开（计时不暂停）','Leave (clock keeps running)')]])}
+   ${g('Anki',[['<kbd>Ctrl</kbd> <kbd>↵</kbd>',t('接受卡片','Accept note')],['<kbd>S</kbd>',t('跳过卡片','Skip note')],['<kbd>P</kbd>',t('桌面 / 手机预览','Desktop / phone preview')]])}</div>
+  </div><div class="acts"><button class="btn pri" data-close data-autofocus>${t('知道了','Done')}</button></div>`,true);
+}
+function leaveDialog(target){
+  const to=target||'today';
+  dialog(`<span class="micro">${t('测评 · 第 3 次','Assessment · run 3')}</span><h2 id="dlg-title">${t('离开测评？','Leave the assessment?')}</h2>
+   <p>${t('离开后可以随时恢复，但<b style="color:var(--ink)">计时不暂停</b>：全卷剩余时间会继续减少。','You can resume any time, but <b style="color:var(--ink)">the clock keeps running</b> while you are away.')}</p>
+   <div class="acts"><a class="btn" href="#/${to}" data-close>${t('离开，去','Leave for')} ${META[to][S.lang]}</a><button class="btn pri" data-close data-autofocus>${t('继续作答','Keep going')}</button></div>`);
+}
+function setDialog(kind){
+  const ex=kind==='exam';
+  dialog(`<span class="micro">${t('尚未确定','Not yet known')}</span><h2 id="dlg-title">${ex?t('设置考试日期','Set the exam date'):t('设置每日学习时长','Set a daily study budget')}</h2>
+   <p>${ex?t('只填你确认过的日期。不填也没关系，系统不会替你猜。','Enter a date you have confirmed. Leaving it unset is fine; nothing will guess it for you.'):t('每天大约能学多少分钟？以后可改。','About how many minutes a day? You can change it later.')}</p>
+   ${ex?`<input type="date" id="dlg-in" aria-label="${t('考试日期','Exam date')}">`:`<input type="number" id="dlg-in" min="10" max="240" step="5" aria-label="${t('每日分钟数','Minutes per day')}"> <span class="muted">${t('分钟','minutes')}</span>`}
+   <div class="acts"><button class="btn" data-close>${t('取消','Cancel')}</button><button class="btn pri" id="dlg-save" disabled data-act="${ex?'save-exam':'save-daily'}">${t('保存','Save')}</button></div>`);
+}
+let toastT=0;
+function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('on'),2800);}
+
+/* =====================================================================
+   margin-note layout + leaders
+   Each note sits level with the line it annotates; if the previous note
+   is in the way it drops below it. Leaders (on .lead notes) run from the
+   end of the anchored line, through the ragged-right white, to the note.
+   ===================================================================== */
+function lineEnd(a,r){
+  const blk=a.closest('p,li,h1,div')||a;const rg=document.createRange();rg.selectNodeContents(blk);
+  let x=r.right;const cy=r.top+r.height/2;
+  for(const q of rg.getClientRects()){if(q.width>0&&cy>=q.top&&cy<=q.bottom)x=Math.max(x,q.right);}
+  return x;
+}
+function layoutNotes(){
+  const leaf=$('#leaf'); if(!leaf)return;
+  const lr=leaf.getBoundingClientRect(), paths=[];
+  leaf.querySelectorAll('.mg[data-notes]').forEach(m=>{
+    const mr=m.getBoundingClientRect();
+    const items=[...m.querySelectorAll(':scope > .mnote[data-for]')].map(n=>{const a=document.getElementById(n.dataset.for);if(!a)return null;const rs=a.getClientRects();const r=rs[rs.length-1]||a.getBoundingClientRect();const r0=rs[0]||r;return {n,a,r,r0}}).filter(Boolean);
+    items.sort((x,y)=>x.r0.top-y.r0.top);
+    let y=0,lane=0;
+    items.forEach(o=>{
+      const isBlock=!/^(SPAN|SUP|MARK|B|I)$/.test(o.a.tagName);
+      const lh=isBlock?(parseFloat(getComputedStyle(o.a).lineHeight)||22):o.r0.height;
+      const hd=o.n.querySelector('.mh')||o.n.querySelector('p')||o.n;
+      const hOff=Math.min(hd.getBoundingClientRect().height,26)/2; /* first-line midline of the note */
+      const target=(o.r0.top-mr.top)+Math.min(lh,o.r0.height||lh)/2-hOff;
+      const top=Math.max(target,y);o.n.style.top=top+'px';
+      y=top+o.n.offsetHeight+(o.n.hasAttribute('data-soft')?10:18);
+      if(!o.n.classList.contains('lead'))return;
+      const k=o.n.classList.contains('k')?'k':'', opt=o.n.dataset.opt||'';
+      const ya=o.r.top-lr.top+o.r.height*.58, xa=lineEnd(o.a,o.r)-lr.left+5;
+      const yn=mr.top-lr.top+top+hOff, xn=mr.left-lr.left-6;
+      let d;
+      if(Math.abs(yn-ya)<3)d=`M${xa} ${ya} H${xn}`;
+      else{const xl=Math.max(xa+8,xn-10-lane*12);lane++;d=`M${xa} ${ya} H${xl} V${yn} H${xn}`;}
+      paths.push(`<path class="${k}" data-opt="${opt}" d="${d}"/><circle class="${k}" data-opt="${opt}" cx="${xa}" cy="${ya}" r="2"/>`);
+    });
+    m.style.minHeight=y+'px';
+  });
+  const svg=$('#leaders'); if(svg)svg.innerHTML=paths.join('');
+}
+function hot(L,on){document.querySelectorAll(`[data-opt="${L}"]`).forEach(e=>e.classList.toggle('hot',on));}
+
+/* =====================================================================
+   marks (practice)
+   ===================================================================== */
+function applyMarks(){
+  const root=$('#passage'); if(!root)return;
+  S.marks.forEach((m,i)=>{
+    const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let n;
+    while((n=w.nextNode())){const at=n.nodeValue.indexOf(m);if(at>=0&&!n.parentNode.closest('mark')){
+      const r=document.createRange();r.setStart(n,at);r.setEnd(n,at+m.length);const mk=document.createElement('mark');mk.className='pen';mk.id='mk-'+i;r.surroundContents(mk);break;}}
+  });
+}
+function markSelection(){
+  const sel=getSelection(); if(!sel||sel.isCollapsed)return false;
+  const p=$('#passage'); if(!p||!p.contains(sel.anchorNode)||!p.contains(sel.focusNode))return false;
+  const txt=sel.toString().trim(); if(!txt||txt.length>160)return false;
+  if(sel.anchorNode!==sel.focusNode){toast(t('请在同一句里选择文字','Select words within one run of text'));return false;}
+  S.marks.push(txt); sel.removeAllRanges(); render(); toast(t('已标记，可稍后做成 Anki 卡片','Marked — available for an Anki note later')); return true;
+}
+
+/* =====================================================================
+   render + router (keeps keyboard focus across re-renders)
+   ===================================================================== */
+const VIEWS={today,practice,feedback,assess,report,anki,settings};
+const FOCUS_KEYS=['data-mode','data-goto','data-ans','data-choose','data-act','data-w','data-ct','data-conf','data-annot','data-unmark','data-jump','id'];
+function focusKey(el){
+  if(!el||el===document.body||el.id==='main')return null;
+  for(const a of FOCUS_KEYS)if(el.hasAttribute(a))return `[${a}="${CSS.escape(el.getAttribute(a))}"]`;
+  return null;
+}
+let curRoute=null;
+function render(){
+  const r=route(), html=document.documentElement;
+  const fk=layerOpen()?null:focusKey(document.activeElement);
+  html.lang=S.lang==='zh'?'zh-Hans':'en'; html.dataset.theme=S.theme; html.dataset.route=r;
+  document.title=`${META[r][S.lang]} — Pass Quest`;
+  head(r); foot(r);
+  const main=$('#main'), same=curRoute===r;
+  const keepScroll=same?main.scrollTop:0;
+  if(same)main.setAttribute('data-settled','');else main.removeAttribute('data-settled');
+  main.innerHTML=VIEWS[r]();
+  main.scrollTop=keepScroll;
+  curRoute=r;
+  if(r==='practice')applyMarks();
+  layoutNotes(); requestAnimationFrame(layoutNotes);
+  if(fk){const el=document.querySelector(fk);el&&el.focus({preventScroll:true});}
+}
+window.addEventListener('hashchange',()=>{closeLayers(false);S.skipAsk=false;S.revokeAsk=false;render();$('#main').focus({preventScroll:true});});
+window.addEventListener('resize',layoutNotes);
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(layoutNotes);
+
+function go(r){location.hash='#/'+r;}
+function setTheme(v){S.theme=v||(S.theme==='light'?'dark':'light');persist();render();}
+function setLang(v){S.lang=v||(S.lang==='zh'?'en':'zh');persist();render();}
+function choose(L){S.choice=L;render();const el=document.querySelector(`[data-choose="${L}"]`);el&&el.focus({preventScroll:true});}
+function resetAttempt(){S.choice=null;S.assisted=false;S.hintOpen=false;S.skipAsk=false;S.pClock=0;}
+function submit(){if(!S.choice)return;S.answered=S.choice;S.answeredAt=S.pClock;S.answeredCond=S.assisted?'asst':'ind';resetAttempt();go('feedback');}
+function setMode(m){
+  if(S.coach===m&&!S.pending)return;
+  S.coach=m;
+  /* no consent → nothing is sent, nothing is spent */
+  if(!S.consent){render();return;}
+  if(!S.coachVisited[m]&&!S.shot){
+    S.coachVisited[m]=true;S.pending=m;S.budget=Math.min(20,S.budget+1);render();
+    setTimeout(()=>{if(S.pending===m){S.pending=null;render();}},900);
+  } else {S.coachVisited[m]=true;if(S.pending&&S.pending!==m)S.pending=null;render();}
+}
+function aGo(n){const A=S.assess;if(n<1||n>40)return;A.cur=n;A.item=n===17?52:0;render();}
+function aAns(L){const A=S.assess;if(A.to.has(A.cur))return;A.ans[A.cur]=L;render();}
+const stub=(zh,en)=>()=>toast(t(zh,en));
+
+/* ---------- clicks ---------- */
+document.addEventListener('click',e=>{
+  if(e.target===$('#scrim')){closeLayers();return;}
+  const el=e.target.closest('[data-act],[data-choose],[data-mode],[data-goto],[data-ans],[data-close],[data-w],[data-ct],[data-conf],[data-annot],[data-unmark],[data-jump]');
+  if(!el)return;
+  if(el.dataset.choose){choose(el.dataset.choose);return;}
+  if(el.dataset.mode){setMode(el.dataset.mode);return;}
+  if(el.dataset.goto){aGo(+el.dataset.goto);return;}
+  if(el.dataset.ans){aAns(el.dataset.ans);return;}
+  if(el.dataset.w){S.anki.width=el.dataset.w;render();return;}
+  if(el.dataset.ct){S.anki.ctheme=el.dataset.ct;render();return;}
+  if(el.dataset.conf){S.anki.conflict=el.dataset.conf;render();toast(el.dataset.conf==='mine'?t('已保留你的版本；Anki 未运行，已排队，连上后写回','Kept yours — queued; written back once Anki is reachable'):t('已保留 Anki 中的版本','Kept the Anki version'));return;}
+  if(el.dataset.annot){S.annot=+el.dataset.annot;render();return;}
+  if(el.dataset.unmark){S.marks.splice(+el.dataset.unmark,1);render();return;}
+  if(el.dataset.jump){e.preventDefault();document.getElementById(el.dataset.jump).scrollIntoView({behavior:S.shot?'auto':'smooth',block:'start'});return;}
+  if(el.hasAttribute('data-close')&&!el.dataset.act){closeLayers(el.tagName!=='A');return;}
+  const a=el.dataset.act;
+  ({
+    toc:openToc, lang:()=>setLang(), theme:()=>setTheme(), keys:keysDialog,
+    submit, skip:()=>{S.skipAsk=true;render();}, 'skip-no':()=>{S.skipAsk=false;render();},
+    'skip-yes':()=>{resetAttempt();toast(t('第 1 题已跳过，记为“跳过”','Item 1 skipped and recorded as skipped'));go('today');},
+    hint:hintDialog, 'hint-yes':()=>{S.assisted=true;S.hintOpen=true;closeLayers();render();},
+    mark:()=>{markSelection();$('#markpop')&&$('#markpop').classList.remove('on');},
+    policy:()=>{S.policy=!S.policy;render();},
+    'brief-resume':()=>{S.brief='running';render();}, 'brief-cancel':()=>{S.brief='cancelled';render();},
+    'set-exam':()=>setDialog('exam'), 'set-daily':()=>setDialog('daily'),
+    'save-exam':()=>{const v=$('#dlg-in').value;if(!v)return;S.examDate=v;closeLayers();render();},
+    'save-daily':()=>{const v=+$('#dlg-in').value;if(!v)return;S.dailyMin=v;closeLayers();render();},
+    aprev:()=>aGo(S.assess.cur-1), anext:()=>aGo(S.assess.cur+1), leave:()=>leaveDialog('today'),
+    accept:()=>{S.anki.state='accepted';render();toast(t('已接受修订 1；Anki 未运行，已排队','Accepted revision 1; Anki not running, queued'));},
+    askip:()=>{S.anki.state='skipped';render();}, aundo:()=>{S.anki.state='draft';render();},
+    refine:stub('润色需要一次外部调用（DeepSeek，预算 +1）——原型中不发送','Refining needs one external call (DeepSeek, budget +1) — not sent in the prototype'),
+    test:stub('测试需要一次外部调用（Qwen，预算 +1）——原型中不发送','A test needs one external call (Qwen, budget +1) — not sent in the prototype'),
+    addkey:stub('会打开系统密钥库的输入框；密钥只写入那里，这里从不显示——原型中不执行','Opens the OS secret-store prompt; the key is written there and never shown here — not run in the prototype'),
+    checkkey:stub('会从系统密钥库读取密钥并重新验证 text.chat（一次外部调用）——原型中不执行','Reads the key from the OS secret store and re-verifies text.chat (one external call) — not run in the prototype'),
+    configure:stub('会要求端点地址、模型名与密钥；密钥写入系统密钥库——原型中不执行','Asks for an endpoint, model and key; the key goes to the OS secret store — not run in the prototype'),
+    'revoke-ask':()=>{S.revokeAsk=true;render();}, 'revoke-no':()=>{S.revokeAsk=false;render();},
+    consent:()=>{const now=new Date();const w=`11-13 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+      S.consent=!S.consent;S.revokeAsk=false;S.events.forEach(x=>x.fresh=false);S.events.push({when:S.shot?'11-13 09:30':w,kind:S.consent?'grant':'revoke',fresh:true});render();},
+    next:()=>{resetAttempt();}
+  }[a]||(()=>{}))();
+  if(a==='next')return; // allow link navigation
+  if(el.tagName==='A'&&el.hasAttribute('data-close'))closeLayers(false);
+});
+document.addEventListener('input',e=>{
+  if(e.target.id==='dlg-in'){const b=$('#dlg-save');if(b)b.disabled=!e.target.value;return;}
+  const id=e.target.id, A=S.anki;
+  if(id==='f-front')A.front=e.target.value; else if(id==='f-b1')A.back1=e.target.value; else if(id==='f-b2')A.back2=e.target.value; else if(id==='f-tac')A.tactic=e.target.value; else return;
+  $('#stage').innerHTML=cardHTML();
+  const fr=document.querySelector('.notes-list .fr'); if(fr)fr.textContent=A.front;
+});
+document.addEventListener('mouseover',e=>{const n=e.target.closest('[data-opt],[data-fn]');if(!n)return;if(n.dataset.opt&&route()==='feedback')hot(n.dataset.opt,true);if(n.dataset.fn)document.querySelectorAll(`[data-fn="${n.dataset.fn}"]`).forEach(x=>x.classList.add('hot'));});
+document.addEventListener('mouseout',e=>{const n=e.target.closest('[data-opt],[data-fn]');if(!n)return;if(n.dataset.opt&&route()==='feedback')hot(n.dataset.opt,false);if(n.dataset.fn)document.querySelectorAll(`[data-fn="${n.dataset.fn}"]`).forEach(x=>x.classList.remove('hot'));});
+document.addEventListener('mouseup',e=>{
+  const pop=$('#markpop'); if(!pop)return;
+  setTimeout(()=>{const sel=getSelection(),p=$('#passage');
+    if(sel&&!sel.isCollapsed&&p&&p.contains(sel.anchorNode)&&sel.toString().trim()){
+      const rr=sel.getRangeAt(0).getBoundingClientRect(),cr=$('#textcol').getBoundingClientRect();
+      pop.style.left=(rr.left+rr.width/2-cr.left)+'px';pop.style.top=(rr.top-cr.top-8)+'px';pop.classList.add('on');
+    } else if(!e.target.closest?.('#markpop')) pop.classList.remove('on');},0);
+});
+
+/* ---------- keyboard ---------- */
+document.addEventListener('keydown',e=>{
+  const r=route(), k=e.key, typing=/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+  /* focus stays inside an open layer */
+  if(k==='Tab'&&openEl){
+    const f=[...openEl.querySelectorAll('a[href],button:not([disabled]),input,[tabindex="0"]')];
+    if(f.length){const i=f.indexOf(document.activeElement);
+      if(e.shiftKey&&(i<=0)){f[f.length-1].focus();e.preventDefault();}
+      else if(!e.shiftKey&&(i===f.length-1||i<0)){f[0].focus();e.preventDefault();}}
+    return;
+  }
+  if(k==='Escape'){if(layerOpen()){closeLayers();e.preventDefault();return;} if(typing){document.activeElement.blur();return;} if(r==='assess'){leaveDialog('today');return;} if(S.skipAsk){S.skipAsk=false;render();} return;}
+  if(r==='anki'&&k==='Enter'&&(e.ctrlKey||e.metaKey)){if(S.anki.state==='draft'){S.anki.state='accepted';render();toast(t('已接受修订 1；Anki 未运行，已排队','Accepted revision 1; Anki not running, queued'));}e.preventDefault();return;}
+  if(typing||e.ctrlKey||e.metaKey||e.altKey)return;
+  if(layerOpen()){
+    if(openEl===$('#drawer')&&/^[1-7]$/.test(k)){closeLayers(false);go(ROUTES[+k-1]);}
+    return;
+  }
+  const lk=k.length===1?k.toLowerCase():k;
+  const onCtl=!!e.target.closest?.('button,a');
+  if(k==='?'){keysDialog();return;}
+  if(lk==='t'){setTheme();return;}
+  if(lk==='l'){setLang();return;}
+  if(r==='assess'){
+    /* nothing leaves a timed run without the clock warning */
+    if(k==='['||k===']'){leaveDialog(k===']'?'report':'feedback');return;}
+    if(lk==='g'){leaveDialog('today');e.preventDefault();return;}
+    const m={a:'A',b:'B',c:'C',d:'D','1':'A','2':'B','3':'C','4':'D'};
+    if(m[lk]){aAns(m[lk]);return;}
+    if(k===' '&&e.target.closest?.('[role=radio]')){aAns(e.target.dataset.ans);e.preventDefault();return;}
+    if((k==='ArrowDown'||k==='ArrowUp')&&e.target.closest?.('[role=radio]')){const i=L4.indexOf(e.target.dataset.ans)+(k==='ArrowDown'?1:-1);const nx=document.querySelector(`[data-ans="${L4[Math.max(0,Math.min(3,i))]}"]`);if(nx){[...document.querySelectorAll('.omr [role=radio]')].forEach(x=>x.tabIndex=-1);nx.tabIndex=0;nx.focus();}e.preventDefault();return;}
+    if(k==='ArrowRight'){aGo(S.assess.cur+1);e.preventDefault();return;}
+    if(k==='ArrowLeft'){aGo(S.assess.cur-1);e.preventDefault();return;}
+    return;
+  }
+  if(lk==='g'){openToc();e.preventDefault();return;}
+  if(k==='['||k===']'){const i=ROUTES.indexOf(r)+(k===']'?1:-1);if(ROUTES[i])go(ROUTES[i]);return;}
+  if(r==='today'&&k==='Enter'&&!onCtl){go('practice');return;}
+  if(r==='practice'){
+    const m={a:'A',b:'B',c:'C',d:'D','1':'A','2':'B','3':'C','4':'D'};
+    if(m[lk]){choose(m[lk]);return;}
+    if(k===' '&&e.target.closest?.('[data-choose]')){choose(e.target.dataset.choose);e.preventDefault();return;}
+    if(k==='ArrowDown'||k==='ArrowUp'){const i=S.choice?L4.indexOf(S.choice):-1;const n=k==='ArrowDown'?Math.min(3,i+1):Math.max(0,i-1);choose(L4[n]);e.preventDefault();return;}
+    if(k==='Enter'&&!e.target.closest?.('button,a')){submit();e.preventDefault();return;}
+    if(lk==='h'&&!S.hintOpen){hintDialog();return;}
+    if(lk==='s'){S.skipAsk=true;render();return;}
+    if(lk==='m'){markSelection();return;}
+  }
+  if(r==='feedback'){
+    const m={'1':'explain','2':'probe','3':'lesson'};
+    if(m[k]){setMode(m[k]);return;}
+    if(lk==='k'){go('anki');return;} if(lk==='n'){resetAttempt();go('practice');return;}
+  }
+  if(r==='anki'){
+    if(lk==='p'){S.anki.width=S.anki.width==='phone'?'desktop':'phone';render();return;}
+    if(lk==='s'&&S.anki.state==='draft'){S.anki.state='skipped';render();return;}
+  }
+});
+
+/* ---------- clocks (frozen for screenshots) ---------- */
+if(!S.shot){
+  setInterval(()=>{
+    const r=route();
+    if(r==='practice'){S.pClock++;const c=$('#pclock');if(c)c.textContent=fmt(S.pClock);}
+    const A=S.assess; A.left=Math.max(0,A.left-1);
+    if(r==='assess'){if(A.item<90)A.item++;const a=$('#iclock'),b=$('#rclock'),c=$('#ibar');if(a)a.textContent=fmt(A.item);if(b)b.textContent=fmt(A.left);if(c)c.style.width=Math.min(100,A.item/90*100)+'%';}
+  },1000);
+}
+
+render();
+</script>
+</body>
+</html>
