@@ -1651,6 +1651,8 @@ Entry format:
 - Default taken: (A). `TestPackagingIdentity` pins the value, `docs/install.md` names macOS 13
   (Ventura), and CI proves only `macos-latest`. Reverse by building with an older Go toolchain.
 - Revisit when: the Go toolchain raises its macOS minimum again, or a learner needs an older macOS.
+- Revisited (2026-11-20): the owner supports only the latest two macOS majors (Q-0000-07); goal 0017
+  raises the declared minimum to macOS 26.
 
 ### Q-0013-11 — How does the window treat an opaque, source-less `Script error.`?
 - Status: decided(default taken)
@@ -1806,3 +1808,43 @@ Entry format:
   Only the release job holds `contents: write`. Reverse by dropping `--draft` from the
   `gh release create` call (B).
 - Revisit when: the owner wants tag-to-public releases, signing, or an update channel.
+
+### Q-0000-07 — Which platforms and system versions does Pass Quest support?
+- Status: resolved
+- Resolution: (owner, 2026-11-20) Windows and macOS are first-tier and get the best experience; Linux
+  is second-tier (still built and smoke-tested, no Linux-only polish). Supported: Windows 11 and
+  later, and the latest two macOS majors — macOS 27 Golden Gate and macOS 26 Tahoe per Apple's
+  support page dated 2026-11-09. Windows 10 is documented as unsupported and untested but not
+  blocked by the installer. Platform and architecture coverage is sufficient: no new targets.
+- Context: goal 0013 declared macOS 13 (Q-0013-10) and claimed Windows x64 without a version floor;
+  the owner judged older systems not worth supporting.
+- Options considered: (A) keep the goal-0013 floors; (B) latest two macOS majors and Windows 11+,
+  enforced on macOS by the package minimum and documented on Windows; (C) also block Windows 10 in
+  the installer.
+- Default taken: (B), applied by goal 0017.
+- Revisit when: Apple ships the next macOS major (the supported pair moves), or a learner needs an
+  older system.
+
+### Q-0000-08 — Does the app download and install updates itself?
+- Status: resolved
+- Resolution: (owner, 2026-11-20) wanted eventually, deferred now: not a current priority. Goal
+  0015's check-only behaviour stands until a goal revisits it.
+- Context: comparable unsigned apps (FlClash) download, verify and run the installer from inside the
+  app, which also spares a browser-downloaded upgrade from SmartScreen and Gatekeeper.
+- Options considered: (A) keep check-only; (B) add in-app download and install as its own goal.
+- Default taken: (A) for now.
+- Revisit when: the owner schedules it, or a release needs learners to upgrade quickly.
+
+### Q-0000-09 — Which engines does the desktop frontend target?
+- Status: resolved
+- Resolution: (owner, 2026-11-20) the frontend is written as modern code for the engines the supported
+  systems run (Q-0000-07): current WebView2 on Windows 11 and WKWebView on macOS 26 and later.
+  Workarounds for older engines go, native platform features are preferred where they simplify the
+  code or improve performance, and performance is measured rather than assumed. Linux's WebKitGTK
+  must keep working as second-tier.
+- Context: goal 0011 targeted ES2022 and the styles carry 135 vendor-prefixed or compatibility
+  constructs; dropping older systems makes them unnecessary.
+- Options considered: (A) keep the goal-0011 feature level; (B) target the supported engines' baseline.
+- Default taken: (B), applied by goal 0019.
+- Revisit when: the supported system pair moves, or a modern feature measurably slows an engine.
+
