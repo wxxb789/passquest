@@ -5,18 +5,23 @@
  * exact thing the gate exists to catch — and one whose bundled Node runtime
  * is missing, which the layout case must name before any launch.
  *
- * The content scan gets three more, driven over the same fixture tree with
+ * The content scan gets six more, driven over the same fixture tree with
  * `only: contents` (no package, no launch): one payload that seeds a PDF
  * under another name, a SQLite header, every private-path and `.env` spelling
  * (mixed case included) plus links whose own name and target name private
  * data or an environment file, the internal-only marker and a
  * credential-shaped string in a bundled host — the failure must name every
- * seed and stay silent on the same credential in a `node_modules` file — one
- * synthetic baseline pair (a page file plus the partial extraction) whose
- * byte-identical copies, embedded lines and encoded forms — JSON-escaped,
- * `\uXXXX`-escaped, UTF-16LE — must all be reported while an unrelated line
- * is not, and one accepted tree whose only secret-shaped string sits in
- * `node_modules`.
+ * seed and stay silent on the same credential in a third-party file (a
+ * package carries no node_modules at all, so the fixture's file lives outside
+ * the agent tree) — one synthetic baseline pair (a page file plus the partial
+ * extraction) whose byte-identical copies, embedded lines and encoded forms —
+ * JSON-escaped, `\uXXXX`-escaped, UTF-16LE — must all be reported while an
+ * unrelated line is not, three that drive the lean-tree check (goal 0016) — a
+ * shipped `agent/node_modules`, a host that still names the package `openai`,
+ * and a host embedding a build machine's account path in bun's per-module
+ * comment — and two accepted trees: one whose only secret-shaped string sits
+ * in a third-party file, and one whose host carries urls and clock-shaped
+ * text the machine-path scan must read as ordinary content.
  */
 import { BASELINE, BASELINE_PARTIAL } from "../../lib/baseline.ts";
 import { Database } from "bun:sqlite";
@@ -27,6 +32,7 @@ import path from "node:path";
 import { makePackageSmokeGate } from "../package-smoke.ts";
 import { compareDatabases, rowCountProblems } from "../package-smoke/upgrade.ts";
 import { packageNaming } from "../../lib/package-build.ts";
+import { assertLeanAgentTree, runtimeResolutionUses } from "../../lib/package.ts";
 import { executable, run } from "../../lib/process.ts";
 import { GO_MOD } from "./fixture.ts";
 import type { BrokenCase, PassCase } from "./fixture.ts";
@@ -212,6 +218,66 @@ export function upgradeComparisonProblem(): string | null {
   }
 }
 
+/**
+ * The staging rules (goal 0016): a host that resolves a module at run time
+ * beyond a string-literal specifier — a computed `import()`/`require()`
+ * argument, `createRequire`, `require.resolve`, `import.meta.resolve` — must
+ * be refused by `runtimeResolutionUses`, while a literal import (static,
+ * dynamic, or a template with no substitution) and a plain `import.meta.url`
+ * read must not be; and `assertLeanAgentTree` must refuse a staged file that
+ * embeds a machine path while ordinary urls and clock-shaped text pass. A
+ * host a package cannot resolve must never be staged silently.
+ */
+export function stagingRefusalsProblem(): string | null {
+  const refused: Array<[string, string]> = [
+    ["a computed import argument", `const name = "no-such-package";\nawait import(name);\n`],
+    ["a computed require argument", `const name = "no-such-package";\nrequire(name);\n`],
+    ["a template with a substitution", "await import(`pkg-${kind}`);\n"],
+    ["a createRequire resolver", `const req = createRequire(import.meta.url);\nconst x = req("openai");\n`],
+    ["a require.resolve call", `const p = require.resolve("openai");\n`],
+    ["an import.meta.resolve call", `const p = import.meta.resolve("openai");\n`],
+  ];
+  for (const [label, source] of refused) {
+    if (runtimeResolutionUses(source).length === 0) return `staging rules: a host with ${label} is not refused`;
+  }
+  const accepted: Array<[string, string]> = [
+    ["a static literal import", `import { x } from "openai";\n`],
+    ["a literal dynamic import", `const m = await import("openai");\n`],
+    ["a substitution-free template import", "const m = await import(`openai`);\n"],
+    ["an import.meta.url read", `const here = import.meta.url;\n`],
+    ["a url and clock-shaped text", `const u = "https://example.com/v1";\nconst t = "12:30";\n`],
+  ];
+  for (const [label, source] of accepted) {
+    const uses = runtimeResolutionUses(source);
+    if (uses.length > 0) return `staging rules: a host with ${label} is refused as ${uses.join(", ")}`;
+  }
+  const dir = mkdtempSync(path.join(tmpdir(), "passquest-staging-rules-"));
+  try {
+    const host = path.join(dir, "durable-host.mjs");
+    for (const [label, text] of [
+      ["a Windows drive path", `// C:/Users/dev/AppData/Local/Temp/passquest-agent-entry-x1y2/entry.mjs\n`],
+      ["a POSIX user home", `// /Users/dev/projects/checkout/agent/durable-host.mjs\n`],
+      ["a Linux temp path", `// /tmp/passquest-agent-entry-x1y2/entry.mjs\n`],
+    ] as const) {
+      writeFileSync(host, text);
+      let message = "";
+      try {
+        assertLeanAgentTree(dir);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      if (!message.includes("embeds the machine path")) {
+        return `staging rules: a staged file with ${label} is not refused (${message === "" ? "no failure" : message})`;
+      }
+    }
+    writeFileSync(host, `const u = "https://example.com/v1";\nconst t = "12:30";\n`);
+    assertLeanAgentTree(dir);
+    return null;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 export function packageSmokeCases(): BrokenCase[] {
   return [
     {
@@ -267,6 +333,51 @@ func main() {
         failures.some((line) => line.startsWith("layout: the installed tree is missing") && line.includes("node"))
           ? null
           : `package-smoke: did not report the missing runtime: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),
+      label: "installed agent tree carrying node_modules",
+      files: {
+        ...FIXTURE_FILES,
+        // A package ships no third-party package at all (goal 0016): the
+        // contents scan's lean-tree check must name the directory.
+        "build/fixture/agent/node_modules/openai/package.json": `{"name": "openai", "version": "0.0.0"}\n`,
+      },
+      postFail: (failures) =>
+        failures.some((line) => slashed(line).includes("agent/node_modules") && line.includes("directory"))
+          ? null
+          : `package-smoke: did not report the shipped node_modules: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),
+      label: "installed agent host naming a package specifier",
+      files: {
+        ...FIXTURE_FILES,
+        // Every host ships as one self-contained bundle (goal 0016): a staged
+        // host that still names a package is a tree that cannot run where it
+        // lands, and no node_modules travels beside it.
+        "build/fixture/agent/durable-host.mjs": `import { OpenAI } from "openai";\n`,
+      },
+      postFail: (failures) =>
+        failures.some((line) => slashed(line).includes("agent/durable-host.mjs") && line.includes(`names the specifier "openai"`))
+          ? null
+          : `package-smoke: did not report the host's package specifier: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),
+      label: "installed agent file embedding a machine path",
+      files: {
+        ...FIXTURE_FILES,
+        // bun writes each module's path as a comment at the top of the
+        // bundle; an entry outside the checkout made it absolute, so the
+        // shipped file named the build machine's account and temp directory
+        // (goal 0016's review, the leak this case exists for).
+        "build/fixture/agent/durable-host.mjs": `// C:/Users/runneradmin/AppData/Local/Temp/passquest-agent-entry-abc123/entry.mjs\n`,
+      },
+      postFail: (failures) =>
+        failures.some((line) => slashed(line).includes("agent/durable-host.mjs") && line.includes("embeds the machine path"))
+          ? null
+          : `package-smoke: did not report the machine path in the installed host: ${failures.slice(0, 3).join("; ")}`,
     },
     {
       gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),
@@ -394,10 +505,25 @@ export function packageSmokePassCases(): PassCase[] {
   return [
     {
       gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),
-      label: "third-party file with a credential-shaped string",
+      label: "third-party file outside the agent tree with a credential-shaped string",
       files: {
         ...FIXTURE_FILES,
-        "build/fixture/agent/node_modules/@vendor/sdk/index.mjs": `const key = "${fakeKey()}";\n`,
+        "build/fixture/vendor/@vendor/sdk/index.mjs": `const key = "${fakeKey()}";\n`,
+      },
+      postPass: (detail) =>
+        detail.includes("contents scan:")
+          ? null
+          : `package-smoke: the content scan completed without a scan line (${detail})`,
+    },
+    {
+      gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),
+      label: "installed agent host carrying urls and clock-shaped text",
+      files: {
+        ...FIXTURE_FILES,
+        // The machine-path scan reads drive paths and user or temp
+        // directories, not a colon after any text: a host's urls and time
+        // strings are ordinary content (goal 0016).
+        "build/fixture/agent/search-host.mjs": `const base = "https://example.com/v1";\nconst at = "12:30";\n`,
       },
       postPass: (detail) =>
         detail.includes("contents scan:")

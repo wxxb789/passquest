@@ -35,6 +35,7 @@ import {
   packageNamingProblem,
   packageSmokeCases,
   packageSmokePassCases,
+  stagingRefusalsProblem,
   upgradeComparisonProblem,
 } from "./self-test/package-smoke.cases.ts";
 import { portablePathsCases } from "./self-test/portable-paths.cases.ts";
@@ -411,6 +412,7 @@ export const selfTest: Gate = {
       endpointPinProblem,
       uxCoverageProblem,
       packageNamingProblem,
+      stagingRefusalsProblem,
       upgradeComparisonProblem,
       () => gateGroupProblem(gates, gateGroups, ctx.root),
     ]) {

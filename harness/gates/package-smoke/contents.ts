@@ -25,8 +25,8 @@
  * - a private path: any path segment equal to `data/private`, `data/local`,
  *   `.passquest` or `local-data`, compared case-insensitively on the
  *   `/`/`\`-normalised relative path;
- * - `.env`: a file named `.env` or `.env.*` (case-insensitively; the staged
- *   node_modules holds none today, and this check does not exempt one);
+ * - `.env`: a file named `.env` or `.env.*` (case-insensitively; a staged tree
+ *   carries no node_modules at all today, and this check does not exempt one);
  * - the internal-only marker: the bytes of `CONFIDENTIAL_MARKER_TEXTS` in the
  *   file — UTF-8 text, in binaries too;
  * - the baseline text: the scan reads, at run time, both committed
@@ -57,6 +57,12 @@
  *   and the baseline file, never the text. A tree carrying neither baseline
  *   (a self-test fixture) has nothing to match, which the scan line states.
  *
+ * The installed `agent/` tree is checked as a whole too (`assertLeanAgentTree`,
+ * goal 0016): it holds the host scripts and the notices file only — no
+ * node_modules, no symlink, no other file — no host names a specifier that is
+ * not a `node:` built-in, and no file embeds a path of the machine that built
+ * it (a drive path, a user home, a temp directory).
+ *
  * The credential patterns the secrets gate carries apply to project-owned
  * files only, through `scanFiles` (its patterns and its binary skip, not a
  * copy): the four bundled `agent/*.mjs` hosts, the metadata MyGo generates
@@ -64,10 +70,11 @@
  * `Contents/Info.plist`; Windows writes no such file, the exe carries the
  * version info and the installer's strings live in the registry — and the
  * frontend dist this build embedded (the same bytes sit in the app binary,
- * which is not credential-scanned). The bundled Node runtime and
- * `node_modules` are not credential-scanned: they legitimately contain
- * published credential-shaped examples (the AWS SDK type doc the plan
- * scouted), and the check must not be weakened per file to pass.
+ * which is not credential-scanned). The bundled Node runtime is not
+ * credential-scanned either: it legitimately contains published
+ * credential-shaped examples (a provider SDK's type doc the plan scouted), and
+ * the check must not be weakened per file to pass. A package carries no
+ * node_modules at all (goal 0016), which the lean-tree check below enforces.
  *
  * The run's package artifact — the NSIS setup, the `.dmg` or the AppImage —
  * is checked cheaply: its name must be the exact name this build writes
@@ -88,7 +95,7 @@ import type { Check } from "../../lib/desktop-page.ts";
 import { mygoFileName } from "../../lib/package-build.ts";
 import type { PackageArtifact, PackageNaming } from "../../lib/package-build.ts";
 import { size } from "../../lib/package-build.ts";
-import { goTarget, hostTarget } from "../../lib/package.ts";
+import { assertLeanAgentTree, goTarget, hostTarget } from "../../lib/package.ts";
 import { resolve } from "../../lib/repo.ts";
 import type { GateContext } from "../../lib/types.ts";
 import { CONFIDENTIAL_MARKER_TEXTS } from "../local-only.ts";
@@ -484,6 +491,19 @@ export async function scanPackageContents(
       }
     };
     walk(dir, "");
+  }
+
+  // The agent tree is lean (goal 0016): the installed agent/ holds the host
+  // scripts and the notices file only, no host names a package specifier, no
+  // package carries node_modules, and no file embeds the path of the machine
+  // that built it.
+  const agentDir = app.hosts.length > 0 ? path.dirname(app.hosts[0]!) : "";
+  if (agentDir !== "" && existsSync(agentDir)) {
+    try {
+      assertLeanAgentTree(agentDir);
+    } catch (error) {
+      check(false, `contents: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   // The credential patterns apply to the project-owned files only: the four
