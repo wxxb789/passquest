@@ -1,30 +1,9 @@
 name: keychain
 
-# The goal-0018 P1 experiment, on a macOS runner: build two packages from two
-# commits (A = the pull request's base sha, B = its head; on a manual dispatch
-# A = the `a-ref` input and B = the dispatched ref), install A then B over it
-# in one temp prefix, and ask whether B reads the key A stored through the
-# window — with each build's real partition id, the item's `security
-# dump-keychain -a` ACL before and after, and a `SecurityAgent` a prompt left
-# behind all recorded. `harness/tools/keychain-experiment.ts` runs the three
-# arms (`adhoc`, `self-signed`, `project`); its header carries the whole
-# contract, including why the experiment keychain has an empty password (no
-# secret on a `security`/`openssl` argv) and why the signing password travels
-# through the child's environment only.
-#
-# `pull_request` with a `paths:` filter is the pre-merge path (the coordinator
-# opens a draft pull request and this run is the P1 evidence); a dispatchable
-# workflow exists only once its file is on the default branch, so the
-# `workflow_dispatch` path is for after the merge: `gh workflow run
-# keychain.yml -f a-ref=963aa6f`. The record and the log are uploaded as the
-# `keychain-record` artifact on every run, green or red.
 on:
   pull_request:
     paths:
       - .github/workflows/keychain.yml
-      # The tool and its repo-local import closure, read from the tool itself: a
-      # change to any file it loads must re-run this workflow, or a break in one
-      # of them would sit unnoticed until the next experiment.
       - harness/tools/keychain-experiment.ts
       - harness/lib/appimage.ts
       - harness/lib/desktop-page.ts
@@ -38,15 +17,11 @@ on:
       - harness/lib/process.ts
       - harness/lib/repo.ts
       - harness/lib/types.ts
-      # The files the two package builds read.
       - mygo.json
       - go.mod
       - go.sum
       - package.json
       - bun.lock
-      # The experiment's semantic inputs: the credential store the app reads and writes, and the
-      # settings row whose `data-credential` the read script waits for. A change to either can
-      # change the answer this run exists to establish, so it must re-run the experiment.
       - internal/desktop/**
       - desktop/web/src/views/settings.ts
   workflow_dispatch:
@@ -66,11 +41,8 @@ concurrency:
 jobs:
   experiment:
     name: keychain experiment (macOS)
-    # The floor goal 0017 pinned, and the platform the experiment is about.
     runs-on: macos-26
-    # Two package builds plus three arms (each with up to four launches, one of
-    # which may burn the launch's 60 s kill) fit well inside 90; the two 0016/0017
-    # package jobs take about 15 minutes each.
+    # Two package builds plus three arms fit inside 90 minutes; the 0016/0017 package jobs take ~15 each.
     timeout-minutes: 90
     steps:
       - name: Resolve the two commits
@@ -98,16 +70,12 @@ jobs:
           echo "a=$a" >> "$GITHUB_OUTPUT"
           echo "b=$b" >> "$GITHUB_OUTPUT"
 
-      # B first, at the workspace root: the tool lives in B's tree and runs from there.
       - name: Checkout B
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.refs.outputs.b }}
           fetch-depth: 2
 
-      # A under a/, checked out by its commit id: the gate's own clone depth, so
-      # `go build`'s VCS stamping (what makes the two cdhashes differ) finds the
-      # commit as it does in the gate's package job.
       - name: Checkout A
         uses: actions/checkout@v4
         with:
@@ -131,14 +99,9 @@ jobs:
         working-directory: a
         run: bun install --frozen-lockfile
 
-      # Seconds of parser, guard and classifier cases before the two builds: a
-      # broken dump parser fails here, not half an hour later.
       - name: Check the tool's dump parser, guards and classifier
         run: bun harness/tools/keychain-experiment.ts --self-check
 
-      # Each package is built by its own tree's harness, `bun run package` — the
-      # sequence `harness/lib/package-build.ts` defines — so the package each
-      # commit ships is the package the experiment installs.
       - name: Build B's package
         run: bun run package
 
@@ -146,12 +109,6 @@ jobs:
         working-directory: a
         run: bun run package
 
-      # The `self-signed` arm's identity: a throwaway created here, used for
-      # this run only, and deleted in the always() step below. Its CN must not
-      # equal the project identity's (the tool signs by CN). The p12 carries an
-      # empty passphrase on purpose: `security import` takes the passphrase as
-      # an argv argument only, and this repository's rule treats security/openssl
-      # argv as public (the tool's header).
       - name: Create the throwaway self-signed identity
         shell: bash
         run: |
@@ -188,8 +145,6 @@ jobs:
         env:
           PASSQUEST_KEYCHAIN_SELF_SIGNED_P12: ${{ runner.temp }}/keychain-throwaway/identity.p12
           PASSQUEST_KEYCHAIN_SELF_SIGNED_IDENTITY: Pass Quest Keychain Experiment
-          # The project arm runs only when both are set; a pull request from a
-          # fork carries neither, and the arm then records its skip by name.
           PASSQUEST_MACOS_SIGNING_P12: ${{ secrets.PASSQUEST_MACOS_SIGNING_P12 }}
           PASSQUEST_MACOS_SIGNING_PASSWORD: ${{ secrets.PASSQUEST_MACOS_SIGNING_PASSWORD }}
         run: |
@@ -198,12 +153,8 @@ jobs:
             --out "$RUNNER_TEMP/keychain-record.json" --arms adhoc,self-signed,project \
             2>&1 | tee "$RUNNER_TEMP/keychain-experiment.log"
 
-      # The tool deletes its keychain in its own finally and logs it; this step is
-      # the backstop for a run that was killed before it got there (a cancel, the
-      # job's timeout, a crashed tool): a leftover experiment keychain is deleted
-      # and the login keychain is made the user default and sole search entry
-      # again. Then the throwaway identity files are removed and whatever is left
-      # is listed, so a leftover is visible in the log.
+      # Backstop for a run killed before the tool's own finally: delete a leftover experiment
+      # keychain and restore the login keychain as the user default and sole search entry.
       - name: Delete the throwaway identity files
         if: ${{ always() }}
         shell: bash
@@ -216,8 +167,8 @@ jobs:
             echo "keychain: $dir was already gone"
           fi
           login="$HOME/Library/Keychains/login.keychain-db"
-          # `getconf DARWIN_USER_TEMP_DIR` is where os.tmpdir() points when TMPDIR
-          # is unset, which is where the tool's mkdtemp tree lives.
+          # os.tmpdir() points at $TMPDIR, else at getconf DARWIN_USER_TEMP_DIR — where the
+          # tool's mkdtemp tree lives.
           for base in "${TMPDIR:-}" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"; do
             [ -n "$base" ] || continue
             for tree in "$base"/passquest-keychain-experiment-*; do

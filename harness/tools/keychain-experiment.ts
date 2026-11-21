@@ -1,62 +1,5 @@
-/**
- * The goal-0018 P1 experiment: two packages (A from an older commit, B from the pull request head)
- * are installed one over the other in a temp prefix, A stores a key through the window, B reads it
- * — and the same three arms run it: `adhoc` (the package as built), `self-signed` (a throwaway
- * identity the workflow creates in the job) and `project` (the coordinator's signing secrets,
- * skipped when they are not in the environment).
- *
- * The tool never assumes which check macOS applies: before and after every read it dumps the item
- * with `security dump-keychain -a` (its partition list and every trusted application's
- * `requirement:`), learns the running build's real partition ID from an item that build itself
- * stores (cross-checked against the `cdhash:` computed from `codesign -dvvv`), and classifies the
- * refusal as the partition list, the application list, both or neither (`classifyRefusal`). A
- * read that is not a success (`refused`, `blocked` or `failed`) continues into the plan's simulated
- * allow: B's partition ID is added to the item with `security set-generic-password-partition-list`,
- * B reads again (expected to succeed), and a third build C — B's bundle with a bumped
- * `CFBundleShortVersionString`, signed the way its arm signs — reads again (expected to be
- * refused): the difference between "the allow records the app" and "it records the build".
- *
- * A read is classified from what happened, never from a message: `read` (the row showed present and
- * the loopback stub received the key), `refused` (the app ran to completion and its window reported
- * the credential absent or unreadable), `blocked` (the read did not complete — the tool's own
- * watchdog kill, the launch helper's hard timeout, or a window that never rendered the row — and a
- * `pgrep -lf SecurityAgent` sampler saw a SecurityAgent while the launch ran, one probe a second,
- * every probe recorded) or `failed` (anything else, with the failure lines). A `failed` read fails
- * the run: the job must not be green when the experiment it exists for did not happen. `codesign
- * -d -r-` prints a stored requirement as `designated => …` and, for code that has none — an ad-hoc
- * signature — the implied one as a source comment, `# designated => cdhash H"…"` (CODESIGN(1),
- * `-r`): both forms are parsed and `implied` is recorded, an ad-hoc build's requirement is expected
- * to be implied, and a re-signed build whose requirement is still implied fails the arm (the
- * re-sign did not take).
- *
- * The experiment's keychain is its own: created under the run's temp tree, made the user default
- * and the sole user search-list entry, restored and deleted in `finally`. The login keychain is
- * left as it was found: each arm's service is looked up there before and after the arm through
- * `security find-generic-password -s <service> <login keychain>` (its exit code only, never `-g`),
- * any hit is deleted in the `finally` and fails the run, and both values are in the record. It is
- * created with an empty password because `security` takes `create-keychain -p`, `import -P`,
- * `unlock-keychain -p` and `set-*-partition-list -k` as command-line arguments only, and this
- * repository's rule treats `security`/`codesign`/`openssl` argv as public: no secret on a command
- * line. The signing password therefore never reaches argv — openssl reads it from the child's
- * environment (`-passin env:…`), the tool imports a passphrase-less copy (0600, under the run's
- * private temp tree, deleted with it), and every decoded or derived file dies with the run too. A
- * passphrase is never printed and never recorded.
- *
- * Every `security`, `codesign`, `hdiutil`, `openssl`, `plutil`, `ditto` and `pgrep` call goes
- * through `loggedRun`, which prints the exact argv (an empty argument prints as `""`, never as a
- * secret). The record (`--out`) carries the numbers and the raw `security dump-keychain -a` item
- * block; the key is only ever recorded as its SHA-256, and the tool fails the run when any key byte
- * reaches a file under its temp tree (the keychain — the store the item exists in — is the one
- * exemption), the record, or the text this tool printed (every print is captured and scanned before
- * it exits, on top of the redaction every recorded line goes through).
- *
- * `--self-check` runs the dump parser, the designated-requirement parser, the guards and the
- * refusal classifier over fixtures that mirror SecurityTool's own print format
- * (Security-61901.120.67, `keychain_utilities.c` and
- * `clientid.cpp`), on any OS, so the pure parts are verified where the keychain calls cannot run.
- * The tool asserts an experiment on macOS only: it exits 2 anywhere else, because a skip would
- * report evidence that never happened (the cask tools' rule).
- */
+// security(1) takes keychain passwords on argv only, and this repository treats `security`/`openssl`
+// argv as public, so the experiment keychain and every import are passphrase-less.
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -73,17 +16,15 @@ import { loggedRun, resultText, runMain, tail } from "../lib/process.ts";
 import type { RunResult } from "../lib/process.ts";
 import { resolve } from "../lib/repo.ts";
 
-/** The account the app stores every provider key under (internal/desktop/credentials.go). */
+/** The account internal/desktop/credentials.go stores under: `api-key:<provider>`. */
 const ACCOUNT = `api-key:${STUB_PROVIDER}`;
-/** Nothing listens on port 1; the desktop smoke's own value, so no real AnkiConnect is touched. */
+/** The desktop smoke's own unreachable endpoint; port 1 is never listened on. */
 const UNREACHABLE_ANKI = "http://127.0.0.1:1";
 const ARMS = ["adhoc", "self-signed", "project"] as const;
 type ArmId = (typeof ARMS)[number];
-/** The SecurityAgent sampler's one probe a second while a launch runs. */
 const AGENT_PROBE_MS = 1000;
-/** The tool's watchdog kill for every launch: early enough that the helper's own hard timeout stays the backstop. */
+/** 5 s inside the launch helper's hard timeout, so the helper's kill stays the backstop of a hung launch. */
 const WATCHDOG_KILL_MS = LAUNCH_TIMEOUT_MS - 5000;
-/** The lines of a launch's output a failure line and the record keep. */
 const OUTPUT_TAIL_LINES = 60;
 
 const USAGE = `Run the goal-0018 P1 Keychain experiment on this macOS machine.
@@ -159,17 +100,14 @@ function parseArgs(argv: readonly string[]): Options {
   return options;
 }
 
-/** The keys this run generated, so printed output can be redacted and files scanned. */
 const generatedKeys: string[] = [];
 
-/** Every generated key byte sequence replaced by a marker: the record and the log must not hold it. */
 function redact(text: string): string {
   let out = text;
   for (const key of generatedKeys) out = out.split(key).join("<key-bytes-redacted>");
   return out;
 }
 
-/** One assertion, its exact command and observed value, and why it failed. */
 class Checker {
   private readonly failures: string[] = [];
   private passed = 0;
@@ -186,7 +124,6 @@ class Checker {
     return false;
   }
 
-  /** A failure without a command to answer for (an arm- or run-level guard). */
   fail(message: string): void {
     this.failures.push(message);
     console.log(`[assert] FAIL — ${redact(message)}`);
@@ -206,14 +143,12 @@ class Checker {
   }
 }
 
-/** The first lines of a command's output, for one assertion line. */
-function observed(result: RunResult, limit = 4): string {
+function observedHead(result: RunResult, limit = 4): string {
   const text = resultText(result).trim();
   if (text === "") return "(no output)";
   return redact(text.split("\n").slice(0, limit).join(" | "));
 }
 
-/** The last lines of a command's output, for a failure line (the 0017 lesson: the offence is at the end). */
 function observedTail(result: RunResult, limit = 60): string {
   const text = resultText(result).trim();
   if (text === "") return "(no output)";
@@ -223,10 +158,6 @@ function observedTail(result: RunResult, limit = 60): string {
   return redact(omitted > 0 ? `(${omitted} earlier line(s) omitted) ${shown}` : shown);
 }
 
-/**
- * `loggedRun` with the harness's own `cleanEnv` — no child inherits a PASSQUEST_* variable a shell
- * carries — plus the variables the caller names deliberately.
- */
 async function tool(command: string, args: readonly string[], extra: Record<string, string> = {}): Promise<RunResult> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(cleanEnv())) {
@@ -235,53 +166,39 @@ async function tool(command: string, args: readonly string[], extra: Record<stri
   return loggedRun(command, [...args], { env: { ...env, ...extra }, replaceEnv: true });
 }
 
-/** The SHA-256 of a file, streamed so a 45 MB dmg is never held in memory twice. */
 async function sha256File(file: string): Promise<string> {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer);
   return hash.digest("hex");
 }
 
-/** The quoted paths a `security` keychain query prints, in order. */
 function quotedPaths(text: string): string[] {
   return [...text.matchAll(/"([^"\n]+)"/g)].map((match) => match[1]!);
 }
 
-// ---------------------------------------------------------------------------------------------------
-// The dump parser, the guards and the refusal classifier: pure functions, exercised by --self-check
-// against fixtures mirroring SecurityTool/macOS/keychain_utilities.c's own print format.
-// ---------------------------------------------------------------------------------------------------
-
-/** One ACL entry of an item, as `security dump-keychain -a` prints it. */
 interface AclEntry {
   authorizations: string[];
   description: string;
-  /** `applications: <null>` prints as "any": an entry any application may use. */
+  /** The dump prints "any application" as `applications: <null>` (keychain_utilities.c). */
   applications: number | "any";
   requirements: string[];
 }
 
-/** The item under test, as the dump shows it. */
 interface DumpItem {
   found: boolean;
-  /** The raw item block, verbatim. */
   block: string;
   entries: AclEntry[];
-  /** Every partition entry's list, comma-split, in the dump's order. */
   partitions: string[];
-  /** True when some non-partition entry trusts any application (the owner ACL entry). */
   anyApplication: boolean;
-  /** Every trusted application's `requirement:`, with its entry index. */
   requirements: { entry: number; requirement: string }[];
 }
 
-/** The attribute a generic-password item's service/account is printed under, e.g. `"svce"<blob>="x"`. */
+/** The dump's attribute form: `"svce"<blob>="value"` (keychain_utilities.c). */
 function attributeOf(block: string, tag: string): string | null {
   const match = new RegExp(`^[ \\t]*"${tag}"<blob>="(.*)"[ \\t]*$`, "m").exec(block);
   return match === null ? null : match[1]!;
 }
 
-/** The block of one generic-password item, from a `security dump-keychain -a` text. */
 function parseDumpItem(text: string, service: string, account: string): DumpItem {
   const empty: DumpItem = { found: false, block: "", entries: [], partitions: [], anyApplication: false, requirements: [] };
   for (const block of text.split(/^(?=keychain: )/m)) {
@@ -329,9 +246,8 @@ function parseDumpItem(text: string, service: string, account: string): DumpItem
     let anyApplication = false;
     entries.forEach((entry, index) => {
       if (entry.authorizations.includes("partition_id")) {
-        // print_partition_id_list prints an unparsable list as "invalid partition ID: <raw>"; a
-        // value like that is not a partition id and must not be treated as one (the item guard
-        // then fails, which is the point).
+        // print_partition_id_list prints an unparsable list as "invalid partition ID: <raw>"
+        // (keychain_utilities.c): not a partition id, so it is dropped and the item guard fails.
         if (entry.description !== "<NULL>" && entry.description !== "" && !entry.description.startsWith("invalid partition ID:")) {
           for (const value of entry.description.split(",")) {
             const trimmed = value.trim();
@@ -350,7 +266,6 @@ function parseDumpItem(text: string, service: string, account: string): DumpItem
   return empty;
 }
 
-/** Why the two built packages fail the premise guard, or null when they carry different cdhashes. */
 function buildGuardProblem(aCdhash: string, bCdhash: string): string | null {
   if (aCdhash === "" || bCdhash === "") return "a build carries no cdhash; codesign -dvvv printed none";
   if (aCdhash.toLowerCase() === bCdhash.toLowerCase()) {
@@ -359,7 +274,6 @@ function buildGuardProblem(aCdhash: string, bCdhash: string): string | null {
   return null;
 }
 
-/** Why the stored item fails the premise guard (it must exist and carry a partition list), or null. */
 function itemGuardProblem(item: DumpItem): string | null {
   if (!item.found) return "the item is not in the dump";
   if (item.partitions.length === 0) {
@@ -368,7 +282,6 @@ function itemGuardProblem(item: DumpItem): string | null {
   return null;
 }
 
-/** Why the value codesign computes for the build differs from the partition the dump stores, or null. */
 function partitionGuardProblem(computed: string, stored: string | null): string | null {
   if (computed === "") return "the build carries no cdhash, so its cdhash: partition id cannot be computed";
   if (stored === null || stored === "") return "the dump shows no partition value for the build";
@@ -378,7 +291,6 @@ function partitionGuardProblem(computed: string, stored: string | null): string 
   return null;
 }
 
-/** Whether a designated requirement admits a trusted-application requirement, and how it matched. */
 function requirementMatches(designated: string, requirement: string): { matches: boolean; method: string } {
   const normal = (text: string): string => text.replace(/\s+/g, " ").trim();
   const dr = normal(designated);
@@ -391,7 +303,6 @@ function requirementMatches(designated: string, requirement: string): { matches:
   return { matches: false, method: "none" };
 }
 
-/** Which of the item's two checks admits the build, and which one therefore refuses it. */
 interface Classification {
   partition: "admitted" | "absent" | "unknown";
   application: "admitted-any" | "admitted-requirement" | "refused" | "unknown";
@@ -439,11 +350,7 @@ function classifyRefusal(item: DumpItem, partitionId: string | null, designatedR
   return { partition, application, requirementMatch, refusesBy, detail };
 }
 
-// ---------------------------------------------------------------------------------------------------
-// --self-check: fixtures in SecurityTool's own print format, so the parser and guards are verified
-// where the keychain calls cannot run (any OS). The must-fail cases assert the guard fails.
-// ---------------------------------------------------------------------------------------------------
-
+// Fixtures mirror SecurityTool's own print format (Security-61901.120.67, keychain_utilities.c).
 function fixtureDump(service: string, account: string, access: string): string {
   return [
     `keychain: "/Users/runner/work/_temp/passquest-keychain-experiment-self/experiment.keychain"`,
@@ -506,7 +413,6 @@ const BROKEN_PARTITION_ACCESS = [
 
 interface SelfCase {
   name: string;
-  /** null passes; a string is the failure line. */
   run: () => string | null;
 }
 
@@ -684,11 +590,6 @@ function selfCheck(): number {
   return failed === 0 ? 0 : 1;
 }
 
-// ---------------------------------------------------------------------------------------------------
-// Page scripts: A stores a fresh key, B reads the item A stored (the stub proves the key left the
-// OS store), or B stores its own item so its real partition ID can be read from the dump.
-// ---------------------------------------------------------------------------------------------------
-
 function storeScript(key: string, label: string): string {
   return pageScript(`
 const KEY = ${JSON.stringify(key)};
@@ -708,10 +609,8 @@ function readScript(label: string): string {
   return pageScript(`
 const row = '.rrow[data-provider="${STUB_PROVIDER}"]';
 location.hash = "#/settings";
-// Neither wait throws: a window that never renders the row, or never shows the credential
-// state, inside its own bound is the blocked-read shape, and the tool reads that from the
-// returned state (with the SecurityAgent samples the launch recorded) instead of a string.
-// Both bounds stay inside the smoke hook's own 40 s script bound.
+// Waits return state instead of throwing (the tool classifies from it); 15/20/30 s stay
+// inside the smoke hook's 40 s script bound.
 const rowDeadline = Date.now() + 15000;
 while (!q(row) && Date.now() < rowDeadline) await sleep(100);
 if (!q(row)) {
@@ -739,10 +638,6 @@ return { state: "present", verified: true, label: ${JSON.stringify(label)} };
 `);
 }
 
-// ---------------------------------------------------------------------------------------------------
-// The experiment's own plumbing
-// ---------------------------------------------------------------------------------------------------
-
 interface RootRecord {
   label: string;
   root: string;
@@ -754,7 +649,6 @@ interface RootRecord {
 
 interface SignatureRecord {
   designatedRequirement: string;
-  /** True when `codesign -d -r-` printed the requirement as a source comment (the implied one). */
   implied: boolean;
   requirementOutput: string;
   identifier: string;
@@ -767,20 +661,13 @@ interface SignatureRecord {
   computedPartition: string;
 }
 
-/** One `pgrep -lf SecurityAgent` hit, with the probe's instant. */
 interface AgentSample {
   at: string;
   lines: string[];
 }
 
-/**
- * What the one-probe-a-second `pgrep -lf SecurityAgent` sampler saw while a launch ran. The
- * `blocked` bucket needs it: a prompt nobody could click is the one thing that makes a read that
- * did not complete a blocked read rather than a failed one.
- */
 interface AgentScan {
   probes: number;
-  /** The first probe that could not run at all; a scan that cannot run leaves `matches` empty. */
   error: string | null;
   matches: AgentSample[];
 }
@@ -791,7 +678,6 @@ interface LaunchRecord {
   value: unknown;
   messages: string[];
   outputTail: string;
-  /** The SecurityAgent samples taken while this launch ran (one probe a second). */
   agentScan: AgentScan;
 }
 
@@ -805,12 +691,6 @@ interface ItemRecord {
 }
 
 interface ReadRecord {
-  /**
-   * `read` (the row showed present and the stub received the key), `refused` (the app ran to
-   * completion and reported the credential absent or unreadable), `blocked` (the read did not
-   * complete and a SecurityAgent was sampled while it ran), `failed` (anything else, which fails the
-   * run) or `not-run` (the arm stopped before its read; also a failure).
-   */
   outcome: "read" | "refused" | "blocked" | "failed" | "not-run";
   detail: string;
   providerCarriedKey: boolean;
@@ -835,12 +715,6 @@ interface ArmRecord {
   a: SignatureRecord;
   b: SignatureRecord;
   drSame: boolean;
-  /**
-   * The login keychain lookups for this arm's service: the exit code before the arm, and one entry
-   * per service the arm created afterwards (the arm's own and the allow's `-b` service). Exit 0 is
-   * "present"; the lookup never asks for the secret (`-g`/`-w` are never passed, both would
-   * withdraw it). Absent when the arm was skipped before it looked.
-   */
   login?: { before: { service: string; exit: number }; after: { service: string; exit: number }[] };
   store: { stored: boolean; launch: LaunchRecord };
   itemAfterStore: ItemRecord;
@@ -882,16 +756,12 @@ interface ExperimentRecord {
     password: string;
     defaultBefore: string | null;
     searchListBefore: string[] | null;
-    /** While the experiment ran: the experiment keychain is the user default and the sole entry. */
     defaultDuring: string | null;
     searchListDuring: string[] | null;
-    /** After the restore: equal to the Before values when the restore took. */
     defaultAfter: string | null;
     searchListAfter: string[] | null;
     deleted: boolean;
-    /** The learner's own keychain, and every synthetic service this run found there (expected: none). */
     loginPath: string;
-    /** Each hit: the service, the lookup's exit code and whether the deletion took. */
     loginResidue: { service: string; found: number; deleted: boolean }[];
   };
   guards: { buildsDiffer: boolean | null; aCdhash: string; bCdhash: string; log: { prints: number; keyBytes: number } };
@@ -920,14 +790,11 @@ interface Ctx {
   b: RootRecord;
   stopReason: string | null;
   guardsDone: boolean;
-  /** The learner's own keychain: looked up before and after every arm, and swept in the `finally`. */
   loginPath: string;
 }
 
-/** A global condition that makes the rest of the run meaningless. */
 class StopRun extends Error {}
 
-/** One arm's failure; the next arm still runs, so its evidence is kept. */
 class ArmFailure extends Error {}
 
 interface SignatureFields {
@@ -945,10 +812,8 @@ interface SignatureFields {
 }
 
 /**
- * The designated requirement `codesign -d -r-` printed, and whether it is the implied one. The
- * command writes a stored requirement as `designated => …` and, for code that carries none — an
- * ad-hoc signature — the implied requirement as a source comment, `# designated => cdhash H"…"`
- * (CODESIGN(1), `-r, --requirements`).
+ * codesign prints a stored requirement as `designated => …` and an implied one (ad-hoc code) as a
+ * source comment, `# designated => cdhash H"…"` (CODESIGN(1), -r, --requirements).
  */
 function parseDesignatedRequirement(text: string): { designatedRequirement: string; implied: boolean } {
   const match = /^\s*(#)?\s*designated => (.*)$/m.exec(text);
@@ -956,11 +821,6 @@ function parseDesignatedRequirement(text: string): { designatedRequirement: stri
   return { designatedRequirement: match[2]!.trim(), implied: match[1] !== undefined };
 }
 
-/**
- * Why a printed requirement cannot be used, or null. `explicitRequired` is the rule after a
- * re-sign: the signature must carry the requirement, so the implied form means the re-sign did not
- * take.
- */
 function requirementProblem(fields: { designatedRequirement: string; implied: boolean }, explicitRequired: boolean): string | null {
   if (fields.designatedRequirement === "") return "codesign -d -r- printed no designated requirement";
   if (explicitRequired && fields.implied) {
@@ -1039,8 +899,8 @@ async function inspectRoot(root: string, label: string, checker: Checker): Promi
   const record: RootRecord = {
     label,
     root,
-    commit: head.code === 0 ? head.stdout.trim() : `(git failed: ${observed(head)})`,
-    status: status.code === 0 && status.stdout.trim() === "" ? "clean" : `dirty/failed: ${status.stdout.trim() || observed(status)}`,
+    commit: head.code === 0 ? head.stdout.trim() : `(git failed: ${observedHead(head)})`,
+    status: status.code === 0 && status.stdout.trim() === "" ? "clean" : `dirty/failed: ${status.stdout.trim() || observedHead(status)}`,
     goarch,
     dmg: { name, path: file, bytes: statSync(file).size, sha256: await sha256File(file) },
   };
@@ -1048,12 +908,6 @@ async function inspectRoot(root: string, label: string, checker: Checker): Promi
   return record;
 }
 
-/**
- * The SecurityAgent sampler: one `pgrep -lf SecurityAgent` probe a second until `stop()`. Every
- * probe is counted, every hit is kept with its instant, and a probe that cannot run at all is
- * recorded once (its empty `matches` then means "nothing was seen", not "nothing could be seen") —
- * this is the evidence the `blocked` bucket rests on.
- */
 function startAgentSampler(): { scan: AgentScan; stop: () => Promise<void> } {
   const scan: AgentScan = { probes: 0, error: null, matches: [] };
   let running = true;
@@ -1069,7 +923,7 @@ function startAgentSampler(): { scan: AgentScan; stop: () => Promise<void> } {
           .filter((line) => line !== "");
         if (lines.length > 0) scan.matches.push({ at, lines });
       } else if (probe.code !== 1 && scan.error === null) {
-        // `pgrep` exits 1 when nothing matches; anything else is the probe itself failing.
+        // pgrep(1) exits 1 when nothing matches; any other non-zero is the probe itself failing.
         scan.error = `pgrep exited ${probe.code}: ${observedTail(probe, 4)}`;
       }
       if (!running) break;
@@ -1085,7 +939,6 @@ function startAgentSampler(): { scan: AgentScan; stop: () => Promise<void> } {
   };
 }
 
-/** One sampler line for a launch's log line. */
 function agentSummary(scan: AgentScan): string {
   if (scan.matches.length === 0) {
     return `the SecurityAgent sampler saw none in ${scan.probes} probe(s)${scan.error === null ? "" : ` (${scan.error})`}`;
@@ -1094,7 +947,6 @@ function agentSummary(scan: AgentScan): string {
   return `the SecurityAgent sampler saw a SecurityAgent in ${scan.matches.length} of ${scan.probes} probe(s), last at ${last.at}: ${last.lines.join(" | ")}`;
 }
 
-/** The launch site's shared environment and the launchPage call, with the page script removed after it. */
 async function launchWith(
   ctx: Ctx,
   spec: { binary: string; dir: string; label: string; where: string; script: string; service: string; dataDir: string },
@@ -1119,14 +971,10 @@ async function launchWith(
         PASSQUEST_PROVIDER_REGISTRY: ctx.registry,
         PASSQUEST_ANKI_ENDPOINT: UNREACHABLE_ANKI,
       },
-      // Only failures are recorded: a message pushed for every launch, whatever it says, would
-      // turn any failed launch into whatever the later reader matched its text against.
       check: (condition, message) => {
         if (!condition) messages.push(message);
         return condition;
       },
-      // The tool's own watchdog kill: the launch helper's hard timeout stays the backstop, and a
-      // kill comes back as `Launched.killed` instead of a line a reader would have to parse.
       killWhen: async () => Date.now() - startedAt >= WATCHDOG_KILL_MS,
     });
   } finally {
@@ -1156,8 +1004,6 @@ function classifyRead(outcome: LaunchOutcome, key: string, provider: ProviderStu
   const record = launchRecord(outcome, where);
   const seen = outcome.agentScan.matches.length > 0;
   if (outcome.kind !== "ok") {
-    // The read did not complete. Which bucket it belongs to is decided by what was observed while
-    // it ran: a SecurityAgent up at the time is the prompt path, and nothing else is `blocked`.
     const observed = `the launch ended ${outcome.kind} (${outcome.messages.join("; ") || "no failure line"}) and ${agentSummary(outcome.agentScan)}`;
     return {
       outcome: seen ? "blocked" : "failed",
@@ -1184,7 +1030,6 @@ function classifyRead(outcome: LaunchOutcome, key: string, provider: ProviderStu
     };
   }
   if (state === "no-row" || state === "no-credential") {
-    // The window ran to completion without ever telling the page what the credential state was.
     const stuck =
       state === "no-row"
         ? "the window never rendered the provider row inside its own 15 s bound"
@@ -1204,7 +1049,6 @@ function readLine(arm: ArmId, label: string, read: ReadRecord, expected: string)
   console.log(`[read ${arm}${label === "" ? "" : ` ${label}`}] outcome=${read.outcome} (expected ${expected}): ${read.detail}`);
 }
 
-/** One `security dump-keychain -a` per stage, parsed for the item. */
 async function dumpItem(ctx: Ctx, dir: string, label: string, service: string): Promise<{ record: ItemRecord; raw: DumpItem }> {
   await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
   const result = await tool("security", ["dump-keychain", "-a", ctx.keychain]);
@@ -1221,7 +1065,6 @@ async function dumpItem(ctx: Ctx, dir: string, label: string, service: string): 
   return { record: itemRecord(item), raw: item };
 }
 
-/** The keychain snapshot `security default-keychain`/`list-keychains` print, or nulls when unreadable. */
 async function keychainSnapshot(): Promise<{ default: string | null; list: string[] | null }> {
   const def = await tool("security", ["default-keychain", "-d", "user"]);
   const list = await tool("security", ["list-keychains", "-d", "user"]);
@@ -1232,20 +1075,14 @@ async function keychainSnapshot(): Promise<{ default: string | null; list: strin
 }
 
 /**
- * Whether one of this run's services exists in the login keychain: the exit code of a lookup that
- * names the keychain and never asks for the secret (`-g` and `-w` both withdraw it, so neither is a
- * neutral way to ask). Exit 0 is "present"; anything else is "not found" and `security` says why.
+ * A lookup by exit code only: `-g` and `-w` would withdraw the secret (security.1:577-580), so
+ * neither is a neutral presence test; exit 0 is "present".
  */
 async function loginLookup(service: string, keychain: string): Promise<number> {
   const found = await tool("security", ["find-generic-password", "-s", service, keychain]);
   return found.code;
 }
 
-/**
- * The signing fields `codesign -d -r-`/`-dvv`/`-dvvv` give one installed app, recorded verbatim.
- * `explicitRequired` is set for a read taken after a re-sign: the requirement must then be stored,
- * not printed as the implied one.
- */
 async function readSignature(app: string, executable: string, label: string, explicitRequired: boolean): Promise<SignatureRecord> {
   const requirement = await tool("codesign", ["-d", "-r-", app]);
   const dvv = await tool("codesign", ["-dvv", app]);
@@ -1267,12 +1104,11 @@ async function readSignature(app: string, executable: string, label: string, exp
   return record;
 }
 
-/** Installs one `.dmg`'s `.app` into `prefix`, naming the bundle and its executable by listing, as the smoke does. */
 async function installFromDmg(ctx: Ctx, dmg: RootRecord["dmg"], prefix: string, label: string): Promise<{ app: string; executable: string; bundle: string }> {
   const mount = path.join(ctx.temp, `mount-${label}`);
   mkdirSync(mount, { recursive: true });
   const attach = await tool("hdiutil", ["attach", "-nobrowse", "-readonly", "-mountpoint", mount, dmg.path]);
-  if (!ctx.checker.check(`install ${label}: hdiutil attach`, attach.code === 0, `hdiutil attach … -> exit 0: ${observed(attach, 2)}`, `hdiutil attach exited ${attach.code}: ${observedTail(attach)}`)) {
+  if (!ctx.checker.check(`install ${label}: hdiutil attach`, attach.code === 0, `hdiutil attach … -> exit 0: ${observedHead(attach, 2)}`, `hdiutil attach exited ${attach.code}: ${observedTail(attach)}`)) {
     throw new ArmFailure(`the dmg of ${label} could not be attached`);
   }
   try {
@@ -1318,7 +1154,6 @@ async function installFromDmg(ctx: Ctx, dmg: RootRecord["dmg"], prefix: string, 
   }
 }
 
-/** An arm's signing identity, imported into the experiment's keychain and usable by codesign. */
 interface Identity {
   cn: string;
   sha1: string | null;
@@ -1327,7 +1162,6 @@ interface Identity {
   source: string;
 }
 
-/** The identity material an arm needs, from the environment; a problem string means the arm is skipped. */
 interface IdentityInput {
   kind: "self-signed" | "project";
   p12File?: string;
@@ -1358,21 +1192,18 @@ function identityInput(id: ArmId): IdentityInput | null {
   return { kind: "project", p12Base64: base64, password, cn: cn === "" ? null : cn, source: "PASSQUEST_MACOS_SIGNING_P12/PASSWORD" };
 }
 
-/** The subject's CN, however LibreSSL/OpenSSL spell it; null when there is none. */
+/** LibreSSL and OpenSSL spell the subject differently; null when no CN is printed. */
 function commonNameOf(subjectOutput: string): string | null {
   const match = /CN\s*=\s*([^,\n/]+)/.exec(subjectOutput);
   return match === null ? null : match[1]!.trim();
 }
 
-/** Decodes the material, imports it into the experiment keychain, and unlocks it for codesign. */
 async function importIdentity(ctx: Ctx, id: ArmId, input: IdentityInput, dir: string): Promise<Identity> {
   let importable: string;
   if (input.kind === "self-signed") {
     importable = input.p12File!;
   } else {
-    // The coordinator's secret travels base64 in the environment; it is decoded 0600 under the run's
-    // private tree and re-packaged with an empty passphrase, because SecurityTool takes the
-    // passphrase as an argv argument only — see the tool header.
+    // Decoded 0600 under the run's private tree; the copy imported below is passphrase-less (see the header).
     const decoded = path.join(dir, "project-signing.p12");
     writeFileSync(decoded, Buffer.from(input.p12Base64!, "base64"), { mode: 0o600 });
     chmodSync(decoded, 0o600);
@@ -1411,7 +1242,7 @@ async function importIdentity(ctx: Ctx, id: ArmId, input: IdentityInput, dir: st
   ctx.checker.check(
     `identity ${id}: security import`,
     imported.code === 0 && importedCount !== "0",
-    `security import … -P "" -> exit ${imported.code}: ${observed(imported, 2)}`,
+    `security import … -P "" -> exit ${imported.code}: ${observedHead(imported, 2)}`,
     `security import exited ${imported.code} or imported no identity: ${observedTail(imported)}`,
   );
   if (imported.code !== 0 || importedCount === "0") throw new ArmFailure(`the ${id} identity could not be imported`);
@@ -1423,11 +1254,9 @@ async function importIdentity(ctx: Ctx, id: ArmId, input: IdentityInput, dir: st
     `security set-key-partition-list exited ${partitioned.code}: ${observedTail(partitioned)}`,
   );
   if (partitioned.code !== 0) throw new ArmFailure("codesign cannot use the imported key without its partition list");
-  // The command prints every key it touched; an empty result means no signing key matched (the
-  // codesign step below is the authority, but the log should carry what this step saw).
-  console.log(`[identity ${id}] set-key-partition-list prints: ${observed(partitioned, 3)}`);
+  console.log(`[identity ${id}] set-key-partition-list prints: ${observedHead(partitioned, 3)}`);
   const listed = await tool("security", ["find-identity", "-p", "codesigning", ctx.keychain]);
-  console.log(`[identity ${id}] security find-identity -p codesigning -> exit ${listed.code}: ${observed(listed, 4)}`);
+  console.log(`[identity ${id}] security find-identity -p codesigning -> exit ${listed.code}: ${observedHead(listed, 4)}`);
   let cn = input.cn;
   if (cn === null) {
     const certFile = path.join(dir, "identity-cert.pem");
@@ -1446,12 +1275,10 @@ async function importIdentity(ctx: Ctx, id: ArmId, input: IdentityInput, dir: st
   return { cn, sha1, findIdentity: listed.stdout.trim(), couldNotSign: false, source: input.source };
 }
 
-/** `codesign --force --deep --sign <identity>` — MyGo's own argv without the production-only flags. */
 async function signBundle(app: string, identity: string): Promise<RunResult> {
   return tool("codesign", ["--force", "--deep", "--sign", identity, app]);
 }
 
-/** Signs the installed bundle with the identity, falling back to the certificate's SHA-1, or fails the arm. */
 async function signOrFail(ctx: Ctx, arm: ArmRecord, identity: Identity, app: string): Promise<void> {
   let signed = await signBundle(app, identity.cn);
   if (signed.code !== 0) {
@@ -1471,7 +1298,6 @@ async function signOrFail(ctx: Ctx, arm: ArmRecord, identity: Identity, app: str
   }
 }
 
-/** After a read that is not a success: name, and clear, a SecurityAgent a prompt left behind (the plan's guard). */
 async function settleSecurityAgent(ctx: Ctx, arm: ArmRecord, into: ReadRecord): Promise<void> {
   const table = await listProcesses();
   if ("error" in table) {
@@ -1495,7 +1321,6 @@ async function settleSecurityAgent(ctx: Ctx, arm: ArmRecord, into: ReadRecord): 
   if (left.length > 0) throw new StopRun(`a SecurityAgent survived the kill: ${into.securityAgent.left.join(" | ")}; stopping before the next arm`);
 }
 
-/** Everything one arm does, in the plan's order; failures are recorded and the next arm still runs. */
 async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
   const service = `passquest-keychain-experiment-${process.pid}-${Date.now()}-${id}`;
   const arm: ArmRecord = {
@@ -1533,15 +1358,12 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
     }
     await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
 
-    // A: install, sign for the arm, record.
     const prefix = path.join(dir, "install");
     const installedA = await installFromDmg(ctx, ctx.a.dmg, prefix, `${id}-a`);
     const aBuilt = await readSignature(installedA.app, installedA.executable, `${id}-a-built`, false);
     if (identity !== null) await signOrFail(ctx, arm, identity, installedA.app);
-    // A re-signed build must carry its requirement: an implied one means the re-sign did not take.
     arm.a = identity === null ? aBuilt : await readSignature(installedA.app, installedA.executable, `${id}-a`, true);
 
-    // A stores the key; the dump shows the ACL the learner would later allow against.
     const keyA = randomBytes(16).toString("hex");
     generatedKeys.push(keyA);
     arm.keySha256 = sha256Hex(keyA);
@@ -1581,12 +1403,10 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
     }
     console.log(`[state ${id}] A's stored partition ${aPartition} equals the computed ${arm.a.computedPartition}`);
 
-    // B: install over A, sign for the arm, record; the pair guard runs on the first arm.
     const installedB = await installFromDmg(ctx, ctx.b.dmg, prefix, `${id}-b`);
     const bBuilt = await readSignature(installedB.app, installedB.executable, `${id}-b-built`, false);
     if (!ctx.guardsDone) {
       const problem = buildGuardProblem(aBuilt.cdhash, bBuilt.cdhash);
-      // The log scan in the same object is filled in at the end of the run.
       ctx.record.guards.buildsDiffer = problem === null;
       ctx.record.guards.aCdhash = aBuilt.cdhash;
       ctx.record.guards.bCdhash = bBuilt.cdhash;
@@ -1602,7 +1422,6 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
       `[state ${id}] A and B carry the same designated requirement: ${arm.drSame} (A ${arm.a.implied ? "implied " : ""}${arm.a.designatedRequirement}; B ${arm.b.implied ? "implied " : ""}${arm.b.designatedRequirement})`,
     );
 
-    // B reads A's item.
     await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
     ctx.provider.received.length = 0;
     const read = await launchWith(ctx, {
@@ -1620,8 +1439,6 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
     arm.itemAfterRead = afterRead.record;
     arm.read.classification = classifyRefusal(afterRead.raw, arm.b.computedPartition, arm.b.designatedRequirement);
     console.log(`[classify ${id}] refusesBy=${arm.read.classification.refusesBy}: ${arm.read.classification.detail}`);
-    // Every read that is not a success continues: a prompt has to be cleared and covered even when
-    // its bucket is uncertain (a `failed` read is red at the arm's end, not silently left alone).
     if (arm.read.outcome !== "read") await settleSecurityAgent(ctx, arm, arm.read);
     if (arm.read.outcome !== "read") {
       await simulateAllow(ctx, arm, { dir, service, installed: installedB, keyA });
@@ -1635,12 +1452,6 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
   await concludeArm(ctx, arm);
 }
 
-/**
- * The end of one arm: the login keychain is looked up again for every service the arm created, and
- * the arm's reads are checked against what a green run may report. A read whose outcome is `failed`
- * means the experiment did not happen for that arm, so it fails the run (the record keeps the
- * failure lines, printed here in full).
- */
 async function concludeArm(ctx: Ctx, arm: ArmRecord): Promise<void> {
   if (arm.skipped !== undefined) return;
   const login = arm.login;
@@ -1662,14 +1473,12 @@ async function concludeArm(ctx: Ctx, arm: ArmRecord): Promise<void> {
   if (arm.third !== undefined) readFailure(ctx, `arm ${arm.id} third build`, arm.third.read);
 }
 
-/** One read's `failed` outcome: the run must not be green, and the launch's own last lines are printed. */
 function readFailure(ctx: Ctx, where: string, read: ReadRecord): void {
   if (read.outcome !== "failed") return;
   console.log(`[tail ${where}] the last ${OUTPUT_TAIL_LINES} lines of the launch's output:\n${read.launch.outputTail}`);
   ctx.checker.fail(`${where}: the read failed (${read.detail}), so this run proves nothing and must not be green`);
 }
 
-/** The plan's simulated allow: B's runtime partition id joins the item, then a third build C. */
 async function simulateAllow(
   ctx: Ctx,
   arm: ArmRecord,
@@ -1758,7 +1567,6 @@ async function simulateAllow(
   await thirdBuild(ctx, arm, { dir, service, installed, keyA: spec.keyA });
 }
 
-/** C: B's bundle with a bumped version, signed the way the arm signs, installed over B. */
 async function thirdBuild(
   ctx: Ctx,
   arm: ArmRecord,
@@ -1792,7 +1600,6 @@ async function thirdBuild(
   if (!ctx.checker.check(`third ${arm.id}: install over B`, install.code === 0, `ditto -> exit 0`, `ditto exited ${install.code}: ${observedTail(install)}`)) {
     throw new ArmFailure("the third build could not be installed over B");
   }
-  // C is signed the way its arm signs: an ad-hoc C is expected to print the implied requirement.
   const signature = await readSignature(installed.app, installed.executable, `${arm.id}-c`, arm.identity.kind !== "none");
   console.log(`[state ${arm.id}] the third build carries version ${versionAfter} (was ${versionBefore}), cdhash ${signature.cdhash}; its DR equals B's: ${signature.designatedRequirement === arm.b.designatedRequirement}`);
   ctx.provider.received.length = 0;
@@ -1818,7 +1625,6 @@ async function thirdBuild(
   if (record.outcome !== "read") await settleSecurityAgent(ctx, arm, record);
 }
 
-/** One file's occurrences of every generated key. */
 function keyOccurrences(file: string, keys: readonly string[]): number {
   let bytes: Buffer;
   try {
@@ -1840,7 +1646,6 @@ function keyOccurrences(file: string, keys: readonly string[]): number {
   return count;
 }
 
-/** Every file under a tree, so the leak guard can name the carrier. */
 function filesUnder(dir: string): string[] {
   if (!existsSync(dir)) return [];
   const files: string[] = [];
@@ -1855,7 +1660,6 @@ function filesUnder(dir: string): string[] {
   return files;
 }
 
-/** Writes the record, redacting (and failing on) any key bytes it would carry. */
 function writeRecord(record: ExperimentRecord, checker: Checker, stopReason: string | null, out: string): void {
   record.failures = stopReason === null ? checker.list : [...checker.list, `stopped: ${stopReason}`];
   record.status = checker.ok ? (stopReason === null ? "ok" : "stopped") : "failed";
@@ -1878,8 +1682,6 @@ function writeRecord(record: ExperimentRecord, checker: Checker, stopReason: str
 
 async function runExperiment(options: Options): Promise<number> {
   const checker = new Checker();
-  // Everything this tool prints, captured so the run can scan its own log for key bytes: the log is
-  // uploaded next to the record, and a redaction the record gets must not be missing from it.
   const printed: string[] = [];
   for (const level of ["log", "error"] as const) {
     const original = console[level].bind(console);
@@ -1980,8 +1782,6 @@ async function runExperiment(options: Options): Promise<number> {
         throw error;
       }
     }
-    // A run that proved nothing is red: the pair guard's premise must have been compared, and only
-    // the project arm's secret-driven skip is one the plan sanctions.
     if (record.guards.buildsDiffer === null) {
       checker.fail("guard: the two builds' cdhashes were never compared (no arm reached the pair guard), so the run's premise is unproven");
     }
@@ -2003,8 +1803,6 @@ async function runExperiment(options: Options): Promise<number> {
       const restored = await tool("security", ["list-keychains", "-d", "user", "-s", ...record.keychain.searchListBefore]);
       console.log(`[cleanup] restored the user search list to ${record.keychain.searchListBefore.join(", ")} (exit ${restored.code})`);
     }
-    // After the restore, so the record shows the state the run left behind rather than the state it
-    // made for itself (that one is `defaultDuring`/`searchListDuring`).
     const after = await keychainSnapshot();
     record.keychain.defaultAfter = after.default;
     record.keychain.searchListAfter = after.list;
@@ -2028,8 +1826,6 @@ async function runExperiment(options: Options): Promise<number> {
     const deleted = await tool("security", ["delete-keychain", keychain]);
     record.keychain.deleted = deleted.code === 0;
     console.log(`[cleanup] deleted the experiment keychain ${keychain} (exit ${deleted.code})`);
-    // The learner's own keychain, left as found: every service this run created is looked up there,
-    // and a hit is deleted and fails the run — the item belongs in the experiment keychain measured.
     let loginLookups = 0;
     for (const arm of record.arms) {
       if (arm.skipped !== undefined) continue;
@@ -2054,7 +1850,6 @@ async function runExperiment(options: Options): Promise<number> {
     } else {
       console.log(`[guard] no key bytes under ${temp} outside the keychain itself (which the run deletes)`);
     }
-    // The log the workflow uploads: every line this tool printed, scanned for the keys it generated.
     const logHits = generatedKeys.filter((key) => printed.join("\n").includes(key));
     record.guards.log = { prints: printed.length, keyBytes: logHits.length };
     if (logHits.length > 0) {
@@ -2065,8 +1860,7 @@ async function runExperiment(options: Options): Promise<number> {
       console.log(`[guard] no key bytes in the ${printed.length} line(s) this tool printed`);
     }
     if (stopReason !== null) console.log(`[stop] ${stopReason}`);
-    // The record is written after the temp tree is gone: a write that throws then cannot leave the
-    // decoded signing material (the project arm re-exports a passphrase-less p12) behind.
+    // Written after the temp tree is removed: a throw here must not leave the decoded signing material behind.
     if (!(await removeTree(temp))) console.log(`[cleanup] could not remove ${temp}`);
     else console.log(`[cleanup] removed ${temp} and every dump or decoded signing material in it`);
     writeRecord(record, checker, stopReason, path.resolve(options.out));

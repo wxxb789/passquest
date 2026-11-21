@@ -416,6 +416,43 @@ remote other than the repository's own secrets.
 - **P4 → the goal close:** the run ids, the gate counts and the fingerprint, each read back from the named runs;
   nothing from memory.
 
+## Amendments
+
+One line per amendment, made where the step's row met the tree (owner's comment policy, 2026-11-22: source
+comments reduced to the keep-list; the design intent they carried is recorded here).
+
+1. **P1 the keychain and every import are passphrase-less.** `security` takes keychain passwords on argv only
+   (`create-keychain -p`, `import -P`, `unlock-keychain -p`, `set-*-partition-list -k`) and this repository treats
+   `security`/`openssl` argv as public, so no secret can be on a command line; the tool's file header keeps that
+   reason, and the record's `keychain.password` field is unchanged: `empty (see the tool header)`.
+2. **P1 the throwaway identity's CN must differ from the project identity's**, because the tool signs by CN
+   (default 7).
+3. **P1 B is checked out at the workspace root and A under `a/`, each with `fetch-depth: 2`.** The tool and the
+   harness it runs live in B's tree; A is checked out by commit id so `go build`'s VCS stamping finds the commit
+   exactly as the gate's package job does.
+4. **P1 the self-check step runs before the two package builds**, so a broken dump parser fails in seconds, not
+   after the builds; and the `paths:` filter also lists the experiment's semantic inputs (`internal/desktop/**`,
+   the settings view), because a change to either can change the answer this run exists to establish.
+5. **P1 an arm's failure does not stop the run.** `ArmFailure` is recorded and the next arm still runs so its
+   evidence is kept; only a run-level condition (`StopRun`: the pair guard, a keychain that cannot be created, a
+   SecurityAgent that survives its kill) stops the experiment early.
+6. **P1 *blocked* needs a SecurityAgent sample.** A read that did not complete is *blocked* only when the
+   one-probe-a-second `pgrep -lf SecurityAgent` sampler saw a SecurityAgent while the launch ran; otherwise it is
+   *failed*, and a `failed` read fails the run.
+7. **P1 every read that is not a success is still cleared and covered.** `settleSecurityAgent` and the simulated
+   allow run for `refused`, `blocked` and `failed` alike: a prompt must be cleared before the next arm, and a
+   `failed` read is red at the arm's end.
+8. **P1 a build read after a re-sign must show a stored requirement.** `readSignature(…, explicitRequired=true)`
+   fails the arm when codesign prints the implied form: the signature carries none, so the re-sign did not take.
+9. **P1 a green run's premises.** The pair guard must have compared the two cdhashes, and only the project arm
+   may skip (a fork pull request carries no project secrets); every other skip fails the run.
+10. **P1 the launch's `check` records failure messages only, and classification never matches message text**: a
+    message pushed for every launch would let whatever a later reader greps for turn a failed launch into a pass.
+11. **P1 `tool()` pairs `loggedRun` with the harness's `cleanEnv`** so a `PASSQUEST_*` variable from the caller's
+    shell cannot reach a child; `sha256File` streams (a dmg is tens of MB, not held in memory twice); and
+    `observedHead`/`observedTail` split an assertion's head from a failure's tail, where the offending line sits
+    (the 0017 lesson).
+
 ## Status
 
 This file is the plan for goal 0018; P1 is the first implementer run, and P2–P4 are conditional on P1's evidence.
