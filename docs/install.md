@@ -1,11 +1,13 @@
 # Install Pass Quest
 
 Pass Quest ships as an unsigned package for Windows, macOS and Linux: an NSIS installer, a `.dmg`
-and an AppImage. Each package carries the desktop app, the agent host scripts, their production
-dependencies and a pinned Node 22 runtime, so the agent features run on the package's own Node
-with no Node installed (CI proves this for the coach and Anki; see
-[What CI proves](#what-ci-proves-and-what-is-untested)). Anki, AnkiConnect and any model are **not**
-bundled; a coach call needs a provider key you enter yourself.
+and an AppImage. Each package carries the desktop app, the four agent host scripts, the third-party
+notices the inlined code requires and a pinned Node 22 runtime, so the agent features run on the
+package's own Node with no Node installed (CI proves this for the coach, Anki and the study brief;
+see [What CI proves](#what-ci-proves-and-what-is-untested)). A host that loads npm packages ships as
+one self-contained file and the rest as byte-identical copies, so a package carries no
+`node_modules` and nothing the hosts do not run ([`agent/README.md`](../agent/README.md)). Anki,
+AnkiConnect and any model are **not** bundled; a coach call needs a provider key you enter yourself.
 
 The packages are built and smoke-tested by CI ([What CI proves](#what-ci-proves-and-what-is-untested)).
 Download them from the repository's
@@ -156,8 +158,10 @@ CI ([`.github/workflows/gate.yml`](../.github/workflows/gate.yml)) runs the `pac
 Each job builds that OS's package from the repository, installs or attaches it (NSIS `/S`, the `.dmg`
 mounted and the `.app` copied out with `ditto`, the AppImage run in place), launches the installed app
 with `go`, `bun` and `node` absent from `PATH` (asserted), and drives the study loop, the agent
-features, Anki, the forward upgrade, the credential case and the broken-runtime case through it (the
-`package smoke` gate, cases `contents, layout, study, agents, anki, upgrade, credential, broken`).
+features — including a study brief the installed app completes on its own bundled runtime and hosts —
+Anki, the forward upgrade, the credential case and the broken-runtime case through it (the
+`package smoke` gate, cases `contents, layout, study, agents, brief, anki, upgrade, credential,
+broken`).
 Each run keeps its package as the `package-windows-latest`, `package-macos-latest` or
 `package-ubuntu-latest` artifact for 7 days. A run on a version tag hands these same artifacts to the
 release workflow, which publishes them only after the owner reviews the draft
@@ -183,9 +187,11 @@ Untested, and therefore not claimed:
   Wayland-specific behaviour is not covered either.
 - **Anki and AnkiConnect.** Not bundled. Anki is reported present when a reachable AnkiConnect
   endpoint runs and reported absent otherwise; study works without it.
-- **Search and the study brief with the bundled runtime.** The package carries their hosts and the
-  same resolver finds them, but CI runs only their unavailable path in the installed app; their
-  success path is covered by the source-tree smokes, not by the package.
+- **Search with the bundled runtime.** The package carries the search host and the same resolver
+  finds it, but no package case exercises it: the `package smoke` cases are `contents, layout, study,
+  agents, brief, anki, upgrade, credential, broken`, and the search host's success path is covered by
+  the source-tree `find smoke` only. The durable host's success path is tested in the installed app
+  instead (the `brief` case above).
 - **Updates.** The package smoke does not drive the update check or its browser hand-off; those
   are covered by `desktop smoke`'s `update` scenario in a source checkout, not by the installed
   package.

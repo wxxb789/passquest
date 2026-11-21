@@ -2,9 +2,10 @@
  * What every desktop-smoke scenario shares: the run it is handed, launching the window on its own data
  * directory, the second process (`passquest ... --db`) and the attempt cross-check.
  */
-import { cliJson, launchPage, tail } from "../../lib/desktop-page.ts";
+import { cliJson, launchPage, SKILL, STUB_MODEL, tail } from "../../lib/desktop-page.ts";
 import type { Check, Launched, ProviderStub } from "../../lib/desktop-page.ts";
 import { arrayField, field, numberField, stringField } from "../../lib/json.ts";
+import { resolve } from "../../lib/repo.ts";
 import type { RunResult } from "../../lib/process.ts";
 import type { GateContext } from "../../lib/types.ts";
 
@@ -31,9 +32,11 @@ export interface Shared {
   /**
    * Environment every launch gets beyond the smoke hook's own variables and
    * the scenario's. The package smoke strips PATH and points HOME/AppData/
-   * XDG_CONFIG_HOME at a temp tree here.
+   * XDG_CONFIG_HOME at a temp tree here. Every value is a string: unsetting a
+   * variable is not supported, so a launch that must not see one leaves the
+   * key out of this record rather than giving it an `undefined` value.
    */
-  launchEnv?: Record<string, string | undefined>;
+  launchEnv?: Record<string, string>;
   /**
    * Set false to leave PASSQUEST_DESKTOP_DATA unset, so the app resolves its
    * own per-user data directory (the package smoke, whose data root is what
@@ -46,6 +49,16 @@ export interface Shared {
    * package smoke passes the installed tree, which no credential may reach.
    */
   secretScanRoots?: readonly string[];
+  /**
+   * The Node runtime and the durable host an installed copy carries. A
+   * scenario that runs the installed binary as its own CLI pins them through
+   * PASSQUEST_NODE and PASSQUEST_AGENT_HOST: the CLI composition root
+   * resolves no resources directory (only the window does, see
+   * docs/harness.md), so unlike the window it cannot find packaged files on
+   * its own. Undefined in the source tree, where both resolve normally.
+   */
+  runtime?: string;
+  durableHost?: string;
 }
 
 export interface ScenarioRun {
@@ -121,6 +134,47 @@ export async function setup(s: ScenarioRun, steps: string[][], env: Record<strin
     }
   }
   return true;
+}
+
+/**
+ * An environment's string-valued entries: what a launch's own
+ * `Record<string, string>` can take, with an absent variable simply absent
+ * rather than carrying an `undefined` value.
+ */
+export function textEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) if (typeof value === "string") out[name] = value;
+  return out;
+}
+
+const IMPORT_FIXTURE = "internal/cli/testdata/import";
+
+/**
+ * Seeds the study trail the coach case and the package smoke's brief case
+ * share, through the repository CLI: the import fixture, then a guided and an
+ * independent first-party attempt on the imported item — so the recommendation
+ * opens it and the brief's packet is non-empty — and the stub model tested and
+ * chosen. False after the first failed step; every failure line is prefixed
+ * with `${s.id}`.
+ */
+export async function seedStudyTrail(s: ScenarioRun, env: Record<string, string>): Promise<boolean> {
+  const imported = await cli(s, ["import", "--path", resolve(s.shared.ctx.root, IMPORT_FIXTURE)]);
+  const sourceID = stringField(field(imported.doc, "source"), "id");
+  if (
+    !s.check(imported.code === 0 && sourceID !== undefined, `${s.id}: setup import exit = ${imported.code}: ${tail(imported.stderr, 4)}`)
+  ) {
+    return false;
+  }
+  const steps = [
+    ["question", "add", sourceID!, "1", "--file", resolve(s.shared.ctx.root, `${IMPORT_FIXTURE}/question-q2-tagged.json`)],
+    ["page", "review", sourceID!, "1", "--reviewer", "smoke"],
+    ["question", "review", sourceID!, "q2", "--answer", "C", "--reviewer", "smoke"],
+    ["tactic", "practice", SKILL, "--stage", "guided", "--answer", "A"],
+    ["skill", "practice", SKILL, "--answer", "A"],
+    ["model", "test", STUB_MODEL],
+    ["model", "use", STUB_MODEL],
+  ];
+  return setup(s, steps, env);
 }
 
 export function attemptsOf(report: { doc: unknown }): unknown[] {

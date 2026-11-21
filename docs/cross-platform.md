@@ -97,8 +97,9 @@ turns red.
 ## Packaging
 
 One sequence (`bun run package`, `harness/lib/package-build.ts`) builds every package: the frontend
-bundle, the staged resources (`agent/*.mjs`, a hoisted production `node_modules`, a pinned Node
-runtime, the icon), then `go tool mygo build` from `mygo.json`.
+bundle, the staged resources (`agent/*.mjs` — one self-contained bundle per host that imports a
+package, a byte-identical copy for every other host — a pinned Node runtime, the icon), then
+`go tool mygo build` from `mygo.json`.
 
 - **Windows** gets the per-user NSIS installer into `%LOCALAPPDATA%\Programs\Pass Quest`, no admin:
   a silent install is `/S` with an unquoted `/D=<dir>` (NSIS ignores a quoted `/D=`), so a test
@@ -116,8 +117,19 @@ runtime, the icon), then `go tool mygo build` from `mygo.json`.
   launches it.
 - The Node runtime is pinned per platform and archive (`win32-x64`, `darwin-arm64`, `darwin-x64`,
   `linux-x64`), each archive's SHA-256 from `SHASUMS256.txt`; a target with no pin fails instead of
-  falling back to another platform's runtime, and staging refuses a tree that carries a `.node` file
-  or a package restricting its own `os`, `cpu` or `libc`.
+  falling back to another platform's runtime. Staging ships no third-party package and no trace of
+  the machine that built it: a staged host that names a specifier which is not a `node:` built-in,
+  an agent tree holding a file that is neither a host script nor the notices file, and a staged
+  host embedding a path of the build machine (a drive path, a user home, a temp directory) each
+  fails the run (`assertLeanAgentTree`) instead of shipping a tree that cannot run where it lands
+  or that names the account it was built in. `agent/THIRD-PARTY-NOTICES.txt` is the one file that
+  is not read for those shapes: it carries the inlined packages' own licence prose, which may name
+  `/home/` or `/tmp/` legitimately, and `tmpdir()` is machine-spelled itself ("/tmp" on Linux), so
+  the shape rule would refuse one licence text on one OS and accept it on another. It is refused
+  for one literal instead — the checkout root, in both spellings — which no licence text can name
+  and the assembly never writes, so a leak from the assembly or a header naming a path still fails;
+  its bytes come from the packages' own licence files, the SPDX MIT fallback and headers the
+  assembly builds from package names, versions and package-relative file names.
 - A package carries no second app executable (only the bundled Node runtime beside it): on Windows the GUI-subsystem binary is the CLI too when
   given arguments, and its stdout over an inherited pipe is how the durable host runs
   `agent record-step` (`-H=windowsgui` hides the window, not the pipe).

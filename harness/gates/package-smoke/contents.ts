@@ -25,8 +25,8 @@
  * - a private path: any path segment equal to `data/private`, `data/local`,
  *   `.passquest` or `local-data`, compared case-insensitively on the
  *   `/`/`\`-normalised relative path;
- * - `.env`: a file named `.env` or `.env.*` (case-insensitively; the staged
- *   node_modules holds none today, and this check does not exempt one);
+ * - `.env`: a file named `.env` or `.env.*` (case-insensitively; a staged tree
+ *   carries no node_modules at all today, and this check does not exempt one);
  * - the internal-only marker: the bytes of `CONFIDENTIAL_MARKER_TEXTS` in the
  *   file — UTF-8 text, in binaries too;
  * - the baseline text: the scan reads, at run time, both committed
@@ -57,6 +57,26 @@
  *   and the baseline file, never the text. A tree carrying neither baseline
  *   (a self-test fixture) has nothing to match, which the scan line states.
  *
+ * The installed `agent/` tree is checked as a whole too (`assertLeanAgentTree`,
+ * goal 0016): it holds the host scripts and the notices file only — no
+ * node_modules, no symlink, no other file — no host names a specifier that is
+ * not a `node:` built-in, and no file embeds a path of the machine that built
+ * it (a drive path, a user home, a temp directory; the notices file is the
+ * one exemption, and only from the shapes and the temp literal — the next
+ * paragraph states the rule it does carry).
+ *
+ * The notices file must carry what the staged bundles required (goal 0016 P4,
+ * `noticesProblems`): every licence text staging assembled for the packages
+ * the bundles inlined, under the header naming it, verbatim. The build's
+ * identity carries that set; a fixture install carries none unless the caller
+ * hands one in (`fixtureNotices`), which is how the self-test drives this
+ * check over a fixture too. The notices file is exempt from the machine-path
+ * shapes and the temp-directory literal — licence prose may name `/home/` or
+ * `/tmp/`, and `tmpdir()` is machine-spelled itself — and is refused for the
+ * checkout root alone, the same rule on every OS (harness/lib/package.ts,
+ * checkoutRootIn); the assembly writes no path of this machine
+ * (harness/lib/notices.ts).
+ *
  * The credential patterns the secrets gate carries apply to project-owned
  * files only, through `scanFiles` (its patterns and its binary skip, not a
  * copy): the four bundled `agent/*.mjs` hosts, the metadata MyGo generates
@@ -64,10 +84,11 @@
  * `Contents/Info.plist`; Windows writes no such file, the exe carries the
  * version info and the installer's strings live in the registry — and the
  * frontend dist this build embedded (the same bytes sit in the app binary,
- * which is not credential-scanned). The bundled Node runtime and
- * `node_modules` are not credential-scanned: they legitimately contain
- * published credential-shaped examples (the AWS SDK type doc the plan
- * scouted), and the check must not be weakened per file to pass.
+ * which is not credential-scanned). The bundled Node runtime is not
+ * credential-scanned either: it legitimately contains published
+ * credential-shaped examples (a provider SDK's type doc the plan scouted), and
+ * the check must not be weakened per file to pass. A package carries no
+ * node_modules at all (goal 0016), which the lean-tree check below enforces.
  *
  * The run's package artifact — the NSIS setup, the `.dmg` or the AppImage —
  * is checked cheaply: its name must be the exact name this build writes
@@ -85,10 +106,12 @@ import { appImageFileName } from "../../lib/appimage.ts";
 import { BASELINE, BASELINE_PARTIAL } from "../../lib/baseline.ts";
 import { FRONTEND_DIST } from "../../lib/desktop.ts";
 import type { Check } from "../../lib/desktop-page.ts";
+import { noticeSection } from "../../lib/notices.ts";
+import type { StagedNotices } from "../../lib/notices.ts";
 import { mygoFileName } from "../../lib/package-build.ts";
 import type { PackageArtifact, PackageNaming } from "../../lib/package-build.ts";
 import { size } from "../../lib/package-build.ts";
-import { goTarget, hostTarget } from "../../lib/package.ts";
+import { assertLeanAgentTree, goTarget, hostTarget, NOTICES_FILE } from "../../lib/package.ts";
 import { resolve } from "../../lib/repo.ts";
 import type { GateContext } from "../../lib/types.ts";
 import { CONFIDENTIAL_MARKER_TEXTS } from "../local-only.ts";
@@ -101,6 +124,8 @@ export interface PackageIdentity {
   naming: PackageNaming;
   /** mygo.json as written: the AppImage's name comes from its raw name and version. */
   config: { name: string; version: string };
+  /** The notices this staging's bundles required (harness/lib/notices.ts): the installed notices file must carry every text of them. */
+  notices: StagedNotices;
 }
 
 const PDF = Buffer.from("%PDF-", "latin1");
@@ -418,15 +443,50 @@ function filesUnder(dir: string): string[] {
 }
 
 /**
+ * The problems the installed notices file has against what the staged bundles
+ * required (goal 0016 P4): the file must carry every section staging
+ * assembled — its header and its text, as one unit (noticeSection) — so a
+ * body deleted in transit is seen even where another section carries the same
+ * body under a different header, which five of the real file's sections do.
+ * A missing file, a section dropped in transit and a file some other staging
+ * wrote each fail; the messages name the package and the source file, never
+ * the text itself.
+ */
+export function noticesProblems(file: string, required: StagedNotices): string[] {
+  if (!existsSync(file)) {
+    return [
+      `${NOTICES_FILE} is missing from ${path.dirname(file)}/: the staged bundles inlined ${required.packages.length} package(s), whose notices must travel with the code`,
+    ];
+  }
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (error) {
+    return [`${file} cannot be read: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  const problems: string[] = [];
+  for (const notice of required.texts) {
+    if (text.includes(noticeSection(notice))) continue;
+    if (!text.includes(notice.label)) problems.push(`${NOTICES_FILE} names no ${notice.label}`);
+    else problems.push(`${NOTICES_FILE} does not carry the text of ${notice.label} under its own header`);
+  }
+  return problems;
+}
+
+/**
  * Scans the installed package's contents and reports every problem through
  * `check`; returns the scan line (file count, bytes, needles, wall time) for
- * the gate's pass detail.
+ * the gate's pass detail. A real run passes the `identity` of the package it
+ * built, whose notices set the installed file must carry; a fixture install
+ * tree, which has no build, passes `fixtureNotices` instead — a run has one
+ * or the other, never both.
  */
 export async function scanPackageContents(
   app: InstalledApp,
   ctx: GateContext,
   check: Check,
   identity?: PackageIdentity,
+  fixtureNotices?: StagedNotices,
 ): Promise<string> {
   const started = performance.now();
   const baseline = baselineSource(ctx.root);
@@ -484,6 +544,36 @@ export async function scanPackageContents(
       }
     };
     walk(dir, "");
+  }
+
+  // The agent tree is lean (goal 0016): the installed agent/ holds the host
+  // scripts and the notices file only, no host names a package specifier, no
+  // package carries node_modules, and no file embeds the path of the machine
+  // that built it — the checkout root included, which this scan knows the way
+  // staging does (the notices file is refused for that literal alone, and for
+  // no other machine path).
+  const agentDir = app.hosts.length > 0 ? path.dirname(app.hosts[0]!) : "";
+  if (agentDir !== "" && existsSync(agentDir)) {
+    try {
+      assertLeanAgentTree(agentDir, { root: ctx.root });
+    } catch (error) {
+      check(false, `contents: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // The notices the staged bundles required must have travelled into the
+  // install (goal 0016 P4): mygo.json packs the staged agent/ tree, so the
+  // file the build assembled is the file the package carries. A fixture
+  // install stands in for a build's set through fixtureNotices, so the
+  // self-test drives this check over a fixture too. The scan line names how
+  // many texts were checked, so a passing run shows the check ran.
+  const required = identity !== undefined ? identity.notices : fixtureNotices;
+  let noticeTextsChecked = 0;
+  if (required !== undefined && agentDir !== "" && existsSync(agentDir)) {
+    for (const problem of noticesProblems(path.join(agentDir, NOTICES_FILE), required)) {
+      check(false, `contents: ${problem}`);
+    }
+    noticeTextsChecked = required.texts.length;
   }
 
   // The credential patterns apply to the project-owned files only: the four
@@ -571,5 +661,6 @@ export async function scanPackageContents(
     baseline === null
       ? `no baseline under ${BASELINE} or ${BASELINE_PARTIAL}`
       : `needles: ${baseline.pageLines} page-file lines of ${BASELINE} (${baseline.files} files hashed) and ${baseline.partialLines} lines of ${BASELINE_PARTIAL}`;
-  return `contents scan: ${files} files, ${size(bytes)}, ${needles}, ${ownedFiles} project-owned files credential-scanned, ${((performance.now() - started) / 1000).toFixed(1)}s`;
+  const noticesNote = noticeTextsChecked === 0 ? "" : `, ${noticeTextsChecked} notice text(s) verified against the staged bundles' set`;
+  return `contents scan: ${files} files, ${size(bytes)}, ${needles}, ${ownedFiles} project-owned files credential-scanned${noticesNote}, ${((performance.now() - started) / 1000).toFixed(1)}s`;
 }

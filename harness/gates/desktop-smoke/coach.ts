@@ -1,12 +1,10 @@
 import { randomBytes } from "node:crypto";
 
-import { chatReply, pageScript, SKILL, STUB_CREDENTIAL_ENV, STUB_MODEL, tail } from "../../lib/desktop-page.ts";
+import { chatReply, pageScript, STUB_CREDENTIAL_ENV } from "../../lib/desktop-page.ts";
 import { arrayField, field, numberField, stringField } from "../../lib/json.ts";
-import { resolve } from "../../lib/repo.ts";
-import { cli, HOSTILE_MARKUP, launch, setup } from "./scenario.ts";
+import { cli, HOSTILE_MARKUP, launch, seedStudyTrail } from "./scenario.ts";
 import type { Scenario } from "./scenario.ts";
 
-const IMPORT_FIXTURE = "internal/cli/testdata/import";
 const IMPORTED_SENTENCE = "The Westbridge Community Library closes at 4 p.m. on Saturdays.";
 
 export const coach: Scenario = {
@@ -15,21 +13,7 @@ export const coach: Scenario = {
     const { provider } = s.shared;
     const key = `sk-smoke-${randomBytes(12).toString("hex")}`;
     const keyEnv = { [STUB_CREDENTIAL_ENV]: key };
-    const imported = await cli(s, ["import", "--path", resolve(s.shared.ctx.root, IMPORT_FIXTURE)]);
-    const sourceID = stringField(field(imported.doc, "source"), "id");
-    if (!s.check(imported.code === 0 && sourceID !== undefined, `coach: setup import exit = ${imported.code}: ${tail(imported.stderr, 4)}`)) return;
-    // A guided and an independent first-party attempt make the recommendation
-    // open the imported item; the model is tested and chosen through the CLI.
-    const steps = [
-      ["question", "add", sourceID!, "1", "--file", resolve(s.shared.ctx.root, `${IMPORT_FIXTURE}/question-q2-tagged.json`)],
-      ["page", "review", sourceID!, "1", "--reviewer", "smoke"],
-      ["question", "review", sourceID!, "q2", "--answer", "C", "--reviewer", "smoke"],
-      ["tactic", "practice", SKILL, "--stage", "guided", "--answer", "A"],
-      ["skill", "practice", SKILL, "--answer", "A"],
-      ["model", "test", STUB_MODEL],
-      ["model", "use", STUB_MODEL],
-    ];
-    if (!(await setup(s, steps, keyEnv))) return;
+    if (!(await seedStudyTrail(s, keyEnv))) return;
 
     provider.received.length = 0;
     let reportAtFailure: string | null = null;

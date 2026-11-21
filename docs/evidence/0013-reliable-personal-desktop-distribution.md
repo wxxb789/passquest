@@ -90,3 +90,34 @@ real credential, no real deck.
   repository as cwd, exactly as the CLI smokes do (`upgrade.ts`'s disclosure).
 - **No release is published.** The packages exist as 7-day workflow artifacts only (Q-0013-07); there
   is no update check and no published download (goal 0015).
+
+## Dated note — 2026-11-21 (goal 0016, step P5; appended, no row above is changed)
+
+The credential-scan disclosure in item 6 of "Acceptance → evidence" no longer describes a package.
+After goal 0016 no package carries `node_modules`: the installed `agent/` holds the four host
+scripts and `agent/THIRD-PARTY-NOTICES.txt` only, with the one host that loads packages shipped as a
+self-contained bundle and the other three copied byte-identically. The `secrets` gate's credential
+patterns still apply to the project-owned files (the staged hosts, Linux's `.desktop`, macOS's
+`Contents/Info.plist` and the embedded frontend dist), and now the exempt side is the bundled Node
+runtime together with any third-party file outside that set. The disclosure's self-test detail moved
+with it: the accepted credential-shaped string sits in a third-party file outside the agent tree
+(`build/fixture/vendor/@vendor/sdk/index.mjs`), and the must-fail case's third-party credential sits
+under the agent tree's `node_modules` — a path the lean check refuses on its own, so only the
+credential in it must stay unnamed. Measured sizes and the new checks: see
+[`0016-lean-package.md`](0016-lean-package.md).
+
+The same dated step supersedes one line of the disclosed limits above: "the durable brief is
+exercised in the installed app as the unavailable path (`broken`) only" no longer holds. Goal 0016's
+`brief` case drives the durable host's *success* path in the installed app on all three OSes (run
+44854554521), the unavailable path stays the `broken` case, and search is still not exercised in the
+package at all ([`install.md`'s untested list](../install.md#what-ci-proves-and-what-is-untested)).
+
+## Dated note — 2026-11-21 (goal 0016 P5 review; appended, no row above is changed)
+
+The bold heading "**The durable host and search with the bundled runtime present are not exercised
+by the installed package.**" in the limits above no longer holds for its first half: goal 0016's
+`brief` case exercises the durable host's *success* path with the bundled runtime present in the
+installed app on all three OSes (CI run 44854554521,
+[`0016-lean-package.md`](0016-lean-package.md)); the dated note above retired only the middle
+sentence of the item. Search remains unexercised in the installed package, so the heading's second
+half and the item's last sentence still hold.

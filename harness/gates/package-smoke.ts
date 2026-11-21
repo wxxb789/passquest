@@ -87,7 +87,8 @@ import { removeTree } from "../lib/desktop.ts";
 import { buildCLI } from "../lib/go.ts";
 import { buildPackage, packageNaming, size } from "../lib/package-build.ts";
 import type { PackageNaming } from "../lib/package-build.ts";
-import { assertPlatformExecutable } from "../lib/package.ts";
+import { assertPlatformExecutable, DURABLE_HOST } from "../lib/package.ts";
+import type { StagedNotices } from "../lib/notices.ts";
 import { fail, pass, skip } from "../lib/types.ts";
 import type { Gate, GateContext, GateResult } from "../lib/types.ts";
 
@@ -95,6 +96,7 @@ import { installPackage, hostPackageArtifact, HOSTS } from "./package-smoke/inst
 import type { InstalledApp } from "./package-smoke/install.ts";
 import { scanPackageContents } from "./package-smoke/contents.ts";
 import type { PackageIdentity } from "./package-smoke/contents.ts";
+import { brief } from "./package-smoke/brief.ts";
 import { unavailable } from "./package-smoke/unavailable.ts";
 import { upgradeCase } from "./package-smoke/upgrade.ts";
 import { anki } from "./desktop-smoke/anki.ts";
@@ -112,7 +114,7 @@ import { settings } from "./desktop-smoke/settings.ts";
  * earlier ones proved. The content scan runs first, before any launch, when
  * the tree still holds exactly what the package shipped.
  */
-const CASES = ["contents", "layout", "study", "agents", "anki", "upgrade", "credential", "broken"] as const;
+const CASES = ["contents", "layout", "study", "agents", "brief", "anki", "upgrade", "credential", "broken"] as const;
 
 export interface PackageSmokeOptions {
   /**
@@ -123,6 +125,15 @@ export interface PackageSmokeOptions {
    * cases still run, but no installer does.
    */
   installedTree?: string;
+  /**
+   * The notices a fixture install tree must carry (harness/lib/notices.ts):
+   * the contents scan checks the fixture's `agent/THIRD-PARTY-NOTICES.txt`
+   * against them exactly as a real run checks its installed file against the
+   * set its own staging assembled (goal 0016 P4). A real run never needs it —
+   * its build's identity carries the set — so it applies beside
+   * `installedTree` only.
+   */
+  notices?: StagedNotices;
   /** The cases to run, in their usual order; all by default. */
   only?: readonly string[];
 }
@@ -289,6 +300,8 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
   writeStubRegistry(registry, provider.endpoint);
   let app: InstalledApp | undefined;
   let identity: PackageIdentity | undefined;
+  /** What a fixture install tree stands in for: the notices set its file must carry (PackageSmokeOptions.notices). */
+  let fixtureNotices: StagedNotices | undefined;
   let packageLine = "";
   let studyData = "";
   let scanLine = "";
@@ -299,6 +312,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       if (!existsSync(tree)) checks.push(`the fixture install tree ${options.installedTree} does not exist`);
       else {
         app = fixtureApp(tree);
+        fixtureNotices = options.notices;
         packageLine = "a fixture install tree (no package built)";
       }
     } else {
@@ -312,7 +326,14 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
           const artifact = hostPackageArtifact(built.build);
           app = await installPackage(built.build, temp);
           packageLine = `${artifact.name} ${size(artifact.bytes)} (staged ${built.build.staged.files} files)`;
-          identity = { artifact, naming, config: { name: config.name, version: typeof config.version === "string" ? config.version : "" } };
+          identity = {
+            artifact,
+            naming,
+            config: { name: config.name, version: typeof config.version === "string" ? config.version : "" },
+            // The notices this staging assembled: the contents scan proves the
+            // installed file carries every text of them (goal 0016 P4).
+            notices: built.build.staged.notices,
+          };
         } catch (error) {
           checks.push(`installing the package failed: ${error instanceof Error ? error.message : String(error)}`, ...buildLog.slice(-8));
         }
@@ -338,7 +359,8 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       return true;
     };
     const needsCli =
-      cases.includes("study") || cases.includes("agents") || cases.includes("anki") || cases.includes("credential") || cases.includes("broken");
+      cases.includes("study") || cases.includes("agents") || cases.includes("brief") || cases.includes("anki") ||
+      cases.includes("credential") || cases.includes("broken");
     const ready = app !== undefined && (!needsCli || (await ensureCli()));
 
     /** One case's launch site: its own temp cwd, per-user root and credential service. */
@@ -365,6 +387,9 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
         launchEnv: { PATH: launchPath, ...(site.keepHome === true ? {} : homeEnv(home)), ...extraEnv },
         dataOverride: site.setData === true,
         secretScanRoots: app!.installDirs,
+        runtime: app!.runtime,
+        // The durable host the installed copy carries, by its agent/ name.
+        durableHost: app!.hosts.find((file) => path.basename(file) === DURABLE_HOST),
       };
       return {
         dataRoot,
@@ -382,7 +407,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
 
     const studies: Record<string, () => Promise<void>> = {
       contents: async () => {
-        scanLine = await scanPackageContents(app!, ctx, check, identity);
+        scanLine = await scanPackageContents(app!, ctx, check, identity, fixtureNotices);
       },
       layout: async () => {
         for (const file of [app!.runtime, ...app!.hosts]) {
@@ -417,6 +442,9 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       },
       agents: async () => {
         await coach.run(siteOf("agents", app!.binary, app!.launchEnv).run);
+      },
+      brief: async () => {
+        await brief.run(siteOf("brief", app!.binary, app!.launchEnv).run);
       },
       anki: async () => {
         await anki.run(siteOf("anki", app!.binary, app!.launchEnv).run);

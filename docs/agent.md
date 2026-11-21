@@ -66,6 +66,13 @@ environment. See [providers.md](providers.md#credentials).
 - The Node host is `agent/durable-host.mjs`; it imports `@earendil-works/pi-durable`,
   `@earendil-works/pi-ai`, `@earendil-works/chord` and `@earendil-works/pi-schema`, all pinned exactly
   in `agent/package.json`. `bun install` at the repository root installs the workspace.
+- A package stages the same hosts without `node_modules` (goal 0016): a host that names a package
+  specifier — `durable-host.mjs` is the only one today — ships as one self-contained ESM file built
+  from the locked tree, the other three hosts ship byte-identical, and the licence texts of the
+  packages the bundle inlined travel beside them in `agent/THIRD-PARTY-NOTICES.txt`. A host that
+  gains an import is bundled by that same rule: staging refuses a specifier it cannot resolve, a
+  module it could only resolve at run time, or a non-JavaScript asset, instead of shipping a host
+  that cannot run outside this checkout. Development from `agent/` is unchanged.
 - The provider is the goal-0005 `tutor_config`: one OpenAI-compatible endpoint, model, timeout and
   output bound. A registry-selected provider supplies its endpoint; a custom provider keeps the
   learner's endpoint. The endpoint must end in `/chat/completions`; `https` is required except on

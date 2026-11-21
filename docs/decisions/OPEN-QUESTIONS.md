@@ -501,6 +501,10 @@ Entry format:
   installed app's coach and refinement calls run through that runtime, and with it deleted every
   agent surface — the durable brief included — reports `node_unavailable` with one action. The store
   location and the reversal are unchanged.
+- Revisited (2026-11-21): goal 0016 ships no `node_modules` at all — the one host that loads packages
+  is staged as a self-contained bundle whose seven inlined packages travel with their notices, and
+  the other three hosts are byte-identical copies (Q-0016-01, Q-0016-05). The store location and the
+  reversal are unchanged.
 
 ### Q-0006-03 — How is one run paused, resumed and cancelled across processes?
 - Status: decided(default taken)
@@ -1847,4 +1851,226 @@ Entry format:
 - Options considered: (A) keep the goal-0011 feature level; (B) target the supported engines' baseline.
 - Default taken: (B), applied by goal 0019.
 - Revisit when: the supported system pair moves, or a modern feature measurably slows an engine.
+
+### Q-0016-01 — Is bundling the shipping rule, with no fallback to the old tree?
+- Status: decided(default taken)
+- Context: every package used to stage the hosts' whole production `node_modules` (12,768 files /
+  84.9 MB, 88 packages) while only `agent/durable-host.mjs` loads any of it. A bundle was proven
+  workable, but a staging path that *could* fall back to the old tree would ship it silently the day
+  one specifier stops resolving or one asset appears — and the size evidence would describe a tree
+  no gate tested.
+- Options considered: (A) bundling is the rule — a host that names a non-`node:` specifier is bundled,
+  a host that names none is copied byte-identically, and a bundle that cannot be complete (an
+  unresolvable specifier, a specifier resolved at run time, a symlink, a directory, a non-`.mjs`
+  file, an embedded machine path) fails the run; (B) stage the hoisted tree and bundle
+  opportunistically; (C) ship both and choose at run time.
+- Default taken: (A). `stageAgent`/`bundleHost` (`harness/lib/package.ts`) and `assertLeanAgentTree`,
+  which runs at staging and again over the installed tree in the package smoke's contents check, so
+  the installed tree — not only the staged one — holds the four hosts plus
+  `THIRD-PARTY-NOTICES.txt` and nothing else. Reverse by restoring the `stageAgentModules` path
+  (deleted in P1) and the checks; the contents check's must-fail fixtures (`installed agent tree
+  carrying node_modules`, a host that still names `openai`) fail until the old shape returns.
+- Revisit when: a host genuinely needs a native addon, a wasm asset or a non-JavaScript file — then
+  the rule needs a decided exception that proves the asset travels, not a silent fallback.
+
+### Q-0016-02 — How is a host that loads packages bundled?
+- Status: decided(default taken)
+- Context: a plain `bun build agent/durable-host.mjs --target=node --format=esm` answers `status` but
+  faults on a real brief (`task_faulted: Cannot read properties of undefined (reading 'get')`): the
+  packages declare `sideEffects`, so bun resolves the host's named imports to hoisted declarations
+  and drops their initialization. `--minify`, `--splitting`, `--sourcemap`, `treeShaking: false` and
+  `ignoreDCEAnnotations: true` all still fault — the experiment was a start-and-answer lead, never a
+  model call.
+- Options considered: (A) build from a generated entry that namespace-imports every specifier the
+  host names (resolved from `agent/` with `Bun.resolveSync`) and then imports the host; (B) keep the
+  tree and patch the affected initialization; (C) vendor the packages into the repository and build
+  without a bundler.
+- Default taken: (A). `bundleEntrySource` writes the entry and `bundleHost` builds it; both the entry
+  and bun's metafile live under `build/package-cache/bundles/` — intermediates that never ship, at a
+  stable machine-free path, because a bundle comment carrying the build machine's absolute temp path
+  (the P1 review's finding) leaks an account name and makes two stagings of one source differ. The
+  run builds the host twice and requires byte-identical output. Reverse by deleting the entry
+  generator and building the host itself; the durable matrix's bundle pass then faults in its first
+  section.
+- Revisit when: bun changes how it treats `sideEffects` — a plain bundle would have to pass the
+  matrix before the entry is removed.
+
+### Q-0016-03 — Do the staged file's name and the source-tree resolution stay?
+- Status: decided(default taken)
+- Context: `internal/hostpaths` resolves `agent/<host>.mjs` by name from the packaged resources;
+  `--outdir` makes bun rename a `.mjs` entry to `.js`; and `agent/package.json`, `bun.lock` and
+  `agent/node_modules` are what every source-tree gate and a developer working from `agent/`
+  resolve through.
+- Options considered: (A) the staged file keeps the host's own name and only the packaging path
+  changes; (B) rename the hosts to `.js` on both sides; (C) bundle from a copied tree and keep
+  `node_modules` in the checkout.
+- Default taken: (A). `bun build … --outfile=<stage>/agent/<host>` keeps the name (`--outdir` is
+  never used), `agent/package.json`, `bun.lock` and `internal/hostpaths` are untouched, and the
+  durable matrix runs the source host first so a broken source path fails the same gate. Reverse by
+  renaming both sides in one change; the layout check and the matrix name the host.
+- Revisit when: the hosts stop being `.mjs`, or a host must resolve by a path other than its name.
+
+### Q-0016-04 — Are the shipped bundles minified, or mapped back to their sources?
+- Status: decided(default taken)
+- Context: a 1.55 MB bundle is a reviewable artefact: human-readable output is what makes a future
+  notice, provenance or "which code is this" check possible on the shipped file.
+- Options considered: (A) no minification and no source maps; (B) minify; (C) minify with an external
+  source map.
+- Default taken: (A). The staging command is `bun build … --target=node --format=esm --outfile
+  --metafile` and nothing else, so what the size table measures is what a reader can open. A source
+  map would also be a second file in the staged tree, which `assertLeanAgentTree` refuses (the tree
+  holds `*.mjs` and the notices file). Reverse by adding the flag; the lean check must be taught the
+  new file type first.
+- Revisit when: bundle size or start-up becomes a measured problem — with a number, not a
+  preference.
+
+### Q-0016-05 — How do the third-party notices travel with the shipped code?
+- Status: decided(default taken)
+- Context: the bundles inline seven third-party packages (Apache-2.0, MIT, ISC and BSD-3-Clause
+  texts); those licences require their notices to accompany a redistribution, and the package ships
+  no `node_modules` whose files would carry them.
+- Options considered: (A) staging assembles `agent/THIRD-PARTY-NOTICES.txt` from the packages each
+  bundle inlines and the package smoke verifies the installed file carries every text the staged
+  bundles required; (B) ship each licence beside its package inside the bundle's tree (needs
+  `node_modules`); (C) link to the licences in the documentation.
+- Default taken: (A), in `harness/lib/notices.ts` (a pure `assembleNotices(packages, source)` so the
+  self-test can drive it) and `harness/lib/package.ts` (the assembly reads the metafiles of every
+  bundle it staged, unioned, deduplicated and sorted, and the file lands beside the hosts). The
+  contents check compares the installed file's texts against the staging result's set and names how
+  many it verified, and `THIRD-PARTY-NOTICES.txt` is the one file `assertLeanAgentTree` accepts next
+  to the hosts. Where a package ships no licence file of its own (all `@earendil-works` packages)
+  the SPDX MIT text with the package's own `author` line stands in — our wording, disclosed in the
+  evidence record. Reverse by dropping the assembly; the contents check and four self-test units
+  fail.
+- Revisit when: a dependency's licence cannot be stated by a copied text or the SPDX MIT fallback
+  (then the assembly must gain that licence's text rather than the package's terms being guessed).
+
+### Q-0016-06 — Is the durable host's cold start gated or reported?
+- Status: decided(default taken)
+- Context: the goal asks for the durable host's cold start before and after with a sample count and
+  spread; this machine is frequently at 100% CPU, so any absolute bound would either gate the
+  machine's load or be too loose to notice a real regression.
+- Options considered: (A) reported — 15 `status` samples on the durable host per tree, min/median/max
+  and the raw samples in the evidence record, with the CPU load stated beside them; (B) gated on an
+  absolute bound; (C) gated as a ratio against the unbundled host.
+- Default taken: (A). The plan's wording was 15 samples `per host`; only the durable host is
+  measured, because it is the one host whose staging changed — the other three ship as byte-identical
+  copies of their sources, and the goal asks for the durable host's start-up. Staging keeps a *load
+  proof* only (the staged host answers one `status` request on the staged runtime, printed as
+  `durable-host.mjs answered status on the staged runtime in N ms`) — a plain bundle passes that
+  too, which is why P2's matrix and P3's `brief` case are the behavioural checks. The measured
+  numbers live in `docs/evidence/0016-lean-package.md`. Reverse by adding a bound to the staging
+  check or a gate case; it must be a margin this machine's worst observed slowdown cannot cross.
+- Revisit when: a start-up regression slips through — then gate a ratio (bundle against source host
+  on one machine), not a millisecond bound.
+
+### Q-0016-07 — Must the generated bundle entry hold its bindings?
+- Status: decided(default taken)
+- Context: the entry (Q-0016-02) exists because bun dropped the packages' initialization; an entry
+  that namespace-imports a specifier but never mentions the namespace again could be dropped by the
+  same pass — silently, in a file that still answers `status`.
+- Options considered: (A) the entry references every namespace binding in an exported value, and a
+  unit self-test pins the entry's exact shape; (B) rely on the durable matrix to catch a dropped
+  prelude; (C) a build flag that marks the packages side-effectful.
+- Default taken: (A). `bundleEntrySource` emits one `import * as pinnedN from <resolved path>` per
+  specifier in the host's order, then `export const pinned = [pinned0, …]`, then the host, and
+  `bundleEntryProblem` (a self-test unit) asserts exactly that shape — so a dropped prelude or a
+  reordered entry fails a unit instead of shipping. The matrix's bundle pass stays the end-to-end
+  check: `plainBundleFaultProblem` runs the matrix against a plain bundle and requires the
+  `task_faulted` failure, so the entry's necessity is itself tested. Reverse by emitting bare
+  imports; the unit fails before the bundle reaches a package.
+- Revisit when: a second host needs bundling or the entry shape changes — the assertions cover the
+  loaded specifier set, not one hard-coded host.
+
+### Q-0016-08 — Does `--metafile` take a separated value?
+- Status: decided(default taken)
+- Context: staging reads bun's metafile to learn which packages a bundle inlined — the notices set
+  (Q-0016-05) and the lock check (Q-0016-11) both come from it. On the pinned bun 1.4.5 the
+  documented `--metafile <file>` spelling parses the value as a second entry point.
+- Options considered: (A) the inline form `--metafile=<file>`; (B) a bun config file; (C) parse the
+  bundle text instead of the metafile.
+- Default taken: (A), with the reason in a comment beside the command (`bundleHost`). A wrong
+  spelling fails loudly at staging — without the metafile, `bundlePackages` cannot read the inlined
+  set — so the failure mode is a red run, never a silently unnoticed bundle. Same for `--outfile=`.
+  Reverse when bun accepts the separated form again; the metafile stays required either way.
+- Revisit when: the pinned bun version changes (re-test both spellings on the upgrade).
+
+### Q-0016-09 — Which files of an inlined package travel in the notices?
+- Status: decided(default taken)
+- Context: the licences that must travel belong to the code the bundle carries, and the inlined
+  packages keep licence texts in many shapes — `LICENSE`, `MIT-LICENSE`, `THIRD-PARTY-NOTICES.txt`,
+  a `LICENSES/` directory, `THIRD_PARTY_NOTICES/<subdir>/…` — and some vendor code whose licence is
+  neither (`openai` carries `src/internal/qs/LICENSE.md`). Omitting a licence is a compliance
+  failure; carrying one text too many is not.
+- Options considered: (A) over-include: a file travels when its *name* carries a licence word
+  (`licen[cs]e|notice|copying`) or when it sits under a directory whose name carries one
+  (`licen[cs]es|notices`), at any depth, minus code extensions (`.js`, `.mjs`, `.cjs`, `.ts`,
+  `.mts`, `.cts`, `.d.ts`, `.map`, `.json`) so `license-checker.js` stays out; (B) only a root-level
+  `LICENSE`/`NOTICE`; (C) only the file a package's `license` field names.
+- Default taken: (A), in `harness/lib/notices.ts` (`LICENCE_WORD`, `LICENCE_DIR_WORD`,
+  `CODE_EXTENSIONS`). The search walks each package's own tree only; a nested `node_modules` holds
+  other packages, each named by the metafile and noticed for itself. The asymmetry is deliberate and
+  disclosed: the real set carries 11 sections for 7 packages, a licence name the rule misses is a
+  known limit in the evidence record, and a package whose *own* terms are not in its tree — the only
+  licence text it ships sits under `THIRD_PARTY_NOTICES/`, as in `@earendil-works/pi-schema` — still
+  gets the SPDX MIT fallback for its own terms (10 sections instead of 11 would be the failure).
+  Reverse by narrowing the rule; `licenceNamesProblem` and `noticesAssemblyProblem` pin both sides.
+- Revisit when: a package ships a licence under a name the rule misses (the fix is a name, not a
+  broader blacklist of code extensions).
+
+### Q-0016-10 — What happens when a licence read fails?
+- Status: decided(default taken)
+- Context: the licence search reads a package's tree for the notices. A permission error read as
+  "not there" would silently replace a real licence with the SPDX fallback — a fail-open that turns
+  a compliance requirement into a green run. The P4 platform review reproduced exactly that.
+- Options considered: (A) fail closed: only `ENOENT`/`ENOTDIR` mean "not there", every other error
+  (`EACCES`, `EPERM`, `EBUSY`, `ELOOP`, `EISDIR`, …) aborts staging with the path and the errno, and
+  a symlink where a file or directory was expected is refused by name; (B) any error counts as
+  absent; (C) log and continue.
+- Default taken: (A). `noticeSource(fs = FILE_SYSTEM)` in `harness/lib/package.ts` is the read seam:
+  `pathAbsent` recognises only `ENOENT`/`ENOTDIR`, `unreadable` builds the staging error naming the
+  file and the operation. The self-test drives the seam with 24 injected failures (six errnos at
+  four call sites) and requires each to throw, and a probe (`denied-read.ts`, under
+  `Q:/scratch/omp/g16/P4/newrule/`) reproduced the old shape's silent SPDX swap. Reverse by
+  returning `undefined` for every error; `noticeSourceProblem` fails.
+- Revisit when: a package legitimately needs a skipped path (a broken link inside a licence
+  directory) — the skip must then be named, not silent.
+
+### Q-0016-11 — Are a bundle's inputs taken from the checkout or checked against the lock?
+- Status: decided(default taken)
+- Context: bundling resolves from the checkout's `agent/node_modules` (bun's workspace store), not
+  from a fresh `--frozen-lockfile` install; a stale tree there would ship a version `bun.lock` does
+  not pin, and the lock is the only committed statement of what a release contains.
+- Options considered: (A) read every inlined package's name and version out of its own
+  `package.json` (through the metafile) and fail staging unless `bun.lock` pins exactly that
+  version; (B) install a fresh tree into a temp directory for every staging; (C) trust the checkout.
+- Default taken: (A). `bundlePackages` (metafile → inlined packages), `lockedVersions` (the text
+  lockfile, read with `Bun.JSON5`), `lockProblems` (a name the lock does not carry, or another
+  version, fails). The registry settings and the lock are untouched, and an unreadable or
+  unparsable lock fails staging instead of skipping the check. `bundleLockProblem` and
+  `bundlePackagesProblem` are self-test units with must-fail inputs. Reverse by deleting the check;
+  the units fail.
+- Revisit when: staging grows a mode that installs its own tree — then that install must satisfy the
+  same check against the same lock.
+
+### Q-0016-12 — How does the harness pause a run without racing a loaded machine?
+- Status: decided(default taken)
+- Context: agent-smoke's section 9 and the package smoke's `brief` case need a *paused* run that
+  still carries durable work. The original recipe (`agent start --timeout-seconds 1` against a
+  delaying stub) lost the race on a machine at 100% CPU — the deadline fired before the host had
+  enqueued anything — and even a 20-second deadline left only ~1.2× over the same machine's worst
+  observed slowdown.
+- Options considered: (A) trigger the pause from the stub's side: wait until the loopback stub has
+  recorded the run's own first provider request (the host submits its durable task before it calls
+  the provider), then write the control-file pause request the host already polls, with
+  `--timeout-seconds 60` kept as a bound rather than the trigger; (B) keep a larger deadline;
+  (C) retry the run until the pause finds work.
+- Default taken: (A). `harness/lib/host-control.ts`: `PAUSE_DEADLINE_SECONDS = 60` and
+  `startPausedRun(start, requests, storePath)`, used by both callers; the deadline stays in the
+  command line so a host that never reaches the provider still fails a gate in bounded time instead
+  of hanging it. This makes "the pause found durable work" true by construction instead of by
+  timing. Reverse by restoring a short deadline; both cases then fail intermittently on a loaded
+  machine, which is why the recipe exists.
+- Revisit when: a gate needs a pause at a different lifecycle point (before the provider request) —
+  the trigger must then be a different real event, not a tighter bound.
 

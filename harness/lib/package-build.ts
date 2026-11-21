@@ -164,7 +164,7 @@ export function mygoFileName(naming: PackageNaming, platform: PackageTarget["pla
 
 /**
  * The package of one target. The bundle goes into the embed root the binary is
- * linked with, the staged tree (agent hosts, node_modules, Node runtime, icon)
+ * linked with, the staged tree (the agent hosts, the Node runtime, the icon)
  * is proved before MyGo copies it, and the AppImage — MyGo builds none — is
  * wrapped from MyGo's Linux output where the tool can run: on Linux, for
  * linux-x64. A target that refuses (an AppImage on another host) fails here

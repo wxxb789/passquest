@@ -78,7 +78,7 @@ import { pageScript, tail } from "../../lib/desktop-page.ts";
 import type { Check } from "../../lib/desktop-page.ts";
 import { removeTree } from "../../lib/desktop.ts";
 import type { GateContext } from "../../lib/types.ts";
-import { launch, UNREACHABLE_ENDPOINT } from "../desktop-smoke/scenario.ts";
+import { launch, textEnv, UNREACHABLE_ENDPOINT } from "../desktop-smoke/scenario.ts";
 import type { ScenarioRun } from "../desktop-smoke/scenario.ts";
 
 /**
@@ -299,13 +299,6 @@ async function holdsCommit(root: string, commit: string): Promise<boolean> {
 /** The git output of a failed step, for a failure line. */
 function gitOutput(result: { stdout: string; stderr: string }): string {
   return tail(`${result.stdout}${result.stderr}`, 3);
-}
-
-/** The site's launch environment as `run` takes it: the per-user root, the stripped PATH and the AppImage's extraction are strings. */
-function textEnv(env: Record<string, string | undefined>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [name, value] of Object.entries(env)) if (typeof value === "string") out[name] = value;
-  return out;
 }
 
 /** One old-CLI call: the base commit's binary, `--db` at the old data root, `--json`, repository cwd. */

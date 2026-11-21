@@ -161,6 +161,15 @@ export function chatReply(text: string): Response {
   return Response.json({ choices: [{ message: { content: text } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
 }
 
+/**
+ * How long the stub may hold one request unanswered before Bun closes the
+ * connection (Bun's own default is 10 seconds): the brief case in the package
+ * smoke parks a paused run here for its whole deadline (goal 0016 P3), and
+ * the agent smoke's held run waits out its pause request behind one
+ * (harness/gates/agent-smoke.ts, section 9).
+ */
+export const STUB_IDLE_SECONDS = 120;
+
 export function startProviderStub(): ProviderStub {
   const stub: ProviderStub = {
     endpoint: "",
@@ -171,6 +180,7 @@ export function startProviderStub(): ProviderStub {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
+    idleTimeout: STUB_IDLE_SECONDS,
     async fetch(request) {
       const raw = await request.text();
       const entry: ProviderRequest = {
@@ -207,15 +217,21 @@ export function writeStubRegistry(file: string, endpoint: string): void {
   );
 }
 
-/** `passquest <args> --db <database> --json` from `cwd`; `doc` is the parsed stdout. */
+/**
+ * `passquest <args> --db <database> --json` from `cwd`; `doc` is the parsed
+ * stdout. `replaceEnv` hands the child exactly `env` (harness/lib/process.ts),
+ * which a caller that must not inherit this shell's PASSQUEST_* variables
+ * needs — the package smoke's installed-CLI calls.
+ */
 export async function cliJson(
   cli: string,
   database: string,
   cwd: string,
   args: string[],
   env: Record<string, string>,
+  options: { replaceEnv?: boolean } = {},
 ): Promise<RunResult & { doc: unknown }> {
-  const result = await run(cli, [...args, "--db", database, "--json"], { cwd, env });
+  const result = await run(cli, [...args, "--db", database, "--json"], { cwd, env, replaceEnv: options.replaceEnv });
   return { ...result, doc: parse(result.stdout) };
 }
 
