@@ -20,11 +20,11 @@
 
 | 平台 | 安装包 | 依赖 |
 |---|---|---|
-| Windows 10/11 x64 | `pass-quest-setup-<version>-amd64.exe`：按用户安装，无需管理员权限 | Microsoft Edge WebView2 Runtime（Windows 11 自带） |
-| macOS 13+（Apple 芯片） | `pass-quest-<version>-arm64.dmg` | 无 |
-| Linux x86_64 | `Pass_Quest-<version>-x86_64.AppImage` | GTK 3 与 WebKitGTK 4.1 |
+| Windows 11+ x64 | `pass-quest-setup-<version>-amd64.exe`：按用户安装，无需管理员权限 | Microsoft Edge WebView2 Runtime（Windows 11 自带） |
+| macOS 26+（Apple 芯片） | `pass-quest-<version>-arm64.dmg` | 无 |
+| Linux x86_64（第二梯队） | `Pass_Quest-<version>-x86_64.AppImage` | GTK 3 与 WebKitGTK 4.1 |
 
-每个安装包都自带 Node 运行时和 agent host，无需安装任何开发工具。安装包**未签名**，首次启动时 Windows SmartScreen 和 macOS Gatekeeper 会弹出警告。[安装指南](docs/install.md)（英文）说明了各平台如何放行、数据存放位置、如何升级与卸载。**Settings → Updates** 只在你点击时检查本仓库的 GitHub Releases，从不自动下载或安装任何东西。
+每个安装包都自带 Node 运行时和 agent host，无需安装任何开发工具。安装包**未签名**，首次启动时 Windows SmartScreen 和 macOS Gatekeeper 会弹出警告。[安装指南](docs/install.zh-CN.md)（[English](docs/install.md)）说明了各平台如何放行、数据存放位置、如何升级与卸载；macOS 上用 `brew install --cask wxxb789/tap/pass-quest` 安装同一个包，不会遇到警告。**Settings → Updates** 只在你点击时检查本仓库的 GitHub Releases，从不自动下载或安装任何东西。
 
 ## 为什么选择 Pass Quest
 

@@ -1,5 +1,7 @@
 # Install Pass Quest
 
+**English** | [简体中文](install.zh-CN.md)
+
 Pass Quest ships as an unsigned package for Windows, macOS and Linux: an NSIS installer, a `.dmg`
 and an AppImage. Each package carries the desktop app, the four agent host scripts, the third-party
 notices the inlined code requires and a pinned Node 22 runtime, so the agent features run on the
@@ -14,7 +16,23 @@ Download them from the repository's
 [GitHub Releases](https://github.com/wxxb789/passquest/releases/latest): each release carries the
 three packages and a `SHA256SUMS.txt`, and its packages are the ones the gate's `package` jobs built,
 installed and smoke-tested on the tagged commit ([Releasing](release.md)). A CI run's
-`package-<os>` artifact, kept for 7 days, is an untagged build for inspection.
+`package-<os>` artifact, kept for 7 days, is an untagged build for inspection. This guide covers
+installing the packaged app; what the app does is described in the [project README](../README.md).
+
+## Supported systems
+
+Windows and macOS are first-tier: every CI run builds, installs and drives both packages. Linux is
+**second-tier** — the AppImage works, but it gets less CI and no installer.
+
+| Platform | Package | Supported |
+|---|---|---|
+| Windows x64 | `pass-quest-setup-<version>-amd64.exe` | Windows 11 and later |
+| macOS Apple silicon | `pass-quest-<version>-arm64.dmg` | macOS 26 and macOS 27, the two latest majors |
+| Linux x86_64 | `Pass_Quest-<version>-x86_64.AppImage` | second-tier; AppImage only |
+
+**Windows 10** is not blocked but it is unsupported and untested: the installer runs and the package
+may work, yet no CI job covers Windows 10 and nothing here is tested on it. Any macOS older than 26
+is unsupported: the packages declare macOS 26 as their minimum.
 
 ## Windows
 
@@ -30,6 +48,9 @@ where **Uninstall** (or `Uninstall.exe` in the install folder) removes it.
 protected your PC*. Choose **More info**, then **Run anyway**. The warning is expected for an unsigned
 package; it is not a sign of a modified file.
 
+<!-- screenshot: windows-smartscreen -->
+*Screenshot: the SmartScreen "Windows protected your PC" dialog and its **More info** link (owner).*
+
 **Prerequisites.** The Microsoft Edge WebView2 Runtime, the system web view. Windows 11 ships it;
 Windows 10 may not, and the package does not bundle it. When it is missing, the app shows one message
 before any window — *"Pass Quest needs the Microsoft Edge WebView2 Runtime, which this PC does not
@@ -41,21 +62,66 @@ Standalone Installer), then start Pass Quest again."* — and exits.
 **Package.** `pass-quest-<version>-arm64.dmg`, built on `macos-latest` (Apple silicon). An Intel build
 is not produced by CI.
 
-**Install.** Open the disk image and drag **Pass Quest** into **Applications**.
+**Install.** Open the disk image and drag **Pass Quest** into **Applications**, then eject the image
+and open the app from **Applications**. The image is read-only, and macOS does not eject it for you;
+macOS records the exception below for the app in **Applications**, and a copy started from the
+still-mounted image is a different file that the exception does not cover.
 
-**Unsigned warning.** The app is ad-hoc signed only and not notarized — the owner's recorded decision
-in goal 0013, with no certificate and no Apple Developer account. Gatekeeper therefore blocks the
-first launch of a downloaded copy. To open it:
+**First launch of a downloaded copy.** The app is ad-hoc signed only and not notarized — the owner's
+recorded decision in goal 0013, with no certificate and no Apple Developer account. Gatekeeper
+therefore blocks the first launch of a copy you downloaded, and macOS 26 and 27 no longer offer the
+older right-click → **Open** way past it. What works:
 
-1. Right-click (Control-click) the app in Applications, choose **Open**, and confirm the dialog.
-2. If that is refused, open **System Settings > Privacy & Security**, find the notice about the
-   blocked app and choose **Open Anyway**.
-3. A download also sets the quarantine attribute, which can keep the app blocked after those steps.
-   The workaround this guide documents is to remove that attribute once:
-   `xattr -dr com.apple.quarantine "/Applications/Pass Quest.app"`.
+1. Open **Pass Quest** from **Applications** and let macOS refuse it.
+2. Open **System Settings** → **Privacy & Security**, scroll to the notice about the blocked app and
+   choose **Open Anyway** — macOS offers the button for about an hour after the attempt.
+3. Confirm with your login password or Touch ID. macOS saves the app as an exception, so this is the
+   only time the refusal appears.
+4. Open **Pass Quest** again; it starts normally.
 
-**Prerequisites.** macOS 13 (Ventura) or later, the oldest release the Go 1.27 toolchain builds
-for; nothing else. WKWebView is part of the system and the package bundles what else it needs.
+The steps and the one-hour window are Apple's: [Safely open apps on your
+Mac](https://support.apple.com/en-us/102445) (published 2026-05-27) and [Open a Mac app from an
+unknown developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
+
+<!-- screenshot: macos-blocked-dialog -->
+*Screenshot: the dialog macOS shows when the first launch of the downloaded app is refused (owner).*
+
+<!-- screenshot: macos-privacy-security -->
+*Screenshot: System Settings → Privacy & Security with the blocked-app notice and the Open Anyway button (owner).*
+
+<!-- screenshot: macos-open-anyway-confirm -->
+*Screenshot: the confirmation that asks for the login password or Touch ID (owner).*
+
+<!-- screenshot: macos-first-launch -->
+*Screenshot: Pass Quest open after the exception was saved (owner).*
+
+This is needed **once per download**: when you upgrade by downloading the new `.dmg` in a browser, the
+new copy is a new download and macOS refuses its first launch too. A Homebrew install avoids the
+warning instead — its cask clears the quarantine flag after the download, so the first launch is not
+blocked:
+
+```bash
+brew install --cask wxxb789/tap/pass-quest
+```
+
+<!-- screenshot: macos-homebrew-install -->
+*Screenshot: `brew install --cask wxxb789/tap/pass-quest` finishing in Terminal (owner).*
+
+**Terminal alternative.** If you prefer the terminal, the exception has a one-line equivalent that
+removes the quarantine attribute the browser download set:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Pass Quest.app"
+```
+
+<!-- screenshot: macos-xattr-terminal -->
+*Screenshot: the `xattr` command succeeding in Terminal (owner).*
+
+Do not disable Gatekeeper system-wide to get past the warning. The steps above are per-app, and the
+rest of the system stays protected.
+
+**Prerequisites.** macOS 26 (Tahoe) or macOS 27 (Golden Gate), on Apple silicon — the two supported
+majors. Nothing else: WKWebView is part of the system and the package bundles what else it needs.
 
 ## Linux
 
@@ -131,6 +197,9 @@ Install the newer package over the old one: run the newer installer, replace the
 or replace the AppImage file. Your data carries forward — it lives in the per-user directory above,
 never inside the install, and the newer build opens the older database.
 
+**macOS.** A copy you downloaded in a browser is a new download, so the Open Anyway step comes back
+once; the Homebrew cask clears the quarantine flag for you instead (see [macOS](#macos)).
+
 Downgrade is not supported. An older build refuses a database written by a newer one and does not
 modify it: the window shows *This data is from a newer Pass Quest*, with the next step *Install the
 newer Pass Quest that wrote this data; this version will not change it.*, and the CLI reports
@@ -161,8 +230,8 @@ with `go`, `bun` and `node` absent from `PATH` (asserted), and drives the study 
 features — including a study brief the installed app completes on its own bundled runtime and hosts —
 Anki, the forward upgrade, the credential case and the broken-runtime case through it (the
 `package smoke` gate, cases `contents, layout, study, agents, brief, anki, upgrade, credential,
-broken`).
-Each run keeps its package as the `package-windows-latest`, `package-macos-latest` or
+broken`). The macOS job also checks the built `.app`'s `Info.plist` minimum: the package declares
+macOS 26. Each run keeps its package as the `package-windows-latest`, `package-macos-latest` or
 `package-ubuntu-latest` artifact for 7 days. A run on a version tag hands these same artifacts to the
 release workflow, which publishes them only after the owner reviews the draft
 ([Releasing](release.md)).
@@ -179,6 +248,8 @@ Untested, and therefore not claimed:
 
 - **Other architectures.** Windows arm64, macOS x86_64 (Intel) and Linux arm64: no package is built
   or run.
+- **macOS 27.** No GitHub-hosted runner provides it, so the guide documents the pair from Apple's
+  support page (2026-11-09) while CI proves macOS 26 only.
 - **Code signing and notarization.** None. The SmartScreen and Gatekeeper paths above are the
   learner's manual way past the warning, and CI cannot exercise the Gatekeeper prompt: a `.dmg` built
   on the runner carries no quarantine attribute.
