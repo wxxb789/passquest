@@ -44,19 +44,29 @@ The record's vocabulary, so a value cannot be read as more than it is:
     a green run is one where the experiment actually happened.
   - `not-run`: the arm stopped before its read step. Also a failure.
 - `arms[i].read.classification.refusesBy`: `partition`, `application`, `both`, `neither` or
-  `unknown` — computed from the item's dump (each ACL entry's partition list and every trusted
-  application's `requirement:`) against the build's `cdhash:` partition id and its designated
-  requirement. `neither` with a refused read would say the lists admit the build and the refusal
+  `unknown` — computed from the item's dump against the build's `cdhash:` partition id and its
+  designated requirement: the partition list (or `partition: "none"` with
+  `itemAfterStore.partitionEntry` false — an item with no partition entry has no partition check to
+  refuse it) and the decrypt entry's application list with every trusted application's
+  `requirement:`. `neither` with a refused read would say the lists admit the build and the refusal
   came from elsewhere.
+- `arms[i].read.bInDecryptAcl`: whether the build's designated requirement matches a `requirement:`
+  in the decrypt entry's application list (false when the list names none, e.g. an any-application
+  entry) — the application-side half of what a learner's Always Allow would record, and the
+  decisive comparison for an item whose ACL is the run-44928776617 shape.
 - `arms[i].a.implied` / `arms[i].b.implied`: `codesign -d -r-` prints a stored requirement as
   `designated => …` and, for code that carries none (an ad-hoc signature), the implied one as a
   source comment (`# designated => cdhash H"…"`, CODESIGN(1), `-r`). `implied: true` is expected for
   the ad-hoc arm's builds; a build re-signed by an identity arm that still prints the implied form
   fails that arm (the re-sign did not take), so both arms' `implied` values and the DR strings are
   read, never assumed.
+- `arms[i].allow`: after a read that was not a success, the simulated allow — the partition half of
+  a learner's Always Allow, the only half a runner can write. It is `{"skipped": "no partition
+  entry"}` when the item carries no partition entry, because there is nothing to add; the
+  application-list half is never simulated, so such an item keeps only that half.
 - `arms[i].third.read`: C is B's bundle with a bumped `CFBundleShortVersionString`, signed the way
   its arm signs; `expected` is `refused`, and the record keeps `expected` and the observed outcome
-  side by side.
+  side by side. It runs with the allow (a skipped allow runs no third build).
 - `keychain.loginPath` and `arms[i].login`: the learner's keychain, looked up for each of this run's
   synthetic services before and after the arm and swept in the run's `finally` (`exit 0` is
   "present"; the lookup never passes `-g`, which would withdraw the secret). A hit is deleted and
@@ -77,21 +87,21 @@ Each value is read from `keychain-record.json`; `<arm>` is `0` for `adhoc` and `
 | the ad-hoc arm: A's designated requirement and that it is the implied one | `arms[0].a.designatedRequirement`, `arms[0].a.implied` | `<pending: …>`, `<pending: true>` |
 | the ad-hoc arm: B's designated requirement (the DR moves with every ad-hoc build) | `arms[0].b.designatedRequirement`, `arms[0].b.implied` | `<pending: …>` |
 | the ad-hoc arm: A's and B's cdhashes | `arms[0].a.cdhash`, `arms[0].b.cdhash` | `<pending: …>` |
-| the ad-hoc arm: A's stored partition (as stored) and computed (as `codesign -dvvv` sees it) | `arms[0].itemAfterStore.partitions`, `arms[0].a.computedPartition` | `<pending: …>`, `<pending: …>` |
-| the ad-hoc arm: the item's ACL after A stores it — partition list | `arms[0].itemAfterStore.partitions` | `<pending: …>` |
+| the ad-hoc arm: whether A's item carries a partition entry, the stored list, and the computed value (as `codesign -dvvv` sees it) | `arms[0].itemAfterStore.partitionEntry`, `arms[0].itemAfterStore.partitions`, `arms[0].a.computedPartition` | `<pending: …>`, `<pending: …>`, `<pending: …>` |
 | the ad-hoc arm: the item's ACL after A stores it — application list | `arms[0].itemAfterStore.anyApplication`, `arms[0].itemAfterStore.requirements` | `<pending: any application / requirements>` |
-| the ad-hoc arm: the item's ACL after B's read | `arms[0].itemAfterRead.partitions`, `arms[0].itemAfterRead.anyApplication`, `arms[0].itemAfterRead.block` | `<pending: …>` |
-| the ad-hoc arm: B's read and which check refused it | `arms[0].read.outcome`, `arms[0].read.classification.refusesBy`, `arms[0].read.classification.detail` | `<pending: …>` |
+| the ad-hoc arm: the item's ACL after B's read | `arms[0].itemAfterRead.partitionEntry`, `arms[0].itemAfterRead.partitions`, `arms[0].itemAfterRead.anyApplication`, `arms[0].itemAfterRead.block` | `<pending: …>` |
+| the ad-hoc arm: B's read, whether B's designated requirement is in the decrypt entry's list, and which check refused it | `arms[0].read.outcome`, `arms[0].read.bInDecryptAcl`, `arms[0].read.classification.refusesBy`, `arms[0].read.classification.detail` | `<pending: …>` |
 | the ad-hoc arm: the SecurityAgent samples taken while B's read ran | `arms[0].read.launch.agentScan.probes`, `.matches`, `.error` | `<pending: …>` |
 | the self-signed arm: the throwaway identity's CN and certificate SHA-1 | `arms[1].identity.cn`, `arms[1].identity.sha1` | `<pending: Pass Quest Keychain Experiment>`, `<pending: …>` |
 | the self-signed arm: A's and B's designated requirements (both stored, `implied: false`), and whether they are equal | `arms[1].a.designatedRequirement`, `arms[1].b.designatedRequirement`, `arms[1].a.implied`, `arms[1].b.implied`, `arms[1].drSame` | `<pending: …>` |
 | the self-signed arm: A's and B's cdhashes | `arms[1].a.cdhash`, `arms[1].b.cdhash` | `<pending: …>` |
 | the self-signed arm: the item's ACL after A stores it and after B's read | `arms[1].itemAfterStore.block`, `arms[1].itemAfterRead.block` | `<pending: the raw dump blocks>` |
-| the self-signed arm: B's read and which check refused it | `arms[1].read.outcome`, `arms[1].read.classification.refusesBy` | `<pending: …>` |
-| each refused/blocked arm: B's own item (its runtime partition id) | `arms[<arm>].allow.bPartition`, `arms[<arm>].allow.bPartitionComputed`, `arms[<arm>].allow.bItem.partitions` | `<pending: …>` |
-| each refused/blocked arm: the simulated allow's new list and exit | `arms[<arm>].allow.command`, `arms[<arm>].allow.exit`, `arms[<arm>].allow.list` | `<pending: …>` |
-| each refused/blocked arm: B's read after the allow (expected `read`) | `arms[<arm>].allow.reread.outcome` | `<pending: read>` |
-| each refused/blocked arm: the third build C (version, cdhash, read, DR equal to B's) | `arms[<arm>].third.versionBefore`, `.versionAfter`, `.signature.cdhash`, `.read.outcome`, `.drEqualsB` | `<pending: refused>` |
+| the self-signed arm: B's read, whether B's designated requirement is in the decrypt entry's list, and which check refused it | `arms[1].read.outcome`, `arms[1].read.bInDecryptAcl`, `arms[1].read.classification.refusesBy` | `<pending: …>` |
+| each refused/blocked arm: whether the allow was skipped (items with no partition entry) | `arms[<arm>].allow.skipped` | `<pending: skipped / absent>` |
+| each refused/blocked arm with a partition entry: B's own item (its runtime partition id) | `arms[<arm>].allow.bPartition`, `arms[<arm>].allow.bPartitionComputed`, `arms[<arm>].allow.bItem.partitions` | `<pending: …>` |
+| each refused/blocked arm with a partition entry: the simulated allow's new list and exit | `arms[<arm>].allow.command`, `arms[<arm>].allow.exit`, `arms[<arm>].allow.list` | `<pending: …>` |
+| each refused/blocked arm with a partition entry: B's read after the allow (expected `read`) | `arms[<arm>].allow.reread.outcome` | `<pending: read>` |
+| each refused/blocked arm with a partition entry: the third build C (version, cdhash, read, DR equal to B's) | `arms[<arm>].third.versionBefore`, `.versionAfter`, `.signature.cdhash`, `.read.outcome`, `.drEqualsB` | `<pending: refused>` |
 | a read that was not a success: the SecurityAgent it left | `arms[<arm>].read.securityAgent`, `arms[<arm>].third.securityAgent` | `<pending: found / none>` |
 | the project arm (P1 has no signing secrets) | `arms[2].skipped` | `<pending: PASSQUEST_MACOS_SIGNING_P12, PASSQUEST_MACOS_SIGNING_PASSWORD not set …>` |
 | the keychain the run used, that it was the only store the app could reach, and that it was restored and deleted | `keychain.path`, `keychain.defaultDuring`, `keychain.searchListDuring`, `keychain.defaultBefore`, `keychain.defaultAfter`, `keychain.searchListBefore`, `keychain.searchListAfter`, `keychain.deleted` | `<pending: …>` |
@@ -104,20 +114,28 @@ Each value is read from `keychain-record.json`; `<arm>` is `0` for `adhoc` and `
    the base and head commits of the pull request and differ; both `.dmg`s exist with different
    SHA-256s.
 2. `guards.buildsDiffer` is `true`, with both cdhashes quoted.
-3. The four `security` calls that take an empty password are accepted on the runner, and the record
-   shows it: `create-keychain -p ""`, `unlock-keychain -p ""`, `import … -P ""` and
-   `set-*-partition-list -k ""` (the first command that refuses fails the run by name, with its
-   output in the failure line; this is the one thing the Windows implementer run cannot prove).
-4. The `adhoc` arm: `store.stored` is `true`; `itemAfterStore.partitions` is non-empty and equals
-   `a.computedPartition`; `a.implied` and `b.implied` are both `true` (the implied requirement the
-   ad-hoc signature prints as a source comment); `read.outcome` is recorded with
-   `classification.refusesBy`, the two raw dump blocks and the agent samples.
+3. The three `security` calls that take an empty password are accepted on the runner, and the
+   record shows it: `create-keychain -p ""`, `unlock-keychain -p ""` and `set-*-partition-list -k
+   ""` (the first command that refuses fails the run by name, with its output in the failure line;
+   this is the one thing the Windows implementer run cannot prove). The fourth call,
+   `security import`, carries the throwaway identity's random passphrase on `-P` argv (redacted in
+   the log) against a p12 the step exported legacy-encrypted; run 44928776617's `-P ""` against
+   OpenSSL's default PKCS#12 encryption failed with `SecKeychainItemImport: The user name or
+   passphrase you entered is not correct.`
+4. The `adhoc` arm: `store.stored` is `true`; `itemAfterStore.partitionEntry` says whether A's item
+   carries a partition entry at all, and when it does, `itemAfterStore.partitions` equals
+   `a.computedPartition` (run 44928776617's item carried none, and the arm now reads on, so the
+   partition guard is conditional while the item guard must still pass); `a.implied` and `b.implied`
+   are both `true` (the implied requirement the ad-hoc signature prints as a source comment);
+   `read.outcome` is recorded with `read.bInDecryptAcl`, `classification.refusesBy`, the two raw
+   dump blocks and the agent samples.
 5. The `self-signed` arm: `identity.cn` is the throwaway CN, `identity.sha1` is set, the arm signed
    (`couldNotSign` absent), both DRs are stored (`implied` false) and `drSame` is `true` (expected —
    the requirement names the certificate, the partition does not); the read outcome and
    classification are recorded exactly like the ad-hoc arm's.
 6. The `project` arm records its skip by name (no secrets in the P1 run).
-7. The log carries every `security`/`codesign`/`hdiutil`/`openssl`/`plutil`/`ditto`/`pgrep` argv,
+7. The log carries every `security`/`codesign`/`hdiutil`/`openssl`/`plutil`/`ditto`/`pgrep` argv
+   (`security import`'s passphrase replaced by its placeholder),
    `<from run: the tool's [cleanup] deleted the experiment keychain … line>`,
    `<from run: the tool's [cleanup] restored the default keychain … line>`,
    `<from run: the workflow's keychain: deleted … line from the always() step>`, and no key bytes:
@@ -132,9 +150,11 @@ Each value is read from `keychain-record.json`; `<arm>` is `0` for `adhoc` and `
 - `arms[0].read.outcome == "read"` (an ad-hoc B reads A's item): the goal's premise is false — stop,
   report the run, add no identity.
 - `arms[1].read.outcome` is `refused` or `blocked`: a project-owned self-signed identity cannot meet
-  Done-when 2; the `allow` and `third` rows show why (the partition list, not the app list, gates
-  the read, and a grant to B does not admit C). Then the owner's decision (plan default 10) is the
-  only way forward: an Apple-issued certificate, or accepting a re-prompt per upgrade.
+  Done-when 2; `read.bInDecryptAcl`, `classification.refusesBy` and the `allow`/`third` rows say
+  which side refused it (with run 44928776617's ACL shape: the decrypt entry's application list and
+  a `skipped` allow; when the item does carry a partition entry: the partition list and the third
+  build C's outcome). Then the owner's decision (plan default 10) is the only way forward: an
+  Apple-issued certificate, or accepting a re-prompt per upgrade.
 - `arms[1].read.outcome == "read"`: P2–P4 proceed (the identity keeps access across builds); the
   pinned DR string for P2 is read from `arms[1].a.designatedRequirement` (or
   `arms[1].b.designatedRequirement`; they must be byte-equal in a passing run).
@@ -155,9 +175,11 @@ parser/guard/classifier check, the must-fail fixtures and the text gates.
 
 | Check | Result |
 |---|---|
-| `mise exec -- bun harness/tools/keychain-experiment.ts --self-check` | PASS — `13 of 13 case(s) passed`: the dump fixtures (partition entry, any-application owner, an unparsable partition description that must leave the list empty), the build/partition/item guards (including the must-fail equal-cdhash case), the refusal classifier (partition, application, matched requirement, unmatched requirement), the designated-requirement parser (the commented implied form and the plain stored form, plus the re-sign rule that refuses an implied requirement) and the read classifier (a kill or a stuck window is `blocked` only with a SecurityAgent sample, `refused` for a missing row, `read` only when the stub carried the key) |
-| must-fail fixtures (`Q:/scratch/omp/g18/P1/mustfail/`) | PASS — with the parser narrowed to the plain form `12 of 13 case(s) passed ... the commented form was not read as the implied one`; with the classifier reading `killed` instead of the samples `12 of 13 ... a kill with no SecurityAgent sampled gave blocked` — each new case fails on a deliberately broken input, and the repo copy is untouched |
-| dry run of the whole tool (`Q:/scratch/omp/g18/P1/dryrun/`, Windows) | PASS — the macOS commands are stand-in stubs (`security`, `codesign`, `hdiutil`, `ditto`, `plutil`, `pgrep`, `sw_vers`, `uname`) and the app is a fake smoke hook, so the orchestration runs where the real tool refuses to: `--arms adhoc` → tool exit 0, `status: ok`, `guards.buildsDiffer: true`, `guards.log: {prints: 294, keyBytes: 0}`, `keychain.loginResidue: []`, `arms[0].read.outcome: refused` with `classification.refusesBy: partition`, `allow.reread.outcome: read`, `third.read.outcome: refused`; a second run with the stubbed `pgrep` reporting a SecurityAgent gives `read.outcome: blocked` with `read.launch.agentScan.matches` 5 of 5 probes; a third with the stubbed login keychain holding the items fails the run (`status: failed`) and records both `keychain.loginResidue` entries with `deleted: true` |
+| `mise exec -- bun harness/tools/keychain-experiment.ts --self-check` | PASS — `15 of 15 case(s) passed`: the dump fixtures (partition entry, any-application owner, an unparsable partition description that must leave the list empty, and run 44928776617's 3-entry no-partition-entry ACL), the build/partition/item guards (including the must-fail equal-cdhash case), the refusal classifier (partition, application, matched requirement, unmatched requirement), the `bInDecryptAcl` comparison, the designated-requirement parser (the commented implied form and the plain stored form, plus the re-sign rule that refuses an implied requirement) and the read classifier (a kill or a stuck window is `blocked` only with a SecurityAgent sample, `refused` for a missing row, `read` only when the stub carried the key) |
+| must-fail fixtures, round 1 (`Q:/scratch/omp/g18/P1/mustfail/`) | PASS — with the parser narrowed to the plain form `12 of 13 case(s) passed ... the commented form was not read as the implied one`; with the classifier reading `killed` instead of the samples `12 of 13 ... a kill with no SecurityAgent sampled gave blocked` — each new case fails on a deliberately broken input, and the repo copy is untouched |
+| must-fail fixtures, round 3 (`Q:/scratch/omp/g18/p1-r3/mustfail/`) | PASS — with `itemGuardProblem` back to failing on any empty partition list the no-partition-entry case fails (`14 of 15 case(s) passed ... the item guard failed the observed ACL: the item carries a partition entry whose value cannot be read …`); with `decryptAclAdmits` reading the `encrypt` entry instead of the `decrypt` entry the `bInDecryptAcl` case fails (`14 of 15 ... A's own requirement was not matched in the decrypt entry`) — each new case catches its deliberate break, and the repo copy is untouched |
+| the workflow's identity step, run locally (`Q:/scratch/omp/g18/p1-r3/`, Git's OpenSSL 3.5.9) | PASS — the step script passes `bash -n`, chooses `pkcs12 pbe flags -legacy` for `OpenSSL 3.5.9`, and with an empty `OPENSSL_MODULES` the first export fails (`pkcs12: unable to load provider legacy`) and the retry produces `MAC: sha1`, `PKCS7 Encrypted data: pbeWithSHA1And3-KeyTripleDES-CBC`, `Shrouded Keybag: pbeWithSHA1And3-KeyTripleDES-CBC`; the passphrase appears on the step's stdout zero times (`::add-mask::` is consumed by the runner, `OmitEcho`), and the throwaway key, certificate and p12 were deleted in the same run |
+| dry run of the whole tool (`Q:/scratch/omp/g18/p1-r3/dryrun/`, Windows) | PASS — the macOS commands are stand-in stubs (`security`, `codesign`, `hdiutil`, `ditto`, `plutil`, `pgrep`, `sw_vers`, `uname`), the stubbed `security dump-keychain` prints the 3-entry no-partition ACL, and the app is a fake smoke hook: `--arms adhoc,self-signed,project` → tool exit 0, `status: ok`, 30 assertions, `guards.buildsDiffer: true`, `guards.log: {prints: 366, keyBytes: 0}`; both arms record `itemAfterStore.partitionEntry: false`, `read.outcome: refused`, `read.bInDecryptAcl: false`, `classification.refusesBy: application`, `allow: {"skipped": "no partition entry"}` and no `third`; the self-signed arm's import line is logged `-P "<passphrase-redacted>"`, the stub fails the import unless `-P` is exactly the passphrase the env carries, and the passphrase appears in neither the log nor the record (`[guard] no signing passphrase in the 367 line(s) this tool printed`); the "user default and sole search entry" check passes on the one resolved form. Round 1's runs of the same stub harness covered the `blocked` path (a stubbed SecurityAgent) and the login-keychain sweep's failure; those paths are unchanged by this round |
 | `mise exec -- bun Q:/scratch/pq-harness-run/run.ts typecheck.ts typecheck` | PASS — `0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
 | `mise exec -- bun Q:/scratch/pq-harness-run/run.ts secrets.ts secrets` | PASS — `775 files, 0 findings` |
 | `mise exec -- bun Q:/scratch/pq-harness-run/run.ts docs-links.ts docsLinks` | PASS — `327 checked, 0 broken` |
@@ -171,10 +193,12 @@ parser/guard/classifier check, the must-fail fixtures and the text gates.
 - The sampler is one `pgrep` a second, so a `SecurityAgent` that both appears and disappears between
   two probes would be missed; a miss turns the read into `failed`, which is loud, and never into
   `read`.
-- The simulated allow records the **partition** half of a real "Always Allow". The application-list
-  half (the requester's code requirement) is exactly what the record's dump shows is *absent* when
-  the item is created, which is why the partition list is where a refusal lives in this experiment;
-  the `allow` rows make that visible instead of asserting the learner's click.
+- A runner cannot click a Keychain prompt, so the simulated allow can write only the **partition**
+  half of a real "Always Allow"; the application-list half (the requester's code requirement) is
+  never written by this tool. Run 44928776617's item carried no partition entry at all, so for that
+  shape the allow is recorded as `skipped: no partition entry` and neither half is simulated — the
+  decisive comparison there is `read.bInDecryptAcl`, which is why the record keeps it beside the
+  read outcome.
 - macOS 27 has no runner and its Security source is not published; the citations are
   `Security-61901.120.67`, one macOS 26-era tag (`docs/plans/2026-11-22-0100-0018-keychain-survives-upgrade.md`,
   fact 2), and the record names the runner's `sw_vers`.

@@ -110,6 +110,7 @@ jobs:
         run: bun run package
 
       - name: Create the throwaway self-signed identity
+        id: identity
         shell: bash
         run: |
           set -euo pipefail
@@ -131,10 +132,30 @@ jobs:
           extendedKeyUsage = critical, codeSigning
           subjectKeyIdentifier = hash
           EOF
+          version="$(openssl version)"
+          echo "keychain: $version"
+          case "$version" in
+            OpenSSL\ [3-9]*) pbe=(-legacy) ;;
+            *) pbe=(-keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1) ;;
+          esac
+          pass="$(openssl rand -base64 24 | tr -d '\n')"
+          echo "::add-mask::$pass"
+          echo "password=$pass" >> "$GITHUB_OUTPUT"
           openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 3650 -config "$dir/openssl.cnf" \
             -keyout "$dir/key.pem" -out "$dir/cert.pem"
-          openssl pkcs12 -export -inkey "$dir/key.pem" -in "$dir/cert.pem" \
-            -name "Pass Quest Keychain Experiment" -out "$dir/identity.p12" -passout pass:
+          printf '%s' "$pass" > "$dir/passphrase"
+          chmod 600 "$dir/passphrase"
+          export_p12() {
+            openssl pkcs12 -export "${pbe[@]}" -inkey "$dir/key.pem" -in "$dir/cert.pem" \
+              -name "Pass Quest Keychain Experiment" -out "$dir/identity.p12" -passout "file:$dir/passphrase"
+          }
+          echo "keychain: pkcs12 pbe flags ${pbe[*]}"
+          if ! export_p12; then
+            pbe=(-keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1)
+            echo "keychain: the first export failed; retrying with the explicit PBE flags ${pbe[*]}"
+            export_p12
+          fi
+          rm -f "$dir/passphrase"
           chmod 600 "$dir"/key.pem "$dir"/cert.pem "$dir"/identity.p12
           openssl x509 -in "$dir/cert.pem" -noout -subject
           ls -l "$dir"
@@ -145,6 +166,7 @@ jobs:
         env:
           PASSQUEST_KEYCHAIN_SELF_SIGNED_P12: ${{ runner.temp }}/keychain-throwaway/identity.p12
           PASSQUEST_KEYCHAIN_SELF_SIGNED_IDENTITY: Pass Quest Keychain Experiment
+          PASSQUEST_KEYCHAIN_SELF_SIGNED_PASSWORD: ${{ steps.identity.outputs.password }}
           PASSQUEST_MACOS_SIGNING_P12: ${{ secrets.PASSQUEST_MACOS_SIGNING_P12 }}
           PASSQUEST_MACOS_SIGNING_PASSWORD: ${{ secrets.PASSQUEST_MACOS_SIGNING_PASSWORD }}
         run: |

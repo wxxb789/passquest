@@ -1,7 +1,7 @@
-// security(1) takes keychain passwords on argv only, and this repository treats `security`/`openssl`
-// argv as public, so the experiment keychain and every import are passphrase-less.
+// security(1) takes keychain passwords on argv only, so the experiment keychain stays passphrase-less and the
+// one import that must carry a passphrase (the throwaway identity's) logs its argv with the passphrase replaced.
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
@@ -12,7 +12,7 @@ import { sha256Hex } from "../lib/hash.ts";
 import { field, stringField } from "../lib/json.ts";
 import { mygoFileName, packageNaming } from "../lib/package-build.ts";
 import { goTarget, hostTarget, targetDir } from "../lib/package.ts";
-import { loggedRun, resultText, runMain, tail } from "../lib/process.ts";
+import { loggedRun, resultText, run, runMain, tail } from "../lib/process.ts";
 import type { RunResult } from "../lib/process.ts";
 import { resolve } from "../lib/repo.ts";
 
@@ -39,9 +39,10 @@ const USAGE = `Run the goal-0018 P1 Keychain experiment on this macOS machine.
   --self-check    run the parser, requirement, guard and classifier cases over fixtures (any OS)
   --help          this text
 
-Identity material, base64 or path, never on argv and never printed:
-  PASSQUEST_KEYCHAIN_SELF_SIGNED_P12       path to the self-signed arm's passphrase-less p12
-  PASSQUEST_KEYCHAIN_SELF_SIGNED_IDENTITY  its CN; both must be set for the arm to run
+Identity material, base64 or path, never printed:
+  PASSQUEST_KEYCHAIN_SELF_SIGNED_P12       path to the self-signed arm's p12
+  PASSQUEST_KEYCHAIN_SELF_SIGNED_IDENTITY  its CN
+  PASSQUEST_KEYCHAIN_SELF_SIGNED_PASSWORD  its passphrase; all three must be set for the arm to run
   PASSQUEST_MACOS_SIGNING_P12              the project arm's p12, base64 (Actions secret)
   PASSQUEST_MACOS_SIGNING_PASSWORD         its passphrase (Actions secret; read via -passin env:)
   PASSQUEST_MACOS_SIGNING_IDENTITY         its CN; derived from the imported certificate when unset
@@ -101,10 +102,14 @@ function parseArgs(argv: readonly string[]): Options {
 }
 
 const generatedKeys: string[] = [];
+const signingPassphrases: string[] = [];
 
 function redact(text: string): string {
   let out = text;
   for (const key of generatedKeys) out = out.split(key).join("<key-bytes-redacted>");
+  for (const phrase of signingPassphrases) {
+    if (phrase !== "") out = out.split(phrase).join("<passphrase-redacted>");
+  }
   return out;
 }
 
@@ -158,12 +163,16 @@ function observedTail(result: RunResult, limit = 60): string {
   return redact(omitted > 0 ? `(${omitted} earlier line(s) omitted) ${shown}` : shown);
 }
 
-async function tool(command: string, args: readonly string[], extra: Record<string, string> = {}): Promise<RunResult> {
+function childEnv(extra: Record<string, string> = {}): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(cleanEnv())) {
     if (value !== undefined) env[name] = value;
   }
-  return loggedRun(command, [...args], { env: { ...env, ...extra }, replaceEnv: true });
+  return { ...env, ...extra };
+}
+
+async function tool(command: string, args: readonly string[], extra: Record<string, string> = {}): Promise<RunResult> {
+  return loggedRun(command, [...args], { env: childEnv(extra), replaceEnv: true });
 }
 
 async function sha256File(file: string): Promise<string> {
@@ -189,6 +198,7 @@ interface DumpItem {
   block: string;
   entries: AclEntry[];
   partitions: string[];
+  partitionEntry: boolean;
   anyApplication: boolean;
   requirements: { entry: number; requirement: string }[];
 }
@@ -200,7 +210,7 @@ function attributeOf(block: string, tag: string): string | null {
 }
 
 function parseDumpItem(text: string, service: string, account: string): DumpItem {
-  const empty: DumpItem = { found: false, block: "", entries: [], partitions: [], anyApplication: false, requirements: [] };
+  const empty: DumpItem = { found: false, block: "", entries: [], partitions: [], partitionEntry: false, anyApplication: false, requirements: [] };
   for (const block of text.split(/^(?=keychain: )/m)) {
     if (attributeOf(block, "svce") !== service) continue;
     if (attributeOf(block, "acct") !== account) continue;
@@ -243,9 +253,11 @@ function parseDumpItem(text: string, service: string, account: string): DumpItem
     }
     const partitions: string[] = [];
     const requirements: { entry: number; requirement: string }[] = [];
+    let partitionEntry = false;
     let anyApplication = false;
     entries.forEach((entry, index) => {
       if (entry.authorizations.includes("partition_id")) {
+        partitionEntry = true;
         // print_partition_id_list prints an unparsable list as "invalid partition ID: <raw>"
         // (keychain_utilities.c): not a partition id, so it is dropped and the item guard fails.
         if (entry.description !== "<NULL>" && entry.description !== "" && !entry.description.startsWith("invalid partition ID:")) {
@@ -254,14 +266,14 @@ function parseDumpItem(text: string, service: string, account: string): DumpItem
             if (trimmed !== "") partitions.push(trimmed);
           }
         }
-      } else if (entry.applications === "any") {
+      } else if (entry.authorizations.includes("decrypt") && entry.applications === "any") {
         anyApplication = true;
       }
       for (const text of entry.requirements) {
         if (text !== "none") requirements.push({ entry: index, requirement: text });
       }
     });
-    return { found: true, block, entries, partitions, anyApplication, requirements };
+    return { found: true, block, entries, partitions, partitionEntry, anyApplication, requirements };
   }
   return empty;
 }
@@ -276,8 +288,8 @@ function buildGuardProblem(aCdhash: string, bCdhash: string): string | null {
 
 function itemGuardProblem(item: DumpItem): string | null {
   if (!item.found) return "the item is not in the dump";
-  if (item.partitions.length === 0) {
-    return "the item carries no partition entry (an unparsable description counts as none), so the simulated allow would use a value nobody wants";
+  if (item.partitionEntry && item.partitions.length === 0) {
+    return "the item carries a partition entry whose value cannot be read (an unparsable description counts as none), so the simulated allow would use a value nobody wants";
   }
   return null;
 }
@@ -304,30 +316,41 @@ function requirementMatches(designated: string, requirement: string): { matches:
 }
 
 interface Classification {
-  partition: "admitted" | "absent" | "unknown";
+  partition: "admitted" | "absent" | "none" | "unknown";
   application: "admitted-any" | "admitted-requirement" | "refused" | "unknown";
   requirementMatch: string;
   refusesBy: "partition" | "application" | "both" | "neither" | "unknown";
   detail: string;
 }
 
+function decryptAclAdmits(item: DumpItem, designatedRequirement: string): boolean {
+  return item.entries
+    .filter((entry) => entry.authorizations.includes("decrypt"))
+    .some((entry) => entry.requirements.some((requirement) => requirement !== "none" && requirementMatches(designatedRequirement, requirement).matches));
+}
+
 function classifyRefusal(item: DumpItem, partitionId: string | null, designatedRequirement: string | null): Classification {
   const partition =
-    partitionId === null || partitionId === ""
-      ? "unknown"
-      : item.partitions.some((value) => value.toLowerCase() === partitionId.toLowerCase())
-        ? "admitted"
-        : "absent";
+    !item.partitionEntry
+      ? "none"
+      : partitionId === null || partitionId === ""
+        ? "unknown"
+        : item.partitions.some((value) => value.toLowerCase() === partitionId.toLowerCase())
+          ? "admitted"
+          : "absent";
   let application: Classification["application"];
   let requirementMatch = "none";
+  const decryptRequirements = item.entries
+    .filter((entry) => entry.authorizations.includes("decrypt"))
+    .flatMap((entry) => entry.requirements.filter((requirement) => requirement !== "none"));
   if (item.anyApplication) {
     application = "admitted-any";
-  } else if (item.requirements.length === 0 || designatedRequirement === null || designatedRequirement === "") {
+  } else if (decryptRequirements.length === 0 || designatedRequirement === null || designatedRequirement === "") {
     application = "unknown";
   } else {
     let admitted = false;
-    for (const entry of item.requirements) {
-      const match = requirementMatches(designatedRequirement, entry.requirement);
+    for (const requirement of decryptRequirements) {
+      const match = requirementMatches(designatedRequirement, requirement);
       if (match.matches) {
         admitted = true;
         requirementMatch = match.method;
@@ -336,7 +359,7 @@ function classifyRefusal(item: DumpItem, partitionId: string | null, designatedR
     }
     application = admitted ? "admitted-requirement" : "refused";
   }
-  const partitionOk = partition === "admitted";
+  const partitionOk = partition === "admitted" || partition === "none";
   const applicationOk = application === "admitted-any" || application === "admitted-requirement";
   let refusesBy: Classification["refusesBy"];
   if (partitionOk && applicationOk) refusesBy = "neither";
@@ -344,9 +367,19 @@ function classifyRefusal(item: DumpItem, partitionId: string | null, designatedR
   else if (applicationOk && partition === "absent") refusesBy = "partition";
   else if (partition === "absent" && application === "refused") refusesBy = "both";
   else refusesBy = "unknown";
-  const detail =
-    `the partition list ${partition === "admitted" ? "admits" : partition === "absent" ? "does not admit" : "is unknown for"} ${partitionId ?? "(no id)"}; ` +
-    `the application list is ${application === "admitted-any" ? "any application (the owner entry has no requirements)" : application === "admitted-requirement" ? `a requirement matching the designated requirement (${requirementMatch})` : application === "refused" ? "specific requirements that do not match the designated requirement" : "unknown"}`;
+  const partitionText =
+    partition === "none"
+      ? "the item carries no partition entry, so no partition list weighs on the read"
+      : `the partition list ${partition === "admitted" ? "admits" : partition === "absent" ? "does not admit" : "is unknown for"} ${partitionId ?? "(no id)"}`;
+  const applicationText =
+    application === "admitted-any"
+      ? "any application (the decrypt entry names no requirements)"
+      : application === "admitted-requirement"
+        ? `a requirement matching the designated requirement (${requirementMatch})`
+        : application === "refused"
+          ? "specific requirements that do not match the designated requirement"
+          : "unknown";
+  const detail = `${partitionText}; the decrypt entry's application list is ${applicationText}`;
   return { partition, application, requirementMatch, refusesBy, detail };
 }
 
@@ -411,6 +444,31 @@ const BROKEN_PARTITION_ACCESS = [
   `        applications: <null>`,
 ].join("\n");
 
+// Run 44928776617's ad-hoc item, verbatim from the uploaded log's dump.
+const OBSERVED_ACL_SERVICE = "passquest-keychain-experiment-4264-1795281297551-adhoc";
+const OBSERVED_A_DR = `cdhash H"b9bcd4b4f4cab7f45281383a3b1b0ae7016da185"`;
+
+const NO_PARTITION_ACCESS = [
+  `access: 3 entries`,
+  `    entry 0:`,
+  `        authorizations (1): encrypt`,
+  `        don't-require-password`,
+  `        description: ${OBSERVED_ACL_SERVICE}`,
+  `        applications: <null>`,
+  `    entry 1:`,
+  `        authorizations (6): decrypt derive export_clear export_wrapped mac sign`,
+  `        don't-require-password`,
+  `        description: ${OBSERVED_ACL_SERVICE}`,
+  `        applications (1):`,
+  `            0: /private/var/folders/q2/p1t6rgxj5fj32g1dc7dmd49r0000gn/T/passquest-keychain-experiment-IJLZJa/arm-adhoc/install/Pass Quest.app (OK)`,
+  `                requirement: ${OBSERVED_A_DR}`,
+  `    entry 2:`,
+  `        authorizations (1): change_acl`,
+  `        don't-require-password`,
+  `        description: ${OBSERVED_ACL_SERVICE}`,
+  `        applications (0):`,
+].join("\n");
+
 interface SelfCase {
   name: string;
   run: () => string | null;
@@ -419,6 +477,7 @@ interface SelfCase {
 const A_PARTITION = "cdhash:1111111111111111111111111111111111111111111111111111111111111111";
 const B_PARTITION = "cdhash:2222222222222222222222222222222222222222222222222222222222222222";
 const B_DR_CDHASH = `designated => cdhash H"2222222222222222222222222222222222222222"`;
+const B_DR = `cdhash H"2222222222222222222222222222222222222222"`;
 
 const SELF_CASES: readonly SelfCase[] = [
   {
@@ -441,12 +500,12 @@ const SELF_CASES: readonly SelfCase[] = [
     },
   },
   {
-    name: "an unparsable partition description yields no partition list (the item guard fails)",
+    name: "an unparsable partition description yields no partition list and still fails the item guard",
     run: () => {
       const item = parseDumpItem(fixtureDump("svc", "acct", BROKEN_PARTITION_ACCESS), "svc", "acct");
       if (item.partitions.length !== 0) return `partitions = [${item.partitions.join(", ")}]`;
       const problem = itemGuardProblem(item);
-      return problem === null ? "the item guard passed although there is no partition entry" : null;
+      return problem === null ? "the item guard passed although the partition entry's value cannot be read" : null;
     },
   },
   {
@@ -574,6 +633,38 @@ const SELF_CASES: readonly SelfCase[] = [
       return empty.outcome === "failed" ? null : `an unreadable page state gave ${empty.outcome}`;
     },
   },
+  {
+    name: "the no-partition-entry item of run 44928776617 parses, passes the item guard, and refuses on the decrypt entry's application list",
+    run: () => {
+      const item = parseDumpItem(fixtureDump(OBSERVED_ACL_SERVICE, "acct", NO_PARTITION_ACCESS), OBSERVED_ACL_SERVICE, "acct");
+      if (!item.found) return "the item was not found";
+      if (item.partitionEntry) return "a partition entry was read although the dump carries none";
+      if (item.partitions.length !== 0) return `partitions = [${item.partitions.join(", ")}]`;
+      if (item.anyApplication) return "the encrypt entry's any-application list was read as the item's application verdict";
+      if (item.entries.length !== 3) return `entries = ${item.entries.length}`;
+      if (item.requirements.length !== 1 || item.requirements[0]!.requirement !== OBSERVED_A_DR) {
+        return `requirements = ${JSON.stringify(item.requirements)}`;
+      }
+      const problem = itemGuardProblem(item);
+      if (problem !== null) return `the item guard failed the observed ACL: ${problem}`;
+      const classification = classifyRefusal(item, B_PARTITION, B_DR);
+      if (classification.partition !== "none") return `partition = ${classification.partition}`;
+      if (classification.application !== "refused") return `application = ${classification.application}`;
+      if (classification.refusesBy !== "application") return `refusesBy = ${classification.refusesBy}`;
+      return null;
+    },
+  },
+  {
+    name: "bInDecryptAcl: only the decrypt entry's application list can match the designated requirement",
+    run: () => {
+      const item = parseDumpItem(fixtureDump(OBSERVED_ACL_SERVICE, "acct", NO_PARTITION_ACCESS), OBSERVED_ACL_SERVICE, "acct");
+      if (!decryptAclAdmits(item, OBSERVED_A_DR)) return "A's own requirement was not matched in the decrypt entry";
+      if (decryptAclAdmits(item, B_DR)) return "another build's requirement matched the decrypt entry";
+      const any = parseDumpItem(fixtureDump("svc", "acct", FRESH_ITEM_ACCESS), "svc", "acct");
+      if (decryptAclAdmits(any, B_DR)) return "an any-application decrypt entry reported a requirement match";
+      return null;
+    },
+  },
 ];
 
 function selfCheck(): number {
@@ -685,6 +776,7 @@ interface ItemRecord {
   found: boolean;
   block: string;
   partitions: string[];
+  partitionEntry: boolean;
   anyApplication: boolean;
   requirements: { entry: number; requirement: string }[];
   entryCount: number;
@@ -694,6 +786,7 @@ interface ReadRecord {
   outcome: "read" | "refused" | "blocked" | "failed" | "not-run";
   detail: string;
   providerCarriedKey: boolean;
+  bInDecryptAcl?: boolean;
   launch: LaunchRecord;
   classification?: Classification;
   securityAgent?: SecurityAgentRecord;
@@ -704,6 +797,22 @@ interface SecurityAgentRecord {
   killed: boolean;
   left: string[];
 }
+
+type ArmAllow =
+  | { skipped: string }
+  | {
+      bService: string;
+      bKeySha256: string;
+      bItem: ItemRecord;
+      bPartition: string;
+      bPartitionComputed: string;
+      list: string;
+      command: string;
+      exit: number;
+      itemAfterAllow: ItemRecord;
+      reread: ReadRecord;
+      expected: string;
+    };
 
 interface ArmRecord {
   id: ArmId;
@@ -720,19 +829,7 @@ interface ArmRecord {
   itemAfterStore: ItemRecord;
   read: ReadRecord;
   itemAfterRead: ItemRecord;
-  allow?: {
-    bService: string;
-    bKeySha256: string;
-    bItem: ItemRecord;
-    bPartition: string;
-    bPartitionComputed: string;
-    list: string;
-    command: string;
-    exit: number;
-    itemAfterAllow: ItemRecord;
-    reread: ReadRecord;
-    expected: string;
-  };
+  allow?: ArmAllow;
   third?: {
     versionBefore: string;
     versionAfter: string;
@@ -874,6 +971,7 @@ function itemRecord(item: DumpItem): ItemRecord {
     found: item.found,
     block: item.block,
     partitions: item.partitions,
+    partitionEntry: item.partitionEntry,
     anyApplication: item.anyApplication,
     requirements: item.requirements,
     entryCount: item.entries.length,
@@ -1057,7 +1155,7 @@ async function dumpItem(ctx: Ctx, dir: string, label: string, service: string): 
   if (result.code !== 0) throw new ArmFailure(`security dump-keychain -a exited ${result.code}: ${observedTail(result)}`);
   const item = parseDumpItem(result.stdout, service, ACCOUNT);
   console.log(
-    `[dump ${label}] item ${item.found ? "present" : "MISSING"}: ${item.partitions.length} partition value(s) [${item.partitions.join(", ")}], ${item.entries.length} access entr(y|ies), applications ${item.anyApplication ? "any" : `${item.requirements.length} requirement(s)`}`,
+    `[dump ${label}] item ${item.found ? "present" : "MISSING"}: ${item.partitionEntry ? `${item.partitions.length} partition value(s) [${item.partitions.join(", ")}]` : "no partition entry"}, ${item.entries.length} access entr(y|ies), applications ${item.anyApplication ? "any" : `${item.requirements.length} requirement(s)`}`,
   );
   if (item.found) {
     for (const line of item.block.split("\n")) console.log(`[dump ${label}]   ${line}`);
@@ -1177,10 +1275,12 @@ function identityInput(id: ArmId): IdentityInput | null {
   if (id === "self-signed") {
     const file = process.env.PASSQUEST_KEYCHAIN_SELF_SIGNED_P12 ?? "";
     const cn = process.env.PASSQUEST_KEYCHAIN_SELF_SIGNED_IDENTITY ?? "";
-    const missing = [file === "" ? "PASSQUEST_KEYCHAIN_SELF_SIGNED_P12" : "", cn === "" ? "PASSQUEST_KEYCHAIN_SELF_SIGNED_IDENTITY" : ""].filter((name) => name !== "").join(", ");
-    if (missing !== "") return { kind: "self-signed", password: null, cn: null, source: "PASSQUEST_KEYCHAIN_SELF_SIGNED_P12/IDENTITY", problem: `${missing} not set` };
-    if (!existsSync(file)) return { kind: "self-signed", p12File: file, password: null, cn, source: "PASSQUEST_KEYCHAIN_SELF_SIGNED_P12", problem: `${file} does not exist` };
-    return { kind: "self-signed", p12File: file, password: null, cn, source: "PASSQUEST_KEYCHAIN_SELF_SIGNED_P12" };
+    const password = process.env.PASSQUEST_KEYCHAIN_SELF_SIGNED_PASSWORD ?? "";
+    const source = "PASSQUEST_KEYCHAIN_SELF_SIGNED_P12/IDENTITY/PASSWORD";
+    const missing = [file === "" ? "PASSQUEST_KEYCHAIN_SELF_SIGNED_P12" : "", cn === "" ? "PASSQUEST_KEYCHAIN_SELF_SIGNED_IDENTITY" : "", password === "" ? "PASSQUEST_KEYCHAIN_SELF_SIGNED_PASSWORD" : ""].filter((name) => name !== "").join(", ");
+    if (missing !== "") return { kind: "self-signed", password: null, cn: null, source, problem: `${missing} not set` };
+    if (!existsSync(file)) return { kind: "self-signed", p12File: file, password: null, cn, source, problem: `${file} does not exist` };
+    return { kind: "self-signed", p12File: file, password, cn, source };
   }
   const base64 = process.env.PASSQUEST_MACOS_SIGNING_P12 ?? "";
   const password = process.env.PASSQUEST_MACOS_SIGNING_PASSWORD ?? "";
@@ -1198,12 +1298,28 @@ function commonNameOf(subjectOutput: string): string | null {
   return match === null ? null : match[1]!.trim();
 }
 
+/**
+ * security(1) takes the p12 passphrase on argv only (no env or file form), so this one command's log
+ * line is built here with the passphrase replaced; every other argv is logged exactly as it was passed.
+ */
+async function importP12(keychain: string, file: string, password: string): Promise<RunResult> {
+  const args = ["import", file, "-f", "pkcs12", "-k", keychain, "-P", password, "-T", "/usr/bin/codesign"];
+  const shown = args.map((arg) => (password !== "" && arg === password ? JSON.stringify("<passphrase-redacted>") : arg));
+  console.log(`[run] security ${shown.join(" ")}`);
+  const result = await run("security", args, { env: childEnv(), replaceEnv: true });
+  console.log(`[run] exit ${result.code}`);
+  return result;
+}
+
 async function importIdentity(ctx: Ctx, id: ArmId, input: IdentityInput, dir: string): Promise<Identity> {
+  if (input.password !== null && input.password !== "") signingPassphrases.push(input.password);
   let importable: string;
+  let password = "";
   if (input.kind === "self-signed") {
     importable = input.p12File!;
+    password = input.password!;
   } else {
-    // Decoded 0600 under the run's private tree; the copy imported below is passphrase-less (see the header).
+    // Decoded 0600 under the run's private tree; the re-export keeps this import passphrase-less.
     const decoded = path.join(dir, "project-signing.p12");
     writeFileSync(decoded, Buffer.from(input.p12Base64!, "base64"), { mode: 0o600 });
     chmodSync(decoded, 0o600);
@@ -1237,12 +1353,12 @@ async function importIdentity(ctx: Ctx, id: ArmId, input: IdentityInput, dir: st
       throw new ArmFailure("the project p12 could not be re-exported with an empty passphrase");
     }
   }
-  const imported = await tool("security", ["import", importable, "-f", "pkcs12", "-k", ctx.keychain, "-P", "", "-T", "/usr/bin/codesign"]);
+  const imported = await importP12(ctx.keychain, importable, password);
   const importedCount = /([0-9]+) identit(?:y|ies) imported/.exec(imported.stdout)?.[1] ?? "0";
   ctx.checker.check(
     `identity ${id}: security import`,
     imported.code === 0 && importedCount !== "0",
-    `security import … -P "" -> exit ${imported.code}: ${observedHead(imported, 2)}`,
+    `security import … -P ${password === "" ? '""' : '"<passphrase-redacted>"'} -> exit ${imported.code}: ${observedHead(imported, 2)}`,
     `security import exited ${imported.code} or imported no identity: ${observedTail(imported)}`,
   );
   if (imported.code !== 0 || importedCount === "0") throw new ArmFailure(`the ${id} identity could not be imported`);
@@ -1333,9 +1449,9 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
     b: {} as SignatureRecord,
     drSame: false,
     store: { stored: false, launch: launchRecord(null, `${id} A store`) },
-    itemAfterStore: { found: false, block: "", partitions: [], anyApplication: false, requirements: [], entryCount: 0 },
+    itemAfterStore: { found: false, block: "", partitions: [], partitionEntry: false, anyApplication: false, requirements: [], entryCount: 0 },
     read: { outcome: "not-run", detail: "the arm stopped before its read step", providerCarriedKey: false, launch: launchRecord(null, `${id} B read`) },
-    itemAfterRead: { found: false, block: "", partitions: [], anyApplication: false, requirements: [], entryCount: 0 },
+    itemAfterRead: { found: false, block: "", partitions: [], partitionEntry: false, anyApplication: false, requirements: [], entryCount: 0 },
     failures: [],
   };
   ctx.record.arms.push(arm);
@@ -1395,13 +1511,17 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
       ctx.checker.fail(`arm ${id}: ${itemProblem}`);
       throw new ArmFailure(itemProblem);
     }
-    const aPartition = afterStore.raw.partitions.length === 1 ? afterStore.raw.partitions[0]! : null;
-    const partitionProblem = partitionGuardProblem(arm.a.computedPartition, aPartition);
-    if (partitionProblem !== null) {
-      ctx.checker.fail(`arm ${id}: ${partitionProblem}`);
-      throw new ArmFailure(partitionProblem);
+    if (afterStore.raw.partitionEntry) {
+      const aPartition = afterStore.raw.partitions.length === 1 ? afterStore.raw.partitions[0]! : null;
+      const partitionProblem = partitionGuardProblem(arm.a.computedPartition, aPartition);
+      if (partitionProblem !== null) {
+        ctx.checker.fail(`arm ${id}: ${partitionProblem}`);
+        throw new ArmFailure(partitionProblem);
+      }
+      console.log(`[state ${id}] A's stored partition ${aPartition} equals the computed ${arm.a.computedPartition}`);
+    } else {
+      console.log(`[state ${id}] the item carries no partition entry (partitionEntry false); the read proceeds and a simulated allow would be skipped`);
     }
-    console.log(`[state ${id}] A's stored partition ${aPartition} equals the computed ${arm.a.computedPartition}`);
 
     const installedB = await installFromDmg(ctx, ctx.b.dmg, prefix, `${id}-b`);
     const bBuilt = await readSignature(installedB.app, installedB.executable, `${id}-b-built`, false);
@@ -1438,10 +1558,16 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
     const afterRead = await dumpItem(ctx, dir, `${id}-after-read`, service);
     arm.itemAfterRead = afterRead.record;
     arm.read.classification = classifyRefusal(afterRead.raw, arm.b.computedPartition, arm.b.designatedRequirement);
-    console.log(`[classify ${id}] refusesBy=${arm.read.classification.refusesBy}: ${arm.read.classification.detail}`);
+    arm.read.bInDecryptAcl = decryptAclAdmits(afterRead.raw, arm.b.designatedRequirement);
+    console.log(`[classify ${id}] bInDecryptAcl=${String(arm.read.bInDecryptAcl)} refusesBy=${arm.read.classification.refusesBy}: ${arm.read.classification.detail}`);
     if (arm.read.outcome !== "read") await settleSecurityAgent(ctx, arm, arm.read);
     if (arm.read.outcome !== "read") {
-      await simulateAllow(ctx, arm, { dir, service, installed: installedB, keyA });
+      if (afterRead.raw.partitionEntry) {
+        await simulateAllow(ctx, arm, { dir, service, installed: installedB, keyA });
+      } else {
+        arm.allow = { skipped: "no partition entry" };
+        console.log(`[allow ${id}] skipped: no partition entry — the partition half of the learner's allow has nothing to add here, and the application-list half is not simulated by this tool`);
+      }
     }
   } catch (error) {
     if (error instanceof StopRun) throw error;
@@ -1456,7 +1582,7 @@ async function concludeArm(ctx: Ctx, arm: ArmRecord): Promise<void> {
   if (arm.skipped !== undefined) return;
   const login = arm.login;
   if (login !== undefined) {
-    for (const service of [arm.service, ...(arm.allow === undefined ? [] : [arm.allow.bService])]) {
+    for (const service of armServices(arm)) {
       login.after.push({ service, exit: await loginLookup(service, ctx.loginPath) });
     }
     const hits = login.after.filter((entry) => entry.exit === 0);
@@ -1469,8 +1595,13 @@ async function concludeArm(ctx: Ctx, arm: ArmRecord): Promise<void> {
     return;
   }
   readFailure(ctx, `arm ${arm.id}`, arm.read);
-  if (arm.allow !== undefined) readFailure(ctx, `arm ${arm.id} after the allow`, arm.allow.reread);
+  if (arm.allow !== undefined && !("skipped" in arm.allow)) readFailure(ctx, `arm ${arm.id} after the allow`, arm.allow.reread);
   if (arm.third !== undefined) readFailure(ctx, `arm ${arm.id} third build`, arm.third.read);
+}
+
+function armServices(arm: ArmRecord): string[] {
+  const allow = arm.allow;
+  return [arm.service, ...(allow === undefined || "skipped" in allow ? [] : [allow.bService])];
 }
 
 function readFailure(ctx: Ctx, where: string, read: ReadRecord): void {
@@ -1673,8 +1804,19 @@ function writeRecord(record: ExperimentRecord, checker: Checker, stopReason: str
     record.status = "failed";
     text = `${JSON.stringify(record, null, 2)}\n`;
   }
+  const phraseCarriers = signingPassphrases.filter((phrase) => phrase !== "" && text.includes(phrase));
+  if (phraseCarriers.length > 0) {
+    for (const phrase of phraseCarriers) text = text.split(phrase).join("<passphrase-redacted>");
+    checker.fail(`the record would have carried the signing passphrase; it was redacted (this still fails the run)`);
+    record.failures = checker.list;
+    record.status = "failed";
+    text = `${JSON.stringify(record, null, 2)}\n`;
+  }
   for (const key of generatedKeys) {
     if (text.includes(key)) throw new Error("the record still carries key bytes after redaction; refusing to write it");
+  }
+  for (const phrase of signingPassphrases) {
+    if (phrase !== "" && text.includes(phrase)) throw new Error("the record still carries the signing passphrase after redaction; refusing to write it");
   }
   writeFileSync(out, text);
   console.log(`[record] wrote ${out} (${Buffer.byteLength(text, "utf8")} bytes, status ${record.status})`);
@@ -1718,10 +1860,12 @@ async function runExperiment(options: Options): Promise<number> {
       "The key is recorded only as its SHA-256; the launch scripts that carried it for the window are removed after each launch, and the keychain is deleted with the run.",
       "A read is classified from what happened, never from a message: `read`, `refused`, `blocked` (the read did not complete and the one-probe-a-second SecurityAgent sampler saw a SecurityAgent while the launch ran) or `failed`; a `failed` read fails the run, so a green run is one where the experiment actually happened.",
       "The login keychain is left as found: each arm's service is looked up there before and after the arm (the lookup's exit code only, never -g, which would withdraw the secret), and the finally deletes any hit and fails the run.",
+      "The simulated allow adds a partition id only: when an item carries no partition entry (partitions empty, partitionEntry false) the allow is recorded as skipped, and the application-list half of a learner's Always Allow is then not simulated.",
     ],
     status: "running",
   };
-  const temp = mkdtempSync(path.join(tmpdir(), "passquest-keychain-experiment-"));
+  // macOS resolves /var to /private/var in security's output, so the tool carries one resolved form from here on.
+  const temp = realpathSync(mkdtempSync(path.join(tmpdir(), "passquest-keychain-experiment-")));
   const keychain = path.join(temp, "experiment.keychain");
   const registry = path.join(temp, "registry.json");
   const provider = startProviderStub();
@@ -1829,7 +1973,7 @@ async function runExperiment(options: Options): Promise<number> {
     let loginLookups = 0;
     for (const arm of record.arms) {
       if (arm.skipped !== undefined) continue;
-      for (const service of [arm.service, ...(arm.allow === undefined ? [] : [arm.allow.bService])]) {
+      for (const service of armServices(arm)) {
         loginLookups += 1;
         const found = await loginLookup(service, loginPath);
         if (found !== 0) continue;
@@ -1858,6 +2002,14 @@ async function runExperiment(options: Options): Promise<number> {
       );
     } else {
       console.log(`[guard] no key bytes in the ${printed.length} line(s) this tool printed`);
+    }
+    const phraseHits = signingPassphrases.filter((phrase) => phrase !== "" && printed.join("\n").includes(phrase));
+    if (phraseHits.length > 0) {
+      checker.fail(
+        `the signing passphrase reached this run's log: ${phraseHits.length} value(s) appear in the ${printed.length} line(s) this tool printed, and the log is uploaded next to the record`,
+      );
+    } else if (signingPassphrases.length > 0) {
+      console.log(`[guard] no signing passphrase in the ${printed.length} line(s) this tool printed`);
     }
     if (stopReason !== null) console.log(`[stop] ${stopReason}`);
     // Written after the temp tree is removed: a throw here must not leave the decoded signing material behind.

@@ -452,6 +452,31 @@ comments reduced to the keep-list; the design intent they carried is recorded he
     shell cannot reach a child; `sha256File` streams (a dmg is tens of MB, not held in memory twice); and
     `observedHead`/`observedTail` split an assertion's head from a failure's tail, where the offending line sits
     (the 0017 lesson).
+12. **P1 the item macOS 26 stores carries no partition entry (run 44928776617).** The ad-hoc item's ACL is
+    `encrypt` (any application) + `decrypt derive export_clear export_wrapped mac sign` (one application, A's
+    `requirement: cdhash H"b9bc…"`) + `change_acl` (none), so the no-partition guard stopped the arm before its
+    read; a missing partition list is now the recorded fact `partitionEntry: false` with `partitions: []` and the
+    arm reads on, the simulated allow (partition half only) is recorded as `allow: {"skipped": "no partition
+    entry"}` when there is nothing to add, the classifier weighs the decrypt entry's application list (the
+    `encrypt` entry's any-application list no longer counts as the item's verdict), and `read.bInDecryptAcl`
+    records whether B's designated requirement matches a `requirement:` in that list.
+13. **P1 the throwaway p12 must be legacy-encrypted and carry a passphrase (supersedes amendment 1's "every
+    import are passphrase-less").** `security import … -P ""` failed (`SecKeychainItemImport: The user name or
+    passphrase you entered is not correct.`) because the runner's `openssl` is OpenSSL 4.1.0 (the macos-26-arm64
+    image's readme), whose PKCS#12 default is AES-256/PBKDF2 (`openssl-pkcs12(1)`, fetched 2026-11-22); the
+    workflow prints `openssl version` and exports with `-legacy` for OpenSSL 3+ or the explicit `-keypbe
+    PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1` (OpenBSD's `pkcs12.c`, LibreSSL's app, takes the same
+    three options), with a random non-empty passphrase handed to the tool through the
+    step's output and the run step's `env:`; if the chosen export fails (measured locally on OpenSSL 3.5.9:
+    `-legacy` needs the legacy provider module, `pkcs12: unable to load provider legacy`), the step retries
+    once with the explicit flags, which the same build accepts without that provider. `security` takes that
+    passphrase on `-P` argv only (a platform
+    limit), so the tool builds that one log line with the passphrase replaced and scans its record and log for the
+    value; the experiment keychain and the `-T /usr/bin/codesign` and `set-key-partition-list` steps are unchanged.
+14. **P1 the tool resolves its temp path once.** `security` prints the keychain's resolved path
+    (`/private/var/folders/…` for `os.tmpdir()`'s `/var/folders/…`), which failed the "user default and sole
+    search entry" check although the swap had taken (run 44928776617); `realpathSync` on the mkdtemp result makes
+    the record and every comparison carry one form.
 
 ## Status
 
