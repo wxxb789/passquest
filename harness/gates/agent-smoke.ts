@@ -31,7 +31,7 @@ function parse(raw: string): unknown {
 }
 
 /** One host the durable matrix drives, and how to reach it. */
-export interface DurableMatrixOptions {
+interface DurableMatrixOptions {
   /** Names the host in every failure line and in the gate's summary, e.g. `source host`. */
   label: string;
   /** The host script the CLI must run: agent/durable-host.mjs, or the bundle staging builds from it. */
@@ -43,7 +43,7 @@ export interface DurableMatrixOptions {
 }
 
 /** What one pass of the durable matrix did. */
-export interface DurableMatrixResult {
+interface DurableMatrixResult {
   label: string;
   assertions: number;
   /** Provider requests the stub answered during this pass. */

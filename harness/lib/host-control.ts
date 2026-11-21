@@ -83,23 +83,22 @@ async function waitForProviderRequest(
 /**
  * Write the pause request the CLI's own deadline writes
  * (internal/agent.WriteHostControl): the run id and host token the live host
- * publishes in its heartbeat, and the action it polls for. Returns false when
- * no live host has a readable heartbeat — the fixture binaries that stand in
- * for an installed app never run one — so the caller's own assertion, not a
- * thrown error, reports the state the run ended in.
+ * publishes in its heartbeat, and the action it polls for. A store with no
+ * readable heartbeat — the fixture binaries that stand in for an installed
+ * app never run one — gets no request; the caller's own checks, not a thrown
+ * error, then report the state the run ended in.
  */
-export function pauseLiveHost(storePath: string): boolean {
+function pauseLiveHost(storePath: string): void {
   const heartbeatPath = `${storePath}.host`;
   let heartbeat: { run_id?: unknown; token?: unknown };
   try {
     heartbeat = JSON.parse(readFileSync(heartbeatPath, "utf8")) as { run_id?: unknown; token?: unknown };
   } catch {
-    return false;
+    return;
   }
-  if (typeof heartbeat.run_id !== "string" || heartbeat.run_id === "" || typeof heartbeat.token !== "string") return false;
+  if (typeof heartbeat.run_id !== "string" || heartbeat.run_id === "" || typeof heartbeat.token !== "string") return;
   writeFileSync(
     `${heartbeatPath}.control`,
     JSON.stringify({ run_id: heartbeat.run_id, host_token: heartbeat.token, action: "pause" }),
   );
-  return true;
 }

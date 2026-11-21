@@ -2,9 +2,10 @@
  * What every desktop-smoke scenario shares: the run it is handed, launching the window on its own data
  * directory, the second process (`passquest ... --db`) and the attempt cross-check.
  */
-import { cliJson, launchPage, tail } from "../../lib/desktop-page.ts";
+import { cliJson, launchPage, SKILL, STUB_MODEL, tail } from "../../lib/desktop-page.ts";
 import type { Check, Launched, ProviderStub } from "../../lib/desktop-page.ts";
 import { arrayField, field, numberField, stringField } from "../../lib/json.ts";
+import { resolve } from "../../lib/repo.ts";
 import type { RunResult } from "../../lib/process.ts";
 import type { GateContext } from "../../lib/types.ts";
 
@@ -131,6 +132,47 @@ export async function setup(s: ScenarioRun, steps: string[][], env: Record<strin
     }
   }
   return true;
+}
+
+/**
+ * An environment's string-valued entries: what a launch's own
+ * `Record<string, string>` can take, with an absent variable simply absent
+ * rather than carrying an `undefined` value.
+ */
+export function textEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) if (typeof value === "string") out[name] = value;
+  return out;
+}
+
+const IMPORT_FIXTURE = "internal/cli/testdata/import";
+
+/**
+ * Seeds the study trail the coach case and the package smoke's brief case
+ * share, through the repository CLI: the import fixture, then a guided and an
+ * independent first-party attempt on the imported item — so the recommendation
+ * opens it and the brief's packet is non-empty — and the stub model tested and
+ * chosen. False after the first failed step; every failure line is prefixed
+ * with `${s.id}`.
+ */
+export async function seedStudyTrail(s: ScenarioRun, env: Record<string, string>): Promise<boolean> {
+  const imported = await cli(s, ["import", "--path", resolve(s.shared.ctx.root, IMPORT_FIXTURE)]);
+  const sourceID = stringField(field(imported.doc, "source"), "id");
+  if (
+    !s.check(imported.code === 0 && sourceID !== undefined, `${s.id}: setup import exit = ${imported.code}: ${tail(imported.stderr, 4)}`)
+  ) {
+    return false;
+  }
+  const steps = [
+    ["question", "add", sourceID!, "1", "--file", resolve(s.shared.ctx.root, `${IMPORT_FIXTURE}/question-q2-tagged.json`)],
+    ["page", "review", sourceID!, "1", "--reviewer", "smoke"],
+    ["question", "review", sourceID!, "q2", "--answer", "C", "--reviewer", "smoke"],
+    ["tactic", "practice", SKILL, "--stage", "guided", "--answer", "A"],
+    ["skill", "practice", SKILL, "--answer", "A"],
+    ["model", "test", STUB_MODEL],
+    ["model", "use", STUB_MODEL],
+  ];
+  return setup(s, steps, env);
 }
 
 export function attemptsOf(report: { doc: unknown }): unknown[] {

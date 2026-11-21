@@ -501,6 +501,10 @@ Entry format:
   installed app's coach and refinement calls run through that runtime, and with it deleted every
   agent surface — the durable brief included — reports `node_unavailable` with one action. The store
   location and the reversal are unchanged.
+- Revisited (2026-11-21): goal 0016 ships no `node_modules` at all — the one host that loads packages
+  is staged as a self-contained bundle whose seven inlined packages travel with their notices, and
+  the other three hosts are byte-identical copies (Q-0016-01, Q-0016-05). The store location and the
+  reversal are unchanged.
 
 ### Q-0006-03 — How is one run paused, resumed and cancelled across processes?
 - Status: decided(default taken)

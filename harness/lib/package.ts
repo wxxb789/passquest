@@ -260,7 +260,7 @@ function clearStage(dir: string): void {
 }
 
 /** One staged host: the file in the staged tree, and how it got there. */
-export interface StagedHost {
+interface StagedHost {
   /** The file name under agent/, which a bundle keeps. */
   host: string;
   /** True when the staged file is a self-contained ESM bundle built from a generated entry; false when it is a byte-identical copy. */
@@ -272,7 +272,7 @@ export interface StagedHost {
 }
 
 /** The staged agent tree: the hosts it carries, and the lean proof staging made. */
-export interface StagedAgentTree {
+interface StagedAgentTree {
   hosts: StagedHost[];
   /** The notices the staged bundles required, and the text written to agent/THIRD-PARTY-NOTICES.txt. */
   notices: StagedNotices;
@@ -339,7 +339,7 @@ export async function stageAgent(root: string, dir: string): Promise<StagedAgent
 }
 
 /** One built host bundle: the staged file, what it pinned, and the packages the metafile names. */
-export interface HostBundle {
+interface HostBundle {
   /** The bundle's absolute path inside outDir. */
   file: string;
   bytes: number;
@@ -584,7 +584,7 @@ export function lockProblems(packages: readonly BundlePackage[], locked: Readonl
 }
 
 /** The parts of a path's own entry a licence source reads: enough to tell a regular file from a directory or a link. */
-export interface NoticePathStats {
+interface NoticePathStats {
   isFile(): boolean;
   isSymbolicLink(): boolean;
   isDirectory(): boolean;
@@ -718,7 +718,7 @@ export function bundleEntrySource(hostPath: string, pins: readonly { specifier: 
  * anywhere. A specifier a host resolves at run time is invisible to this
  * scan; staging refuses those in a source host (runtimeResolutionUses).
  */
-export function hostSpecifiers(source: string): string[] {
+function hostSpecifiers(source: string): string[] {
   // bun's transpiler refuses the hosts' `#!/usr/bin/env node` line.
   const text = source.replace(/^#!.*(\r?\n|$)/, "");
   const scanner = new Bun.Transpiler({ loader: "js" });

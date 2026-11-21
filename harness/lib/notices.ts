@@ -17,8 +17,8 @@
  * when it sits under a directory whose name carries a directory word
  * (`LICENSES/`, `THIRD_PARTY_NOTICES/`, `legal-notices/`), at whatever depth.
  * Source code is not a licence text however it is named: a name ending in a
- * code extension (`.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`, `.d.ts`,
- * `.map`, `.json`) does not travel, so `license-checker.js` stays out; `.txt`,
+ * code extension (`.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`, `.map`,
+ * `.json`) does not travel, so `license-checker.js` stays out; `.txt`,
  * `.md` and a name with no extension always travel.
  *
  * The search is over the package's own tree only: a nested `node_modules`
@@ -82,7 +82,7 @@ export interface StagedNotices {
 }
 
 /** The assembled file: what it must carry, and its whole text. */
-export interface NoticeAssembly extends StagedNotices {
+interface NoticeAssembly extends StagedNotices {
   text: string;
 }
 
@@ -93,7 +93,7 @@ const LICENCE_WORD = /licen[cs]e|notice|copying/i;
 const LICENCE_DIR_WORD = /licen[cs]es|notices/i;
 
 /** The extensions that carry code, not a licence text: a licence word in the name of one of these (`license-checker.js`, `notices.json`) does not make it a notice. `.txt`, `.md` and no extension are never code. */
-const CODE_EXTENSIONS = [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".d.ts", ".map", ".json"];
+const CODE_EXTENSIONS = [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".map", ".json"];
 
 /** The directory a package puts the licence texts of the code it embeds in: those are the notice of that code, not evidence of the package's own terms (the SPDX fallback below leans on that). */
 const THIRD_PARTY_DIR = "THIRD_PARTY_NOTICES";

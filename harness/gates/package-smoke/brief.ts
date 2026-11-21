@@ -26,15 +26,12 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 
-import { chatReply, cleanEnv, cliJson, pageScript, parse, SKILL, STUB_CREDENTIAL_ENV, STUB_MODEL, tail } from "../../lib/desktop-page.ts";
+import { chatReply, cleanEnv, cliJson, pageScript, parse, STUB_CREDENTIAL_ENV, STUB_MODEL, tail } from "../../lib/desktop-page.ts";
 import { PAUSE_DEADLINE_SECONDS, durableStorePath, startPausedRun } from "../../lib/host-control.ts";
 import { arrayField, field, numberField, stringField } from "../../lib/json.ts";
-import { resolve } from "../../lib/repo.ts";
 import { briefAnswer, stubMessages } from "../../lib/sse.ts";
-import { cli, launch, setup } from "../desktop-smoke/scenario.ts";
+import { launch, seedStudyTrail, textEnv } from "../desktop-smoke/scenario.ts";
 import type { Scenario, ScenarioRun } from "../desktop-smoke/scenario.ts";
-
-const IMPORT_FIXTURE = "internal/cli/testdata/import";
 
 /**
  * The environment the installed binary gets when this case runs its CLI: the
@@ -48,14 +45,9 @@ function installedEnv(
   keyEnv: Record<string, string>,
   pins: { runtime: string; durableHost: string },
 ): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [name, value] of Object.entries(cleanEnv())) if (typeof value === "string") env[name] = value;
-  for (const [name, value] of Object.entries(s.shared.launchEnv ?? {})) {
-    if (value === undefined) delete env[name];
-    else env[name] = value;
-  }
   return {
-    ...env,
+    ...textEnv(cleanEnv()),
+    ...textEnv(s.shared.launchEnv ?? {}),
     PASSQUEST_PROVIDER_REGISTRY: s.shared.registry,
     PASSQUEST_NODE: pins.runtime,
     PASSQUEST_AGENT_HOST: pins.durableHost,
@@ -92,22 +84,8 @@ export const brief: Scenario = {
 
     try {
       // The same trail the coach case seeds: recorded attempts make the brief's
-      // packet non-empty, and the model is tested and chosen through the CLI.
-      const imported = await cli(s, ["import", "--path", resolve(s.shared.ctx.root, IMPORT_FIXTURE)]);
-      const sourceID = stringField(field(imported.doc, "source"), "id");
-      if (!s.check(imported.code === 0 && sourceID !== undefined, `brief: setup import exit = ${imported.code}: ${tail(imported.stderr, 4)}`)) {
-        return;
-      }
-      const steps = [
-        ["question", "add", sourceID!, "1", "--file", resolve(s.shared.ctx.root, `${IMPORT_FIXTURE}/question-q2-tagged.json`)],
-        ["page", "review", sourceID!, "1", "--reviewer", "smoke"],
-        ["question", "review", sourceID!, "q2", "--answer", "C", "--reviewer", "smoke"],
-        ["tactic", "practice", SKILL, "--stage", "guided", "--answer", "A"],
-        ["skill", "practice", SKILL, "--answer", "A"],
-        ["model", "test", STUB_MODEL],
-        ["model", "use", STUB_MODEL],
-      ];
-      if (!(await setup(s, steps, keyEnv))) return;
+      // packet non-empty.
+      if (!(await seedStudyTrail(s, keyEnv))) return;
 
       // 1. The installed copy pauses a brief of its own: its runtime and host run
       // the packaged bundle, and the paused run carries the durable work Today

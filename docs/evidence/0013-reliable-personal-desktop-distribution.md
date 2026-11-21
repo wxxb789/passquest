@@ -111,3 +111,13 @@ exercised in the installed app as the unavailable path (`broken`) only" no longe
 `brief` case drives the durable host's *success* path in the installed app on all three OSes (run
 44854554521), the unavailable path stays the `broken` case, and search is still not exercised in the
 package at all ([`install.md`'s untested list](../install.md#what-ci-proves-and-what-is-untested)).
+
+## Dated note — 2026-11-21 (goal 0016 P5 review; appended, no row above is changed)
+
+The bold heading "**The durable host and search with the bundled runtime present are not exercised
+by the installed package.**" in the limits above no longer holds for its first half: goal 0016's
+`brief` case exercises the durable host's *success* path with the bundled runtime present in the
+installed app on all three OSes (CI run 44854554521,
+[`0016-lean-package.md`](0016-lean-package.md)); the dated note above retired only the middle
+sentence of the item. Search remains unexercised in the installed package, so the heading's second
+half and the item's last sentence still hold.

@@ -115,7 +115,7 @@ Reproducible: `Q:/scratch/omp/g16/P5/coldstart-ab.mjs`, run from the repository 
 runtime> <after host> <request file>` (driver Node v22.23.4; before = the base worktree's staged
 package, after = this tree's). Its output is published whole in
 `Q:/scratch/omp/g16/P5/coldstart-final.log` (run 2026-11-21T10:59:39+08:00), which carries the raw
-lines, the command and both tree paths. CPU load 100%
+lines. CPU load 100%
 (`(Get-CimInstance Win32_Processor).LoadPercentage`) before the run and after it. The medians moved
 1,234.4 → 851.2 ms (−31%, from the samples above): the absolute numbers are the machine's load
 talking as much as the bundle — P0's probe, as the plan's facts section records it, measured the same
@@ -169,7 +169,7 @@ taken as the machine-path clause of Q-0016-01).
 | `docs-links`, `secrets` and `typecheck` gates (this step's final tree) | PASS — `294 checked, 0 broken`; `755 files, 0 findings`; `0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
 | `gofmt -l internal cmd`, `go build ./...` (this step, final tree) | `gofmt` prints nothing and the build succeeds; no Go file changed in the whole goal (row below) |
 | `harness self-test` gate (this step, final tree) | PASS — `83 cases (9 must pass), 24/24 gates` in 1491 s, load 100% before and after (`Q:/scratch/omp/g16/P5/selftest-final.log`); this step's only change under `harness/` is a comment in `package-smoke.cases.ts` |
-| `git diff 4633b07..HEAD -- agent internal cmd '*.go' mygo.json bun.lock agent/package.json` | empty: no host script, Go file, lock file or module manifest changed in the whole goal |
+| `git diff 4633b07..HEAD -- 'agent/*.mjs' internal cmd '*.go' mygo.json bun.lock agent/package.json` | empty: no host script, Go file, lock file or module manifest changed in the whole goal |
 
 The self-test's case count is read two ways that agree: the three CI jobs print `83 cases (9 must
 pass), 24/24 gates`, and counting a case's own `label` field — `grep -h '^      label: "'
@@ -180,7 +180,7 @@ those files is not a case) — gives 83 over the 24 case files without running t
 
 | # | Contract item | Evidence |
 |---|---|---|
-| 1 | Only code that runs is shipped | Staging and the package smoke's contents check both run `assertLeanAgentTree` (`harness/lib/package.ts`): the installed `agent/` holds the four hosts and `THIRD-PARTY-NOTICES.txt` only — no `node_modules`, no symlink, no other file type, no staged file naming a package specifier, no file embedding the machine path of the builder. Self-test must-fail fixtures: `installed agent tree carrying node_modules`, `installed agent host naming a package specifier`, `installed agent file embedding a machine path`; the staging-side lean check and the run-time-resolution refusal are driven through staging by the `stagingRefusalsProblem` unit. The tree itself: the staged `agent/` went 12,772 files / 89.1 MB → 5 files / 1.6 MB and the whole staged tree 12,774 files → 7 on all three OSes, with the package bytes following (table above) |
+| 1 | Only code that runs is shipped | Staging and the package smoke's contents check both run `assertLeanAgentTree` (`harness/lib/package.ts`): the installed `agent/` holds the four hosts and `THIRD-PARTY-NOTICES.txt` only — no `node_modules`, no symlink, no other file type, no staged file naming a package specifier, no file embedding the machine path of the builder. Self-test must-fail fixtures: `installed agent tree carrying node_modules`, `installed agent host naming a package specifier`, `installed agent file embedding a machine path`; the staging-side lean check and the run-time-resolution refusal are driven through staging by the `stagingRefusalsProblem` unit. The tree itself: the staged `agent/` went 12,772 files / 89.1 MB → 5 files / 1.6 MB and the whole staged tree 12,774 files → 7 on all three OSes, with the package bytes following (table above). One name in the goal's example list is loaded, not absent: `openai@7.19.0` — `@earendil-works/pi-ai`'s OpenAI-compatible completions path imports it (`agent/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js`: `import OpenAI from "openai"`) — so the one bundle inlines it and its four licence texts travel (notices table above); the goal's rule, no third-party package that none of the hosts load, holds, and the other names on the list are absent from the staged `durable-host.mjs` |
 | 2 | The smaller package is measured, not asserted | The two tables above give, per OS's package job, the staged file count, the installed tree (the uncompressed reading), the package size and the uploaded artifact bytes, each citing its CI run (the v0.15.0 release assets stand beside the before row), plus the local re-derivation of both trees; no number is promised that a run did not print |
 | 3 | The study brief works in the installed app | The `brief` case (`harness/gates/package-smoke/brief.ts`) in the three package jobs of run 44854554521: the installed binary's own CLI pauses a run (exit 4) against a held stub answer, the window resumes it from Today, the stub answers step 1, step 2 and the final text, `brief:changed` reports completion, and `agent status` / `report` through the installed binary show two committed steps and an untouched attempt report after the window's resume made exactly three provider requests on the one path (checked as `resumed.length === 3`; the CLI half's own pause made one) |
 | 4 | Nothing else changes for the learner | The 11-section durable matrix runs against the source host *and* the staged bundle in the three `core` jobs (run 44854554521); `gofmt`/`vet`/`build`/`test` and every other gate stay green on three OSes; the golden-contract gate is green with no `internal/**/testdata/` change; `agent/*.mjs`, `internal/`, `cmd/`, `mygo.json`, `bun.lock` and `agent/package.json` have an empty diff across the goal; three of the four hosts ship byte-identical (sha256 above), and the bundled one answers the same protocol documents (matrix pass) |
@@ -195,10 +195,12 @@ those files is not a case) — gives 83 over the 24 case files without running t
   language would be missed or carried only if an ancestor directory matches. Over-inclusion is the
   accepted side; omission is the risk, and it is bounded by the inlined set being 7 packages today.
 - **A package root that is a symlink fails staging**, and that path is unproven on POSIX: the licence
-  source refuses a symlink by name (Q-0016-10), and Windows refused to create the fixture link in
-  the self-test. If a future dependency resolves through a symlinked package root on macOS or Linux,
-  staging would fail rather than assemble a partial notice set — a loud failure, but not one CI has
-  exercised.
+  source refuses a symlink by name (Q-0016-10) — a refusal the self-test drives through an injected
+  `NoticeFs` (`isSymbolicLink` true), so no fixture creates a real link for it, and the harness's
+  real `symlinkSync` call in the self-test (the credential fixture's link seeds) is skipped where
+  Windows refuses it with EPERM. If a future dependency resolves through a symlinked package root
+  on macOS or Linux, staging would fail rather than assemble a partial notice set — a loud failure,
+  but not one CI has exercised.
 - **`emptyInlinedSetProblem`'s call site is untested**: the guard has a unit
   (`inlinedSetProblem`), but no test drives `bundleHost` with a metafile that names a package and
   inlines none, so the guard's wiring to staging is proven by reading, not by a run.

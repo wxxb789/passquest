@@ -42,7 +42,7 @@ export function sseTool(
 }
 
 /** One chat message of an OpenAI-compatible request body, as far as a stub reads it. */
-export interface StubMessage {
+interface StubMessage {
   role?: string;
   content?: unknown;
 }
