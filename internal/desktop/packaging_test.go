@@ -58,10 +58,14 @@ func TestPackagingIdentity(t *testing.T) {
 	if config.Linux.Maintainer == "" {
 		t.Error("mygo.json linux.maintainer is empty")
 	}
-	// The Go 1.27 toolchain links darwin binaries for macOS 13 and later
-	// (LC_BUILD_VERSION minos 13.0); MyGo's default Info.plist minimum is
-	// 12.0, which would let macOS 12 try to open a binary it cannot run.
-	if config.MacOS.MinimumSystemVersion != "13.0" {
-		t.Errorf("mygo.json macos.minimumSystemVersion = %q, want 13.0, the toolchain's minimum", config.MacOS.MinimumSystemVersion)
+	// The supported floor is a product decision, and MyGo copies
+	// macos.minimumSystemVersion verbatim into the Info.plist's
+	// LSMinimumSystemVersion (cmd/mygo/bundle.go:254); its own default is
+	// 12.0. The effective floor is the higher of that key and the Mach-O's
+	// `minos`, which the Go 1.27 linker writes as 13.0 — below the declared
+	// 26.0 — so the plist key binds and raising minos is not needed (dyld
+	// refuses a binary whose minos is newer than the running macOS).
+	if config.MacOS.MinimumSystemVersion != "26.0" {
+		t.Errorf("mygo.json macos.minimumSystemVersion = %q, want 26.0, the supported floor", config.MacOS.MinimumSystemVersion)
 	}
 }

@@ -1,6 +1,6 @@
 # 0016 — A lean package that ships only what the app runs: evidence
 
-Contract: [`../goals/0016-lean-package.md`](../goals/0016-lean-package.md).
+Contract: [`../goals/archive/0016-lean-package.md`](../goals/archive/0016-lean-package.md).
 Plan: [`../plans/2026-11-20-2100-0016-lean-package.md`](../plans/2026-11-20-2100-0016-lean-package.md).
 Guide: [`../install.md`](../install.md). Decisions: Q-0016-01…12 in
 [`../decisions/OPEN-QUESTIONS.md`](../decisions/OPEN-QUESTIONS.md).

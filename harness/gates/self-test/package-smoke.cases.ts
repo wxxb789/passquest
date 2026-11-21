@@ -31,6 +31,13 @@
  * whose host carries urls and clock-shaped text the machine-path scan must
  * read as ordinary content, and one whose notices file carries every text
  * whole.
+ *
+ * Three cases drive the bundle's Info.plist (goal 0017 P1): a tree whose
+ * `.app` plist kept an older `LSMinimumSystemVersion` than the mygo.json it
+ * carries declares must fail naming both values, the same tree with the
+ * declared value must pass, and one whose nested `Helpers/X.app` plist keeps
+ * an older value must pass too, because a nested bundle's plist is not the
+ * installed app's — on every OS, so the check is not macOS-only.
  */
 import { BASELINE, BASELINE_PARTIAL } from "../../lib/baseline.ts";
 import { Database } from "bun:sqlite";
@@ -98,6 +105,31 @@ const FIXTURE_FILES: Record<string, string> = {
   "desktop/web/src/main.ts": 'document.title = "selftest";\n',
   ...FIXTURE_HOSTS,
 };
+
+/** The fixture mygo.json of a case that carries the macOS floor: the value MyGo copies into LSMinimumSystemVersion. */
+const FIXTURE_MYGO_MACOS = '{"name": "Pass Quest", "version": "0.0.0", "macos": {"minimumSystemVersion": "26.0"}}\n';
+
+/**
+ * The bundle's Info.plist as MyGo writes it (cmd/mygo/bundle.go, infoPlist
+ * and writePlistValue: XML, sorted keys, tab-indented), reduced to two keys.
+ * Placed where the gate's walk meets it in an installed macOS tree, the
+ * `.app`'s `Contents/Info.plist`.
+ */
+function fixturePlist(minimum: string): string {
+  return [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">`,
+    `<plist version="1.0">`,
+    `<dict>`,
+    `\t<key>CFBundleIdentifier</key>`,
+    `\t<string>com.github.wxxb789.passquest</string>`,
+    `\t<key>LSMinimumSystemVersion</key>`,
+    `\t<string>${minimum}</string>`,
+    `</dict>`,
+    `</plist>`,
+    "",
+  ].join("\n");
+}
 
 /** A credential-shaped string built at run time, the way the secrets cases build one. */
 function fakeKey(): string {
@@ -1409,6 +1441,27 @@ func main() {
         return null;
       },
     },
+    {
+      gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),
+      label: "installed bundle whose Info.plist kept an older minimum than mygo.json declares",
+      files: {
+        ...FIXTURE_FILES,
+        // MyGo copies the declared floor into LSMinimumSystemVersion verbatim,
+        // and the effective floor is the higher of that key and the Mach-O's
+        // minos — 13.0 from the Go 1.27 linker — so the key binds and an older
+        // value would open on a macOS between the linker's minos and the
+        // declared floor (goal 0017 P1). The failure must name both values.
+        "mygo.json": FIXTURE_MYGO_MACOS,
+        "build/fixture/Contents/Info.plist": fixturePlist("13.0"),
+      },
+      postFail: (failures) => {
+        const line = failures.map(slashed).find((entry) => entry.includes("Contents/Info.plist"));
+        if (line === undefined || !line.includes('"13.0"') || !line.includes('"26.0"')) {
+          return `package-smoke: the content scan did not report the plist minimum against both values: ${failures.slice(0, 3).join("; ")}`;
+        }
+        return null;
+      },
+    },
   ];
 }
 
@@ -1455,6 +1508,40 @@ export function packageSmokePassCases(): PassCase[] {
         detail.includes("contents scan:")
           ? null
           : `package-smoke: the content scan completed without a scan line (${detail})`,
+    },
+    {
+      gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),
+      label: "installed bundle whose Info.plist declares the minimum mygo.json states",
+      files: {
+        ...FIXTURE_FILES,
+        // The counterpart of the broken case above (goal 0017 P1): the scan
+        // must accept the declared floor, and its pass line names the value it
+        // checked, so a check that stopped running shows here too.
+        "mygo.json": FIXTURE_MYGO_MACOS,
+        "build/fixture/Contents/Info.plist": fixturePlist("26.0"),
+      },
+      postPass: (detail) =>
+        detail.includes("Contents/Info.plist declares LSMinimumSystemVersion 26.0")
+          ? null
+          : `package-smoke: the content scan did not report the checked plist minimum (${detail})`,
+    },
+    {
+      gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),
+      label: "installed bundle whose nested app Info.plist kept an older minimum",
+      files: {
+        ...FIXTURE_FILES,
+        // The scan reads the bundle at the tree's root only (goal 0017 P1):
+        // the root plist carries the declared floor, and the nested
+        // `Helpers/X.app` plist, which is not the installed app's, must not
+        // fail the tree even though its value is older.
+        "mygo.json": FIXTURE_MYGO_MACOS,
+        "build/fixture/Contents/Info.plist": fixturePlist("26.0"),
+        "build/fixture/Helpers/X.app/Contents/Info.plist": fixturePlist("13.0"),
+      },
+      postPass: (detail) =>
+        detail.includes("Contents/Info.plist declares LSMinimumSystemVersion 26.0")
+          ? null
+          : `package-smoke: the content scan did not report the checked plist minimum (${detail})`,
     },
   ];
 }

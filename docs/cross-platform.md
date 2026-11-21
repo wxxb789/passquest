@@ -152,6 +152,6 @@ package, a byte-identical copy for every other host — a pinned Node runtime, t
 
 ## Gates
 
-`bun run gate` → 25 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
+`bun run gate` → 26 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
 gates run on all three OS in CI. CI runs it as four groups (`core`, `desktop`, `package`, `self-test`)
-per OS; `bun run gate` with no argument still runs all 25.
+per OS; `bun run gate` with no argument still runs all 26.
