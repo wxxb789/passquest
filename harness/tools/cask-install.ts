@@ -214,7 +214,18 @@ function firstDifference(rendered: string, tap: string): string {
   return "the two texts hold the same lines and differ in encoding only";
 }
 
-/** One run's mutable state: the checker, the app to reap, the clone to remove. */
+/**
+ * One run's mutable state: the checker, the fully qualified name of the cask
+ * this run installed, the app to reap, the clone to remove.
+ *
+ * The name is decided once, from the mode, and every `brew` command that takes
+ * a cask name — `install`, `list`, `uninstall --zap`, `audit` — is given it. A
+ * bare token is not enough: in a mutant run two installed taps carry `pass-quest`
+ * (`passquest/mutant` and the tap clone), and `brew uninstall --zap --cask
+ * pass-quest` then refuses to act — "Cask pass-quest exists in multiple taps:
+ * passquest/mutant/pass-quest, wxxb789/tap/pass-quest" (CI run 44909338098) —
+ * so the uninstall removed nothing and the mutant's own cask stayed installed.
+ */
 class CaskRun {
   readonly checker = new Checker();
   app: DesktopRun | null = null;
@@ -222,7 +233,7 @@ class CaskRun {
   mutantTapDir: string | null = null;
   markerCreated = false;
 
-  constructor(readonly temp: string) {}
+  constructor(readonly temp: string, readonly cask: string) {}
 }
 
 /** The data directory the app creates, `~/Library/Application Support/Pass Quest`. */
@@ -290,10 +301,10 @@ function installedAppPath(run: CaskRun, install: RunResult): string {
  * app, so the log shows why a check written against it would prove nothing about
  * the installed app.
  */
-async function printCaskroomLink(): Promise<void> {
-  const listed = await loggedRun("brew", ["list", "--cask", CASK_FACTS.token]);
+async function printCaskroomLink(run: CaskRun): Promise<void> {
+  const listed = await loggedRun("brew", ["list", "--cask", run.cask]);
   if (listed.code !== 0) {
-    console.log(`[info] brew list --cask ${CASK_FACTS.token} -> exit ${listed.code}: ${observed(listed)}`);
+    console.log(`[info] brew list --cask ${run.cask} -> exit ${listed.code}: ${observed(listed)}`);
     return;
   }
   const app =
@@ -303,7 +314,7 @@ async function printCaskroomLink(): Promise<void> {
       .map((line) => line.trim())
       .find((line) => line.endsWith(".app")) ?? null;
   if (app === null) {
-    console.log(`[info] brew list --cask ${CASK_FACTS.token} lists no Caskroom .app: ${observed(listed)}`);
+    console.log(`[info] brew list --cask ${run.cask} lists no Caskroom .app: ${observed(listed)}`);
     return;
   }
   const link = await loggedRun("ls", ["-ld", app]);
@@ -459,12 +470,12 @@ async function createDataMarker(run: CaskRun): Promise<void> {
 
 /** `brew uninstall --zap` and the three things it must do: quit, remove, remove. */
 async function uninstallAndAssert(run: CaskRun, appPath: string, app: DesktopRun | null): Promise<void> {
-  const uninstall = await loggedRun("brew", ["uninstall", "--zap", "--cask", CASK_FACTS.token]);
+  const uninstall = await loggedRun("brew", ["uninstall", "--zap", "--cask", run.cask]);
   run.checker.check(
     "uninstall",
     uninstall.code === 0,
-    `brew uninstall --zap --cask ${CASK_FACTS.token} -> exit ${uninstall.code}: ${observed(uninstall, 6)}`,
-    `brew uninstall --zap --cask ${CASK_FACTS.token} exited ${uninstall.code}: ${observedTail(uninstall)}`,
+    `brew uninstall --zap --cask ${run.cask} -> exit ${uninstall.code}: ${observed(uninstall, 6)}`,
+    `brew uninstall --zap --cask ${run.cask} exited ${uninstall.code}: ${observedTail(uninstall)}`,
   );
   if (app !== null) {
     const log = `${uninstall.stdout}${uninstall.stderr}`;
@@ -649,19 +660,19 @@ async function runTap(run: CaskRun): Promise<void> {
 
   const tapText = await cloneTap(run);
 
-  const install = await loggedRun("brew", ["install", "--cask", TAP_CASK]);
+  const install = await loggedRun("brew", ["install", "--cask", run.cask]);
   run.checker.check(
     "install",
     install.code === 0,
-    `brew install --cask ${TAP_CASK} -> exit 0: ${observed(install)}`,
-    `brew install --cask ${TAP_CASK} exited ${install.code}: ${observedTail(install)}`,
+    `brew install --cask ${run.cask} -> exit 0: ${observed(install)}`,
+    `brew install --cask ${run.cask} exited ${install.code}: ${observedTail(install)}`,
   );
-  if (install.code !== 0) throw new Error(`brew install --cask ${TAP_CASK} exited ${install.code}`);
+  if (install.code !== 0) throw new Error(`brew install --cask ${run.cask} exited ${install.code}`);
 
   const appPath = installedAppPath(run, install);
   const exe = appExecutable(appPath);
   console.log(`[state] installed app ${appPath} (the target of the install's own Moving line), executable ${exe}`);
-  await printCaskroomLink();
+  await printCaskroomLink(run);
 
   const attribute = await xattrQuarantine(appPath);
   run.checker.check("quarantine-app", attribute.absent, attribute.detail, `the installed app still carries com.apple.quarantine: ${attribute.tail}`);
@@ -692,16 +703,20 @@ async function runTap(run: CaskRun): Promise<void> {
   await assertZapPathsGone(run, tapText);
   printListing("after the uninstall", await libraryListing());
 
-  const audit = await loggedRun("brew", ["audit", "--cask", "--strict", TAP_CASK]);
+  const audit = await loggedRun("brew", ["audit", "--cask", "--strict", run.cask]);
   run.checker.check(
     "audit",
     audit.code === 0,
-    `brew audit --cask --strict ${TAP_CASK} -> exit 0: ${observed(audit, 2)}`,
-    `brew audit --cask --strict ${TAP_CASK} exited ${audit.code}; its last 60 lines: ${observedTail(audit)}`,
+    `brew audit --cask --strict ${run.cask} -> exit 0: ${observed(audit, 2)}`,
+    `brew audit --cask --strict ${run.cask} exited ${audit.code}; its last 60 lines: ${observedTail(audit)}`,
   );
 }
 
-/** One mutant: install the derived cask from the scratch tap and require the matching assertion to catch the removal. */
+/**
+ * One mutant: install the derived cask from the scratch tap and require the
+ * matching assertion to catch the removal. Its caller runs only when mutants
+ * were asked for, where `run.cask` is the scratch tap's cask.
+ */
 async function runMutant(run: CaskRun, mutant: Mutant, tapText: string): Promise<void> {
   console.log(`\ncask-install: mutant '${mutant}' — the tap cask with ${MUTANT_FEATURE[mutant]} removed, installed from the scratch tap ${MUTANT_TAP_NAME}`);
   const mutated = mutate(tapText, mutant);
@@ -712,13 +727,13 @@ async function runMutant(run: CaskRun, mutant: Mutant, tapText: string): Promise
   const file = path.join(run.mutantTapDir, CASK_TAP_PATH);
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, mutated);
-  console.log(`[mutate] removed ${MUTANT_FEATURE[mutant]}; wrote ${file} (${mutated.length} bytes against the tap file's ${tapText.length}) as ${MUTANT_TAP_CASK}`);
+  console.log(`[mutate] removed ${MUTANT_FEATURE[mutant]}; wrote ${file} (${mutated.length} bytes against the tap file's ${tapText.length}) as ${run.cask}`);
 
-  const install = await loggedRun("brew", ["install", "--cask", MUTANT_TAP_CASK]);
+  const install = await loggedRun("brew", ["install", "--cask", run.cask]);
   run.checker.check(
     "install",
     install.code === 0,
-    `brew install --cask ${MUTANT_TAP_CASK} -> exit 0: ${observed(install)}`,
+    `brew install --cask ${run.cask} -> exit 0: ${observed(install)}`,
     `the '${mutant}' mutant did not install: ${observedTail(install)}`,
   );
   if (install.code !== 0) throw new Error(`the '${mutant}' mutant did not install`);
@@ -746,8 +761,8 @@ async function runMutant(run: CaskRun, mutant: Mutant, tapText: string): Promise
   if (mutant === "zap") {
     await createDataMarker(run);
     run.checker.check("data-marker", existsSync(markerPath()), `${DATA_DIRECTORY} holds ${MARKER} before the uninstall`, `${markerPath()} is missing although this run created it`);
-    const uninstall = await loggedRun("brew", ["uninstall", "--zap", "--cask", CASK_FACTS.token]);
-    run.checker.check("uninstall", uninstall.code === 0, `brew uninstall --zap --cask ${CASK_FACTS.token} -> exit ${uninstall.code}: ${observed(uninstall, 4)}`, `the uninstall exited ${uninstall.code}: ${observedTail(uninstall)}`);
+    const uninstall = await loggedRun("brew", ["uninstall", "--zap", "--cask", run.cask]);
+    run.checker.check("uninstall", uninstall.code === 0, `brew uninstall --zap --cask ${run.cask} -> exit ${uninstall.code}: ${observed(uninstall, 4)}`, `the uninstall exited ${uninstall.code}: ${observedTail(uninstall)}`);
     const listed = await loggedRun("ls", ["-d", DATA_DIRECTORY]);
     run.checker.check(
       "mutant-zap",
@@ -769,8 +784,8 @@ async function runMutant(run: CaskRun, mutant: Mutant, tapText: string): Promise
     `the app was not running (pid ${pid}, state ${early}); the quit mutant cannot observe anything`,
   );
   if (pid === null || early !== "alive") throw new Error("the app did not stay running");
-  const uninstall = await loggedRun("brew", ["uninstall", "--zap", "--cask", CASK_FACTS.token]);
-  run.checker.check("uninstall", uninstall.code === 0, `brew uninstall --zap --cask ${CASK_FACTS.token} -> exit ${uninstall.code}: ${observed(uninstall, 4)}`, `the uninstall exited ${uninstall.code}: ${observedTail(uninstall)}`);
+  const uninstall = await loggedRun("brew", ["uninstall", "--zap", "--cask", run.cask]);
+  run.checker.check("uninstall", uninstall.code === 0, `brew uninstall --zap --cask ${run.cask} -> exit ${uninstall.code}: ${observed(uninstall, 4)}`, `the uninstall exited ${uninstall.code}: ${observedTail(uninstall)}`);
   const spent = await waitForExit(app, MUTANT_SURVIVAL_MS);
   run.checker.check(
     "mutant-quit",
@@ -792,10 +807,10 @@ async function cleanup(run: CaskRun): Promise<void> {
     }
     run.app = null;
   }
-  const listed = await loggedRun("brew", ["list", "--cask", CASK_FACTS.token]);
+  const listed = await loggedRun("brew", ["list", "--cask", run.cask]);
   if (listed.code === 0) {
     console.log("[cleanup] the cask is still installed; uninstalling it with --zap");
-    await loggedRun("brew", ["uninstall", "--zap", "--cask", CASK_FACTS.token]);
+    await loggedRun("brew", ["uninstall", "--zap", "--cask", run.cask]);
   }
   if (run.markerCreated && existsSync(DATA_DIRECTORY)) {
     console.log(`[cleanup] removing the data directory this run created: ${DATA_DIRECTORY}`);
@@ -831,10 +846,14 @@ async function main(argv: readonly string[]): Promise<number> {
     return 2;
   }
 
-  const run = new CaskRun(mkdtempSync(path.join(tmpdir(), "passquest-cask-install-")));
+  // The one place the run's cask name is decided: tap mode installs the tap's
+  // cask, a mutant run installs the derived cask from the scratch tap. Every
+  // `brew` command below takes it from the run.
+  const mutants = options.mutants.length > 0;
+  const run = new CaskRun(mkdtempSync(path.join(tmpdir(), "passquest-cask-install-")), mutants ? MUTANT_TAP_CASK : TAP_CASK);
   try {
     await assertMacosFloor(run);
-    if (options.mutants.length > 0) {
+    if (mutants) {
       console.log(`cask-install: mutants ${options.mutants.join(", ")} (each installs a derived cask from the scratch tap ${MUTANT_TAP_NAME})`);
       const tapText = await cloneTap(run);
       await createMutantTap(run);
