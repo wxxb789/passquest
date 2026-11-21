@@ -244,8 +244,9 @@ The Homebrew path has its own workflow ([`.github/workflows/cask.yml`](../.githu
 on a macOS runner it installs the published release **from the tap** (`brew install --cask
 wxxb789/tap/pass-quest`), asserts `xattr -p com.apple.quarantine` finds no quarantine flag on the
 installed app and on a nested file, launches the installed app through the smoke hook, then runs
-`brew uninstall --zap --cask pass-quest` and asserts the app quit and the bundle and the data
-directory are gone. Publishing a release updates the tap's version and SHA-256 with no manual step. A
+`brew uninstall --zap --cask pass-quest` and asserts the app quit, the bundle is gone, and every path
+the cask's `zap trash:` names is gone: the data directory and the app's WebKit data and cache folders
+under `~/Library`. Publishing a release updates the tap's version and SHA-256 with no manual step. A
 pull request that touches the cask template or its tools runs the same workflow: the `update` job
 renders the release and cross-checks its digest without pushing, and the `install` job is a real
 install, not a dry run — but before installing, it requires the tap's file to equal a fresh render

@@ -7,10 +7,11 @@ name: cask
 # the HOMEBREW_TAP_DEPLOY_KEY secret. `harness/tools/cask-install.ts` then
 # installs that cask from the tap on a macOS runner and asserts it: no
 # quarantine flag, the app boots through the smoke hook, uninstall quits the
-# running app, --zap removes the bundle and the data directory — and three
-# mutant runs prove each of those three removals is caught, each installing its
-# derived cask by name from a scratch tap created with `brew tap-new --no-git`
-# on the runner (a cask cannot be installed from a path on current Homebrew).
+# running app, --zap removes the bundle and every path the cask's zap trash:
+# names, read from the installed cask file — and three mutant runs prove each of
+# those three removals is caught, each installing its derived cask by name from
+# a scratch tap created with `brew tap-new --no-git` on the runner (a cask
+# cannot be installed from a path on current Homebrew).
 #
 # `workflow_dispatch` can start only a workflow whose file is on the default
 # branch (GitHub registers a dispatchable workflow from the default branch), so
@@ -40,6 +41,9 @@ on:
       - harness/gates/desktop-smoke/boot.ts
       - harness/gates/desktop-smoke/scenario.ts
       - harness/tools/cask-*.ts
+      # `cask-publish.ts` reads the pinned render for its dry-run byte
+      # comparison, so a change to it is a change to a file the tools load.
+      - harness/gates/testdata/pass-quest-0.15.0.rb
       - mygo.json
   release:
     types: [published]

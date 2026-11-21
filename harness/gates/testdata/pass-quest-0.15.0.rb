@@ -60,13 +60,21 @@ cask "pass-quest" do
 
   uninstall quit: "com.github.wxxb789.passquest"
 
-  # The data directory the install guides name. The macOS install job prints
-  # the before/after `~/Library` listing (goal 0017, default 8, still open) and
-  # P5 appends what that listing measured, in the array form `brew generate-zap`
-  # emits (dev-cmd/generate-zap.rb) — one string per path, because Homebrew
-  # resolves each directive value as one literal path
-  # (cask/artifact/abstract_uninstall.rb).
-  zap trash: "~/Library/Application Support/Pass Quest"
+  # The data directory the install guides name, plus the WebKit data and cache
+  # directories the app keeps for itself, which the macOS install job's
+  # before/after `~/Library` listing measured (goal 0017, default 8). One string
+  # per path, because Homebrew resolves each directive value as one literal path
+  # (cask/artifact/abstract_uninstall.rb), in the array form `brew generate-zap`
+  # emits (dev-cmd/generate-zap.rb); the elements are alphabetical because that
+  # is what the Cask/ArrayAlphabetization cop requires of a `zap` array
+  # (rubocops/cask/array_alphabetization.rb). The install job reads this list
+  # back out of the installed cask file and requires every path to be gone after
+  # `--zap`, so the stanza and that assertion cannot drift apart.
+  zap trash: [
+    "~/Library/Application Support/Pass Quest",
+    "~/Library/Caches/com.github.wxxb789.passquest",
+    "~/Library/WebKit/com.github.wxxb789.passquest",
+  ]
 
   caveats <<~EOS
     Pass Quest is signed ad-hoc only: macOS 26 or macOS 27 on Apple silicon is required.

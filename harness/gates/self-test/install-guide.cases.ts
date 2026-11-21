@@ -38,6 +38,19 @@ const GUIDE_DOCUMENTS = [
 /** A desc above the Cask-Cookbook's 80-character limit, for the case that must fail on it. */
 const LONG_DESC = "Local-first AI exam coach for one written exam, with recall practice, essay review and pronunciation drills";
 
+/**
+ * The template's own `zap trash:` block, so a case can replace exactly it: the
+ * three paths the macOS install job measured, in the indentation and order the
+ * template carries.
+ */
+const ZAP_BLOCK = [
+  "  zap trash: [",
+  '    "~/Library/Application Support/Pass Quest",',
+  '    "~/Library/Caches/com.github.wxxb789.passquest",',
+  '    "~/Library/WebKit/com.github.wxxb789.passquest",',
+  "  ]",
+].join("\n");
+
 /** The first expected fact that the gate's failure lines do not name. */
 function expectedLines(failures: string[], expected: string[]): string | null {
   for (const line of expected) {
@@ -584,14 +597,19 @@ export function installGuideCases(): BrokenCase[] {
     ),
     caskCase(
       "a cask whose zap is missing the data directory",
-      'zap trash: "~/Library/Application Support/Pass Quest"',
-      'zap trash: "~/Library/Caches/Pass Quest"',
+      ZAP_BLOCK,
+      [
+        "  zap trash: [",
+        '    "~/Library/Caches/com.github.wxxb789.passquest",',
+        '    "~/Library/WebKit/com.github.wxxb789.passquest",',
+        "  ]",
+      ].join("\n"),
       [`${CASK_TEMPLATE_PATH}: zap trash: must carry the data directory the install guides name: "~/Library/Application Support/Pass Quest"`],
     ),
     caskCase(
       "a cask whose zap holds two paths in one string",
-      'zap trash: "~/Library/Application Support/Pass Quest"',
-      'zap trash: "~/Library/Application Support/Pass Quest,~/Library/Caches/com.github.wxxb789.passquest"',
+      '    "~/Library/Application Support/Pass Quest",',
+      '    "~/Library/Application Support/Pass Quest,~/Library/Caches/com.github.wxxb789.passquest",',
       [
         `${CASK_TEMPLATE_PATH}: zap trash: must carry the data directory the install guides name`,
         "holds several paths in one string; Homebrew resolves each directive value as one literal path, so the paths must be separate strings",
@@ -701,17 +719,21 @@ export function installGuidePassCases(): PassCase[] {
       files: {},
       prepare: async (root) => {
         copyProduct(root, GUIDE_DOCUMENTS);
-        const array = [
+        // `brew generate-zap` emits `format_directive`'s own indentation
+        // (dev-cmd/generate-zap.rb: seven spaces per item, five for the closing
+        // bracket), which is not the tree's — the parser reads entries, not a
+        // layout, so a pasted stanza passes.
+        const generated = [
           "  zap trash: [",
-          '    "~/Library/Application Support/Pass Quest",',
-          '    "~/Library/Caches/com.github.wxxb789.passquest",',
-          "  ]",
+          '       "~/Library/Application Support/Pass Quest",',
+          '       "~/Library/Caches/com.github.wxxb789.passquest",',
+          '       "~/Library/WebKit/com.github.wxxb789.passquest",',
+          "     ]",
         ].join("\n");
-        const patched = patchCopy(root, CASK_TEMPLATE_PATH, '  zap trash: "~/Library/Application Support/Pass Quest"', array);
+        const patched = patchCopy(root, CASK_TEMPLATE_PATH, ZAP_BLOCK, generated);
         if (patched) return patched;
         // The edited template is a new render, so the golden moves with it — the
-        // workflow the gate's mismatch message names, and the shape P4 appends
-        // its measured paths in.
+        // workflow the gate's mismatch message names for any accepted edit.
         const template = readFileSync(resolve(root, CASK_TEMPLATE_PATH), "utf8");
         writeFileSync(resolve(root, CASK_GOLDEN_PATH), renderCask(template, CASK_VERSION, CASK_SHA256));
         return null;
@@ -724,10 +746,10 @@ export function installGuidePassCases(): PassCase[] {
       prepare: async (root) => {
         copyProduct(root, GUIDE_DOCUMENTS);
         const oneLine = [
-          '  zap trash: ["~/Library/Application Support/Pass Quest", "~/Library/Caches/com.github.wxxb789.passquest"]',
+          '  zap trash: ["~/Library/Application Support/Pass Quest", "~/Library/Caches/com.github.wxxb789.passquest", "~/Library/WebKit/com.github.wxxb789.passquest"]',
           '  # "a, b" after the array stays a comment, not a second zap entry.',
         ].join("\n");
-        const patched = patchCopy(root, CASK_TEMPLATE_PATH, '  zap trash: "~/Library/Application Support/Pass Quest"', oneLine);
+        const patched = patchCopy(root, CASK_TEMPLATE_PATH, ZAP_BLOCK, oneLine);
         if (patched) return patched;
         const template = readFileSync(resolve(root, CASK_TEMPLATE_PATH), "utf8");
         writeFileSync(resolve(root, CASK_GOLDEN_PATH), renderCask(template, CASK_VERSION, CASK_SHA256));

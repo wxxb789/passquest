@@ -4,14 +4,21 @@
  * behaviour the goal names. Every assertion prints the exact command and the
  * value it observed — `xattr -p com.apple.quarantine <path> -> exit 1: No such
  * xattr: ...` — so the evidence record can quote this log; an assertion that
- * cannot run fails the run instead of passing it.
+ * cannot run fails the run instead of passing it, and a failure quotes the last
+ * 60 lines of the command's output, because that is where `brew` prints the
+ * offence. Two facts are read from the run rather than assumed: the app's path
+ * (the install's own `Moving App 'X.app' to '<path>'` line — the Caskroom path
+ * `brew list --cask` reports is a symlink to it) and the list of paths `--zap`
+ * must remove (the cask file Homebrew installed from).
  *
  * Modes:
  *   (default)      clone `wxxb789/homebrew-tap` into Homebrew's taps directory,
  *                  require its file to be byte-identical to a fresh render of
  *                  the template, then `brew install --cask wxxb789/tap/pass-quest`
- *                  and run every assertion; `brew audit --cask --strict` runs
- *                  last, after the behavioural evidence is already in the log.
+ *                  and run every assertion, including every path in the
+ *                  installed cask's zap trash: being gone after the uninstall;
+ *                  `brew audit --cask --strict` runs last, after the
+ *                  behavioural evidence is already in the log.
  *   --mutant <name> derive the tap cask with one feature removed (`quarantine`:
  *                  the postflight_steps block, `zap`: the zap trash: stanza
  *                  `quit`: the uninstall quit: argument), write the result as
@@ -38,7 +45,16 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
-import { CASK_FACTS, CASK_TAP_PATH, MACOS_DATA_DIRECTORY, renderCask, sha256Text, statedRelease, TAP_REPOSITORY } from "../lib/cask.ts";
+import {
+  CASK_FACTS,
+  CASK_TAP_PATH,
+  MACOS_DATA_DIRECTORY,
+  renderCask,
+  sha256Text,
+  statedRelease,
+  TAP_REPOSITORY,
+  zapTrashPaths,
+} from "../lib/cask.ts";
 import { startDesktop } from "../lib/desktop.ts";
 import type { DesktopRun, LaunchResult } from "../lib/desktop.ts";
 import { cleanEnv, launchPage, pageScript, sleep } from "../lib/desktop-page.ts";
@@ -96,11 +112,13 @@ const USAGE = `Assert the behaviour of the ${TAP_CASK} cask on this macOS machin
 
 The cask's assertions, each printing its exact command and observed value:
   sw_vers against the floor the cask declares; brew --version; the tap file
-  against the render; brew install; the installed .app; xattr -p
-  com.apple.quarantine on the app and on a nested file; a launch through the
-  smoke hook; the data directory marker; the uninstall quitting the running
-  app; the bundle and the data directory gone after --zap; brew audit --cask
-  --strict.
+  against the render; brew install; the app path the install's own
+  "Moving App ... to '<path>'" line names; xattr -p com.apple.quarantine on
+  that app and on a nested file; a launch through the smoke hook; the data
+  directory marker; the uninstall quitting the running app; every path the
+  installed cask file's zap trash: names gone after --zap; brew audit --cask
+  --strict. A failing assertion prints the command's last 60 lines, so the
+  offence at the end of an audit or an install is in the log.
 
 Exit codes: 0 every assertion passed, 1 a failure (its line is in the log),
 2 usage or the wrong platform. This tool never runs on Windows or Linux.`;
@@ -167,6 +185,23 @@ function observed(result: RunResult, limit = 4): string {
   return text.split("\n").slice(0, limit).join(" | ");
 }
 
+/**
+ * The last lines of a command's output, for a failure line. The head of a
+ * `brew` command is its progress noise — "audit is a developer command" and the
+ * gem fetch — while the offence is printed at the end, so a failure that kept
+ * the head hid exactly what it existed to report (round 4's audit assertion
+ * failed with its offence outside the logged 12 lines). 60 lines, and the count
+ * of the lines left out, so a long output is still bounded.
+ */
+function observedTail(result: RunResult, limit = 60): string {
+  const text = `${result.stdout}${result.stderr}`.replace(/\r\n/g, "\n").trim();
+  if (text === "") return "(no output)";
+  const lines = text.split("\n");
+  const omitted = lines.length - limit;
+  const shown = lines.slice(Math.max(0, omitted)).join(" | ");
+  return omitted > 0 ? `(${omitted} earlier line(s) omitted) ${shown}` : shown;
+}
+
 /** The first line on which two texts differ; the drift failure names it. */
 function firstDifference(rendered: string, tap: string): string {
   const left = rendered.split("\n");
@@ -195,18 +230,84 @@ function markerPath(): string {
   return path.join(DATA_DIRECTORY, MARKER);
 }
 
-/** `brew list --cask <token>` names the installed `.app`; the detail is the assertion line. */
-async function installedApp(): Promise<{ app: string | null; detail: string }> {
+/** What the install output says about the app it moved: the path, or why none could be read. */
+interface MovedApp {
+  app: string | null;
+  matched: string | null;
+  reason: string | null;
+}
+
+/**
+ * The app Homebrew moved into place, read from the install's own output. `brew`
+ * prints `Moving App 'Pass Quest.app' to '/Applications/Pass Quest.app'`
+ * (`cask/artifact/moved.rb` `move`); the target is the app that is installed,
+ * while the Caskroom path `brew list --cask` reports is a symlink Homebrew
+ * leaves behind (`post_move` -> `FileUtils.ln_sf target, source`). Asserting
+ * against the Caskroom path therefore asserted against a link: round 4's
+ * quarantine checks and boot launch used it, and so did the `--zap` uninstall,
+ * which removes the target, not the link. Nothing is assumed about the
+ * directory: the path comes from the install, and it must name the app the cask
+ * declares.
+ */
+function movedApp(install: RunResult): MovedApp {
+  const text = `${install.stdout}${install.stderr}`.replace(/\r\n/g, "\n");
+  const moving = /Moving ([A-Za-z]+) '([^'\n]+)' to '([^'\n]+)'/.exec(text);
+  if (moving === null) {
+    return { app: null, matched: null, reason: `the install printed no "Moving ..." line` };
+  }
+  const matched = moving[0];
+  const kind = moving[1] ?? "";
+  const source = moving[2] ?? "";
+  const target = moving[3] ?? "";
+  const wanted = `${CASK_FACTS.name}.app`;
+  if (source !== wanted) {
+    return { app: null, matched, reason: `the install moved ${kind} ${JSON.stringify(source)}, not ${JSON.stringify(wanted)}` };
+  }
+  return { app: target, matched, reason: null };
+}
+
+/**
+ * The path the installed app really has, asserted from the install output and
+ * used by every later check. A missing line fails the run instead of falling
+ * back to a guess: a wrong path would make the quarantine assertions pass
+ * against a symlink and the boot launch run the wrong copy.
+ */
+function installedAppPath(run: CaskRun, install: RunResult): string {
+  const moved = movedApp(install);
+  run.checker.check(
+    "app-path",
+    moved.app !== null,
+    `the install printed ${JSON.stringify(moved.matched ?? "")}`,
+    `${moved.reason ?? "no app path"}; the app's location is taken from the install output, never assumed — its last lines: ${observedTail(install)}`,
+  );
+  if (moved.app === null) throw new Error("the install named no app path; refusing to assert against a guessed one");
+  return moved.app;
+}
+
+/**
+ * The Caskroom `.app` `brew list --cask` reports, printed with `ls -ld` once as
+ * information and never asserted: after `post_move` it is a symlink to the moved
+ * app, so the log shows why a check written against it would prove nothing about
+ * the installed app.
+ */
+async function printCaskroomLink(): Promise<void> {
   const listed = await loggedRun("brew", ["list", "--cask", CASK_FACTS.token]);
+  if (listed.code !== 0) {
+    console.log(`[info] brew list --cask ${CASK_FACTS.token} -> exit ${listed.code}: ${observed(listed)}`);
+    return;
+  }
   const app =
-    listed.code === 0
-      ? (listed.stdout
-          .replace(/\r\n/g, "\n")
-          .split("\n")
-          .map((line) => line.trim())
-          .find((line) => line.endsWith(".app")) ?? null)
-      : null;
-  return { app: app === "" ? null : app, detail: `brew list --cask ${CASK_FACTS.token} -> exit ${listed.code}: ${observed(listed)}` };
+    listed.stdout
+      .replace(/\r\n/g, "\n")
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.endsWith(".app")) ?? null;
+  if (app === null) {
+    console.log(`[info] brew list --cask ${CASK_FACTS.token} lists no Caskroom .app: ${observed(listed)}`);
+    return;
+  }
+  const link = await loggedRun("ls", ["-ld", app]);
+  console.log(`[info] ls -ld ${JSON.stringify(app)} -> exit ${link.code}: ${observed(link, 1)}`);
 }
 
 /** The one executable in the bundle's `Contents/MacOS`, the smoke hook's target. */
@@ -218,14 +319,15 @@ function appExecutable(app: string): string {
 }
 
 /** The quarantine attribute one path carries, as `xattr -p com.apple.quarantine` reports it. */
-async function xattrQuarantine(target: string): Promise<{ absent: boolean; present: boolean; detail: string }> {
+async function xattrQuarantine(target: string): Promise<{ absent: boolean; present: boolean; detail: string; tail: string }> {
   const result = await loggedRun("xattr", ["-p", "com.apple.quarantine", target]);
   const text = `${result.stdout}${result.stderr}`.replace(/\r\n/g, "\n").trim();
-  const detail = `xattr -p com.apple.quarantine ${JSON.stringify(target)} -> exit ${result.code}: ${text.split("\n")[0] ?? "(no output)"}`;
+  const command = `xattr -p com.apple.quarantine ${JSON.stringify(target)}`;
   return {
     absent: result.code !== 0 && text.includes("No such xattr"),
     present: result.code === 0 && text !== "",
-    detail,
+    detail: `${command} -> exit ${result.code}: ${text.split("\n")[0] ?? "(no output)"}`,
+    tail: `${command} -> exit ${result.code}: ${observedTail(result)}`,
   };
 }
 
@@ -362,7 +464,7 @@ async function uninstallAndAssert(run: CaskRun, appPath: string, app: DesktopRun
     "uninstall",
     uninstall.code === 0,
     `brew uninstall --zap --cask ${CASK_FACTS.token} -> exit ${uninstall.code}: ${observed(uninstall, 6)}`,
-    `brew uninstall --zap --cask ${CASK_FACTS.token} exited ${uninstall.code}: ${observed(uninstall, 8)}`,
+    `brew uninstall --zap --cask ${CASK_FACTS.token} exited ${uninstall.code}: ${observedTail(uninstall)}`,
   );
   if (app !== null) {
     const log = `${uninstall.stdout}${uninstall.stderr}`;
@@ -375,7 +477,7 @@ async function uninstallAndAssert(run: CaskRun, appPath: string, app: DesktopRun
       "quit-log",
       quitLine !== undefined,
       `${quitLine ?? "no quit line"} — from the uninstall output`,
-      `the uninstall log carries no "Application '${CASK_FACTS.identifier}' quit successfully." line: ${observed(uninstall, 8)}`,
+      `the uninstall log carries no "Application '${CASK_FACTS.identifier}' quit successfully." line: ${observedTail(uninstall)}`,
     );
     const exit = await waitForExit(app, QUIT_WINDOW_MS);
     run.checker.check(
@@ -390,15 +492,42 @@ async function uninstallAndAssert(run: CaskRun, appPath: string, app: DesktopRun
     "bundle-gone",
     bundle.code !== 0 && !existsSync(appPath),
     `ls -d ${JSON.stringify(appPath)} -> exit ${bundle.code}: ${observed(bundle)}`,
-    `the bundle survived the uninstall: ${observed(bundle)}`,
+    `the bundle survived the uninstall: ${observedTail(bundle)}`,
   );
   const data = await loggedRun("ls", ["-d", DATA_DIRECTORY]);
   run.checker.check(
     "data-gone",
     data.code !== 0 && !existsSync(DATA_DIRECTORY),
     `ls -d ${JSON.stringify(DATA_DIRECTORY)} -> exit ${data.code}: ${observed(data)} (the marker was inside)`,
-    `the data directory survived the uninstall: ${observed(data)}`,
+    `the data directory survived the uninstall: ${observedTail(data)}`,
   );
+}
+
+/**
+ * After `--zap`, every path the installed cask file's `zap trash:` names must
+ * be gone. The list is read out of that file — the tap's cask, which Homebrew
+ * installed from — never a second list in this tool: a hard-coded list would
+ * keep passing after the stanza changed, and would have to be kept in step with
+ * a file the runner, not this checkout, owns.
+ */
+async function assertZapPathsGone(run: CaskRun, caskText: string): Promise<void> {
+  const entries = zapTrashPaths(caskText);
+  if (entries.length === 0) {
+    throw new Error("the installed cask file states no zap trash: paths, so the zap assertion would prove nothing");
+  }
+  console.log(`[state] the installed cask file's zap trash: names ${entries.length} path(s): ${entries.join(", ")}`);
+  for (const entry of entries) {
+    const target = entry.startsWith("~/") ? path.join(homedir(), entry.slice(2)) : entry;
+    const listed = await loggedRun("ls", ["-d", target]);
+    const gone = listed.code !== 0 && !existsSync(target);
+    const marker = target === DATA_DIRECTORY ? ` (${MARKER} was inside)` : "";
+    run.checker.check(
+      `zap-gone ${entry}`,
+      gone,
+      `ls -d ${JSON.stringify(target)} -> exit ${listed.code}: ${observed(listed)}${marker}`,
+      `the path the installed cask's zap trash: names survived the uninstall: ${observedTail(listed)}`,
+    );
+  }
 }
 
 /** Clones the tap, requires its file to equal a fresh render, and returns both texts. */
@@ -413,7 +542,7 @@ async function cloneTap(run: CaskRun): Promise<string> {
   mkdirSync(path.dirname(tapDir), { recursive: true });
   const url = `https://github.com/${TAP_REPOSITORY}.git`;
   const cloned = await loggedRun("git", ["clone", "--depth", "1", url, tapDir]);
-  run.checker.check("tap-clone", cloned.code === 0, `git clone --depth 1 ${url} -> exit 0`, `git clone exited ${cloned.code}: ${observed(cloned, 8)}`);
+  run.checker.check("tap-clone", cloned.code === 0, `git clone --depth 1 ${url} -> exit 0`, `git clone exited ${cloned.code}: ${observedTail(cloned)}`);
   if (cloned.code !== 0) throw new Error(`git clone ${url} exited ${cloned.code}`);
   run.tapDir = tapDir;
 
@@ -458,7 +587,7 @@ async function createMutantTap(run: CaskRun): Promise<void> {
     "mutant-tap",
     created.code === 0,
     `brew tap-new --no-git ${MUTANT_TAP_NAME} -> exit 0: ${observed(created, 1)}`,
-    `brew tap-new --no-git ${MUTANT_TAP_NAME} exited ${created.code}: ${observed(created, 8)}`,
+    `brew tap-new --no-git ${MUTANT_TAP_NAME} exited ${created.code}: ${observedTail(created)}`,
   );
   if (created.code !== 0) throw new Error(`brew tap-new --no-git ${MUTANT_TAP_NAME} exited ${created.code}`);
 }
@@ -507,7 +636,7 @@ async function assertMacosFloor(run: CaskRun): Promise<void> {
     "macos",
     ok,
     `sw_vers -productVersion -> exit ${version.code}: ${text === "" ? "(no output)" : text} (the cask declares macOS ${CASK_FACTS.minimumMajor})`,
-    `the runner reports macOS ${text === "" ? "(nothing)" : text}, below the cask's macOS ${CASK_FACTS.minimumMajor}; this job needs runs-on: macos-${CASK_FACTS.minimumMajor} or newer`,
+    `the runner reports macOS ${text === "" ? "(nothing)" : text}, below the cask's macOS ${CASK_FACTS.minimumMajor}; this job needs runs-on: macos-${CASK_FACTS.minimumMajor} or newer — sw_vers -productVersion -> exit ${version.code}: ${observedTail(version)}`,
   );
   if (!ok) throw new Error(`this machine is not macOS ${CASK_FACTS.minimumMajor}+, so the cask cannot install here`);
 }
@@ -515,31 +644,29 @@ async function assertMacosFloor(run: CaskRun): Promise<void> {
 /** Tap mode: the tap file, the full assertion set, then the audit. */
 async function runTap(run: CaskRun): Promise<void> {
   const brew = await loggedRun("brew", ["--version"]);
-  run.checker.check("brew", brew.code === 0, `brew --version -> exit 0: ${observed(brew, 1)}`, `brew --version exited ${brew.code}: ${observed(brew, 4)}`);
+  run.checker.check("brew", brew.code === 0, `brew --version -> exit 0: ${observed(brew, 1)}`, `brew --version exited ${brew.code}: ${observedTail(brew)}`);
   if (brew.code !== 0) throw new Error("Homebrew is not on PATH");
 
-  await cloneTap(run);
+  const tapText = await cloneTap(run);
 
   const install = await loggedRun("brew", ["install", "--cask", TAP_CASK]);
   run.checker.check(
     "install",
     install.code === 0,
     `brew install --cask ${TAP_CASK} -> exit 0: ${observed(install)}`,
-    `brew install --cask ${TAP_CASK} exited ${install.code}: ${observed(install, 8)}`,
+    `brew install --cask ${TAP_CASK} exited ${install.code}: ${observedTail(install)}`,
   );
   if (install.code !== 0) throw new Error(`brew install --cask ${TAP_CASK} exited ${install.code}`);
 
-  const installed = await installedApp();
-  run.checker.check("app-installed", installed.app !== null, installed.detail, `the install happened but no .app is listed: ${installed.detail}`);
-  if (installed.app === null) throw new Error("no installed .app to assert against");
-  const appPath = installed.app;
+  const appPath = installedAppPath(run, install);
   const exe = appExecutable(appPath);
-  console.log(`[state] installed app ${appPath}, executable ${exe}`);
+  console.log(`[state] installed app ${appPath} (the target of the install's own Moving line), executable ${exe}`);
+  await printCaskroomLink();
 
   const attribute = await xattrQuarantine(appPath);
-  run.checker.check("quarantine-app", attribute.absent, attribute.detail, `the installed app still carries com.apple.quarantine: ${attribute.detail}`);
+  run.checker.check("quarantine-app", attribute.absent, attribute.detail, `the installed app still carries com.apple.quarantine: ${attribute.tail}`);
   const nested = await xattrQuarantine(exe);
-  run.checker.check("quarantine-nested", nested.absent, nested.detail, `a nested file still carries com.apple.quarantine: ${nested.detail}`);
+  run.checker.check("quarantine-nested", nested.absent, nested.detail, `a nested file still carries com.apple.quarantine: ${nested.tail}`);
   await bootCheck(run, exe);
 
   printListing("before the uninstall", await libraryListing());
@@ -562,6 +689,7 @@ async function runTap(run: CaskRun): Promise<void> {
   if (pid === null || early !== "alive") throw new Error("the app did not stay running; the uninstall would not meet a running app");
 
   await uninstallAndAssert(run, appPath, app);
+  await assertZapPathsGone(run, tapText);
   printListing("after the uninstall", await libraryListing());
 
   const audit = await loggedRun("brew", ["audit", "--cask", "--strict", TAP_CASK]);
@@ -569,7 +697,7 @@ async function runTap(run: CaskRun): Promise<void> {
     "audit",
     audit.code === 0,
     `brew audit --cask --strict ${TAP_CASK} -> exit 0: ${observed(audit, 2)}`,
-    `brew audit --cask --strict ${TAP_CASK} exited ${audit.code}: ${observed(audit, 12)}`,
+    `brew audit --cask --strict ${TAP_CASK} exited ${audit.code}; its last 60 lines: ${observedTail(audit)}`,
   );
 }
 
@@ -591,14 +719,13 @@ async function runMutant(run: CaskRun, mutant: Mutant, tapText: string): Promise
     "install",
     install.code === 0,
     `brew install --cask ${MUTANT_TAP_CASK} -> exit 0: ${observed(install)}`,
-    `the '${mutant}' mutant did not install: ${observed(install, 8)}`,
+    `the '${mutant}' mutant did not install: ${observedTail(install)}`,
   );
   if (install.code !== 0) throw new Error(`the '${mutant}' mutant did not install`);
 
-  const installed = await installedApp();
-  run.checker.check("app-installed", installed.app !== null, installed.detail, `the mutant installed nothing listable: ${installed.detail}`);
-  if (installed.app === null) throw new Error("no installed .app to assert against");
-  const appPath = installed.app;
+  // The same install-output path the tap run uses: the mutants assert on the
+  // app Homebrew moved, not on the Caskroom symlink that pointed at it.
+  const appPath = installedAppPath(run, install);
 
   if (mutant === "quarantine") {
     const attribute = await xattrQuarantine(appPath);
@@ -606,7 +733,7 @@ async function runMutant(run: CaskRun, mutant: Mutant, tapText: string): Promise
       "mutant-quarantine",
       attribute.present,
       `${attribute.detail} — the attribute postflight_steps removes is still there`,
-      `the attribute is absent although postflight_steps was removed (${attribute.detail}); the quarantine assertion is not specific`,
+      `the attribute is absent although postflight_steps was removed (${attribute.tail}); the quarantine assertion is not specific`,
     );
     // The marker makes the shared helper's `data-gone` assertion mean something
     // here too: without it this mutant never created the directory, so `ls -d`
@@ -620,7 +747,7 @@ async function runMutant(run: CaskRun, mutant: Mutant, tapText: string): Promise
     await createDataMarker(run);
     run.checker.check("data-marker", existsSync(markerPath()), `${DATA_DIRECTORY} holds ${MARKER} before the uninstall`, `${markerPath()} is missing although this run created it`);
     const uninstall = await loggedRun("brew", ["uninstall", "--zap", "--cask", CASK_FACTS.token]);
-    run.checker.check("uninstall", uninstall.code === 0, `brew uninstall --zap --cask ${CASK_FACTS.token} -> exit ${uninstall.code}: ${observed(uninstall, 4)}`, `the uninstall exited ${uninstall.code}: ${observed(uninstall, 8)}`);
+    run.checker.check("uninstall", uninstall.code === 0, `brew uninstall --zap --cask ${CASK_FACTS.token} -> exit ${uninstall.code}: ${observed(uninstall, 4)}`, `the uninstall exited ${uninstall.code}: ${observedTail(uninstall)}`);
     const listed = await loggedRun("ls", ["-d", DATA_DIRECTORY]);
     run.checker.check(
       "mutant-zap",
@@ -629,7 +756,7 @@ async function runMutant(run: CaskRun, mutant: Mutant, tapText: string): Promise
       `the data directory is gone although zap trash: was removed; the zap assertion is not specific`,
     );
     const bundle = await loggedRun("ls", ["-d", appPath]);
-    run.checker.check("bundle-gone", bundle.code !== 0 && !existsSync(appPath), `ls -d ${JSON.stringify(appPath)} -> exit ${bundle.code}: ${observed(bundle)}`, `the bundle survived the uninstall: ${observed(bundle)}`);
+    run.checker.check("bundle-gone", bundle.code !== 0 && !existsSync(appPath), `ls -d ${JSON.stringify(appPath)} -> exit ${bundle.code}: ${observed(bundle)}`, `the bundle survived the uninstall: ${observedTail(bundle)}`);
     return;
   }
 
@@ -643,7 +770,7 @@ async function runMutant(run: CaskRun, mutant: Mutant, tapText: string): Promise
   );
   if (pid === null || early !== "alive") throw new Error("the app did not stay running");
   const uninstall = await loggedRun("brew", ["uninstall", "--zap", "--cask", CASK_FACTS.token]);
-  run.checker.check("uninstall", uninstall.code === 0, `brew uninstall --zap --cask ${CASK_FACTS.token} -> exit ${uninstall.code}: ${observed(uninstall, 4)}`, `the uninstall exited ${uninstall.code}: ${observed(uninstall, 8)}`);
+  run.checker.check("uninstall", uninstall.code === 0, `brew uninstall --zap --cask ${CASK_FACTS.token} -> exit ${uninstall.code}: ${observed(uninstall, 4)}`, `the uninstall exited ${uninstall.code}: ${observedTail(uninstall)}`);
   const spent = await waitForExit(app, MUTANT_SURVIVAL_MS);
   run.checker.check(
     "mutant-quit",
@@ -652,7 +779,7 @@ async function runMutant(run: CaskRun, mutant: Mutant, tapText: string): Promise
     `the app exited although uninstall quit: was removed; the quit assertion is not specific`,
   );
   const bundle = await loggedRun("ls", ["-d", appPath]);
-  run.checker.check("bundle-gone", bundle.code !== 0 && !existsSync(appPath), `ls -d ${JSON.stringify(appPath)} -> exit ${bundle.code}: ${observed(bundle)}`, `the bundle survived the uninstall: ${observed(bundle)}`);
+  run.checker.check("bundle-gone", bundle.code !== 0 && !existsSync(appPath), `ls -d ${JSON.stringify(appPath)} -> exit ${bundle.code}: ${observed(bundle)}`, `the bundle survived the uninstall: ${observedTail(bundle)}`);
 }
 
 async function cleanup(run: CaskRun): Promise<void> {

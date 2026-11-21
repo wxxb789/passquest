@@ -245,8 +245,13 @@ function arrayBody(text: string, from: number): string {
  * quoted text after the closing `]` is never read as a path. Every entry is one
  * literal path — `cask/artifact/abstract_uninstall.rb` resolves each directive
  * value as a whole — so a comma never separates paths and is never split on.
+ *
+ * Exported for `harness/tools/cask-install.ts`: the macOS install job reads the
+ * list back out of the cask file Homebrew installed from and requires every path
+ * to be gone after `--zap`, so the assertion follows the cask instead of a
+ * second, hand-kept copy of the paths that could drift from it.
  */
-function zapPaths(rendered: string): string[] {
+export function zapTrashPaths(rendered: string): string[] {
   const lines = rendered.split("\n");
   const start = lines.findIndex((line) => /^\s*zap\s+trash:/.test(line));
   if (start < 0) return [];
@@ -343,7 +348,7 @@ export function caskProblems(rendered: string, facts: CaskFacts): string[] {
     problems.push(`uninstall quit: must be ${facts.identifier}, the identifier the app registers under`);
   }
 
-  const zap = zapPaths(rendered);
+  const zap = zapTrashPaths(rendered);
   if (!zap.includes(facts.dataDirectory)) {
     problems.push(`zap trash: must carry the data directory the install guides name: "${facts.dataDirectory}"`);
   }

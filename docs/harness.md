@@ -101,9 +101,11 @@ that hides a real surface is a harness defect.
   gate can hold still, `install-guide` does: it pins the template's v0.15.0 render byte for byte on
   all three OSes, while the workflow installs that render from the tap and asserts the quarantine
   flag is gone, the installed app boots, `brew uninstall --zap` quits it and removes the bundle and
-  the data directory, and three mutant runs catch the removal each behavioural assertion depends
-  on: without `postflight_steps` the quarantine flag is still there, without `zap trash:` the data
-  directory survives, without `quit:` the app keeps running.
+  every path the cask's `zap trash:` names (the data directory and the app's WebKit data and cache
+  folders under `~/Library`, read from the installed cask file rather than a list in the tool), and
+  three mutant runs catch the removal each behavioural assertion depends on: without
+  `postflight_steps` the quarantine flag is still there, without `zap trash:` the data directory
+  survives, without `quit:` the app keeps running.
 - `.github/workflows/gate.yml` checks out with `fetch-depth: 2`. That keeps the clone shallow while leaving
   the change's base reachable as `HEAD^1`, which is what the golden-contract gate diffs against in CI; a
   depth-1 checkout cannot see a golden change at all and the gate refuses instead of passing. On a
