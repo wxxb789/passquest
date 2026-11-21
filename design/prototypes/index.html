@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pass Quest — GUI 方向对比</title>
+<style>
+  :root {
+    --bg: #f4f4f2; --ink: #17181a; --muted: #5d6066; --line: #dcdcd8; --card: #ffffff;
+    --accent: #1f4fd6;
+    font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121315; --ink: #ececea; --muted: #9a9ca2; --line: #2a2c30; --card: #1a1b1e; --accent: #8fb0ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.6; }
+  header { padding: 56px 64px 24px; max-width: 1480px; margin: 0 auto; }
+  h1 { font-size: 28px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 8px; }
+  header p { color: var(--muted); margin: 0; max-width: 72ch; }
+  nav.tabs { display: flex; gap: 8px; padding: 0 64px; max-width: 1480px; margin: 16px auto 0; flex-wrap: wrap; }
+  nav.tabs button { font: inherit; font-size: 14px; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    padding: 6px 14px; border-radius: 999px; cursor: pointer; }
+  nav.tabs button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  main { max-width: 1480px; margin: 0 auto; padding: 24px 64px 96px; }
+  section.dir { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 28px 32px; margin-bottom: 32px; }
+  section.dir h2 { margin: 0; font-size: 22px; font-weight: 600; }
+  section.dir .open { float: right; font-size: 14px; color: var(--accent); text-decoration: none; border: 1px solid var(--line);
+    padding: 6px 14px; border-radius: 8px; }
+  section.dir .concept { color: var(--muted); max-width: 90ch; margin: 8px 0 16px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; font-size: 14px; }
+  .cols h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+  .cols ul { margin: 0; padding-left: 18px; }
+  .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-top: 20px; }
+  figure { margin: 0; }
+  figure a { display: block; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; aspect-ratio: 1440 / 900; background: var(--bg); }
+  figure img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  figcaption { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .compare { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .compare figcaption { font-size: 14px; color: var(--ink); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pass Quest · 三个 GUI 方向</h1>
+  <p>三个原型共用同一份简报（<a href="BRIEF.md">BRIEF.md</a>）、同一组 7 个界面状态和同一套原创占位内容，便于横向比较。点击截图可打开对应原型的实时页面；每个原型内部都可以切换主题和中英文，并支持键盘操作（按 <kbd>?</kbd> 查看快捷键）。</p>
+</header>
+<nav class="tabs" id="tabs"></nav>
+<main id="main"></main>
+<script>window.DIRS = [{"key":"a","file":"a-folio.html","name":"A · Folio 书页","concept":"“Folio 书页”把整个应用排成桌面上的一张书页：页眉页脚印在纸上，正文栏放学习内容，外侧页边专门放批注、证据和账目，就像一本精排的学习书或阅览室里的校样。今日页写成一封短信：日期行、称呼、一句标题，告诉你今天只做一件事，下面附一本技能证据簿，每个结论都用编号旁注对应到页边的事实。练习页是试卷式的题块：题号和选项字母悬挂在内页边，作答条件、计时和提示规则写在旁注里。判分页先给出判过分的题：选错的选项用删除线加校对删除符，正确答案用红圈圈出；教练批注在页边独立成栏，并标明“建议性 / 外部调用”，下方原文里的证据用引线连到 A–D 旁注。计时测评换成更冷、更素的考卷纸：双线卷头、两只时钟、2×20 答题格，没有目录和翻页。报告、Anki 卡片（真实索引卡样张）和设置（版本记录式的提供方登记表）沿用同一套书页语法。浅色是暖白纸配朱红和靛蓝；深色是夜读用的深棕纸。中文用 Noto Serif SC，教练回复用楷体；英文用 Sitka，表格里统一用等宽数字。","signature_moves":["一张书页的版式：内页边放段落号、悬挂的选项字母和校对符号，正文栏放内容，外侧页边放旁注，页眉页脚印在纸上，叶片阴影由固定伪元素绘制，不会有接缝","页边旁注由 layoutNotes() 对齐到锚点首行中线，前一条挡住时依次下移；证据旁注用 SVG 引线从锚定行的行尾穿过装订线连到页边，折点按 12px 车道错开，末端是圆点","今日页写成信件：日期行、称呼、一句标题、两段正文配 1–6 号上标，页边编号旁注逐条给出事实；悬停时上标和旁注互相高亮；签名注明“依据透明策略排定，不由模型撰写”；附言列出尚未确定的考试日期、预算和及格线","判分页先给判过分的题：选错项用删除线加 δ 形删除符并标“你的选择”，正确答案用旋转的红圈标“答案 · 已核验”；作答条件取自实际作答时记录的状态（有辅助就不计入），用时也是记录值","教练批注在页边独立成栏：先列披露行（模型、今日预算、发送哪些字段、同意记录），再给三种模式标签；撤回同意后什么都不发送、预算不扣，回复处显示已扣留","计时测评换用更冷的考卷纸并去掉纹理：双线卷头写明 40 题、60 分钟、无注释、无提示、无词汇表、无 AI，配本题和全卷两只时钟；2×20 答题格分四态（已答下划线、当前圈、超时斜纹、未答素码）；页脚只列按键，[ ] 和 G 先弹离开确认","Anki 页是真实索引卡样张：朱红页眉线加 22px 蓝色格线，正面基线落在格线上，可切换桌面 / 手机宽度和浅色 / 深色卡；编辑字段是带点线基线的校样栏；同步列表用字形标出已推送、排队、已存在、冲突、草稿，冲突可以左右对照着解决","设置页是版本记录式的登记表：能力格只用字形（已验证 / 已声明未验证 / 不支持 / 验证失败）并附图例；状态列用等宽机器状态，如 verified@、no_credential、failed:auth@；预算用 20 格计数条；撤回同意要先在行内确认，并写入事件记录","中英排印分开处理：英文小标签用小型大写字母加字距，中文标签用实心半粗、不加字距；中文正文关掉 text-wrap:pretty，避免行尾参差，句末分句不断行；脚注上标关闭 autospace；英文原文段落用旧式数字，其余地方用等宽齐线数字","交互完整：覆盖层用 inert 加焦点陷阱，关闭后焦点回到原处；重新渲染时 focusKey() 恢复焦点；main[data-settled] 让同一路由重渲染时不重放动画；主题和语言写回 URL；window.onerror 会亮红色错误条"],"tradeoffs":["书页式的单栏正文加页边让阅读感很强，但信息密度低：在 1440×900 下，练习页和判分页较低的旁注、测评页的“不显示反馈”说明都落在首屏以下，1280×800 下这三页都要滚动","旁注靠 JS 绝对定位：内容变长或窗口改变时依赖 layoutNotes() 重新排，脚本出错时页边会叠在一起，比纯 CSS 网格脆弱","引线只连到锚定行的行尾，不深入到具体证据片段，以免穿过字形；对应关系还要靠上标字母和下划线，精确度不如直连","衬线体、小型大写字母、上标这套书卷气对高频操作的界面偏“慢”，按钮的可发现性弱于常规 UI：主操作是带下划线的祈使句，而不是实心按钮","深色夜读纸为了温暖压低了对比，ink-3 次要文字在深色下仍偏弱，长时间阅读页边小字会吃力","测评页改用另一种纸色和纹理来区分考试状态，这个隐喻需要用户自己体会，第一次进入时可能以为是 bug"]},{"key":"b","file":"b-instrument.html","name":"B · Instrument 仪表","concept":"方向 B「仪表 Instrument」把 Pass Quest 当成一台读数精确、只报实测值的学习仪器。左侧是通道与学习队列，中间是作答工作区，右侧是常驻的「证据检视器」。检视器随路由解释当前屏幕的依据：什么会计入、数据来源、外部调用会发送什么。三栏用分区色调区分：工作区最亮，检视器略暗，卡片抬起。颜色有固定语义：琥珀色表示进行中、计时和需要注意；青色表示已验证、已计入和计数；红色只表示错误；紫色只用于 AI 输出。正确答案、增量和预算一律用墨色加符号表达，不靠颜色。数字、时钟和标识符统一用等宽表格数字。未知量（及格线、考试日期、每日预算）画成斜线填充的空槽，不给估值。测评时整个界面「封存」：通道、提示和 AI 全部上锁、加斜线，命令栏只剩本轮命令，顶部改为读数带，模式切换一眼可见。这一版保留原有设计系统，修复了评审提出的全部 blocker 和 major 问题，并在报告数据一致性、键盘可达性、同意感知和 1280×800 适配上做了打磨。","signature_moves":["常驻证据检视器：每个路由的右栏都回答「为什么、依据是什么、会发出什么」。Today 显示什么会计入和推荐来源；反馈页显示本次作答改变了什么（证据 1/3→1/4、接触次数）；Anki 显示「AI 精修将发送」清单，并随同意状态变化。","作答条件面板：五种条件（独立/辅助/重复/重做/测评）画成一条刻度带，指针落在当前条件上，作答前就能看到这次能否计入。打开提示必须经过模态确认：默认焦点在「保持独立」，Enter 安全，按 H 才会转为辅助。","封存态测评：通道和队列上锁并加斜线，命令栏变成「仅限本轮命令」，顶部读数带显示题号 17/40 和以 28px 实时走动的本轮剩余时间。单题时钟环上的「3600 s ÷ 40 = 90 s」公式直接取自规则。导航器只显示已答、当前、未答、超时，不显示对错。","未知量画成斜线填充的空槽，并写明「不估算、不预测分数」。备考天数 23 只出现在侧栏底部的刻度尺上，不和考试日期混在一起。","「下一步」是一张带刻度标尺的指令卡：依据（独立 3 次、答对 1 次、最近一次错选重复词最多的选项）、透明策略标签，以及按升序排列、与学习队列一致的正确率轨迹。","报告的所有数字由同一个逐题结果串 RES 推导，渲染时由 checkReport() 自校验：27/10/3，超时题为 9、26、32；分技能 7/10、9/14、8/12、3/4。同口径对比显示可比性检查（题数、时长、题池族、完成状态），差异段用上划线标出，并明确不归因。","AI 教练从属于已验证答案：带 External 与 Advisory 两个标签。未请求的模式显示「请求 · 1 次调用 → 5/20」按钮，不会自动消耗预算。发送清单逐项列出内容；撤销同意后 S1 摘录显示为已扣留。","命令栏（Ctrl/⌘+K）支持模糊匹配，并显示最近 3 条命令。全键盘操作：选项组用方向键漫游，Enter 只在不会误触时提交，G+字母切换通道，? 打开快捷键表。","Anki 卡片样式：衬线大字正面，EXCEPT 用琥珀色强调；背面例句的关键词用青色。可在明暗、正反面、桌面和手机宽度之间切换预览，字段编辑实时反映，显示字数计数，引号和尖括号经过转义。冲突以中性的并排对比展示（保留我的 / 保留 Anki 的）。"],"tradeoffs":["信息密度高。三栏加常驻检视器适合愿意看依据的学习者，但对初中英语水平、只想答题的学习者可能过于「仪表化」，第一眼的认知负荷比极简方向重。","等宽字体和全大写小标签强化了「仪器」气质，但中文界面下等宽标识符和中文混排的节奏偏硬，长时间阅读的亲和力不如衬线或人文主义方向。","颜色语义锁得很严（琥珀、青、红、紫各司其职，正确答案用墨色加符号）。好处是一致，代价是界面整体偏冷静克制，几乎没有情绪温度，需要靠文案的「温暖而简短」来补。","检视器在 1440 宽度下表现最好。1280 时侧栏和检视器都压窄（200/292），Today 和 Report 需要纵向滚动才能看到全部次要信息。","每个路由都有大量可交互的细节，但除核心流程（作答、提示门、反馈、同意、Anki 编辑、测评导航、命令栏）外，许多按钮只弹出提示，原型深度不均匀。"]},{"key":"c","file":"c-stage.html","name":"C · Stage 一念","concept":"「一念 Stage」：屏幕上同一时刻只有一个主对象。它悬在柔和的空间纵深里，附属信息以「卫星」小胶囊的形式排成弧形环绕，并用渐隐的系线连向主对象。底部是导航 dock，顶部是会话时间线，右下角是会呼吸的导师光球。作答条件直接写进环境光：独立作答时整个房间是冷青色，有辅助时转为暖琥珀，测评时变成去饱和的「静室」，强调色中性化，光球也隐去。这样「这次能不能计入」不靠读字就能感知。阅读是核心动作，所以文章用暖调纸张材质（深色模式下是墨纸），左右栏宽度不随界面语言变化，英文考试文本在中英两种界面下排版完全一致。所有外部调用都折叠成一条「调用 / 发送 / 授权 / 预算」凭据条，紧贴在要花钱的那个按钮旁边。已核验的答案永远在视觉上高于建议性的 AI 文本：反馈页里，后退的原文、展开的判分卡和挂在光球上的导师面板形成前后三层纵深。","signature_moves":["条件即环境光：body[data-room] 用 @property 驱动三层渐变，独立=冷、辅助=暖、测评=静室（去饱和、隐去光球）；打开提示的同时房间转暖，题卡改为「有辅助 · 已看提示」","轨道布局：主对象居中，卫星胶囊沿弧线排开并带渐隐系线，事实行（考试日期未设置 · 及格线未知 · 0 次网络调用）浮在上方；Settings 用单侧轨道","纵深代替分栏：反馈页里原文缩到 .97 并压暗、只点亮证据句，判分卡压在它上面；导师是从光球升起、带指向尾巴的浮层，点光球即可收起","导师凭据条：调用（外部 · DeepSeek · deepseek-chat · 已验证）、发送内容、S1 授权、今日预算四行对齐。撤回授权后载荷被扣下，发送和输入框被禁用，并给出「去设置授权」的直达链接","证据星座图标 cstIco：用点阵表示「独立答对 / 答错」，替代容易被误读为加载圈的进度环；超时用沙漏而不是虚线圈","测评静室：顶部只显示剩余 34:12（基线对齐），每题一个 56px 圆环，导航条只标已答 / 超时 / 未答、不显示对错；选择后才能确认，单题 90 秒到时自动前进","报告页：卫星显示中位 64 秒、p90 112 秒、超时 3、污染 0；同口径对比用 40 格点阵并列；批注面板用带图形的 40 格网格，选中某题即在原文里显示证据","Anki：正反面卡片并排预览（桌面 500px / 手机），样式跟随界面语言；编辑面板为非模态底部抽屉，上方卡片缩到 .84 并实时更新；编辑期间 dock 让位；冲突用整词 <ins> 标出差异，二选一，绝不静默覆盖","Settings 把提供方、模型、能力、授权四个事实分列，状态本地化（已验证 · 时间 / 已声明 · 未验证 / 认证失败），密钥只显示有 / 无；能力网格由独立的展开按钮打开（带 aria-expanded）","焦点与可达性：模态打开时背景 inert，关闭后焦点回到触发处；选项、导师模式、Anki 预览都只做局部更新，不重放动画、不丢焦点；数字一律等宽；?shot=1 关闭全部动效"],"tradeoffs":["一次只放一个主对象，信息密度偏低；熟练用户想同时看技能、池子、预算时，要靠卫星和底部抽屉多点一下","环境光表达条件依赖色彩感知，因此在条件胶囊里同时保留了文字和光点；但在投影或低色域屏幕上，冷暖差异会减弱","反馈页三层纵深在 1280 宽时，后退的原文栏较窄（约 290px），长段落要滚动；悬停能把它提亮，但读起来不如完整阅读栏舒适","大量使用 backdrop-filter 和渐变动画，在低端集显或远程桌面上可能掉帧；?shot=1 和 prefers-reduced-motion 下会关闭这些动效","卫星弧线是手工定位的（--dx 偏移），新增卫星或文案变长时要重新调整，不如网格那样自适应","导师浮层挂在光球上，与主内容存在遮挡关系；在更窄的窗口里，需要收起导师才能看到判分卡的完整宽度"]}];</script>
+<script>
+const ROUTES = [
+  ['today', '今日'], ['practice', '阅读练习'], ['feedback', '反馈 + AI 教练'],
+  ['assess', '限时测评'], ['report', '测评报告'], ['anki', 'Anki 卡片'], ['settings', '模型与隐私'],
+];
+const COMBOS = [['light', 'zh', '浅色 · 中文'], ['dark', 'zh', '深色 · 中文'], ['light', 'en', '浅色 · English']];
+const DIRS = window.DIRS || [
+  { key: 'a', file: 'a-folio.html', name: 'A · Folio 书页' },
+  { key: 'b', file: 'b-instrument.html', name: 'B · Instrument 仪表' },
+  { key: 'c', file: 'c-stage.html', name: 'C · Stage 一念' },
+];
+const main = document.getElementById('main');
+const tabs = document.getElementById('tabs');
+function shot(d, r, t, l) { return `_shots/${d.key}/${r}-${t}-${l}.png`; }
+function live(d, r, t, l) { return `${d.file}?theme=${t}&lang=${l}#/${r}`; }
+function list(items) { return items && items.length ? `<ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>` : '<p>—</p>'; }
+function renderDirections() {
+  main.innerHTML = DIRS.map(d => `
+    <section class="dir">
+      <a class="open" href="${d.file}">打开原型 →</a>
+      <h2>${d.name}</h2>
+      <p class="concept">${d.concept || ''}</p>
+      <div class="cols">
+        <div><h3>标志性设计</h3>${list(d.signature_moves)}</div>
+        <div><h3>取舍与风险</h3>${list(d.tradeoffs)}</div>
+      </div>
+      <div class="shots">${ROUTES.flatMap(([r, label]) => COMBOS.slice(0, 2).map(([t, l, c]) =>
+        `<figure><a href="${live(d, r, t, l)}"><img loading="lazy" src="${shot(d, r, t, l)}" alt="${d.name} ${label} ${c}"></a><figcaption>${label} · ${c}</figcaption></figure>`)).join('')}</div>
+    </section>`).join('');
+}
+function renderCompare(r, label) {
+  main.innerHTML = COMBOS.map(([t, l, c]) => `
+    <section class="dir"><h2>${label} · ${c}</h2>
+      <div class="compare">${DIRS.map(d => `<figure><a href="${live(d, r, t, l)}"><img loading="lazy" src="${shot(d, r, t, l)}" alt="${d.name} ${label}"></a><figcaption>${d.name}</figcaption></figure>`).join('')}</div>
+    </section>`).join('');
+}
+const views = [['dirs', '按方向浏览', renderDirections], ...ROUTES.map(([r, label]) => [r, `对比：${label}`, () => renderCompare(r, label)])];
+tabs.innerHTML = views.map(([k, label]) => `<button data-k="${k}" aria-pressed="false">${label}</button>`).join('');
+function select(k) {
+  views.find(v => v[0] === k)[2]();
+  tabs.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.k === k)));
+}
+tabs.addEventListener('click', e => { const b = e.target.closest('button'); if (b) select(b.dataset.k); });
+select('dirs');
+</script>
+</body>
+</html>
