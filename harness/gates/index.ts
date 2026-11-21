@@ -15,6 +15,7 @@ import { goVet } from "./go-vet.ts";
 import { gofmt } from "./gofmt.ts";
 import { goldenContract } from "./golden-contract.ts";
 import { importSmoke } from "./import-smoke.ts";
+import { installGuide } from "./install-guide.ts";
 import { localOnly } from "./local-only.ts";
 import { noteSmoke } from "./note-smoke.ts";
 import { packageSmoke } from "./package-smoke.ts";
@@ -34,6 +35,7 @@ export const gates: Gate[] = [
   goTest,
   goTidy,
   docsLinks,
+  installGuide,
   secrets,
   localOnly,
   baseline,

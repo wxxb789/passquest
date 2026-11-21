@@ -70,13 +70,13 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { startAnkiStub } from "../../lib/anki-stub.ts";
-import { field, numberField, stringField } from "../../lib/json.ts";
-import { executable, run } from "../../lib/process.ts";
-import type { RunResult } from "../../lib/process.ts";
-import { seedReviewedSource } from "../../lib/reviewed-source.ts";
-import { pageScript, tail } from "../../lib/desktop-page.ts";
+import { pageScript } from "../../lib/desktop-page.ts";
 import type { Check } from "../../lib/desktop-page.ts";
 import { removeTree } from "../../lib/desktop.ts";
+import { field, numberField, stringField } from "../../lib/json.ts";
+import { executable, run, tail } from "../../lib/process.ts";
+import type { RunResult } from "../../lib/process.ts";
+import { seedReviewedSource } from "../../lib/reviewed-source.ts";
 import type { GateContext } from "../../lib/types.ts";
 import { launch, textEnv, UNREACHABLE_ENDPOINT } from "../desktop-smoke/scenario.ts";
 import type { ScenarioRun } from "../desktop-smoke/scenario.ts";

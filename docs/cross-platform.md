@@ -107,8 +107,13 @@ package, a byte-identical copy for every other host — a pinned Node runtime, t
   installer writes the HKCU uninstall key and the shortcuts it creates into the real shell folders, which
   neither `/D=` nor an environment redirection moves.
 - **macOS** gets the `.app` inside a `.dmg`, built only on macOS (ad-hoc signed; no notarization, so
-  Gatekeeper blocks a downloaded copy). MyGo's resources directory is the bundle's
-  `Contents/Resources`, which is where the packaged app resolves `agent/` and the Node runtime.
+  Gatekeeper blocks a downloaded copy). The bundle's `Info.plist` declares macOS 26 as the floor
+  (`mygo.json`'s `macos.minimumSystemVersion`, the binding floor above the linker's `minos 13.0`),
+  and the supported pair is macOS 26 and 27 on Apple silicon. The public tap
+  `wxxb789/homebrew-tap` carries a cask that installs the release's `.dmg` with the quarantine flag
+  cleared, so `brew install --cask wxxb789/tap/pass-quest` never meets Gatekeeper (the browser path
+  still does; `docs/install.md`). MyGo's resources directory is the bundle's `Contents/Resources`,
+  which is where the packaged app resolves `agent/` and the Node runtime.
 - **Linux** gets MyGo's binary plus a `harness/lib/appimage.ts` AppImage, built with a pinned
   `appimagetool` 1.9.1 and a pinned type2 runtime 20251108 (both SHA-256 checked; linux-x64 only). The
   AppDir is assembled in the OS temp directory so its modes are real: 0755 for directories and
@@ -152,6 +157,6 @@ package, a byte-identical copy for every other host — a pinned Node runtime, t
 
 ## Gates
 
-`bun run gate` → 25 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
+`bun run gate` → 26 gates; `portable-paths` fails on a platform-bound literal, `go test` and the smoke
 gates run on all three OS in CI. CI runs it as four groups (`core`, `desktop`, `package`, `self-test`)
-per OS; `bun run gate` with no argument still runs all 25.
+per OS; `bun run gate` with no argument still runs all 26.

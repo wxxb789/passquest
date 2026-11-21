@@ -23,7 +23,6 @@
  * The tree lives under build/, which is gitignored: nothing here is committed,
  * and the gates keep building the development app through buildDesktop.
  */
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -45,6 +44,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
 
+import { sha256Hex } from "./hash.ts";
 import { stringField } from "./json.ts";
 import { assembleNotices } from "./notices.ts";
 import type { BundlePackage, NoticeSource, StagedNotices } from "./notices.ts";
@@ -974,7 +974,7 @@ export async function fetchPinned(options: {
     }
     renameSync(part, file);
   }
-  const sum = createHash("sha256").update(new Uint8Array(await Bun.file(file).arrayBuffer())).digest("hex");
+  const sum = sha256Hex(new Uint8Array(await Bun.file(file).arrayBuffer()));
   if (sum !== sha256) {
     throw new Error(`${asset}: SHA-256 ${sum}, want ${sha256} (${published})`);
   }

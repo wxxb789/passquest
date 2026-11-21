@@ -90,6 +90,13 @@
  * the check must not be weakened per file to pass. A package carries no
  * node_modules at all (goal 0016), which the lean-tree check below enforces.
  *
+ * The bundle's own `Contents/Info.plist` — under a `.app`, or at a fixture
+ * tree's root — must declare `LSMinimumSystemVersion` equal to the minimum
+ * mygo.json declares (goal 0017 P1): `plistProblems` holds the rule and why
+ * the plist key, not the Mach-O's `minos`, binds. A real macOS run must carry
+ * the file; a tree that declares no minimum fails instead of passing
+ * unchecked, and a fixture tree may carry no plist at all.
+ *
  * The run's package artifact — the NSIS setup, the `.dmg` or the AppImage —
  * is checked cheaply: its name must be the exact name this build writes
  * (`mygoFileName` / `appImageFileName`), and its first 1024 bytes must not be
@@ -124,6 +131,8 @@ export interface PackageIdentity {
   naming: PackageNaming;
   /** mygo.json as written: the AppImage's name comes from its raw name and version. */
   config: { name: string; version: string };
+  /** mygo.json's macos.minimumSystemVersion; `plistProblems` checks the installed Info.plist carries it. */
+  minimumSystemVersion: string;
   /** The notices this staging's bundles required (harness/lib/notices.ts): the installed notices file must carry every text of them. */
   notices: StagedNotices;
 }
@@ -474,12 +483,55 @@ export function noticesProblems(file: string, required: StagedNotices): string[]
 }
 
 /**
+ * The problems of an installed bundle's `Contents/Info.plist` against the
+ * minimum mygo.json declares (goal 0017 P1): MyGo writes
+ * `macos.minimumSystemVersion` verbatim into `LSMinimumSystemVersion`
+ * (cmd/mygo/bundle.go:254, writePlistValue — sorted keys, one
+ * `<key>`/`<string>` pair per line), and the effective floor is the higher of
+ * that key and the Mach-O's `minos` — 13.0 from the Go 1.27 linker, below the
+ * declared 26.0 — so the key is the binding one and it must state the floor.
+ * The failure names the found and the expected value; an empty
+ * `expectedMinimum` — mygo.json declares none, and MyGo's own default is
+ * 12.0 — is a failure of its own, so a tree with a plist never passes
+ * unchecked.
+ */
+export function plistProblems(content: string, expectedMinimum: string): string[] {
+  if (expectedMinimum === "") {
+    return ["mygo.json declares no macos.minimumSystemVersion: LSMinimumSystemVersion cannot be checked (MyGo's own default is 12.0)"];
+  }
+  const found = /<key>LSMinimumSystemVersion<\/key>\s*<string>([^<]*)<\/string>/.exec(content);
+  if (found === null) {
+    return [`LSMinimumSystemVersion is not a <key>/<string> pair in the Info.plist; mygo.json declares ${JSON.stringify(expectedMinimum)}`];
+  }
+  if (found[1] !== expectedMinimum) {
+    return [`LSMinimumSystemVersion is ${JSON.stringify(found[1])}, want ${JSON.stringify(expectedMinimum)}, the macos.minimumSystemVersion mygo.json declares`];
+  }
+  return [];
+}
+
+/**
+ * Whether a walk-relative path is the installed bundle's own property list:
+ * `Contents/Info.plist` under the single `.app` a macOS install puts at the
+ * tree's root (install.ts), or at a fixture tree's root, where the tree
+ * itself stands in for the bundle. A nested bundle's plist is not the
+ * installed app's and is not checked.
+ */
+function isBundlePlist(relative: string): boolean {
+  const segments = relative.replace(/\\/g, "/").split("/");
+  if (segments.length === 3 && segments[0]!.endsWith(".app")) segments.shift();
+  return segments.length === 2 && segments[0] === "Contents" && segments[1] === "Info.plist";
+}
+
+/**
  * Scans the installed package's contents and reports every problem through
  * `check`; returns the scan line (file count, bytes, needles, wall time) for
  * the gate's pass detail. A real run passes the `identity` of the package it
  * built, whose notices set the installed file must carry; a fixture install
  * tree, which has no build, passes `fixtureNotices` instead — a run has one
- * or the other, never both.
+ * or the other, never both. The minimum mygo.json declares, which the
+ * installed `Contents/Info.plist` must carry, arrives the same way: in the
+ * identity for a real run, in `fixtureMinimumSystemVersion` for a fixture
+ * tree.
  */
 export async function scanPackageContents(
   app: InstalledApp,
@@ -487,8 +539,13 @@ export async function scanPackageContents(
   check: Check,
   identity?: PackageIdentity,
   fixtureNotices?: StagedNotices,
+  fixtureMinimumSystemVersion = "",
 ): Promise<string> {
   const started = performance.now();
+  // The floor the installed Info.plist must declare: a real run's declaration
+  // travels in its identity, a fixture tree's (which has no build) in
+  // fixtureMinimumSystemVersion.
+  const expectedMinimum = identity !== undefined ? identity.minimumSystemVersion : fixtureMinimumSystemVersion;
   const baseline = baselineSource(ctx.root);
   // A real package run must have both extractions to match against: a missing
   // one would quietly narrow the scan. Fixture trees may run without them.
@@ -498,6 +555,8 @@ export async function scanPackageContents(
   }
   let files = 0;
   let bytes = 0;
+  /** How many `Contents/Info.plist` files the walk met: a real macOS run must meet one. */
+  let plistsSeen = 0;
 
   for (const dir of app.installDirs) {
     const walk = (current: string, prefix: string): void => {
@@ -541,9 +600,20 @@ export async function scanPackageContents(
         files += 1;
         bytes += data.length;
         for (const problem of payloadProblems(full, relative, data, baseline)) check(false, `contents: ${problem}`);
+        if (isBundlePlist(relative)) {
+          plistsSeen += 1;
+          for (const problem of plistProblems(data.toString("utf8"), expectedMinimum)) check(false, `contents: ${full}: ${problem}`);
+        }
       }
     };
     walk(dir, "");
+  }
+
+  // A real macOS package must carry the bundle's property list: without the
+  // file the check above would have nothing to read and the run would pass
+  // unchecked (a fixture tree, which stands in for no build, may carry none).
+  if (identity !== undefined && process.platform === "darwin" && plistsSeen === 0) {
+    check(false, `contents: the installed .app carries no Contents/Info.plist; its LSMinimumSystemVersion (mygo.json declares ${JSON.stringify(expectedMinimum)}) cannot be checked`);
   }
 
   // The agent tree is lean (goal 0016): the installed agent/ holds the host
@@ -662,5 +732,6 @@ export async function scanPackageContents(
       ? `no baseline under ${BASELINE} or ${BASELINE_PARTIAL}`
       : `needles: ${baseline.pageLines} page-file lines of ${BASELINE} (${baseline.files} files hashed) and ${baseline.partialLines} lines of ${BASELINE_PARTIAL}`;
   const noticesNote = noticeTextsChecked === 0 ? "" : `, ${noticeTextsChecked} notice text(s) verified against the staged bundles' set`;
-  return `contents scan: ${files} files, ${size(bytes)}, ${needles}, ${ownedFiles} project-owned files credential-scanned${noticesNote}, ${((performance.now() - started) / 1000).toFixed(1)}s`;
+  const plistNote = plistsSeen === 0 ? "" : `, Contents/Info.plist declares LSMinimumSystemVersion ${expectedMinimum}`;
+  return `contents scan: ${files} files, ${size(bytes)}, ${needles}, ${ownedFiles} project-owned files credential-scanned${noticesNote}${plistNote}, ${((performance.now() - started) / 1000).toFixed(1)}s`;
 }

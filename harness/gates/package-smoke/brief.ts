@@ -26,9 +26,10 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 
-import { chatReply, cleanEnv, cliJson, pageScript, parse, STUB_CREDENTIAL_ENV, STUB_MODEL, tail } from "../../lib/desktop-page.ts";
+import { chatReply, cleanEnv, cliJson, pageScript, parse, STUB_CREDENTIAL_ENV, STUB_MODEL } from "../../lib/desktop-page.ts";
 import { PAUSE_DEADLINE_SECONDS, durableStorePath, startPausedRun } from "../../lib/host-control.ts";
 import { arrayField, field, numberField, stringField } from "../../lib/json.ts";
+import { tail } from "../../lib/process.ts";
 import { briefAnswer, stubMessages } from "../../lib/sse.ts";
 import { launch, seedStudyTrail, textEnv } from "../desktop-smoke/scenario.ts";
 import type { Scenario, ScenarioRun } from "../desktop-smoke/scenario.ts";

@@ -2,11 +2,12 @@
  * What every desktop-smoke scenario shares: the run it is handed, launching the window on its own data
  * directory, the second process (`passquest ... --db`) and the attempt cross-check.
  */
-import { cliJson, launchPage, SKILL, STUB_MODEL, tail } from "../../lib/desktop-page.ts";
+import { cliJson, launchPage, SKILL, STUB_MODEL } from "../../lib/desktop-page.ts";
 import type { Check, Launched, ProviderStub } from "../../lib/desktop-page.ts";
 import { arrayField, field, numberField, stringField } from "../../lib/json.ts";
-import { resolve } from "../../lib/repo.ts";
+import { tail } from "../../lib/process.ts";
 import type { RunResult } from "../../lib/process.ts";
+import { resolve } from "../../lib/repo.ts";
 import type { GateContext } from "../../lib/types.ts";
 
 /** Nothing listens on port 1: the "Anki is not running" endpoint. */

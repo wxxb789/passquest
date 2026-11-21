@@ -271,13 +271,17 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
   } catch (error) {
     return fail([`mygo.json cannot be read: ${error instanceof Error ? error.message : String(error)}`]);
   }
-  let config: { name?: unknown; version?: unknown };
+  let config: { name?: unknown; version?: unknown; macos?: { minimumSystemVersion?: unknown } };
   try {
-    config = JSON.parse(raw) as { name?: unknown; version?: unknown };
+    config = JSON.parse(raw) as { name?: unknown; version?: unknown; macos?: { minimumSystemVersion?: unknown } };
   } catch (error) {
     return fail([`mygo.json is not JSON: ${error instanceof Error ? error.message : String(error)}`]);
   }
   if (typeof config.name !== "string" || config.name.trim() === "") return fail(["mygo.json carries no name; the app's data directory is named after it"]);
+  // The floor the installed Info.plist must declare (goal 0017 P1), read from
+  // mygo.json: empty when it declares none, which the scan reports rather than
+  // checks against. `plistProblems` (package-smoke/contents.ts) holds the rule.
+  const declaredMinimum = typeof config.macos?.minimumSystemVersion === "string" ? config.macos.minimumSystemVersion : "";
   let naming: PackageNaming;
   try {
     naming = packageNaming(raw);
@@ -302,6 +306,8 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
   let identity: PackageIdentity | undefined;
   /** What a fixture install tree stands in for: the notices set its file must carry (PackageSmokeOptions.notices). */
   let fixtureNotices: StagedNotices | undefined;
+  /** What a fixture install tree declares: the minimum its own mygo.json states, which its Info.plist must carry. */
+  let fixtureMinimumSystemVersion = "";
   let packageLine = "";
   let studyData = "";
   let scanLine = "";
@@ -313,6 +319,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       else {
         app = fixtureApp(tree);
         fixtureNotices = options.notices;
+        fixtureMinimumSystemVersion = declaredMinimum;
         packageLine = "a fixture install tree (no package built)";
       }
     } else {
@@ -330,6 +337,9 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
             artifact,
             naming,
             config: { name: config.name, version: typeof config.version === "string" ? config.version : "" },
+            // The floor mygo.json declares: the scan proves the installed
+            // Info.plist carries it (goal 0017 P1).
+            minimumSystemVersion: declaredMinimum,
             // The notices this staging assembled: the contents scan proves the
             // installed file carries every text of them (goal 0016 P4).
             notices: built.build.staged.notices,
@@ -407,7 +417,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
 
     const studies: Record<string, () => Promise<void>> = {
       contents: async () => {
-        scanLine = await scanPackageContents(app!, ctx, check, identity, fixtureNotices);
+        scanLine = await scanPackageContents(app!, ctx, check, identity, fixtureNotices, fixtureMinimumSystemVersion);
       },
       layout: async () => {
         for (const file of [app!.runtime, ...app!.hosts]) {

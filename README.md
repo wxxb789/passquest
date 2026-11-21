@@ -27,14 +27,16 @@ your computer.
 
 | Platform | Package | Needs |
 |---|---|---|
-| Windows 10/11 x64 | `pass-quest-setup-<version>-amd64.exe`: per-user installer, no admin rights | Microsoft Edge WebView2 Runtime (ships with Windows 11) |
-| macOS 13+ on Apple silicon | `pass-quest-<version>-arm64.dmg` | none |
-| Linux x86_64 | `Pass_Quest-<version>-x86_64.AppImage` | GTK 3 and WebKitGTK 4.1 |
+| Windows 11+ x64 | `pass-quest-setup-<version>-amd64.exe`: per-user installer, no admin rights | Microsoft Edge WebView2 Runtime (ships with Windows 11) |
+| macOS 26 and 27 on Apple silicon | `pass-quest-<version>-arm64.dmg` | none |
+| Linux x86_64 (second-tier) | `Pass_Quest-<version>-x86_64.AppImage` | GTK 3 and WebKitGTK 4.1 |
 
 Each package bundles its own Node runtime and agent hosts, so you do not need to install any developer
 tools. The installers are **unsigned**: Windows SmartScreen and macOS Gatekeeper will warn on first
-launch. The [install guide](docs/install.md) explains how to get past the warning on each platform,
-where your data lives, how to upgrade and how to uninstall. **Settings → Updates** checks this
+launch. The [install guide](docs/install.md) ([Chinese](docs/install.zh-CN.md)) explains how to get
+past the warning on each platform, where your data lives, how to upgrade and how to uninstall; on
+macOS, `brew install --cask wxxb789/tap/pass-quest` installs the same package and skips the warning.
+**Settings → Updates** checks this
 repository's GitHub Releases only when you click it. It never downloads or installs anything by itself.
 
 ## Why Pass Quest
