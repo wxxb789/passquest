@@ -1,5 +1,16 @@
 import { existsSync } from "node:fs";
 
+import {
+  caskProblems,
+  CASK_FACTS,
+  CASK_SHA256,
+  CASK_TAP_PATH,
+  CASK_VERSION,
+  MACOS_DATA_DIRECTORY,
+  placeholderProblems,
+  renderCask,
+} from "../lib/cask.ts";
+import type { CaskFacts } from "../lib/cask.ts";
 import { field, stringField } from "../lib/json.ts";
 import { readEach, resolve } from "../lib/repo.ts";
 import { fail, pass } from "../lib/types.ts";
@@ -15,19 +26,26 @@ import type { Gate } from "../lib/types.ts";
  * every OS; the tap install needs a network and is a CI job, not a gate. A
  * string a guide quotes from the app is checked against the app's own sources,
  * so a quote a learner never sees fails here; so does the removed right-click
- * → Open path.
+ * → Open path. The cask template the guides' `brew install` line installs is
+ * read as a third document: rendered with the published v0.15.0 values, its
+ * stanzas must match the same facts and its bytes must equal the pinned render,
+ * so a template edit is a reviewable diff (P3).
  */
 export const ENGLISH_GUIDE = "docs/install.md";
 export const CHINESE_GUIDE = "docs/install.zh-CN.md";
 export const RELEASE_NOTES = ".github/release-notes.md";
+/** The cask template P4's release job renders into the tap's `CASK_TAP_PATH`. */
+export const CASK_TEMPLATE_PATH = ".github/homebrew-cask-template.rb";
+/** The pinned render of the template with `CASK_VERSION` and `CASK_SHA256`: an edited template must match this file byte for byte. */
+export const CASK_GOLDEN_PATH = "harness/gates/testdata/pass-quest-0.15.0.rb";
 const MANIFEST = "mygo.json";
 
 /** The one Homebrew command both guides and the release notes name (P3 renders the matching cask). */
 export const TAP_COMMAND = "brew install --cask wxxb789/tap/pass-quest";
 /** The Terminal equivalent of the Open Anyway exception; quoted, because the app path holds a space. */
 export const QUARANTINE_COMMAND = 'xattr -dr com.apple.quarantine "/Applications/Pass Quest.app"';
-/** The macOS data directory both guides name; the cask's `zap trash:` carries it (P3). */
-export const MACOS_DATA_DIRECTORY = "~/Library/Application Support/Pass Quest";
+/** The bundle identifier `mygo.json` declares; the cask's `uninstall quit:` carries it (P3). */
+const BUNDLE_ID = "com.github.wxxb789.passquest";
 /** The directory the English guide's relative links resolve against. */
 const GUIDE_DIR = ENGLISH_GUIDE.slice(0, ENGLISH_GUIDE.lastIndexOf("/") + 1);
 
@@ -115,6 +133,12 @@ const FACTS: readonly Fact[] = [
     what: "the source and date of the Open Anyway flow (Apple's support page 102445 and the macOS User Guide)",
     english: ["support.apple.com/en-us/102445", "2026-05-27", "mh40616"],
     chinese: ["support.apple.com/en-us/102445", "2026-05-27", "mh40616"],
+  },
+  {
+    section: "macOS",
+    what: "the source of the supported macOS pair (Apple's page listing the latest versions)",
+    english: ["https://support.apple.com/en-us/109033"],
+    chinese: ["https://support.apple.com/en-us/109033"],
   },
   {
     section: "macOS",
@@ -350,6 +374,20 @@ function preview(value: string): string {
   return one.length > 160 ? `${one.slice(0, 157)}...` : one;
 }
 
+/** The first line on which two texts differ, for the pinned render's failure message. */
+function firstDifference(rendered: string, golden: string): string {
+  const renderedLines = rendered.split("\n");
+  const goldenLines = golden.split("\n");
+  for (let index = 0; index < Math.max(renderedLines.length, goldenLines.length); index++) {
+    if (renderedLines[index] !== goldenLines[index]) {
+      const left = JSON.stringify(renderedLines[index] ?? "(end of file)");
+      const right = JSON.stringify(goldenLines[index] ?? "(end of file)");
+      return `first differing line ${index + 1}: ${left} against the golden's ${right}`;
+    }
+  }
+  return "the two texts hold the same lines and differ in encoding only";
+}
+
 export const installGuide: Gate = {
   id: "install-guide",
   title: "install guide",
@@ -361,11 +399,15 @@ export const installGuide: Gate = {
       "README.zh-CN.md",
       RELEASE_NOTES,
       MANIFEST,
+      CASK_TEMPLATE_PATH,
+      CASK_GOLDEN_PATH,
     ]);
-    const paths = [ENGLISH_GUIDE, CHINESE_GUIDE, "README.md", "README.zh-CN.md", RELEASE_NOTES, MANIFEST];
+    const paths = [ENGLISH_GUIDE, CHINESE_GUIDE, "README.md", "README.zh-CN.md", RELEASE_NOTES, MANIFEST, CASK_TEMPLATE_PATH, CASK_GOLDEN_PATH];
     const unreadable = paths.filter((_, index) => documents[index] === null);
     if (unreadable.length > 0) return fail(unreadable.map((path) => `${path}: missing or unreadable`));
-    const [english, chinese, readme, readmeChinese, notes, manifest] = paths.map((_, index) => documents[index]!.toString("utf8")) as string[];
+    const [english, chinese, readme, readmeChinese, notes, manifest, caskTemplate, caskGolden] = paths.map((_, index) =>
+      documents[index]!.toString("utf8"),
+    ) as string[];
     const sourceDocuments = await readEach(ctx.root, [...APP_SOURCES]);
     const unreadableSources = APP_SOURCES.filter((_, index) => sourceDocuments[index] === null);
     if (unreadableSources.length > 0) return fail(unreadableSources.map((path) => `${path}: missing or unreadable`));
@@ -403,6 +445,10 @@ export const installGuide: Gate = {
     const floor = floorText && /^\d+(\.\d+)*$/.test(floorText) ? Number(floorText.split(".")[0]) : null;
     if (floor === null) {
       problems.push(`${MANIFEST}: macos.minimumSystemVersion must be a version like "26.0"; it is ${floorText === undefined ? "missing" : JSON.stringify(floorText)}`);
+    }
+    const identifier = stringField(manifestDocument, "identifier");
+    if (identifier !== BUNDLE_ID) {
+      problems.push(`${MANIFEST}: identifier must be ${BUNDLE_ID}, the bundle id the app registers under and the cask's uninstall quit: names; it is ${identifier === undefined ? "missing" : JSON.stringify(identifier)}`);
     }
 
     for (const [guide, text, language, guideSections] of [
@@ -553,12 +599,40 @@ export const installGuide: Gate = {
       if (notes.includes(name)) problems.push(`${RELEASE_NOTES}: names macOS ${name}, below the supported floor`);
     }
 
+    // The cask the guides' one Homebrew command installs: the template rendered
+    // with the published v0.15.0 values (the release's own asset and SHA-256,
+    // plan fact 6) must carry every stanza the tap needs and no placeholder, and
+    // must equal the pinned render byte for byte. The floor and the identifier
+    // are injected from mygo.json, and the data directory is the guides' own
+    // MACOS_DATA_DIRECTORY, so a cask that disagrees with the guides or the
+    // manifest fails here, before any push. A second render with a synthetic
+    // version and digest proves the two substituted values still travel through
+    // the template instead of being hard-coded.
+    const caskFacts: CaskFacts = {
+      ...CASK_FACTS,
+      minimumMajor: floor ?? CASK_FACTS.minimumMajor,
+      identifier: identifier ?? CASK_FACTS.identifier,
+    };
+    const rendered = renderCask(caskTemplate, CASK_VERSION, CASK_SHA256);
+    for (const problem of caskProblems(rendered, caskFacts)) problems.push(`${CASK_TEMPLATE_PATH}: ${problem}`);
+    for (const problem of placeholderProblems(caskTemplate)) problems.push(`${CASK_TEMPLATE_PATH}: ${problem}`);
+    // Line endings are normalized before the comparison: the tree pins LF, and a
+    // CRLF checkout would otherwise fail as a phantom template edit.
+    const renderedLf = rendered.replaceAll("\r\n", "\n");
+    const goldenLf = caskGolden.replaceAll("\r\n", "\n");
+    if (renderedLf !== goldenLf) {
+      problems.push(
+        `${CASK_GOLDEN_PATH}: the template no longer renders the pinned v${CASK_VERSION} cask (${firstDifference(renderedLf, goldenLf)}); re-render the golden and review the diff`,
+      );
+    }
+
     if (problems.length > 0) return fail(problems);
     const markerTotal = screenshotMarkers(english).length;
     return pass(
       `${GUIDE_SECTIONS.length} sections, ${englishBlocks.length} code blocks and ${markerTotal} screenshot places agree; ` +
         `${englishSide.length} links and ${englishLinks.external.length} URLs agree; ${APP_QUOTES.length} quoted app strings match their sources; ` +
-        `the release notes name the tap command and both guides; floor ${floorText} from ${MANIFEST}`,
+        `the release notes name the tap command and both guides; the cask template renders v${CASK_VERSION} with the release's SHA-256, and a synthetic pair, into ${CASK_TAP_PATH}; ` +
+        `floor ${floorText} from ${MANIFEST}`,
     );
   },
 };

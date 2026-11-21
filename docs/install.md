@@ -32,7 +32,9 @@ Windows and macOS are first-tier: every CI run builds, installs and drives both 
 
 **Windows 10** is not blocked but it is unsupported and untested: the installer runs and the package
 may work, yet no CI job covers Windows 10 and nothing here is tested on it. Any macOS older than 26
-is unsupported: the packages declare macOS 26 as their minimum.
+is unsupported: the packages declare macOS 26 as their minimum, and Apple's [Find out which macOS
+your Mac is using](https://support.apple.com/en-us/109033) lists macOS 27 Golden Gate and macOS
+Tahoe 26 as the latest versions.
 
 ## Windows
 
@@ -75,8 +77,8 @@ older right-click → **Open** way past it. What works:
 1. Open **Pass Quest** from **Applications** and let macOS refuse it.
 2. Open **System Settings** → **Privacy & Security**, scroll to the notice about the blocked app and
    choose **Open Anyway** — macOS offers the button for about an hour after the attempt.
-3. Confirm with your login password or Touch ID. macOS saves the app as an exception, so this is the
-   only time the refusal appears.
+3. Enter your login password. macOS saves the app as an exception, so this is the only time the
+   refusal appears.
 4. Open **Pass Quest** again; it starts normally.
 
 The steps and the one-hour window are Apple's: [Safely open apps on your
@@ -90,7 +92,7 @@ unknown developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-
 *Screenshot: System Settings → Privacy & Security with the blocked-app notice and the Open Anyway button (owner).*
 
 <!-- screenshot: macos-open-anyway-confirm -->
-*Screenshot: the confirmation that asks for the login password or Touch ID (owner).*
+*Screenshot: the confirmation that asks for the login password (owner).*
 
 <!-- screenshot: macos-first-launch -->
 *Screenshot: Pass Quest open after the exception was saved (owner).*
@@ -120,8 +122,10 @@ xattr -dr com.apple.quarantine "/Applications/Pass Quest.app"
 Do not disable Gatekeeper system-wide to get past the warning. The steps above are per-app, and the
 rest of the system stays protected.
 
-**Prerequisites.** macOS 26 (Tahoe) or macOS 27 (Golden Gate), on Apple silicon — the two supported
-majors. Nothing else: WKWebView is part of the system and the package bundles what else it needs.
+**Prerequisites.** macOS 26 (Tahoe) or macOS 27 (Golden Gate), on Apple silicon — the two latest
+majors, per Apple's [Find out which macOS your Mac is
+using](https://support.apple.com/en-us/109033). Nothing else: WKWebView is part of the system and
+the package bundles what else it needs.
 
 ## Linux
 
@@ -249,7 +253,7 @@ Untested, and therefore not claimed:
 - **Other architectures.** Windows arm64, macOS x86_64 (Intel) and Linux arm64: no package is built
   or run.
 - **macOS 27.** No GitHub-hosted runner provides it, so the guide documents the pair from Apple's
-  support page (2026-11-09) while CI proves macOS 26 only.
+  own list while CI proves macOS 26 only.
 - **Code signing and notarization.** None. The SmartScreen and Gatekeeper paths above are the
   learner's manual way past the warning, and CI cannot exercise the Gatekeeper prompt: a `.dmg` built
   on the runner carries no quarantine attribute.

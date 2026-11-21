@@ -26,7 +26,7 @@ Windows 和 macOS 是一线支持：每次 CI 运行都会构建、安装并驱�
 | macOS（Apple 芯片） | `pass-quest-<version>-arm64.dmg` | macOS 26 与 macOS 27，即最新两个大版本 |
 | Linux x86_64 | `Pass_Quest-<version>-x86_64.AppImage` | 第二梯队；仅 AppImage |
 
-**Windows 10** 不会被阻止，但不受支持，也未经测试：安装程序能运行，包也可能可用，只是没有 CI 任务覆盖 Windows 10，我们也没有在上面实测过。macOS 26 之前的版本一律不受支持：安装包把 macOS 26 声明为最低版本。
+**Windows 10** 不会被阻止，但不受支持，也未经测试：安装程序能运行，包也可能可用，只是没有 CI 任务覆盖 Windows 10，我们也没有在上面实测过。macOS 26 之前的版本一律不受支持：安装包把 macOS 26 声明为最低版本，Apple 的 [Find out which macOS your Mac is using](https://support.apple.com/en-us/109033) 把 macOS 27 Golden Gate 与 macOS Tahoe 26 列为最新版本。
 
 ## Windows
 
@@ -51,7 +51,7 @@ Windows 和 macOS 是一线支持：每次 CI 运行都会构建、安装并驱�
 
 1. 从**应用程序**打开 **Pass Quest**，让 macOS 拒绝它。
 2. 打开**系统设置** → **隐私与安全性**（Privacy & Security），滚动到被拦截应用的提示，选择**仍要打开**（Open Anyway）——macOS 在尝试后大约一小时内提供这个按钮。
-3. 用登录密码或触控 ID 确认。macOS 会把该应用记为例外，所以这个拦截只会出现这一次。
+3. 输入你的登录密码。macOS 会把该应用记为例外，所以这个拦截只会出现这一次。
 4. 再次打开 **Pass Quest**，它会正常启动。
 
 上面这些步骤和「约一小时」的期限来自 Apple：支持页面 [Safely open apps on your Mac](https://support.apple.com/en-us/102445)（发布于 2026-05-27）和 [macOS 使用手册：Open a Mac app from an unknown developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac)。
@@ -63,7 +63,7 @@ Windows 和 macOS 是一线支持：每次 CI 运行都会构建、安装并驱�
 *截图：系统设置 → 隐私与安全性里的被拦截提示与 Open Anyway 按钮（待补）。*
 
 <!-- screenshot: macos-open-anyway-confirm -->
-*截图：要求输入登录密码或触控 ID 的确认框（待补）。*
+*截图：要求输入登录密码的确认框（待补）。*
 
 <!-- screenshot: macos-first-launch -->
 *截图：存下例外之后正常打开的 Pass Quest（待补）。*
@@ -88,7 +88,7 @@ xattr -dr com.apple.quarantine "/Applications/Pass Quest.app"
 
 不要为了绕过警告而全局关闭 Gatekeeper。上面的步骤只针对这一个应用，系统其余部分仍然受保护。
 
-**依赖。** macOS 26（Tahoe）或 macOS 27（Golden Gate），Apple 芯片——受支持的就是这两个大版本。没有别的依赖：WKWebView 属于系统，其余需要的都在包里。
+**依赖。** macOS 26（Tahoe）或 macOS 27（Golden Gate），Apple 芯片——最新两个大版本，见 Apple 的 [Find out which macOS your Mac is using](https://support.apple.com/en-us/109033)。没有别的依赖：WKWebView 属于系统，其余需要的都在包里。
 
 ## Linux
 
@@ -167,7 +167,7 @@ CI（[`.github/workflows/gate.yml`](../.github/workflows/gate.yml)）每个操�
 以下内容没有测试，因此也不作声明：
 
 - **其他架构。** Windows arm64、macOS x86_64（Intel）和 Linux arm64：不构建也不运行任何安装包。
-- **macOS 27。** 没有 GitHub 托管的运行器提供它，所以本指南按 Apple 的支持页面（2026-11-09）记录这两个大版本，而 CI 只证明 macOS 26。
+- **macOS 27。** 没有 GitHub 托管的运行器提供它，所以本指南按 Apple 自己列出的版本记录这两个大版本，而 CI 只证明 macOS 26。
 - **代码签名与公证。** 都没有。上面的 SmartScreen 和 Gatekeeper 步骤是学习者手动越过警告的方式，CI 也无法触发 Gatekeeper 提示：在运行器上构建的 `.dmg` 不带隔离属性。
 - **Linux 上的 FUSE 与显示服务器。** CI 只用解包运行（`APPIMAGE_EXTRACT_AND_RUN=1`）跑 AppImage，直接 FUSE 挂载没有覆盖；冒烟测试在 xvfb（X11）下运行，Wayland 特有的行为也没有覆盖。
 - **Anki 与 AnkiConnect。** 不在包内。能连上 AnkiConnect 端点时报告存在，否则报告不存在；没有它学习功能照常可用。

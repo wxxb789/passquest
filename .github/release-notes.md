@@ -12,7 +12,7 @@ Pass Quest {{VERSION}}, a local-first desktop exam coach.
 
 **The installers are unsigned.**
 - On Windows, SmartScreen may show "Windows protected your PC"; choose *More info → Run anyway*.
-- On macOS 26 and 27, open the app once and macOS refuses it; then choose **Open Anyway** under *System Settings → Privacy & Security* and confirm with your login password or Touch ID. With Homebrew, that step never comes:
+- On macOS 26 and 27, open the app once and macOS refuses it; then choose **Open Anyway** under *System Settings → Privacy & Security* and confirm with your login password. With Homebrew, that step never comes:
 
   ```bash
   brew install --cask wxxb789/tap/pass-quest
