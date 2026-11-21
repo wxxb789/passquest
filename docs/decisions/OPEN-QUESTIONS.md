@@ -2074,3 +2074,189 @@ Entry format:
 - Revisit when: a gate needs a pause at a different lifecycle point (before the provider request) —
   the trigger must then be a different real event, not a tighter bound.
 
+### Q-0017-01 — Which macOS version does the package declare as its minimum?
+- Status: decided(default taken)
+- Context: Q-0013-10 declared 13.0 as "the toolchain's minimum": the Go 1.27 linker writes the
+  Mach-O `LC_BUILD_VERSION minos 13.0`, MyGo 0.10.0's own `LSMinimumSystemVersion` default is 12.0,
+  and 13.0 was the last value the tree could defend. The owner's decision (Q-0000-07) supports only
+  the latest two macOS majors — macOS 26 Tahoe and macOS 27 Golden Gate, per Apple's list — so a
+  package that declares 13.0 invites an unsupported system to open a bundle no CI job covers.
+- Options considered: (A) declare 26.0 in `mygo.json` (`macos.minimumSystemVersion`) and leave the
+  linker's `minos` at 13.0; (B) also build with `-ldflags -macos=26.0` so the Mach-O states it;
+  (C) leave 13.0 and only document the pair.
+- Default taken: (A). MyGo copies the value verbatim into `LSMinimumSystemVersion`
+  (`cmd/mygo/bundle.go:254`), and the effective floor is the higher of that key and `minos` — the
+  key (26.0) is above Go 1.27's 13.0, so the key binds; `minos` is not ignored (dyld refuses a
+  binary whose `minos` is newer than the running system), it is simply not the binding floor.
+  `TestPackagingIdentity` pins 26.0 and its comment states this; `plistProblems`
+  (`package-smoke/contents.ts`) fails an installed `.app` whose plist disagrees, naming both
+  values, and three self-test cases (one must fail at 13.0, two must pass) run on all three OSes.
+  The guides, `docs/desktop.md` and `docs/cross-platform.md` state the 26/27 pair. Reverse by
+  restoring 13.0 and the old comment; the test then fails at 26.0 the other way.
+- Revisit when: the supported pair moves again (Apple ships macOS 28), or the Go toolchain's own
+  `minos` passes the declared floor — then the plist key stops being the binding one and the
+  choice must be re-read, not re-applied.
+
+### Q-0017-02 — What is the cask called, where does it live, and what does the learner run?
+- Status: decided(default taken)
+- Context: goal 0017 needs a public tap whose cask installs the published `.dmg`. Homebrew
+  requires explicit trust for a non-official tap since 6.0.0, but a fully qualified install trusts
+  "only that item" (`docs.brew.sh/Tap-Trust`), so the learner's whole step can stay one command.
+  The tap repository, its deploy key and the Actions secret are the owner's actions, taken by the
+  coordinator.
+- Options considered: (A) token `pass-quest` in tap `wxxb789/homebrew-tap`, file
+  `Casks/pass-quest.rb` (the basename must equal the token, or `cask/cask_loader.rb` raises
+  `CaskTokenMismatchError`), learner runs `brew install --cask wxxb789/tap/pass-quest`; (B) a
+  longer token, or a separate `brew trust` step in the guide; (C) install from a URL instead of a
+  tap.
+- Default taken: (A). `install-guide` pins the literal command in both guides and the release
+  notes; `harness/lib/cask.ts` renders the template and checks the token, tap, identifier and data
+  directory; the tap's file is byte-compared with a fresh render (the `install` job's `tap-render`
+  assertion). Every `brew` call in `harness/tools/cask-install.ts` addresses the cask fully
+  qualified because the runner also carries the mutant tap (`Cask pass-quest exists in multiple
+  taps`, run `44909338098`), and the tool runs `brew trust --cask wxxb789/tap/pass-quest` before
+  the strict audit because Homebrew 7.0.14 refuses to load an untrusted tap for `brew audit` even
+  after the qualified install trusted it (run `44910568731`). For a learner with only this tap the
+  short name still resolves, which is why the guides' paragraph about the workflow keeps
+  `brew uninstall --zap --cask pass-quest`.
+- Revisit when: Homebrew changes the trust rules for casks or `brew audit`, or a second cask with
+  this token has to be installed beside ours anywhere a command here is copied.
+
+### Q-0017-03 — What does the cask declare besides the version and SHA-256?
+- Status: decided(default taken)
+- Context: the goal asks the cask to install the latest published release and to serve only the
+  systems the goal supports; Homebrew has a house vocabulary for both, and `brew audit --online`
+  compares a cask's declared macOS minimum with the artifact's own `LSMinimumSystemVersion`
+  (Cask-Cookbook, "Choosing the minimum macOS release").
+- Options considered: (A) `depends_on macos: :tahoe` plus `depends_on arch: :arm64`, version and
+  sha256 from the release asset, `livecheck do url :url; strategy :github_latest end`, and a `url`
+  interpolating `v#{version}`; (B) a looser `depends_on macos: ">= :tahoe"` and no arch line;
+  (C) no livecheck.
+- Default taken: (A). `depends_on macos: :tahoe` is 26 and `:golden_gate` is 27
+  (`macos_version.rb`), so the cask refuses every older system and accepts both supported majors;
+  the `.dmg` is arm64 only, and the arch line makes the refusal explicit; the digest is
+  cross-checked against the release's own `SHA256SUMS.txt` by `cask-publish.ts`, and the gate pins
+  the v0.15.0 render byte for byte; `livecheck`'s `:url` symbol resolves to the cask's own `url`
+  and `GithubLatest` applies only when named (`livecheck/strategy.rb`).
+- Revisit when: an Intel or universal `.dmg` is ever published, or Apple ships a third supported
+  major and the cask should accept it.
+
+### Q-0017-04 — How does the cask clear the quarantine flag, and why `must_succeed: false` with no `writable_*`?
+- Status: decided(default taken)
+- Context: Homebrew quarantines every download by default (its security page says it does so "so
+  Gatekeeper performs these checks instead of Homebrew bypassing them"), and `--no-quarantine` no
+  longer exists (Homebrew/brew#23363), so an unsigned cask must clear the flag itself or the first
+  launch meets Gatekeeper. A third-party cask does that in the structured `postflight_steps` form.
+  The first draft in the tree declared `writable_paths: ["{{appdir}}/Pass Quest.app"]` with
+  `writable_base: :appdir` — a token combined with a base, which is not the documented relative
+  form.
+- Options considered: (A) `postflight_steps do run "/usr/bin/xattr", args: ["-rd",
+  "com.apple.quarantine", "{{appdir}}/Pass Quest.app"], must_succeed: false end` with no
+  `writable_*` — the Cookbook's `run` paragraph already permits writes to the app directory, and
+  `xattr -rd` exits non-zero when the path carries no such attribute, which a re-install over the
+  same cask produces; (B) keep the declared `writable_*`; (C) clear the flag in a shell
+  `postflight` block.
+- Default taken: (A). The install job proves the minimal stanza removes the flag on the app and on
+  the nested executable (run `44912433442`), and its `quarantine` mutant proves the assertion
+  catches a cask without the block
+  (`[assert] mutant-quarantine: … 0181;…;Homebrew\x20Cask;… — the attribute postflight_steps
+  removes is still there`). `must_succeed: false` follows the Cookbook's own rule for a cleanup
+  command whose target state — no attribute — is the state the step wants, and the template
+  comment states the reason.
+- Revisit when: Homebrew's step sandbox changes so the app directory is no longer writable, or
+  `xattr` changes its exit status for a missing attribute.
+
+### Q-0017-05 — When does the cask workflow run, and what does each path do?
+- Status: decided(default taken)
+- Context: the plan wanted `release: [published]` plus `workflow_dispatch`; GitHub registers a
+  dispatchable workflow only once its file is on the default branch, so dispatch cannot produce
+  the pre-merge evidence, and the plan's weekly `schedule` is not in the contract. The tap must
+  also be installed and asserted on a real macOS runner, which a gate cannot do (gates make no
+  external network call).
+- Options considered: (A) `pull_request` with a `paths:` filter running the v0.15.0 dry run plus
+  the real install, `release: [published]` guarded `!draft && !prerelease` (update pushes, install
+  verifies), and `workflow_dispatch` with `tag` default `v0.15.0` and `push` default `false`;
+  (B) `push` on the branch; (C) the weekly schedule.
+- Default taken: (A). The `paths:` filter lists the workflow, the template, `mygo.json`, the
+  golden and the twelve repo files of the two tools' import closure, so a change to anything the
+  tools load re-runs the workflow; the dry-run step's environment holds no secret; the install job
+  runs on `macos-26` (the floor, not `macos-latest`) and asserts `sw_vers` first. The pull-request
+  run is what proved the tap install before the merge (runs `44905438010`, `44909338098`,
+  `44910568731`, `44912433442`); after the merge `gh workflow run cask.yml -f tag=v0.15.0 -f
+  push=false` (or `push=true`) repeats it. The tag travels in `env:` and never inside a `run:`
+  body, and both the step and the tools require the three-number shape.
+- Revisit when: GitHub changes how a branch-only workflow can be dispatched, or the goal gains a
+  scheduled check.
+
+### Q-0017-06 — What credential writes the tap, and where does it live?
+- Status: decided(default taken)
+- Context: the cask must move on its own when a release is published, with no owner login in the
+  loop and with the key never reaching a log or the tree. One write credential is enough: a deploy
+  key scoped to `wxxb789/homebrew-tap`.
+- Options considered: (A) one write deploy key, only as the `HOMEBREW_TAP_DEPLOY_KEY` Actions
+  secret, written by the tool to a `0600` file for the one `git push`; (B) a fine-grained PAT;
+  (C) the workflow's `GITHUB_TOKEN` (it has no access to another repository).
+- Default taken: (A). `cask-publish.ts` reads the key from the environment only on `--push`,
+  writes it under `umask 077` into the run's `0700` temp tree (NTFS ACLs decide on Windows; the
+  comment says so), passes it to `git` through `GIT_SSH_COMMAND`
+  (`-F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes`),
+  prints only the ssh remote and the commit id, deletes the file, commits as the owner
+  (`-c user.name/user.email`), and skips a render the tap already carries. The tap's history is
+  public and disclosed whole in the evidence record: `77210f9` is the round-1 accidental push
+  through the owner's https credential under the identity `passquest-cask-update`; `d9cf7eb` and
+  `82b6693` are the coordinator's seeds with the deploy key, the second with a temporary key that
+  was removed afterwards. The deploy-keys list now holds one key (`passquest cask update`,
+  write, created 12:17:40Z) and the secret is its pair; `secrets` scans the tree (769 files, 0
+  findings in run `44912433474`).
+- Revisit when: the tap moves, the owner rotates the key, or GitHub changes deploy-key
+  capabilities.
+
+### Q-0017-07 — Which paths does `zap trash:` carry, and where were they measured?
+- Status: decided(default taken)
+- Context: the goal asks `--zap` to remove the per-user data directory the install guide names.
+  The first tap install (run `44905438010`) listed `$HOME/Library` before and after the uninstall
+  and found two more paths the app creates: `~/Library/Caches/com.github.wxxb789.passquest` and
+  `~/Library/WebKit/com.github.wxxb789.passquest` — both survived that round's `--zap`.
+- Options considered: (A) the three-element array the measurement named, alphabetical, read back
+  from the installed cask file by the tool and asserted path by path; (B) the data directory only;
+  (C) a glob.
+- Default taken: (A); the array is `brew generate-zap`'s own output format and alphabetical
+  because the `Cask/ArrayAlphabetization` cop requires that of a `zap` array
+  (`rubocops/cask/array_alphabetization.rb`). The final run's `[state] the installed cask file's
+  zap trash: names 3 path(s)` line lists them, the before/after listing goes 2 → 0 entries, and
+  the `zap` mutant shows a cask without the stanza leaves the marker behind. The path list is also
+  what the guides describe under "Where your data lives".
+- Revisit when: the app writes another per-user path (the same listing command catches it on the
+  next install), or WebKit changes where it keeps the app's profile.
+
+### Q-0017-08 — Where do the owner's screenshots go, and what ships until they exist?
+- Status: decided(default taken)
+- Context: the goal says Gatekeeper screenshots come later from the owner and the guide ships with
+  accurate text and marked places for them; a markdown image link to a missing file would fail
+  `docs-links` (it resolves images too), so a placeholder cannot be an image.
+- Options considered: (A) an HTML comment `<!-- screenshot: <name> -->` plus one italic caption
+  line per place, no image link; (B) a committed placeholder PNG; (C) nothing.
+- Default taken: (A). Both guides carry 7 places with the same names, the gate requires the counts
+  to agree, and the evidence record lists them as pending. The owner's wording review is the other
+  half of Done-when 2 and blocks nothing.
+- Revisit when: the owner supplies the images — then each place becomes an image link (the
+  `docs-links` gate will resolve it) and the italic line becomes the caption.
+
+### Q-0017-09 — What is not proven, and why is the tap install a workflow rather than a gate?
+- Status: decided(default taken)
+- Context: the goal's own known limit: CI has no macOS 27 runner, so macOS 27 is covered by
+  documentation only. Separately, the tap install downloads a public release and runs `brew` — an
+  external network call — which harness rules keep out of gates ("a gate makes no external network
+  call", `docs/harness.md`).
+- Options considered: (A) the tap install stays a workflow job on `macos-26` with `sw_vers`
+  asserted first, and macOS 27 stays documented; (B) a gate that skips without the network;
+  (C) a macOS 27 runner that does not exist.
+- Default taken: (A). The install job prints its runner (`macos-26-arm64`, macOS 26.7.2 in run
+  `44912433442`) and its first assertion names the runner instead of failing like a broken cask
+  below the floor; `install-guide` keeps the platform-independent half (the template render, the
+  guides, the supported pair) on all three OSes. The one Homebrew the fix was never re-run on is
+  disclosed: run `44910568731` (7.0.14) ends at the untrusted-tap refusal, and the run carrying
+  the `brew trust` fix landed on a 7.0.11 runner.
+- Revisit when: GitHub provides a macOS 27 runner, or Homebrew's cask sandbox makes the tap
+  install runnable without the network (a fixture cask, like the mutants' scratch tap).
+

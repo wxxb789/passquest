@@ -24,7 +24,7 @@ such a binary opens a "frontend not built" page instead of a blank window. With 
 behaves exactly like `passquest` (`passquest-desktop report --json` …), which is how the durable host calls
 `agent record-step` back on it.
 
-Prerequisites: Windows 11 (Windows 10 is untested) with the WebView2 runtime (bundled with Windows 11); macOS 26+; Linux with GTK 3
+Prerequisites: Windows 11 (Windows 10 is untested) with the WebView2 runtime (bundled with Windows 11); macOS 26 or 27 on Apple silicon; Linux with GTK 3
 and WebKitGTK 4.1. Node ≥ 22 is needed only for the coach, Anki push, find and the study brief — practice,
 feedback, assessment and notes work without it.
 
