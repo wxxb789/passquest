@@ -38,9 +38,10 @@ Pushing a version tag builds a release; publishing it is the owner's decision. T
    the `HOMEBREW_TAP_DEPLOY_KEY` Actions secret. A macOS job then installs the cask from the tap,
    asserts the quarantine flag is gone, launches the installed app, and asserts
    `brew uninstall --zap` quits the app and removes the bundle and the data directory; three mutant
-   runs prove those three removals are caught, each installing its derived cask by name from a
-   scratch tap the runner creates (`brew tap-new --no-git`), because current Homebrew refuses to
-   install a cask from a path. No manual step is involved. A pull
+   runs prove the quarantine clearing, the `zap trash:` removal and the quit are caught, each
+   installing its derived cask by name from a scratch tap the runner creates
+   (`brew tap-new --no-git`), because current Homebrew refuses to install a cask from a path. No
+   manual step is involved. A pull
    request that touches the template or the cask tools runs the same workflow: the `update` job
    renders the release without pushing, and the `install` job is a real install — it first requires
    the tap's file to equal a fresh render of the tree's template, so a template edit the tap has not

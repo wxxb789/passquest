@@ -2116,9 +2116,10 @@ Entry format:
   qualified because the runner also carries the mutant tap (`Cask pass-quest exists in multiple
   taps`, run `44909338098`), and the tool runs `brew trust --cask wxxb789/tap/pass-quest` before
   the strict audit because Homebrew 7.0.14 refuses to load an untrusted tap for `brew audit` even
-  after the qualified install trusted it (run `44910568731`). For a learner with only this tap the
-  short name still resolves, which is why the guides' paragraph about the workflow keeps
-  `brew uninstall --zap --cask pass-quest`.
+  after the qualified install trusted it (run `44910568731`). The guides' paragraph about the
+  workflow names the uninstall fully qualified too (`brew uninstall --zap --cask
+  wxxb789/tap/pass-quest`), the command the job runs: the short name resolves only while one tap
+  carries the cask.
 - Revisit when: Homebrew changes the trust rules for casks or `brew audit`, or a second cask with
   this token has to be installed beside ours anywhere a command here is copied.
 

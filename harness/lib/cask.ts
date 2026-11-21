@@ -19,16 +19,13 @@
  * external network call and `brew` exists on no Windows runner) and reports
  * problems as strings the gate prefixes.
  */
-import { createHash } from "node:crypto";
-
 /** The token the template carries where the release's version goes. */
 const VERSION_TOKEN = "@VERSION@";
 /** The token the template carries where the release asset's SHA-256 goes. */
 const SHA256_TOKEN = "@SHA256@";
 /** A placeholder nobody substituted: any `@name@` token whose name starts with
- * a letter, in either case (the template's own tokens are `@UPPERCASE@`).
- * `{{...}}` stays out of this on purpose, because Homebrew's install-step tokens
- * are meant to survive the render. */
+ * a letter, in either case (the template's own tokens are `@UPPERCASE@`); the
+ * module header holds the `{{...}}` half of this rule. */
 const LEFTOVER = /@[A-Za-z][A-Za-z0-9_-]*@/g;
 
 /** The macOS release each codename `depends_on macos:` may mean (mygo.json's `macos.minimumSystemVersion`). */
@@ -124,9 +121,21 @@ export function renderCask(template: string, version: string, sha256: string): s
   return template.replaceAll(VERSION_TOKEN, version).replaceAll(SHA256_TOKEN, sha256);
 }
 
-/** The SHA-256 of a text's UTF-8 bytes, the digest the cask tools print for a render. */
-export function sha256Text(text: string): string {
-  return createHash("sha256").update(text).digest("hex");
+/**
+ * The first line on which two texts differ, as its 1-based number and each
+ * side's text (null at the end of the shorter text), or null when every line
+ * matches. The golden check and the tap-drift check phrase their own failure
+ * lines around this, so both name the same first differing line.
+ */
+export function firstDifference(left: string, right: string): { line: number; left: string | null; right: string | null } | null {
+  const leftLines = left.split("\n");
+  const rightLines = right.split("\n");
+  for (let index = 0; index < Math.max(leftLines.length, rightLines.length); index++) {
+    if (leftLines[index] !== rightLines[index]) {
+      return { line: index + 1, left: leftLines[index] ?? null, right: rightLines[index] ?? null };
+    }
+  }
+  return null;
 }
 
 /**
@@ -177,7 +186,7 @@ function quotedValue(text: string, key: string): string | null {
   const pattern = new RegExp(`^\\s*${key}\\s+(?:"([^"]*)"|'([^']*)')\\s*$`, "m");
   const found = pattern.exec(text);
   if (found === null) return null;
-  return (found[1] ?? found[2])!.replace(/\\"/g, '"').replace(/\\'/g, "'");
+  return unquote((found[1] ?? found[2])!);
 }
 
 /** The symbol one `depends_on <key>: :value` states, or null when the stanza is absent or not one symbol. */
@@ -193,20 +202,36 @@ function dependsOn(text: string, key: string): string | null {
 function argumentValue(text: string, stanza: string, key: string): string | null {
   const found = new RegExp(`^\\s*${stanza}\\s+${key}:\\s*(?:"([^"]*)"|'([^']*)')\\s*$`, "m").exec(text);
   if (found === null) return null;
-  return (found[1] ?? found[2])!.replace(/\\"/g, '"').replace(/\\'/g, "'");
+  return unquote((found[1] ?? found[2])!);
+}
+
+/** A quoted string's escapes resolved: `\"` and `\'` mean the character itself. */
+function unquote(raw: string): string {
+  return raw.replace(/\\"/g, '"').replace(/\\'/g, "'");
+}
+
+/**
+ * The `do … end` block a cask names `<header>` (e.g. `livecheck`): the text's
+ * lines, the header line's index and the index of the `end` that closes the
+ * block — the first at the header line's own indentation, so a nested block's
+ * deeper `end` is skipped — or null for the whole result when there is no
+ * `<header> do` line. `end` is null when nothing closes the block, and the
+ * callers decide what an unterminated block means.
+ */
+export function stanzaBody(text: string, header: string): { lines: string[]; start: number; end: number | null } | null {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => new RegExp(`^\\s*${header}\\s+do\\s*$`).test(line));
+  if (start < 0) return null;
+  const indent = /^(\s*)/.exec(lines[start] ?? "")?.[1] ?? "";
+  const end = lines.findIndex((line, index) => index > start && new RegExp(`^${indent}end\\s*$`).test(line));
+  return { lines, start, end: end < 0 ? null : end };
 }
 
 /** The body of the `livecheck do … end` block, or null when there is no such block. */
 function livecheckBlock(text: string): string | null {
-  const lines = text.split("\n");
-  const start = lines.findIndex((line) => /^\s*livecheck\s+do\s*$/.test(line));
-  if (start < 0) return null;
-  const body: string[] = [];
-  for (let index = start + 1; index < lines.length; index++) {
-    if (/^\s*end\s*$/.test(lines[index])) break;
-    body.push(lines[index]);
-  }
-  return body.join("\n");
+  const block = stanzaBody(text, "livecheck");
+  if (block === null) return null;
+  return block.lines.slice(block.start + 1, block.end ?? block.lines.length).join("\n");
 }
 
 /**
@@ -215,7 +240,7 @@ function livecheckBlock(text: string): string | null {
  */
 function quotedStrings(text: string): string[] {
   return [...text.matchAll(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g)].map((match) =>
-    match[0].slice(1, -1).replace(/\\"/g, '"').replace(/\\'/g, "'"),
+    unquote(match[0].slice(1, -1)),
   );
 }
 

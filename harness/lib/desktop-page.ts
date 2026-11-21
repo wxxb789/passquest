@@ -15,15 +15,15 @@
  * fixes the page area of a smoke launch. With MYGO_GENERATE set the binary
  * only writes its TypeScript client to that path.
  */
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { childProcesses, descendants, listeningSockets, listProcesses, startDesktop, stillRunning } from "./desktop.ts";
 import type { LaunchResult, ProcessIdentity, ProcessInfo } from "./desktop.ts";
 import { hasGoMod } from "./go.ts";
+import { sha256Hex } from "./hash.ts";
 import { field } from "./json.ts";
-import { run } from "./process.ts";
+import { run, tail } from "./process.ts";
 import type { RunResult } from "./process.ts";
 import { resolve } from "./repo.ts";
 import { fail, skip } from "./types.ts";
@@ -117,10 +117,6 @@ export function pageScript(body: string): string {
   return `${PRELUDE}\n${body}`;
 }
 
-export function tail(text: string, lines = 12): string {
-  return text.replace(/\r\n/g, "\n").trim().split("\n").slice(-lines).join("\n");
-}
-
 export function sleep(ms: number): Promise<void> {
   return new Promise((done) => setTimeout(done, ms));
 }
@@ -187,7 +183,7 @@ export function startProviderStub(): ProviderStub {
         authorization: request.headers.get("authorization") ?? "",
         path: new URL(request.url).pathname,
         raw,
-        sha256: createHash("sha256").update(raw).digest("hex"),
+        sha256: sha256Hex(raw),
       };
       stub.received.push(entry);
       return stub.respond(entry);

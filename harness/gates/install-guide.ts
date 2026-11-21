@@ -6,6 +6,7 @@ import {
   CASK_SHA256,
   CASK_TAP_PATH,
   CASK_VERSION,
+  firstDifference,
   MACOS_DATA_DIRECTORY,
   placeholderProblems,
   renderCask,
@@ -43,7 +44,7 @@ const MANIFEST = "mygo.json";
 /** The one Homebrew command both guides and the release notes name (P3 renders the matching cask). */
 export const TAP_COMMAND = "brew install --cask wxxb789/tap/pass-quest";
 /** The Terminal equivalent of the Open Anyway exception; quoted, because the app path holds a space. */
-export const QUARANTINE_COMMAND = 'xattr -dr com.apple.quarantine "/Applications/Pass Quest.app"';
+const QUARANTINE_COMMAND = 'xattr -dr com.apple.quarantine "/Applications/Pass Quest.app"';
 /** The bundle identifier `mygo.json` declares; the cask's `uninstall quit:` carries it (P3). */
 const BUNDLE_ID = "com.github.wxxb789.passquest";
 /** The directory the English guide's relative links resolve against. */
@@ -267,6 +268,20 @@ function lines(text: string): string[] {
   return text.replace(/\r\n/g, "\n").split("\n");
 }
 
+/**
+ * Walks a text's lines with the fence state each is read in: while outside a
+ * fence a line matching `FENCE` opens one, while inside it a line matching
+ * `CLOSE_FENCE` closes it, and every line is yielded with the state it leaves
+ * behind, so the three scanners below agree on where a fenced block begins.
+ */
+function* fencedLines(text: string): Generator<{ line: string; fenced: boolean }> {
+  let fenced = false;
+  for (const line of lines(text)) {
+    if (fenced ? CLOSE_FENCE.test(line) : FENCE.test(line)) fenced = !fenced;
+    yield { line, fenced };
+  }
+}
+
 interface Section {
   heading: string;
   body: string;
@@ -275,9 +290,7 @@ interface Section {
 /** The `##` sections of a guide in order; a fenced block is body, never headings. */
 function sections(text: string): Section[] {
   const found: Array<{ heading: string; body: string[] }> = [];
-  let fenced = false;
-  for (const line of lines(text)) {
-    if (FENCE.test(line)) fenced = !fenced;
+  for (const { line, fenced } of fencedLines(text)) {
     const heading = fenced ? null : SECTION_HEADING.exec(line);
     if (heading) {
       found.push({ heading: heading[1].trim(), body: [] });
@@ -291,12 +304,7 @@ function sections(text: string): Section[] {
 /** The level of every `#`/`##`/`###` heading in order, fences excluded. */
 function headingLevels(text: string): number[] {
   const levels: number[] = [];
-  let fenced = false;
-  for (const line of lines(text)) {
-    if (FENCE.test(line)) {
-      fenced = !fenced;
-      continue;
-    }
+  for (const { line, fenced } of fencedLines(text)) {
     if (fenced) continue;
     const heading = HEADING.exec(line);
     if (heading) levels.push(heading[1].length);
@@ -331,13 +339,13 @@ function markerProblems(text: string, guide: string): string[] {
 function codeBlocks(text: string): string[] {
   const blocks: string[] = [];
   let open: string[] | null = null;
-  for (const line of lines(text)) {
+  for (const { line, fenced } of fencedLines(text)) {
     if (open === null) {
       const fence = FENCE.exec(line);
       if (fence) open = [fence[1]];
       continue;
     }
-    if (CLOSE_FENCE.test(line)) {
+    if (!fenced) {
       blocks.push(open.join("\n"));
       open = null;
       continue;
@@ -374,35 +382,19 @@ function preview(value: string): string {
   return one.length > 160 ? `${one.slice(0, 157)}...` : one;
 }
 
-/** The first line on which two texts differ, for the pinned render's failure message. */
-function firstDifference(rendered: string, golden: string): string {
-  const renderedLines = rendered.split("\n");
-  const goldenLines = golden.split("\n");
-  for (let index = 0; index < Math.max(renderedLines.length, goldenLines.length); index++) {
-    if (renderedLines[index] !== goldenLines[index]) {
-      const left = JSON.stringify(renderedLines[index] ?? "(end of file)");
-      const right = JSON.stringify(goldenLines[index] ?? "(end of file)");
-      return `first differing line ${index + 1}: ${left} against the golden's ${right}`;
-    }
-  }
-  return "the two texts hold the same lines and differ in encoding only";
+/** The pinned render's failure line: the first line two texts differ on, or the encoding-only case. */
+function renderDifference(rendered: string, golden: string): string {
+  const difference = firstDifference(rendered, golden);
+  if (difference === null) return "the two texts hold the same lines and differ in encoding only";
+  return `first differing line ${difference.line}: ${JSON.stringify(difference.left ?? "(end of file)")} against the golden's ${JSON.stringify(difference.right ?? "(end of file)")}`;
 }
 
 export const installGuide: Gate = {
   id: "install-guide",
   title: "install guide",
   async run(ctx) {
-    const documents = await readEach(ctx.root, [
-      ENGLISH_GUIDE,
-      CHINESE_GUIDE,
-      "README.md",
-      "README.zh-CN.md",
-      RELEASE_NOTES,
-      MANIFEST,
-      CASK_TEMPLATE_PATH,
-      CASK_GOLDEN_PATH,
-    ]);
-    const paths = [ENGLISH_GUIDE, CHINESE_GUIDE, "README.md", "README.zh-CN.md", RELEASE_NOTES, MANIFEST, CASK_TEMPLATE_PATH, CASK_GOLDEN_PATH];
+    const paths = [ENGLISH_GUIDE, CHINESE_GUIDE, "README.md", "README.zh-CN.md", RELEASE_NOTES, MANIFEST, CASK_TEMPLATE_PATH, CASK_GOLDEN_PATH] as const;
+    const documents = await readEach(ctx.root, [...paths]);
     const unreadable = paths.filter((_, index) => documents[index] === null);
     if (unreadable.length > 0) return fail(unreadable.map((path) => `${path}: missing or unreadable`));
     const [english, chinese, readme, readmeChinese, notes, manifest, caskTemplate, caskGolden] = paths.map((_, index) =>
@@ -622,7 +614,7 @@ export const installGuide: Gate = {
     const goldenLf = caskGolden.replaceAll("\r\n", "\n");
     if (renderedLf !== goldenLf) {
       problems.push(
-        `${CASK_GOLDEN_PATH}: the template no longer renders the pinned v${CASK_VERSION} cask (${firstDifference(renderedLf, goldenLf)}); re-render the golden and review the diff`,
+        `${CASK_GOLDEN_PATH}: the template no longer renders the pinned v${CASK_VERSION} cask (${renderDifference(renderedLf, goldenLf)}); re-render the golden and review the diff`,
       );
     }
 

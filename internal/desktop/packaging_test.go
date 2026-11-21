@@ -58,13 +58,10 @@ func TestPackagingIdentity(t *testing.T) {
 	if config.Linux.Maintainer == "" {
 		t.Error("mygo.json linux.maintainer is empty")
 	}
-	// The supported floor is a product decision, and MyGo copies
-	// macos.minimumSystemVersion verbatim into the Info.plist's
-	// LSMinimumSystemVersion (cmd/mygo/bundle.go:254); its own default is
-	// 12.0. The effective floor is the higher of that key and the Mach-O's
-	// `minos`, which the Go 1.27 linker writes as 13.0 — below the declared
-	// 26.0 — so the plist key binds and raising minos is not needed (dyld
-	// refuses a binary whose minos is newer than the running macOS).
+	// The supported floor is a product decision: mygo.json must declare 26.0.
+	// Why the Mach-O `minos` the Go 1.27 linker writes (13.0) does not lower it
+	// is with the check that enforces the plist: plistProblems in
+	// harness/gates/package-smoke/contents.ts.
 	if config.MacOS.MinimumSystemVersion != "26.0" {
 		t.Errorf("mygo.json macos.minimumSystemVersion = %q, want 26.0, the supported floor", config.MacOS.MinimumSystemVersion)
 	}

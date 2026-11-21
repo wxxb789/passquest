@@ -278,11 +278,9 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
     return fail([`mygo.json is not JSON: ${error instanceof Error ? error.message : String(error)}`]);
   }
   if (typeof config.name !== "string" || config.name.trim() === "") return fail(["mygo.json carries no name; the app's data directory is named after it"]);
-  // The floor the installed Info.plist must declare (goal 0017 P1): MyGo
-  // copies this value verbatim into LSMinimumSystemVersion, the binding half
-  // of the effective floor while the Go 1.27 linker's minos 13.0 sits below
-  // it. Empty when mygo.json declares none, which the scan reports rather
-  // than checks against.
+  // The floor the installed Info.plist must declare (goal 0017 P1), read from
+  // mygo.json: empty when it declares none, which the scan reports rather than
+  // checks against. `plistProblems` (package-smoke/contents.ts) holds the rule.
   const declaredMinimum = typeof config.macos?.minimumSystemVersion === "string" ? config.macos.minimumSystemVersion : "";
   let naming: PackageNaming;
   try {

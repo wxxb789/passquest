@@ -5,13 +5,10 @@
 # reads it. Do not name the placeholders in a comment: the substitution is
 # text-wide, and a rendered header that reads like a version is noise.
 #
-# The placeholders below are at-sign tokens with an uppercase name, and
-# deliberately not {{...}}: inside preflight_steps/postflight_steps Homebrew's
-# install-step runner expands its own {{...}} tokens at install time
-# ({{appdir}}, {{version}}, ...), a leftover {{...}} is left silently in place
-# (Cask-Cookbook, "Interpolation in steps blocks"), and the install job proves
-# this template's tokens survive the render. A leftover at-sign token is a gate
-# failure, so nothing reaches the tap unrendered.
+# The placeholders below are at-sign tokens with an uppercase name, deliberately
+# not {{...}}: `harness/lib/cask.ts` holds the reason (Homebrew's install-step
+# runner expands its own {{...}} tokens and leaves an unknown one silently in
+# place) and the LEFTOVER check that fails the gate on a leftover at-sign token.
 cask "pass-quest" do
   version "0.15.0"
   sha256 "477938dc1635971e23b2de952e04c684a87eda5c29fece7508d8b42c787b3e66"

@@ -36,9 +36,9 @@ import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmS
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { CASK_FACTS, CASK_TAP_PATH, CASK_VERSION, renderCask, sha256Text, TAP_REPOSITORY } from "../lib/cask.ts";
-import { loggedRun, runMain } from "../lib/process.ts";
-import type { RunResult } from "../lib/process.ts";
+import { CASK_FACTS, CASK_TAP_PATH, CASK_VERSION, renderCask, TAP_REPOSITORY } from "../lib/cask.ts";
+import { sha256Hex } from "../lib/hash.ts";
+import { loggedRun, resultText, runMain, tail } from "../lib/process.ts";
 
 /** This checkout, so the tool runs from any working directory. */
 const ROOT = path.resolve(import.meta.dir, "../..");
@@ -109,16 +109,6 @@ function parseArgs(argv: readonly string[]): { help: true } | { error: string } 
   if (tag === "") return { error: "--tag <vX.Y.Z> is required" };
   if (!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(tag)) return { error: `--tag ${tag} must look like v0.15.0` };
   return { options: { tag, push } };
-}
-
-/** The last lines of a command's output, for a failure message. */
-function tail(result: RunResult): string {
-  return `${result.stdout}${result.stderr}`
-    .replace(/\r\n/g, "\n")
-    .trim()
-    .split("\n")
-    .slice(-6)
-    .join("\n");
 }
 
 /** The digest a `SHA256SUMS.txt` states for `name`, or null when it states none. */
@@ -241,7 +231,7 @@ async function main(argv: readonly string[]): Promise<number> {
       { env: ghEnv, replaceEnv: true },
     );
     if (download.code !== 0) {
-      return fail(`gh release download ${tag} exited ${download.code}: ${tail(download)}`);
+      return fail(`gh release download ${tag} exited ${download.code}: ${tail(resultText(download), 6)}`);
     }
     const dmgPath = path.join(downloadDir, dmg);
     const sumsPath = path.join(downloadDir, "SHA256SUMS.txt");
@@ -261,7 +251,7 @@ async function main(argv: readonly string[]): Promise<number> {
     const renderedPath = path.join(temp, path.basename(CASK_TAP_PATH));
     writeFileSync(renderedPath, rendered);
     console.log(`[render] ${TEMPLATE} with ${tag} -> ${renderedPath}`);
-    console.log(`[render] version ${version}, sha256 ${computed}, rendered sha256 ${sha256Text(rendered)}`);
+    console.log(`[render] version ${version}, sha256 ${computed}, rendered sha256 ${sha256Hex(rendered)}`);
     if (version === CASK_VERSION && existsSync(path.join(ROOT, GOLDEN))) {
       const equal = rendered === readFileSync(path.join(ROOT, GOLDEN), "utf8");
       console.log(
@@ -281,7 +271,7 @@ async function main(argv: readonly string[]): Promise<number> {
       ["release", "view", tag, "--repo", CASK_FACTS.repository, "--json", "isDraft,isPrerelease", "--jq", ".isDraft, .isPrerelease"],
       { env: ghEnv, replaceEnv: true },
     );
-    if (view.code !== 0) return fail(`gh release view ${tag} exited ${view.code}: ${tail(view)}`);
+    if (view.code !== 0) return fail(`gh release view ${tag} exited ${view.code}: ${tail(resultText(view), 6)}`);
     const flags = view.stdout.replace(/\r\n/g, "\n").trim().split("\n");
     if (flags[0] === "true" || flags[1] === "true") {
       return fail(`${tag} is a draft or pre-release (draft=${flags[0] ?? "?"}, prerelease=${flags[1] ?? "?"}); a draft release changes nothing`);
@@ -315,7 +305,7 @@ async function main(argv: readonly string[]): Promise<number> {
     };
     const clone = path.join(temp, "tap");
     const cloned = await loggedRun("git", ["clone", "--depth", "1", TAP_REMOTE, clone], { env: gitEnv, replaceEnv: true });
-    if (cloned.code !== 0) return fail(`git clone ${TAP_REMOTE} exited ${cloned.code}: ${tail(cloned)}`);
+    if (cloned.code !== 0) return fail(`git clone ${TAP_REMOTE} exited ${cloned.code}: ${tail(resultText(cloned), 6)}`);
 
     const tapFile = path.join(clone, CASK_TAP_PATH);
     mkdirSync(path.dirname(tapFile), { recursive: true });
@@ -327,19 +317,19 @@ async function main(argv: readonly string[]): Promise<number> {
       return 0;
     }
     writeFileSync(tapFile, rendered);
-    console.log(`[push] wrote ${CASK_TAP_PATH} (sha256 ${sha256Text(rendered)})`);
+    console.log(`[push] wrote ${CASK_TAP_PATH} (sha256 ${sha256Hex(rendered)})`);
 
     for (const args of [
       ["add", "--", CASK_TAP_PATH],
       ["-c", `user.name=${COMMIT_NAME}`, "-c", `user.email=${COMMIT_EMAIL}`, "commit", "-m", `Update Pass Quest cask from ${tag}`],
     ]) {
       const git = await loggedRun("git", args, { env: gitEnv, cwd: clone, replaceEnv: true });
-      if (git.code !== 0) return fail(`git ${args.join(" ")} exited ${git.code}: ${tail(git)}`);
+      if (git.code !== 0) return fail(`git ${args.join(" ")} exited ${git.code}: ${tail(resultText(git), 6)}`);
     }
     const head = await loggedRun("git", ["rev-parse", "HEAD"], { env: gitEnv, cwd: clone, replaceEnv: true });
-    if (head.code !== 0) return fail(`git rev-parse HEAD exited ${head.code}: ${tail(head)}`);
+    if (head.code !== 0) return fail(`git rev-parse HEAD exited ${head.code}: ${tail(resultText(head), 6)}`);
     const pushed = await loggedRun("git", ["push", "origin", "HEAD:main"], { env: gitEnv, cwd: clone, replaceEnv: true });
-    if (pushed.code !== 0) return fail(`git push origin HEAD:main exited ${pushed.code}: ${tail(pushed)}`);
+    if (pushed.code !== 0) return fail(`git push origin HEAD:main exited ${pushed.code}: ${tail(resultText(pushed), 6)}`);
     console.log(`[push] committed ${head.stdout.trim()} and pushed HEAD:main to ${TAP_REPOSITORY}`);
     return 0;
   } finally {

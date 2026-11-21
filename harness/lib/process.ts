@@ -63,8 +63,17 @@ export async function loggedRun(cmd: string, args: readonly string[], options: R
 }
 
 export function outputLines(result: RunResult): string[] {
-  const text = `${result.stdout}${result.stderr}`.replace(/\r\n/g, "\n");
-  return text.split("\n").filter((line) => line.trim() !== "");
+  return resultText(result).split("\n").filter((line) => line.trim() !== "");
+}
+
+/** One command's output with its two streams joined and line endings normalized, for logs and failure lines. */
+export function resultText(result: RunResult): string {
+  return `${result.stdout}${result.stderr}`.replace(/\r\n/g, "\n");
+}
+
+/** The last `lines` lines of a text, trimmed: the desktop gates and the cask tools bound a failure line with this. */
+export function tail(text: string, lines = 12): string {
+  return text.replace(/\r\n/g, "\n").trim().split("\n").slice(-lines).join("\n");
 }
 
 /**

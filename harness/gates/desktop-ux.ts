@@ -16,13 +16,12 @@ import {
   STUB_CREDENTIAL_ENV,
   STUB_MODEL,
   STUB_PROVIDER,
-  tail,
   writeStubRegistry,
 } from "../lib/desktop-page.ts";
 import type { Check } from "../lib/desktop-page.ts";
 import { buildCLI } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
-import { executable, run } from "../lib/process.ts";
+import { executable, run, tail } from "../lib/process.ts";
 import { resolve } from "../lib/repo.ts";
 import { seedReviewedSource } from "../lib/reviewed-source.ts";
 import { fail, pass } from "../lib/types.ts";

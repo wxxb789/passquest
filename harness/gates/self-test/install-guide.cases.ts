@@ -79,301 +79,221 @@ function caskCase(label: string, anchor: string, replacement: string, expected: 
   };
 }
 
+/**
+ * A guide case: the real documents plus whatever `patch` edits, and the
+ * failure lines the gate must print for it. `patch` receives the fixture root
+ * with the documents already copied and returns the first `patchCopy` error
+ * (null when every anchor was found).
+ */
+function guideCase(label: string, patch: (root: string) => string | null, expected: string[]): BrokenCase {
+  return {
+    gate: installGuide,
+    label,
+    files: {},
+    prepare: async (root) => {
+      copyProduct(root, GUIDE_DOCUMENTS);
+      return patch(root);
+    },
+    postFail: (failures) => expectedLines(failures, expected),
+  };
+}
+
+/** A guide pass case: the real documents plus `patch`'s edits, which the gate must accept. */
+function guidePassCase(label: string, patch: (root: string) => string | null, postPass?: PassCase["postPass"]): PassCase {
+  return {
+    gate: installGuide,
+    label,
+    files: {},
+    prepare: async (root) => {
+      copyProduct(root, GUIDE_DOCUMENTS);
+      return patch(root);
+    },
+    ...(postPass === undefined ? {} : { postPass }),
+  };
+}
+
 export function installGuideCases(): BrokenCase[] {
   return [
-    {
-      gate: installGuide,
-      label: "the Open Anyway step moved out of the macOS section",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
+    guideCase(
+      "the Open Anyway step moved out of the macOS section",
+      (root) =>
         // The wording stays in the file, in the wrong section, and no longer names
         // the button: only a fact pinned inside its own section can see that.
-        const step = patchCopy(
+        patchCopy(
           root,
           ENGLISH_GUIDE,
           "choose **Open Anyway** — macOS offers the button for about an hour after the attempt.",
           "choose the button macOS offers.",
-        );
-        if (step) return step;
-        const caption = patchCopy(root, ENGLISH_GUIDE, "the blocked-app notice and the Open Anyway button", "the blocked-app notice and the button beside it");
-        if (caption) return caption;
-        return patchCopy(root, ENGLISH_GUIDE, "## Linux\n", "## Linux\n\n**Open Anyway** is the button in System Settings on macOS.\n");
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `${ENGLISH_GUIDE}: the "macOS" section must carry the Open Anyway flow under Privacy & Security: missing "Open Anyway"`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the guide naming a macOS pair below the declared floor",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        const pair = patchCopy(root, ENGLISH_GUIDE, "macOS 26 and macOS 27, the two latest majors", "macOS 24 and macOS 25, the two latest majors");
-        if (pair) return pair;
+        ) ??
+        patchCopy(root, ENGLISH_GUIDE, "the blocked-app notice and the Open Anyway button", "the blocked-app notice and the button beside it") ??
+        patchCopy(root, ENGLISH_GUIDE, "## Linux\n", "## Linux\n\n**Open Anyway** is the button in System Settings on macOS.\n"),
+      [
+        `${ENGLISH_GUIDE}: the "macOS" section must carry the Open Anyway flow under Privacy & Security: missing "Open Anyway"`,
+      ],
+    ),
+    guideCase(
+      "the guide naming a macOS pair below the declared floor",
+      (root) =>
+        patchCopy(root, ENGLISH_GUIDE, "macOS 26 and macOS 27, the two latest majors", "macOS 24 and macOS 25, the two latest majors") ??
         // The rest of the section is brought to the same (wrong) floor, so the fixture is one guide written for macOS 24.
-        const floor = patchCopy(root, ENGLISH_GUIDE, "the packages declare macOS 26 as their minimum", "the packages declare macOS 24 as their minimum");
-        if (floor) return floor;
-        return patchCopy(
+        patchCopy(root, ENGLISH_GUIDE, "the packages declare macOS 26 as their minimum", "the packages declare macOS 24 as their minimum") ??
+        patchCopy(
           root,
           ENGLISH_GUIDE,
           "lists macOS 27 Golden Gate and macOS\nTahoe 26 as the latest versions",
           "lists macOS 24 and macOS 25 as the latest versions",
-        );
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `${ENGLISH_GUIDE}: names macOS 24, below the supported floor of macOS 26`,
-          `${ENGLISH_GUIDE}: the "Supported systems" section names macOS majors [24, 25]; mygo.json declares 26.0, so the supported pair is 26 and 27`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "release notes without the Homebrew line",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, RELEASE_NOTES, TAP_COMMAND, "brew install --cask pass-quest");
-      },
-      postFail: (failures) => expectedLines(failures, [`${RELEASE_NOTES}: must name the Homebrew command ${JSON.stringify(TAP_COMMAND)}`]),
-    },
-    {
-      gate: installGuide,
-      label: "the Chinese guide dropping a screenshot place",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, CHINESE_GUIDE, "<!-- screenshot: macos-open-anyway-confirm -->\n", "");
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `${CHINESE_GUIDE}: the "macOS" section's screenshot places [macos-blocked-dialog, macos-privacy-security, macos-first-launch, macos-homebrew-install, macos-xattr-terminal] must match ${ENGLISH_GUIDE}'s [macos-blocked-dialog, macos-privacy-security, macos-open-anyway-confirm, macos-first-launch, macos-homebrew-install, macos-xattr-terminal]`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the Chinese guide running a different command",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(
+        ),
+      [
+        `${ENGLISH_GUIDE}: names macOS 24, below the supported floor of macOS 26`,
+        `${ENGLISH_GUIDE}: the "Supported systems" section names macOS majors [24, 25]; mygo.json declares 26.0, so the supported pair is 26 and 27`,
+      ],
+    ),
+    guideCase(
+      "release notes without the Homebrew line",
+      (root) => patchCopy(root, RELEASE_NOTES, TAP_COMMAND, "brew install --cask pass-quest"),
+      [`${RELEASE_NOTES}: must name the Homebrew command ${JSON.stringify(TAP_COMMAND)}`],
+    ),
+    guideCase(
+      "the Chinese guide dropping a screenshot place",
+      (root) => patchCopy(root, CHINESE_GUIDE, "<!-- screenshot: macos-open-anyway-confirm -->\n", ""),
+      [
+        `${CHINESE_GUIDE}: the "macOS" section's screenshot places [macos-blocked-dialog, macos-privacy-security, macos-first-launch, macos-homebrew-install, macos-xattr-terminal] must match ${ENGLISH_GUIDE}'s [macos-blocked-dialog, macos-privacy-security, macos-open-anyway-confirm, macos-first-launch, macos-homebrew-install, macos-xattr-terminal]`,
+      ],
+    ),
+    guideCase(
+      "the Chinese guide running a different command",
+      (root) =>
+        patchCopy(
           root,
           CHINESE_GUIDE,
           'xattr -dr com.apple.quarantine "/Applications/Pass Quest.app"',
           "xattr -dr com.apple.quarantine /Applications/Pass Quest.app",
-        );
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `${CHINESE_GUIDE}: code block 2 differs from ${ENGLISH_GUIDE}'s`,
-          `${CHINESE_GUIDE}: the "macOS" section must carry the quarantine alternative: missing "xattr -dr com.apple.quarantine`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the guide naming a system-wide Gatekeeper disabling",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(
+        ),
+      [
+        `${CHINESE_GUIDE}: code block 2 differs from ${ENGLISH_GUIDE}'s`,
+        `${CHINESE_GUIDE}: the "macOS" section must carry the quarantine alternative: missing "xattr -dr com.apple.quarantine`,
+      ],
+    ),
+    guideCase(
+      "the guide naming a system-wide Gatekeeper disabling",
+      (root) =>
+        patchCopy(
           root,
           ENGLISH_GUIDE,
           "Do not disable Gatekeeper system-wide to get past the warning.",
           "If the warning persists, run sudo spctl --master-disable and try again.",
-        );
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [`${ENGLISH_GUIDE}: names "spctl --master-disable", which disables Gatekeeper system-wide; the guide must not suggest that`]),
-    },
-    {
-      gate: installGuide,
-      label: "a README that does not link its own guide",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, "README.zh-CN.md", "[安装指南](docs/install.zh-CN.md)", "[安装指南](docs/install.md)");
-      },
-      postFail: (failures) => expectedLines(failures, [`README.zh-CN.md: must link ${CHINESE_GUIDE}`]),
-    },
-    {
-      gate: installGuide,
-      label: "the Chinese guide dropping the zh-CN README link",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, CHINESE_GUIDE, "](../README.zh-CN.md)", "](../README.md)");
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `${CHINESE_GUIDE}: must link ../README.zh-CN.md, which ${ENGLISH_GUIDE} links`,
-          `${CHINESE_GUIDE}: links ../README.md; ${ENGLISH_GUIDE} does not, so the link exists on one side only`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the English guide's section skeleton changed",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, ENGLISH_GUIDE, "\n## Upgrade\n", "\n## Upgrading\n");
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `the "##" sections of ${ENGLISH_GUIDE} must be exactly [Supported systems | Windows | macOS | Linux | Where your data lives, and how to remove it | Upgrade | What CI proves, and what is untested]; they are [Supported systems | Windows | macOS | Linux | Where your data lives, and how to remove it | Upgrading | What CI proves, and what is untested]`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the Chinese guide's heading levels no longer match",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, CHINESE_GUIDE, "\n## Linux\n", "\n### Linux\n");
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `${CHINESE_GUIDE}: the headings must be the same in the same order as ${ENGLISH_GUIDE}: its levels are [1,2,2,2,3,2,2,2] against [1,2,2,2,2,2,2,2]`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the Chinese guide missing from the tree",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
+        ),
+      [`${ENGLISH_GUIDE}: names "spctl --master-disable", which disables Gatekeeper system-wide; the guide must not suggest that`],
+    ),
+    guideCase(
+      "a README that does not link its own guide",
+      (root) => patchCopy(root, "README.zh-CN.md", "[安装指南](docs/install.zh-CN.md)", "[安装指南](docs/install.md)"),
+      [`README.zh-CN.md: must link ${CHINESE_GUIDE}`],
+    ),
+    guideCase(
+      "the Chinese guide dropping the zh-CN README link",
+      (root) => patchCopy(root, CHINESE_GUIDE, "](../README.zh-CN.md)", "](../README.md)"),
+      [
+        `${CHINESE_GUIDE}: must link ../README.zh-CN.md, which ${ENGLISH_GUIDE} links`,
+        `${CHINESE_GUIDE}: links ../README.md; ${ENGLISH_GUIDE} does not, so the link exists on one side only`,
+      ],
+    ),
+    guideCase(
+      "the English guide's section skeleton changed",
+      (root) => patchCopy(root, ENGLISH_GUIDE, "\n## Upgrade\n", "\n## Upgrading\n"),
+      [
+        `the "##" sections of ${ENGLISH_GUIDE} must be exactly [Supported systems | Windows | macOS | Linux | Where your data lives, and how to remove it | Upgrade | What CI proves, and what is untested]; they are [Supported systems | Windows | macOS | Linux | Where your data lives, and how to remove it | Upgrading | What CI proves, and what is untested]`,
+      ],
+    ),
+    guideCase(
+      "the Chinese guide's heading levels no longer match",
+      (root) => patchCopy(root, CHINESE_GUIDE, "\n## Linux\n", "\n### Linux\n"),
+      [
+        `${CHINESE_GUIDE}: the headings must be the same in the same order as ${ENGLISH_GUIDE}: its levels are [1,2,2,2,3,2,2,2] against [1,2,2,2,2,2,2,2]`,
+      ],
+    ),
+    guideCase(
+      "the Chinese guide missing from the tree",
+      (root) => {
         rmSync(resolve(root, CHINESE_GUIDE));
         return null;
       },
-      postFail: (failures) => expectedLines(failures, [`${CHINESE_GUIDE}: missing or unreadable`]),
-    },
-    {
-      gate: installGuide,
-      label: "a screenshot marker without its italic caption",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(
+      [`${CHINESE_GUIDE}: missing or unreadable`],
+    ),
+    guideCase(
+      "a screenshot marker without its italic caption",
+      (root) =>
+        patchCopy(
           root,
           ENGLISH_GUIDE,
           '<!-- screenshot: windows-smartscreen -->\n*Screenshot: the SmartScreen "Windows protected your PC" dialog and its **More info** link (owner).*\n',
           "<!-- screenshot: windows-smartscreen -->\n",
-        );
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [`${ENGLISH_GUIDE}:53: the screenshot marker "windows-smartscreen" must be followed by an italic caption line`]),
-    },
-    {
-      gate: installGuide,
-      label: "the English guide gaining a code block the Chinese guide lacks",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(
+        ),
+      [`${ENGLISH_GUIDE}:53: the screenshot marker "windows-smartscreen" must be followed by an italic caption line`],
+    ),
+    guideCase(
+      "the English guide gaining a code block the Chinese guide lacks",
+      (root) =>
+        patchCopy(
           root,
           ENGLISH_GUIDE,
           "CI itself runs the AppImage that way and never mounts it with FUSE.",
           "```bash\nls\n```\n\nCI itself runs the AppImage that way and never mounts it with FUSE.",
-        );
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [`${CHINESE_GUIDE}: 4 fenced code blocks against ${ENGLISH_GUIDE}'s 5; the guides must run the same commands`]),
-    },
-    {
-      gate: installGuide,
-      label: "an external URL on the English side only",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(
+        ),
+      [`${CHINESE_GUIDE}: 4 fenced code blocks against ${ENGLISH_GUIDE}'s 5; the guides must run the same commands`],
+    ),
+    guideCase(
+      "an external URL on the English side only",
+      (root) =>
+        patchCopy(
           root,
           ENGLISH_GUIDE,
           "installing the packaged app; what the app does is described in the [project README](../README.md).",
           "installing the packaged app, or through [the walkthrough](https://example.com/only-english); what the app does is described in the [project README](../README.md).",
-        );
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [`the guides must carry the same external links: https://example.com/only-english is in ${ENGLISH_GUIDE} only`]),
-    },
-    {
-      gate: installGuide,
-      label: "the English guide not linking its Chinese counterpart",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, ENGLISH_GUIDE, "[简体中文](install.zh-CN.md)", "[简体中文](install.md)");
-      },
-      postFail: (failures) => expectedLines(failures, [`${ENGLISH_GUIDE}: must link its Chinese counterpart install.zh-CN.md`]),
-    },
-    {
-      gate: installGuide,
-      label: "the release notes dropping the Chinese guide link",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, RELEASE_NOTES, " ([简体中文](https://github.com/wxxb789/passquest/blob/{{TAG}}/docs/install.zh-CN.md))", "");
-      },
-      postFail: (failures) => expectedLines(failures, [`${RELEASE_NOTES}: must link ${CHINESE_GUIDE}`]),
-    },
-    {
-      gate: installGuide,
-      label: "a guide still naming macOS Sonoma",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, ENGLISH_GUIDE, "## Supported systems\n", "## Supported systems\n\nmacOS Sonoma is not supported.\n");
-      },
-      postFail: (failures) => expectedLines(failures, [`${ENGLISH_GUIDE}: names macOS Sonoma, below the supported floor`]),
-    },
-    {
-      gate: installGuide,
-      label: "an unparsable mygo.json floor",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, "mygo.json", '"minimumSystemVersion": "26.0"', '"minimumSystemVersion": "tahoe"');
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [`mygo.json: macos.minimumSystemVersion must be a version like "26.0"; it is "tahoe"`]),
-    },
-    {
-      gate: installGuide,
-      label: "the manifest declaring another bundle identifier",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, "mygo.json", '"identifier": "com.github.wxxb789.passquest"', '"identifier": "com.github.wxxb789.pass-quest"');
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `mygo.json: identifier must be com.github.wxxb789.passquest, the bundle id the app registers under and the cask's uninstall quit: names; it is "com.github.wxxb789.pass-quest"`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the macOS section back to the removed right-click → Open step",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(
+        ),
+      [`the guides must carry the same external links: https://example.com/only-english is in ${ENGLISH_GUIDE} only`],
+    ),
+    guideCase(
+      "the English guide not linking its Chinese counterpart",
+      (root) => patchCopy(root, ENGLISH_GUIDE, "[简体中文](install.zh-CN.md)", "[简体中文](install.md)"),
+      [`${ENGLISH_GUIDE}: must link its Chinese counterpart install.zh-CN.md`],
+    ),
+    guideCase(
+      "the release notes dropping the Chinese guide link",
+      (root) => patchCopy(root, RELEASE_NOTES, " ([简体中文](https://github.com/wxxb789/passquest/blob/{{TAG}}/docs/install.zh-CN.md))", ""),
+      [`${RELEASE_NOTES}: must link ${CHINESE_GUIDE}`],
+    ),
+    guideCase(
+      "a guide still naming macOS Sonoma",
+      (root) => patchCopy(root, ENGLISH_GUIDE, "## Supported systems\n", "## Supported systems\n\nmacOS Sonoma is not supported.\n"),
+      [`${ENGLISH_GUIDE}: names macOS Sonoma, below the supported floor`],
+    ),
+    guideCase(
+      "an unparsable mygo.json floor",
+      (root) => patchCopy(root, "mygo.json", '"minimumSystemVersion": "26.0"', '"minimumSystemVersion": "tahoe"'),
+      [`mygo.json: macos.minimumSystemVersion must be a version like "26.0"; it is "tahoe"`],
+    ),
+    guideCase(
+      "the manifest declaring another bundle identifier",
+      (root) => patchCopy(root, "mygo.json", '"identifier": "com.github.wxxb789.passquest"', '"identifier": "com.github.wxxb789.pass-quest"'),
+      [
+        `mygo.json: identifier must be com.github.wxxb789.passquest, the bundle id the app registers under and the cask's uninstall quit: names; it is "com.github.wxxb789.pass-quest"`,
+      ],
+    ),
+    guideCase(
+      "the macOS section back to the removed right-click → Open step",
+      (root) =>
+        patchCopy(
           root,
           ENGLISH_GUIDE,
           "1. Open **Pass Quest** from **Applications** and let macOS refuse it.",
           "1. Right-click **Pass Quest** in **Applications**, choose **Open**, and confirm the dialog.",
-        );
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `${ENGLISH_GUIDE}: the "macOS" section still offers the removed right-click → Open path (macOS 26 and 27 do not have it)`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the macOS section losing every screenshot place",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
+        ),
+      [`${ENGLISH_GUIDE}: the "macOS" section still offers the removed right-click → Open path (macOS 26 and 27 do not have it)`],
+    ),
+    guideCase(
+      "the macOS section losing every screenshot place",
+      (root) => {
         // Both guides lose every marker, so the per-section minimum is the only check that can see it.
         for (const guide of [ENGLISH_GUIDE, CHINESE_GUIDE]) {
           const file = resolve(root, guide);
@@ -382,101 +302,57 @@ export function installGuideCases(): BrokenCase[] {
         }
         return null;
       },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `${ENGLISH_GUIDE}: the "macOS" section must keep at least one screenshot place; it has none`,
-          `${CHINESE_GUIDE}: the "macOS" section must keep at least one screenshot place; it has none`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the Chinese guide paraphrasing an app string",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, CHINESE_GUIDE, "数据来自更新的 Pass Quest", "数据来自更新版本的 Pass Quest");
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `${CHINESE_GUIDE}: the "Upgrade" section must quote the notice for a database a newer build wrote as the app shows it: missing "数据来自更新的 Pass Quest"`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the app rewording a string the guides quote",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, "desktop/web/src/core/i18n.ts", "'数据来自更新的 Pass Quest'", "'数据来自更新版本的 Pass Quest'");
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `desktop/web/src/core/i18n.ts: no longer holds the notice for a database a newer build wrote: "数据来自更新的 Pass Quest"`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the guide naming macOS 13",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, ENGLISH_GUIDE, "Any macOS older than 26\nis unsupported", "Any macOS 13 or older\nis unsupported");
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `${ENGLISH_GUIDE}: names macOS 13, below the supported floor of macOS 26`,
-          `${ENGLISH_GUIDE}: the "Supported systems" section names macOS majors [13, 26, 27]; mygo.json declares 26.0, so the supported pair is 26 and 27`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the Chinese guide not linking its English counterpart",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, CHINESE_GUIDE, "[English](install.md)", "[English](install.zh-CN.md)");
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `${CHINESE_GUIDE}: must link its English counterpart install.md`,
-          `${CHINESE_GUIDE}: links install.zh-CN.md; ${ENGLISH_GUIDE} does not, so the link exists on one side only`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "the release notes naming a macOS release below the floor",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, RELEASE_NOTES, "`SHA256SUMS.txt` lists each file's SHA-256.", "`SHA256SUMS.txt` lists each file's SHA-256. macOS Sonoma is not supported.");
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [`${RELEASE_NOTES}: names macOS Sonoma, below the supported floor`]),
-    },
-    {
-      gate: installGuide,
-      label: "the app's name declaration gone",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return patchCopy(root, "internal/desktop/paths.go", 'AppName       = "Pass Quest"', "AppName       = appDisplayName");
-      },
-      postFail: (failures) =>
-        expectedLines(failures, [
-          `internal/desktop/paths.go: no AppName = "..." declaration, so the strings the guides quote cannot be checked against the app`,
-        ]),
-    },
-    {
-      gate: installGuide,
-      label: "an app source the guides quote from missing",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
+      [
+        `${ENGLISH_GUIDE}: the "macOS" section must keep at least one screenshot place; it has none`,
+        `${CHINESE_GUIDE}: the "macOS" section must keep at least one screenshot place; it has none`,
+      ],
+    ),
+    guideCase(
+      "the Chinese guide paraphrasing an app string",
+      (root) => patchCopy(root, CHINESE_GUIDE, "数据来自更新的 Pass Quest", "数据来自更新版本的 Pass Quest"),
+      [
+        `${CHINESE_GUIDE}: the "Upgrade" section must quote the notice for a database a newer build wrote as the app shows it: missing "数据来自更新的 Pass Quest"`,
+      ],
+    ),
+    guideCase(
+      "the app rewording a string the guides quote",
+      (root) => patchCopy(root, "desktop/web/src/core/i18n.ts", "'数据来自更新的 Pass Quest'", "'数据来自更新版本的 Pass Quest'"),
+      [`desktop/web/src/core/i18n.ts: no longer holds the notice for a database a newer build wrote: "数据来自更新的 Pass Quest"`],
+    ),
+    guideCase(
+      "the guide naming macOS 13",
+      (root) => patchCopy(root, ENGLISH_GUIDE, "Any macOS older than 26\nis unsupported", "Any macOS 13 or older\nis unsupported"),
+      [
+        `${ENGLISH_GUIDE}: names macOS 13, below the supported floor of macOS 26`,
+        `${ENGLISH_GUIDE}: the "Supported systems" section names macOS majors [13, 26, 27]; mygo.json declares 26.0, so the supported pair is 26 and 27`,
+      ],
+    ),
+    guideCase(
+      "the Chinese guide not linking its English counterpart",
+      (root) => patchCopy(root, CHINESE_GUIDE, "[English](install.md)", "[English](install.zh-CN.md)"),
+      [
+        `${CHINESE_GUIDE}: must link its English counterpart install.md`,
+        `${CHINESE_GUIDE}: links install.zh-CN.md; ${ENGLISH_GUIDE} does not, so the link exists on one side only`,
+      ],
+    ),
+    guideCase(
+      "the release notes naming a macOS release below the floor",
+      (root) => patchCopy(root, RELEASE_NOTES, "`SHA256SUMS.txt` lists each file's SHA-256.", "`SHA256SUMS.txt` lists each file's SHA-256. macOS Sonoma is not supported."),
+      [`${RELEASE_NOTES}: names macOS Sonoma, below the supported floor`],
+    ),
+    guideCase(
+      "the app's name declaration gone",
+      (root) => patchCopy(root, "internal/desktop/paths.go", 'AppName       = "Pass Quest"', "AppName       = appDisplayName"),
+      [`internal/desktop/paths.go: no AppName = "..." declaration, so the strings the guides quote cannot be checked against the app`],
+    ),
+    guideCase(
+      "an app source the guides quote from missing",
+      (root) => {
         rmSync(resolve(root, "desktop/web/src/views/settings.ts"));
         return null;
       },
-      postFail: (failures) => expectedLines(failures, [`desktop/web/src/views/settings.ts: missing or unreadable`]),
-    },
+      [`desktop/web/src/views/settings.ts: missing or unreadable`],
+    ),
     // The cask half: every check in `caskProblems`, `placeholderProblems` and
     // the pinned render have a case here. A template edit fails its semantic
     // check and the golden line together, so each case names the check it
@@ -698,76 +574,49 @@ export function installGuideCases(): BrokenCase[] {
 
 export function installGuidePassCases(): PassCase[] {
   return [
-    {
-      gate: installGuide,
-      label: "the real install guide pair",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        return null;
-      },
-      postPass: (detail) =>
-        detail.includes("7 screenshot places") &&
-        detail.includes("the cask template renders v0.15.0 with the release's SHA-256") &&
-        detail.includes("floor 26.0 from mygo.json")
-          ? null
-          : `the pass line must count the screenshot places, name the cask render and the floor; got: ${detail}`,
-    },
-    {
-      gate: installGuide,
-      label: "the tap cask with the zap paths in the array form brew generate-zap emits",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        // `brew generate-zap` emits `format_directive`'s own indentation
-        // (dev-cmd/generate-zap.rb: seven spaces per item, five for the closing
-        // bracket), which is not the tree's — the parser reads entries, not a
-        // layout, so a pasted stanza passes.
-        const generated = [
-          "  zap trash: [",
-          '       "~/Library/Application Support/Pass Quest",',
-          '       "~/Library/Caches/com.github.wxxb789.passquest",',
-          '       "~/Library/WebKit/com.github.wxxb789.passquest",',
-          "     ]",
-        ].join("\n");
-        const patched = patchCopy(root, CASK_TEMPLATE_PATH, ZAP_BLOCK, generated);
-        if (patched) return patched;
-        // The edited template is a new render, so the golden moves with it — the
-        // workflow the gate's mismatch message names for any accepted edit.
-        const template = readFileSync(resolve(root, CASK_TEMPLATE_PATH), "utf8");
-        writeFileSync(resolve(root, CASK_GOLDEN_PATH), renderCask(template, CASK_VERSION, CASK_SHA256));
-        return null;
-      },
-    },
-    {
-      gate: installGuide,
-      label: "the tap cask with the zap paths in a one-line array",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        const oneLine = [
-          '  zap trash: ["~/Library/Application Support/Pass Quest", "~/Library/Caches/com.github.wxxb789.passquest", "~/Library/WebKit/com.github.wxxb789.passquest"]',
-          '  # "a, b" after the array stays a comment, not a second zap entry.',
-        ].join("\n");
-        const patched = patchCopy(root, CASK_TEMPLATE_PATH, ZAP_BLOCK, oneLine);
-        if (patched) return patched;
-        const template = readFileSync(resolve(root, CASK_TEMPLATE_PATH), "utf8");
-        writeFileSync(resolve(root, CASK_GOLDEN_PATH), renderCask(template, CASK_VERSION, CASK_SHA256));
-        return null;
-      },
-    },
-    {
-      gate: installGuide,
-      label: "the tap cask with the xattr flags written -dr",
-      files: {},
-      prepare: async (root) => {
-        copyProduct(root, GUIDE_DOCUMENTS);
-        const patched = patchCopy(root, CASK_TEMPLATE_PATH, 'args: ["-rd", "com.apple.quarantine', 'args: ["-dr", "com.apple.quarantine');
-        if (patched) return patched;
-        const template = readFileSync(resolve(root, CASK_TEMPLATE_PATH), "utf8");
-        writeFileSync(resolve(root, CASK_GOLDEN_PATH), renderCask(template, CASK_VERSION, CASK_SHA256));
-        return null;
-      },
-    },
+    guidePassCase("the real install guide pair", () => null, (detail) =>
+      detail.includes("7 screenshot places") &&
+      detail.includes("the cask template renders v0.15.0 with the release's SHA-256") &&
+      detail.includes("floor 26.0 from mygo.json")
+        ? null
+        : `the pass line must count the screenshot places, name the cask render and the floor; got: ${detail}`),
+    guidePassCase("the tap cask with the zap paths in the array form brew generate-zap emits", (root) => {
+      // `brew generate-zap` emits `format_directive`'s own indentation
+      // (dev-cmd/generate-zap.rb: seven spaces per item, five for the closing
+      // bracket), which is not the tree's — the parser reads entries, not a
+      // layout, so a pasted stanza passes.
+      const generated = [
+        "  zap trash: [",
+        '       "~/Library/Application Support/Pass Quest",',
+        '       "~/Library/Caches/com.github.wxxb789.passquest",',
+        '       "~/Library/WebKit/com.github.wxxb789.passquest",',
+        "     ]",
+      ].join("\n");
+      const patched = patchCopy(root, CASK_TEMPLATE_PATH, ZAP_BLOCK, generated);
+      if (patched) return patched;
+      // The edited template is a new render, so the golden moves with it — the
+      // workflow the gate's mismatch message names for any accepted edit.
+      const template = readFileSync(resolve(root, CASK_TEMPLATE_PATH), "utf8");
+      writeFileSync(resolve(root, CASK_GOLDEN_PATH), renderCask(template, CASK_VERSION, CASK_SHA256));
+      return null;
+    }),
+    guidePassCase("the tap cask with the zap paths in a one-line array", (root) => {
+      const oneLine = [
+        '  zap trash: ["~/Library/Application Support/Pass Quest", "~/Library/Caches/com.github.wxxb789.passquest", "~/Library/WebKit/com.github.wxxb789.passquest"]',
+        '  # "a, b" after the array stays a comment, not a second zap entry.',
+      ].join("\n");
+      const patched = patchCopy(root, CASK_TEMPLATE_PATH, ZAP_BLOCK, oneLine);
+      if (patched) return patched;
+      const template = readFileSync(resolve(root, CASK_TEMPLATE_PATH), "utf8");
+      writeFileSync(resolve(root, CASK_GOLDEN_PATH), renderCask(template, CASK_VERSION, CASK_SHA256));
+      return null;
+    }),
+    guidePassCase("the tap cask with the xattr flags written -dr", (root) => {
+      const patched = patchCopy(root, CASK_TEMPLATE_PATH, 'args: ["-rd", "com.apple.quarantine', 'args: ["-dr", "com.apple.quarantine');
+      if (patched) return patched;
+      const template = readFileSync(resolve(root, CASK_TEMPLATE_PATH), "utf8");
+      writeFileSync(resolve(root, CASK_GOLDEN_PATH), renderCask(template, CASK_VERSION, CASK_SHA256));
+      return null;
+    }),
   ];
 }

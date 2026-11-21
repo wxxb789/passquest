@@ -34,6 +34,7 @@ on:
       - harness/lib/desktop.ts
       - harness/lib/desktop-page.ts
       - harness/lib/go.ts
+      - harness/lib/hash.ts
       - harness/lib/json.ts
       - harness/lib/process.ts
       - harness/lib/repo.ts

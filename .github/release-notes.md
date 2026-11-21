@@ -5,7 +5,7 @@ Pass Quest {{VERSION}}, a local-first desktop exam coach.
 | Platform | File |
 |---|---|
 | Windows x64 (Windows 11+, per-user installer, no admin) | `pass-quest-setup-{{VERSION}}-amd64.exe` |
-| macOS arm64 (macOS 26 or later) | `pass-quest-{{VERSION}}-arm64.dmg` |
+| macOS arm64 (macOS 26 and 27) | `pass-quest-{{VERSION}}-arm64.dmg` |
 | Linux x86_64 (second-tier; needs GTK 3 and WebKitGTK 4.1) | `Pass_Quest-{{VERSION}}-x86_64.AppImage` |
 
 `SHA256SUMS.txt` lists each file's SHA-256.

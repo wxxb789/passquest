@@ -11,27 +11,6 @@
  * `brew list --cask` reports is a symlink to it) and the list of paths `--zap`
  * must remove (the cask file Homebrew installed from).
  *
- * Modes:
- *   (default)      clone `wxxb789/homebrew-tap` into Homebrew's taps directory,
- *                  require its file to be byte-identical to a fresh render of
- *                  the template, then `brew install --cask wxxb789/tap/pass-quest`
- *                  and run every assertion, including every path in the
- *                  installed cask's zap trash: being gone after the uninstall;
- *                  `brew trust --cask` then `brew audit --cask --strict` run
- *                  last, after the behavioural evidence is already in the log.
- *   --mutant <name> derive the tap cask with one feature removed (`quarantine`:
- *                  the postflight_steps block, `zap`: the zap trash: stanza
- *                  `quit`: the uninstall quit: argument), write the result as
- *                  `Casks/pass-quest.rb` in a scratch tap created with
- *                  `brew tap-new --no-git passquest/mutant`, install it fully
- *                  qualified and require the matching assertion to catch the
- *                  removal — the run that makes the assertions above
- *                  non-vacuous. A cask cannot be installed from a path: current
- *                  Homebrew refuses to load one ("Loading casks from paths,
- *                  URLs or Ruby source is not supported", `cask/cask_loader.rb`),
- *                  so the scratch tap is how a derived cask gets a name. It is
- *                  removed again when the run ends.
- *
  * The tap drift check is the reason the tap clone happens at all: the install
  * job compares the file Homebrew will read with `renderCask` of the tree's own
  * template, so a template edit that never reached the tap fails here instead of
@@ -48,9 +27,10 @@ import path from "node:path";
 import {
   CASK_FACTS,
   CASK_TAP_PATH,
+  firstDifference,
   MACOS_DATA_DIRECTORY,
   renderCask,
-  sha256Text,
+  stanzaBody,
   statedRelease,
   TAP_REPOSITORY,
   zapTrashPaths,
@@ -59,8 +39,9 @@ import { startDesktop } from "../lib/desktop.ts";
 import type { DesktopRun, LaunchResult } from "../lib/desktop.ts";
 import { cleanEnv, launchPage, pageScript, sleep } from "../lib/desktop-page.ts";
 import { MIN_TODAY_TEXT } from "../gates/desktop-smoke/boot.ts";
+import { sha256Hex } from "../lib/hash.ts";
 import { field, numberField } from "../lib/json.ts";
-import { loggedRun, runMain } from "../lib/process.ts";
+import { loggedRun, resultText, runMain } from "../lib/process.ts";
 import type { RunResult } from "../lib/process.ts";
 
 /** This checkout, so the tool runs from any working directory. */
@@ -81,8 +62,14 @@ const TAP_CASK = `${TAP_NAME}/${CASK_FACTS.token}`;
  */
 const MUTANT_TAP_NAME = "passquest/mutant";
 const MUTANT_TAP_CASK = `${MUTANT_TAP_NAME}/${CASK_FACTS.token}`;
+/** A `zap trash:` path resolved: `~/x` (or a bare `~`) under this user's home, anything else as written. */
+function expandHome(target: string): string {
+  if (target === "~") return homedir();
+  return target.startsWith("~/") ? path.join(homedir(), target.slice(2)) : target;
+}
+
 /** The data directory the guides name and the cask's `zap trash:` carries, `~` resolved. */
-const DATA_DIRECTORY = path.join(homedir(), MACOS_DATA_DIRECTORY.replace(/^~\//, ""));
+const DATA_DIRECTORY = expandHome(MACOS_DATA_DIRECTORY);
 const MARKER = "cask-install-marker.txt";
 /** How long the uninstall gets to quit the app, and how long a mutant's app must survive. */
 const QUIT_WINDOW_MS = 30_000;
@@ -182,7 +169,7 @@ class Checker {
 
 /** The first lines of a command's output, for one assertion line. */
 function observed(result: RunResult, limit = 4): string {
-  const text = `${result.stdout}${result.stderr}`.replace(/\r\n/g, "\n").trim();
+  const text = resultText(result).trim();
   if (text === "") return "(no output)";
   return text.split("\n").slice(0, limit).join(" | ");
 }
@@ -196,7 +183,7 @@ function observed(result: RunResult, limit = 4): string {
  * of the lines left out, so a long output is still bounded.
  */
 function observedTail(result: RunResult, limit = 60): string {
-  const text = `${result.stdout}${result.stderr}`.replace(/\r\n/g, "\n").trim();
+  const text = resultText(result).trim();
   if (text === "") return "(no output)";
   const lines = text.split("\n");
   const omitted = lines.length - limit;
@@ -204,16 +191,11 @@ function observedTail(result: RunResult, limit = 60): string {
   return omitted > 0 ? `(${omitted} earlier line(s) omitted) ${shown}` : shown;
 }
 
-/** The first line on which two texts differ; the drift failure names it. */
-function firstDifference(rendered: string, tap: string): string {
-  const left = rendered.split("\n");
-  const right = tap.split("\n");
-  for (let index = 0; index < Math.max(left.length, right.length); index++) {
-    if (left[index] !== right[index]) {
-      return `first differing line ${index + 1}: the render has ${JSON.stringify(left[index] ?? "(end of file)")}, the tap file has ${JSON.stringify(right[index] ?? "(end of file)")}`;
-    }
-  }
-  return "the two texts hold the same lines and differ in encoding only";
+/** The tap-drift failure's first differing line, or the encoding-only case. */
+function driftDifference(rendered: string, tap: string): string {
+  const difference = firstDifference(rendered, tap);
+  if (difference === null) return "the two texts hold the same lines and differ in encoding only";
+  return `first differing line ${difference.line}: the render has ${JSON.stringify(difference.left ?? "(end of file)")}, the tap file has ${JSON.stringify(difference.right ?? "(end of file)")}`;
 }
 
 /**
@@ -263,7 +245,7 @@ interface MovedApp {
  * declares.
  */
 function movedApp(install: RunResult): MovedApp {
-  const text = `${install.stdout}${install.stderr}`.replace(/\r\n/g, "\n");
+  const text = resultText(install);
   const moving = /Moving ([A-Za-z]+) '([^'\n]+)' to '([^'\n]+)'/.exec(text);
   if (moving === null) {
     return { app: null, matched: null, reason: `the install printed no "Moving ..." line` };
@@ -334,7 +316,7 @@ function appExecutable(app: string): string {
 /** The quarantine attribute one path carries, as `xattr -p com.apple.quarantine` reports it. */
 async function xattrQuarantine(target: string): Promise<{ absent: boolean; present: boolean; detail: string; tail: string }> {
   const result = await loggedRun("xattr", ["-p", "com.apple.quarantine", target]);
-  const text = `${result.stdout}${result.stderr}`.replace(/\r\n/g, "\n").trim();
+  const text = resultText(result).trim();
   const command = `xattr -p com.apple.quarantine ${JSON.stringify(target)}`;
   return {
     absent: result.code !== 0 && text.includes("No such xattr"),
@@ -480,9 +462,8 @@ async function uninstallAndAssert(run: CaskRun, appPath: string, app: DesktopRun
     `brew uninstall --zap --cask ${run.cask} exited ${uninstall.code}: ${observedTail(uninstall)}`,
   );
   if (app !== null) {
-    const log = `${uninstall.stdout}${uninstall.stderr}`;
+    const log = resultText(uninstall);
     const quitLine = log
-      .replace(/\r\n/g, "\n")
       .split("\n")
       .map((line) => line.trim())
       .find((line) => line.includes("quit successfully"));
@@ -530,7 +511,7 @@ async function assertZapPathsGone(run: CaskRun, caskText: string): Promise<void>
   }
   console.log(`[state] the installed cask file's zap trash: names ${entries.length} path(s): ${entries.join(", ")}`);
   for (const entry of entries) {
-    const target = entry.startsWith("~/") ? path.join(homedir(), entry.slice(2)) : entry;
+    const target = expandHome(entry);
     const listed = await loggedRun("ls", ["-d", target]);
     const gone = listed.code !== 0 && !existsSync(target);
     const marker = target === DATA_DIRECTORY ? ` (${MARKER} was inside)` : "";
@@ -566,13 +547,13 @@ async function cloneTap(run: CaskRun): Promise<string> {
   const template = readFileSync(path.join(ROOT, TEMPLATE), "utf8");
   const rendered = renderCask(template, stated.version, stated.sha256);
   const equal = text.replaceAll("\r\n", "\n") === rendered.replaceAll("\r\n", "\n");
-  console.log(`[tap] ${CASK_TAP_PATH}: version ${stated.version}, sha256 ${stated.sha256}, sha256(file) ${sha256Text(text)}`);
-  console.log(`[tap] render of ${TEMPLATE} with those values: sha256 ${sha256Text(rendered)}`);
+  console.log(`[tap] ${CASK_TAP_PATH}: version ${stated.version}, sha256 ${stated.sha256}, sha256(file) ${sha256Hex(text)}`);
+  console.log(`[tap] render of ${TEMPLATE} with those values: sha256 ${sha256Hex(rendered)}`);
   run.checker.check(
     "tap-render",
     equal,
-    `the tap file is byte-identical to the render (version ${stated.version}, sha256 ${sha256Text(text)})`,
-    `the tap drifted from the template; ${firstDifference(rendered, text)}`,
+    `the tap file is byte-identical to the render (version ${stated.version}, sha256 ${sha256Hex(text)})`,
+    `the tap drifted from the template; ${driftDifference(rendered, text)}`,
   );
   if (!equal) throw new Error("the tap cask drifted from this tree's template; refusing to assert against it");
   return text;
@@ -609,14 +590,10 @@ async function createMutantTap(run: CaskRun): Promise<void> {
 function mutate(cask: string, mutant: Mutant): string {
   const lines = cask.split("\n");
   if (mutant === "quarantine") {
-    const start = lines.findIndex((line) => /^\s*postflight_steps\s+do\s*$/.test(line));
-    if (start < 0) throw new Error("the cask has no postflight_steps block to remove");
-    // The block's own `end` sits at the opening line's indentation; a nested
-    // block's `end` (there is none today) would be deeper and is skipped.
-    const indent = /^(\s*)/.exec(lines[start] ?? "")?.[1] ?? "";
-    const end = lines.findIndex((line, index) => index > start && new RegExp(`^${indent}end\\s*$`).test(line));
-    if (end < 0) throw new Error("the postflight_steps block has no closing end line");
-    return [...lines.slice(0, start), ...lines.slice(end + 1)].join("\n");
+    const block = stanzaBody(cask, "postflight_steps");
+    if (block === null) throw new Error("the cask has no postflight_steps block to remove");
+    if (block.end === null) throw new Error("the postflight_steps block has no closing end line");
+    return [...block.lines.slice(0, block.start), ...block.lines.slice(block.end + 1)].join("\n");
   }
   if (mutant === "zap") {
     const start = lines.findIndex((line) => /^\s*zap\s+trash:/.test(line));
@@ -747,7 +724,9 @@ async function runMutant(run: CaskRun, mutant: Mutant, tapText: string): Promise
   const file = path.join(run.mutantTapDir, CASK_TAP_PATH);
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, mutated);
-  console.log(`[mutate] removed ${MUTANT_FEATURE[mutant]}; wrote ${file} (${mutated.length} bytes against the tap file's ${tapText.length}) as ${run.cask}`);
+  console.log(
+    `[mutate] removed ${MUTANT_FEATURE[mutant]}; wrote ${file} (${Buffer.byteLength(mutated, "utf8")} bytes against the tap file's ${Buffer.byteLength(tapText, "utf8")}) as ${run.cask}`,
+  );
 
   const install = await loggedRun("brew", ["install", "--cask", run.cask]);
   run.checker.check(

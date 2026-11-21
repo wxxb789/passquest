@@ -11,10 +11,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { buildDesktop, removeTree } from "../lib/desktop.ts";
-import { desktopSurface, startProviderStub, tail, writeStubRegistry } from "../lib/desktop-page.ts";
+import { desktopSurface, startProviderStub, writeStubRegistry } from "../lib/desktop-page.ts";
 import type { Check } from "../lib/desktop-page.ts";
 import { buildCLI } from "../lib/go.ts";
-import { executable, run } from "../lib/process.ts";
+import { executable, run, tail } from "../lib/process.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext, GateResult } from "../lib/types.ts";
 

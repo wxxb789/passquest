@@ -28,7 +28,7 @@ your computer.
 | Platform | Package | Needs |
 |---|---|---|
 | Windows 11+ x64 | `pass-quest-setup-<version>-amd64.exe`: per-user installer, no admin rights | Microsoft Edge WebView2 Runtime (ships with Windows 11) |
-| macOS 26+ on Apple silicon | `pass-quest-<version>-arm64.dmg` | none |
+| macOS 26 and 27 on Apple silicon | `pass-quest-<version>-arm64.dmg` | none |
 | Linux x86_64 (second-tier) | `Pass_Quest-<version>-x86_64.AppImage` | GTK 3 and WebKitGTK 4.1 |
 
 Each package bundles its own Node runtime and agent hosts, so you do not need to install any developer

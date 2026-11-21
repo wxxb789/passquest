@@ -116,17 +116,21 @@ macOS 26.7.2, Homebrew 7.0.11 (printed by the job's own assertions). Selected li
 [summary] tap mode: 21 assertion(s) passed, 0 failed
 ```
 
-The tap's file bytes equal this tree's pinned render: `sha256sum
-harness/gates/testdata/pass-quest-0.15.0.rb` on this machine prints
-`760e3ef87e84660e61b398b059de75cd08f46a7efc640f10ddd1842653c1564d`, the hash the run printed for
-both the tap file and the render. The `trust` assertion exists because Homebrew 7.0.14 refuses an
+In run `44912433442` the tap file and the tree's render both hashed
+`760e3ef87e84660e61b398b059de75cd08f46a7efc640f10ddd1842653c1564d`. **Dated note (final apply run,
+2026-11-21):** that run's tree is not this one — the template's header comment was reworded (the
+simplify review's item 14), so this tree's render and pinned golden are now
+`578f57a7b2232488874a5bdf638e4fb08f0f594404157c3aeb3f09d6fb01b4b6` and the tap must be re-seeded
+before `install`'s `tap-render` assertion can pass again (the command is in the plan's "Coordinator
+actions needed"). The `trust` assertion exists because Homebrew 7.0.14 refuses an
 untrusted tap load for the audit; the tap file's `zap trash:` is read back out of the *installed*
 cask file, not from a list in the tool, so the assertion cannot drift from the cask.
 
-**Two names, deliberately.** The learner's install names the tap fully
+**The fully qualified name.** The learner's install names the tap fully
 (`brew install --cask wxxb789/tap/pass-quest`), which is what carries Homebrew's item-level trust;
-the guides' paragraph about this workflow keeps the short `brew uninstall --zap --cask pass-quest`,
-which resolves uniquely for a learner who has only this tap. The job's own calls are all fully
+and the guides' paragraph about this workflow names the uninstall fully qualified too
+(`brew uninstall --zap --cask wxxb789/tap/pass-quest`), the command the job runs: the short
+`pass-quest` resolves only while one tap carries the cask. The job's own calls are all fully
 qualified because the runner also carries the scratch mutant tap (`passquest/mutant`): run
 `44909338098` failed exactly there — `Cask pass-quest exists in multiple taps`.
 
@@ -160,13 +164,7 @@ green; the final tree's gate matrix is `44912433474`.
 Event `pull_request` → `cask: event=pull_request tag=v0.15.0 push=false`, then:
 
 ```
-[run] gh release download v0.15.0 --repo wxxb789/passquest --pattern pass-quest-0.15.0-arm64.dmg --pattern SHA256SUMS.txt --dir /tmp/passquest-cask-…/release
-[release] pass-quest-0.15.0-arm64.dmg (44963840 bytes) sha256 477938dc1635971e23b2de952e04c684a87eda5c29fece7508d8b42c787b3e66
-[release] v0.15.0's SHA256SUMS.txt states the same digest
-[render] .github/homebrew-cask-template.rb with v0.15.0 -> /tmp/passquest-cask-…/pass-quest.rb
-[render] version 0.15.0, sha256 477938dc…b3e66, rendered sha256 760e3ef87e84660e61b398b059de75cd08f46a7efc640f10ddd1842653c1564d
-[render] equals the pinned render harness/gates/testdata/pass-quest-0.15.0.rb byte for byte
-[push] skipped: dry run (pass --push to commit the render to the tap)
+cask-publish: wxxb789/passquest release v0.15.0 -> wxxb789/homebrew-tap (dry run) | [run] gh release download v0.15.0 --repo wxxb789/passquest --pattern pass-quest-0.15.0-arm64.dmg --pattern SHA256SUMS.txt --dir /tmp/passquest-cask-…/release | [run] exit 0 | [release] pass-quest-0.15.0-arm64.dmg (44963840 bytes) sha256 477938dc1635971e23b2de952e04c684a87eda5c29fece7508d8b42c787b3e66 | [release] v0.15.0's SHA256SUMS.txt states the same digest | [render] .github/homebrew-cask-template.rb with v0.15.0 -> /tmp/passquest-cask-…/pass-quest.rb | [render] version 0.15.0, sha256 477938dc…b3e66, rendered sha256 760e3ef87e84660e61b398b059de75cd08f46a7efc640f10ddd1842653c1564d | [render] equals the pinned render harness/gates/testdata/pass-quest-0.15.0.rb byte for byte | [push] skipped: dry run (pass --push to commit the render to the tap)
 ```
 
 The digest the tool computes from the downloaded asset and the release's own `SHA256SUMS.txt` line
@@ -182,8 +180,8 @@ gate pins on all three OSes.
 | `workflow_dispatch` (`tag` default `v0.15.0`, `push` default `false`) | both | after the merge: `gh workflow run cask.yml -f tag=v0.15.0 -f push=false` (dry) or `push=true` (write) |
 
 No weekly `schedule`: the goal does not ask for one, and a template change re-runs the workflow
-through the `pull_request` path (amendment 14). The tag reaches the tools through `env:` and both the
-step and the tools require `^v[0-9]+\.[0-9]+\.[0-9]+$` (amendment 21).
+through the `pull_request` path (amendment 14). The tag reaches the tool through `env:`, and both
+the step and `harness/tools/cask-publish.ts` require `^v[0-9]+\.[0-9]+\.[0-9]+$` (amendment 21).
 
 ### The credential, and the tap's history
 
@@ -209,11 +207,11 @@ The tap's history is public record. It is disclosed here whole — this branch d
 | `d9cf7eb` | 2026-11-21T12:17:51Z | wxxb789 `wxxb789@outlook.com` | the coordinator's seed with the deploy key, run locally through the same `--push` path |
 | `82b6693` | 2026-11-21T13:26:32Z | wxxb789 `wxxb789@outlook.com` | the re-seed after the measured `zap trash:` paths landed (the round-4 render), pushed with a temporary deploy key that was removed afterwards |
 
-The tap's current file is that round-4 render: run `44912433442`'s `tap-render` assertion compares it
-byte for byte with a fresh render of this tree (hash `760e3ef8…564d`, above). The local seeds used
-the same tool and key path as the workflow's `--push`; the workflow's own push path (a `release:
-published` event, or `push=true` dispatch) has not run yet — the first release after the merge
-exercises it.
+The tap's current file is that round-4 render, `760e3ef8…564d`; since the dated note above moved
+this tree's render to `578f57a7…b4b6`, the tap needs one more seed for `install`'s `tap-render`
+assertion to pass again. The local seeds used the same tool and key path as the workflow's
+`--push`; the workflow's own push path (a `release: published` event, or `push=true` dispatch) has
+not run yet — the first release after the merge exercises it.
 
 ## The constraints row
 
@@ -242,6 +240,13 @@ exercises it.
   the run with the `brew trust` fix (`44912433442`) landed on a 7.0.11 runner, where the assertion
   reads `Already trusted cask: wxxb789/tap/pass-quest`. Runners differ in the Homebrew they carry
   (7.0.11 and 7.0.14 seen), which is why the job prints `brew --version` and asserts on it.
+- **`brew audit --online` did not run.** The job audits with `brew audit --cask --strict` — the
+  offline checks, exit 0 in run `44912433442` — and `--online` was not run: it downloads the
+  artifact and compares the cask's declared minimum with the artifact's own
+  `LSMinimumSystemVersion` (`audit_min_os`, an `online?`-guarded check), and the historical v0.15.0
+  plist says 13.0 against the cask's 26, so the comparison is expected to report a mismatch until
+  the first release built after P1. A gate makes no external network call, so `--online` is not part
+  of the local checks either.
 - **The workflow's push path has not run in CI.** The seeds (`d9cf7eb`, `82b6693`) exercised the
   same tool and key from a workstation; a `release: published` event or a `push=true` dispatch is
   what will exercise it inside Actions.

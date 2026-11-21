@@ -1,7 +1,8 @@
 import path from "node:path";
 
-import { pageScript, tail } from "../../lib/desktop-page.ts";
+import { pageScript } from "../../lib/desktop-page.ts";
 import { arrayField, field, numberField, stringField } from "../../lib/json.ts";
+import { tail } from "../../lib/process.ts";
 import { seedReviewedSource } from "../../lib/reviewed-source.ts";
 import { cli, launch } from "./scenario.ts";
 import type { Scenario } from "./scenario.ts";

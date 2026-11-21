@@ -92,14 +92,10 @@
  *
  * The bundle's own `Contents/Info.plist` — under a `.app`, or at a fixture
  * tree's root — must declare `LSMinimumSystemVersion` equal to the minimum
- * mygo.json declares (goal 0017 P1, `plistProblems`): MyGo copies
- * `macos.minimumSystemVersion` verbatim into that key, and the effective floor
- * is the higher of it and the Mach-O's `minos` — 13.0 from the Go 1.27
- * linker, below the declared 26.0 — so the key is the binding one, and an
- * older value would open on a macOS between the linker's `minos` and the
- * declared floor. A real macOS run must carry the file; a tree that declares
- * no minimum fails instead of passing unchecked, and a fixture tree may carry
- * no plist at all.
+ * mygo.json declares (goal 0017 P1): `plistProblems` holds the rule and why
+ * the plist key, not the Mach-O's `minos`, binds. A real macOS run must carry
+ * the file; a tree that declares no minimum fails instead of passing
+ * unchecked, and a fixture tree may carry no plist at all.
  *
  * The run's package artifact — the NSIS setup, the `.dmg` or the AppImage —
  * is checked cheaply: its name must be the exact name this build writes
@@ -135,7 +131,7 @@ export interface PackageIdentity {
   naming: PackageNaming;
   /** mygo.json as written: the AppImage's name comes from its raw name and version. */
   config: { name: string; version: string };
-  /** mygo.json's macos.minimumSystemVersion, which MyGo writes into the bundle's Info.plist verbatim and the scan requires there. */
+  /** mygo.json's macos.minimumSystemVersion; `plistProblems` checks the installed Info.plist carries it. */
   minimumSystemVersion: string;
   /** The notices this staging's bundles required (harness/lib/notices.ts): the installed notices file must carry every text of them. */
   notices: StagedNotices;

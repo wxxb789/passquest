@@ -57,7 +57,9 @@ package; it is not a sign of a modified file.
 Windows 10 may not, and the package does not bundle it. When it is missing, the app shows one message
 before any window — *"Pass Quest needs the Microsoft Edge WebView2 Runtime, which this PC does not
 have. Install it from https://developer.microsoft.com/microsoft-edge/webview2/ (the Evergreen
-Standalone Installer), then start Pass Quest again."* — and exits.
+Standalone Installer), then start Pass Quest again."* — and exits. The message is English-only: the
+app shows it in a system dialog before any window exists, when no interface language could have been
+chosen yet.
 
 ## macOS
 
@@ -244,16 +246,17 @@ The Homebrew path has its own workflow ([`.github/workflows/cask.yml`](../.githu
 on a macOS runner it installs the published release **from the tap** (`brew install --cask
 wxxb789/tap/pass-quest`), asserts `xattr -p com.apple.quarantine` finds no quarantine flag on the
 installed app and on a nested file, launches the installed app through the smoke hook, then runs
-`brew uninstall --zap --cask pass-quest` and asserts the app quit, the bundle is gone, and every path
-the cask's `zap trash:` names is gone: the data directory and the app's WebKit data and cache folders
-under `~/Library`. Publishing a release updates the tap's version and SHA-256 with no manual step. A
-pull request that touches the cask template or its tools runs the same workflow: the `update` job
-renders the release and cross-checks its digest without pushing, and the `install` job is a real
-install, not a dry run — but before installing, it requires the tap's file to equal a fresh render
-of the tree's template, so a template edit that has not reached the tap fails the job there instead
-of installing anything. Three mutant runs write that cask with `postflight_steps`, `zap trash:` and
-`quit:` removed in turn into a scratch tap the runner creates (`brew tap-new --no-git`), install it
-by name and require the matching assertion to catch each removal.
+`brew uninstall --zap --cask wxxb789/tap/pass-quest` and asserts the app quit, the bundle is gone,
+and every path the cask's `zap trash:` names is gone: the data directory and the app's WebKit data
+and cache folders under `~/Library`. Publishing a release updates the tap's version and SHA-256 with
+no manual step. A pull request that touches the cask template or its tools runs the same workflow:
+the `update` job renders the release and cross-checks its digest without pushing, and the `install`
+job is a real install, not a dry run — but before installing, it requires the tap's file to equal a
+fresh render of the tree's template, so a template edit that has not reached the tap fails the job
+there instead of installing anything. Three mutant runs write that cask with `postflight_steps`,
+`zap trash:` and `quit:` removed in turn into a scratch tap the runner creates
+(`brew tap-new --no-git`), install it by name and require the matching assertion to catch each
+removal.
 
 Only these targets are claimed as supported:
 

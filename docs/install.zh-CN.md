@@ -159,7 +159,7 @@ CI（[`.github/workflows/gate.yml`](../.github/workflows/gate.yml)）每个操�
 Homebrew 路径有自己的工作流（[`.github/workflows/cask.yml`](../.github/workflows/cask.yml)）：
 在 macOS 运行器上它从 tap 安装已发布的版本（`brew install --cask wxxb789/tap/pass-quest`），
 断言 `xattr -p com.apple.quarantine` 在已安装的应用和它内部的一个文件上都找不到隔离属性，
-通过冒烟钩子启动已安装的应用，然后执行 `brew uninstall --zap --cask pass-quest`，断言应用已退出、
+通过冒烟钩子启动已安装的应用，然后执行 `brew uninstall --zap --cask wxxb789/tap/pass-quest`，断言应用已退出、
 应用包已删除，并且该 cask 的 `zap trash:` 列出的每个路径都已删除：数据目录，以及 `~/Library`
 下该应用的 WebKit 数据与缓存目录。发布一个版本会自动更新 tap 里的版本号和 SHA-256，无需手工步骤。
 改动 cask 模板或其工具的 pull request 会跑同一个工作流：`update` 任务渲染发布版本并核对摘要，

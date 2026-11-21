@@ -42,10 +42,10 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readlinkSync, rmSync } from "node:fs";
 import path from "node:path";
 
-import { sleep, tail } from "../../lib/desktop-page.ts";
+import { sleep } from "../../lib/desktop-page.ts";
 import { removeTree } from "../../lib/desktop.ts";
 import type { PackageArtifact, PackageBuild } from "../../lib/package-build.ts";
-import { executable, run } from "../../lib/process.ts";
+import { executable, run, tail } from "../../lib/process.ts";
 
 /** The four host scripts every package carries, as internal/hostpaths looks them up. */
 export const HOSTS = ["tutor-host.mjs", "anki-host.mjs", "search-host.mjs", "durable-host.mjs"] as const;
