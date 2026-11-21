@@ -17,8 +17,8 @@
  *                  the template, then `brew install --cask wxxb789/tap/pass-quest`
  *                  and run every assertion, including every path in the
  *                  installed cask's zap trash: being gone after the uninstall;
- *                  `brew audit --cask --strict` runs last, after the
- *                  behavioural evidence is already in the log.
+ *                  `brew trust --cask` then `brew audit --cask --strict` run
+ *                  last, after the behavioural evidence is already in the log.
  *   --mutant <name> derive the tap cask with one feature removed (`quarantine`:
  *                  the postflight_steps block, `zap`: the zap trash: stanza
  *                  `quit`: the uninstall quit: argument), write the result as
@@ -102,7 +102,8 @@ const USAGE = `Assert the behaviour of the ${TAP_CASK} cask on this macOS machin
 
   (default)         clone ${TAP_REPOSITORY} into Homebrew's taps directory, require the
                     tap file to equal a fresh render of ${TEMPLATE}, install the
-                    cask fully qualified, run every assertion, audit it last
+                    cask fully qualified, run every assertion, trust the cask
+                    and audit it last
   --mutant <name>   write the tap cask with one feature removed as the ${CASK_FACTS.token}
                     cask of the scratch tap ${MUTANT_TAP_NAME} (brew tap-new --no-git),
                     install it fully qualified and require the matching assertion to
@@ -116,9 +117,10 @@ The cask's assertions, each printing its exact command and observed value:
   "Moving App ... to '<path>'" line names; xattr -p com.apple.quarantine on
   that app and on a nested file; a launch through the smoke hook; the data
   directory marker; the uninstall quitting the running app; every path the
-  installed cask file's zap trash: names gone after --zap; brew audit --cask
-  --strict. A failing assertion prints the command's last 60 lines, so the
-  offence at the end of an audit or an install is in the log.
+  installed cask file's zap trash: names gone after --zap; brew trust --cask
+  for the tap, then brew audit --cask --strict. A failing assertion prints the
+  command's last 60 lines, so the offence at the end of an audit or an install
+  is in the log.
 
 Exit codes: 0 every assertion passed, 1 a failure (its line is in the log),
 2 usage or the wrong platform. This tool never runs on Windows or Linux.`;
@@ -702,6 +704,24 @@ async function runTap(run: CaskRun): Promise<void> {
   await uninstallAndAssert(run, appPath, app);
   await assertZapPathsGone(run, tapText);
   printListing("after the uninstall", await libraryListing());
+
+  // The audit is the one load of this cask that the install's own trust does
+  // not cover: `explicitly_allowed?` in Homebrew's `trust.rb` grants the
+  // item-level trust that a fully qualified name carries only for
+  // install/reinstall/upgrade, and `cask_loader.rb` calls
+  // `require_trusted_cask!` on every tap `.rb` load — so Homebrew 7.0.14
+  // refuses the audit with "Refusing to load cask wxxb789/tap/pass-quest from
+  // untrusted tap wxxb789/tap" (CI run 44910568731) where 7.0.11 still audited
+  // it. Trust the cask explicitly first (docs.brew.sh/Tap-Trust, `brew trust
+  // --help`). The learner's documented command does not change: their
+  // `brew install --cask wxxb789/tap/pass-quest` trusts that item by itself.
+  const trust = await loggedRun("brew", ["trust", "--cask", run.cask]);
+  run.checker.check(
+    "trust",
+    trust.code === 0,
+    `brew trust --cask ${run.cask} -> exit 0: ${observed(trust, 2)}`,
+    `brew trust --cask ${run.cask} exited ${trust.code}: ${observedTail(trust)}`,
+  );
 
   const audit = await loggedRun("brew", ["audit", "--cask", "--strict", run.cask]);
   run.checker.check(
