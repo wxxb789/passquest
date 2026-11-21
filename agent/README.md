@@ -112,5 +112,12 @@ platform limits.
 
 ## Boundary
 
-The desktop app spawns these same hosts per call and reaps them on quit, and every package bundles them
-with a pinned Node runtime (goal 0013). The versioned JSON documents are the contract; provider SDKs stay inside Node and never reach `cmd/` or `internal/`.
+The desktop app spawns these same hosts per call and reaps them on quit. Every package carries them
+with a pinned Node runtime and no `node_modules` (goal 0016): a host that names a package specifier
+(`durable-host.mjs` is the only one today) ships as one self-contained ESM bundle built from the
+locked tree, the other three ship byte-identical, and the licence texts of the packages a bundle
+inlined travel beside them in `THIRD-PARTY-NOTICES.txt`. A host that gains an import is bundled by
+that same rule, so it must import only what `agent/package.json` resolves and carry no native or
+non-JavaScript asset: staging fails rather than ship a host that cannot run outside this checkout.
+The versioned JSON documents are the contract; provider SDKs stay inside Node and never reach `cmd/`
+or `internal/`.

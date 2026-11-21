@@ -11,9 +11,10 @@
  * (mixed case included) plus links whose own name and target name private
  * data or an environment file, the internal-only marker and a
  * credential-shaped string in a bundled host — the failure must name every
- * seed and stay silent on the same credential in a third-party file (a
- * package carries no node_modules at all, so the fixture's file lives outside
- * the agent tree) — one synthetic baseline pair (a page file plus the partial
+ * seed and stay silent on the same credential in a third-party file, which
+ * this fixture places under the agent tree's own `node_modules`: the lean
+ * check refuses that directory on its own, so the credential inside it must
+ * stay unnamed too — one synthetic baseline pair (a page file plus the partial
  * extraction) whose byte-identical copies, embedded lines and encoded forms —
  * JSON-escaped, `\uXXXX`-escaped, UTF-16LE — must all be reported while an
  * unrelated line is not, three that drive the lean-tree check (goal 0016) — a
