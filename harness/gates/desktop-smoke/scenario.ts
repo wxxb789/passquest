@@ -32,9 +32,11 @@ export interface Shared {
   /**
    * Environment every launch gets beyond the smoke hook's own variables and
    * the scenario's. The package smoke strips PATH and points HOME/AppData/
-   * XDG_CONFIG_HOME at a temp tree here.
+   * XDG_CONFIG_HOME at a temp tree here. Every value is a string: unsetting a
+   * variable is not supported, so a launch that must not see one leaves the
+   * key out of this record rather than giving it an `undefined` value.
    */
-  launchEnv?: Record<string, string | undefined>;
+  launchEnv?: Record<string, string>;
   /**
    * Set false to leave PASSQUEST_DESKTOP_DATA unset, so the app resolves its
    * own per-user data directory (the package smoke, whose data root is what
