@@ -19,6 +19,8 @@
  * external network call and `brew` exists on no Windows runner) and reports
  * problems as strings the gate prefixes.
  */
+import { createHash } from "node:crypto";
+
 /** The token the template carries where the release's version goes. */
 const VERSION_TOKEN = "@VERSION@";
 /** The token the template carries where the release asset's SHA-256 goes. */
@@ -109,9 +111,35 @@ export const CASK_FACTS: CaskFacts = {
  */
 export const CASK_TAP_PATH = `Casks/${CASK_FACTS.token}.rb`;
 
+/**
+ * The public tap repository that carries the cask (goal 0017, default 2).
+ * `harness/tools/cask-publish.ts` pushes to it over the deploy key and
+ * `harness/tools/cask-install.ts` clones it into Homebrew's taps directory, so
+ * the one literal is here instead of in two tools that could drift apart.
+ */
+export const TAP_REPOSITORY = "wxxb789/homebrew-tap";
+
 /** The template with the release's version and SHA-256 in every placeholder. */
 export function renderCask(template: string, version: string, sha256: string): string {
   return template.replaceAll(VERSION_TOKEN, version).replaceAll(SHA256_TOKEN, sha256);
+}
+
+/** The SHA-256 of a text's UTF-8 bytes, the digest the cask tools print for a render. */
+export function sha256Text(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+/**
+ * The version and SHA-256 a rendered cask states, or null when either line is
+ * absent or not one quoted string. The install tool reads the tap's own copies
+ * with this and re-renders the template with them: equal bytes mean the tap and
+ * the template agree, different bytes mean the tap drifted from the tree.
+ */
+export function statedRelease(rendered: string): { version: string; sha256: string } | null {
+  const version = quotedValue(rendered, "version");
+  const sha256 = quotedValue(rendered, "sha256");
+  if (version === null || sha256 === null) return null;
+  return { version, sha256 };
 }
 
 /**

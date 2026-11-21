@@ -49,7 +49,33 @@ export async function run(cmd: string, args: string[], options: RunOptions = {})
   return { code, stdout, stderr };
 }
 
+/**
+ * `run` with the command, its exact argv and its exit code on stdout — the
+ * evidence lines the cask tools' logs quote. An argument a shell would read is
+ * JSON-quoted in the line, so the log holds the argv as it was passed.
+ */
+export async function loggedRun(cmd: string, args: readonly string[], options: RunOptions = {}): Promise<RunResult> {
+  const shown = [cmd, ...args].map((arg) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(arg) ? arg : JSON.stringify(arg)));
+  console.log(`[run] ${shown.join(" ")}`);
+  const result = await run(cmd, [...args], options);
+  console.log(`[run] exit ${result.code}`);
+  return result;
+}
+
 export function outputLines(result: RunResult): string[] {
   const text = `${result.stdout}${result.stderr}`.replace(/\r\n/g, "\n");
   return text.split("\n").filter((line) => line.trim() !== "");
+}
+
+/**
+ * The wrapper the cask tools end with: `main` decides the exit code, and a
+ * throw out of it is one `name: message` line and exit 1.
+ */
+export async function runMain(name: string, main: (argv: readonly string[]) => Promise<number>): Promise<void> {
+  try {
+    process.exitCode = await main(process.argv.slice(2));
+  } catch (error) {
+    console.error(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  }
 }

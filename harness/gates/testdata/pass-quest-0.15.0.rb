@@ -46,22 +46,25 @@ cask "pass-quest" do
   # attribute (the cask re-installed over itself), and that state is already the
   # one this step wants: the Cask-Cookbook documents `must_succeed: false` for
   # exactly this, a cleanup command that cannot run when its attribute is
-  # absent. `writable_paths:` grants the sandboxed step the write access it
-  # needs on the installed app.
+  # absent. The steps sandbox already permits writes to the app directory —
+  # `cask/artifact/install_steps.rb` allows the caskroom and the appdir before
+  # any `writable_paths` — so this step declares none. The macOS install job
+  # proves the attribute is gone; only that evidence, not caution, would add the
+  # documented relative form
+  # (`writable_paths: ["Pass Quest.app"], writable_base: :appdir`).
   postflight_steps do
     run "/usr/bin/xattr",
         args: ["-rd", "com.apple.quarantine", "{{appdir}}/Pass Quest.app"],
-        writable_paths: ["{{appdir}}/Pass Quest.app"],
-        writable_base: :appdir,
         must_succeed: false
   end
 
   uninstall quit: "com.github.wxxb789.passquest"
 
-  # The data directory the install guides name; P4 appends the paths the macOS
-  # install job measures under ~/Library (goal 0017, default 8), in the array
-  # form `brew generate-zap` emits (dev-cmd/generate-zap.rb) — one string per
-  # path, because Homebrew resolves each directive value as one literal path
+  # The data directory the install guides name. The macOS install job prints
+  # the before/after `~/Library` listing (goal 0017, default 8, still open) and
+  # P5 appends what that listing measured, in the array form `brew generate-zap`
+  # emits (dev-cmd/generate-zap.rb) — one string per path, because Homebrew
+  # resolves each directive value as one literal path
   # (cask/artifact/abstract_uninstall.rb).
   zap trash: "~/Library/Application Support/Pass Quest"
 

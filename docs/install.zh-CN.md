@@ -156,6 +156,17 @@ CI（[`.github/workflows/gate.yml`](../.github/workflows/gate.yml)）每个操�
 `gate (windows-latest, package)`、`gate (macos-latest, package)` 和 `gate (ubuntu-latest, package)`。
 每个任务从仓库构建该操作系统的安装包，安装或挂载它（Windows 用 NSIS `/S`，macOS 挂载 `.dmg` 并用 `ditto` 把 `.app` 拷出来，Linux 就地运行 AppImage），然后在 `PATH` 中没有 `go`、`bun` 和 `node`（已断言）的情况下启动已安装的应用，并驱动学习闭环、agent 功能——包括一个由已安装应用在自带的运行时和 host 上独立完成的学习简报——Anki、前向升级、密钥用例和运行时损坏用例（`package smoke` 门禁，用例为 `contents, layout, study, agents, brief, anki, upgrade, credential, broken`）。macOS 任务还会检查所构建 `.app` 的 `Info.plist` 最低版本：安装包声明 macOS 26。每次运行都把安装包保留为 `package-windows-latest`、`package-macos-latest` 或 `package-ubuntu-latest` 工件，保存 7 天。在版本 tag 上的运行会把这些工件交给发布流程，只有负责人审阅草稿后才会发布（[发布流程](release.md)）。
 
+Homebrew 路径有自己的工作流（[`.github/workflows/cask.yml`](../.github/workflows/cask.yml)）：
+在 macOS 运行器上它从 tap 安装已发布的版本（`brew install --cask wxxb789/tap/pass-quest`），
+断言 `xattr -p com.apple.quarantine` 在已安装的应用和它内部的一个文件上都找不到隔离属性，
+通过冒烟钩子启动已安装的应用，然后执行 `brew uninstall --zap --cask pass-quest`，断言应用已退出、
+应用包和数据目录都已删除。发布一个版本会自动更新 tap 里的版本号和 SHA-256，无需手工步骤。
+改动 cask 模板或其工具的 pull request 会跑同一个工作流：`update` 任务渲染发布版本并核对摘要，
+但不推送；`install` 任务是真安装，不是 dry run——不过在安装之前，它要求 tap 里的文件与仓库内
+模板的渲染逐字节一致，因此尚未同步到 tap 的模板改动会让任务在此失败，不会去安装别的文件。
+三个变异（mutant）运行则依次把该 cask 删掉 `postflight_steps`、`zap trash:` 和 `quit:` 之一后写进
+运行器上新建的临时 tap（`brew tap-new --no-git`），按名字安装，并要求对应的断言发现每一次删除。
+
 只有下面这些目标被声明为受支持：
 
 | 平台 | CI 任务 | 构建并通过冒烟测试的安装包 |

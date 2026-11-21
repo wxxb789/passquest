@@ -95,6 +95,15 @@ that hides a real surface is a harness defect.
 - CI runs `bun run gate --group <group>` for each of the four groups on Linux, macOS and Windows;
   together the groups are the full gate. Platform-specific packaging, WebView or Anki
   behaviour still needs its own runtime evidence; the matrix is not a desktop-app test.
+- The Homebrew cask is proved by a workflow, not a gate: it downloads a published release, clones
+  the public tap and runs `brew`, so it needs a macOS runner, the network and a release that
+  exists (`.github/workflows/cask.yml`, goal 0017). A gate makes no external network call. What a
+  gate can hold still, `install-guide` does: it pins the template's v0.15.0 render byte for byte on
+  all three OSes, while the workflow installs that render from the tap and asserts the quarantine
+  flag is gone, the installed app boots, `brew uninstall --zap` quits it and removes the bundle and
+  the data directory, and three mutant runs catch the removal each behavioural assertion depends
+  on: without `postflight_steps` the quarantine flag is still there, without `zap trash:` the data
+  directory survives, without `quit:` the app keeps running.
 - `.github/workflows/gate.yml` checks out with `fetch-depth: 2`. That keeps the clone shallow while leaving
   the change's base reachable as `HEAD^1`, which is what the golden-contract gate diffs against in CI; a
   depth-1 checkout cannot see a golden change at all and the gate refuses instead of passing. On a
