@@ -108,6 +108,87 @@ jobs:
           Add-Type -AssemblyName System.Windows.Forms
           [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 
+      # The macos-26 runner's own display is too small for the audited 1280x800 page area
+      # (Q-0012-05): AppKit fits a titled window to the screen (NSWindow
+      # constrainFrameRect:toScreen:), so the window comes back clamped. displayplacer is the
+      # macOS counterpart of the Windows step above; its list is printed before and after, so
+      # the log holds the display the bench really measured.
+      - name: Desktop display size (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The audited 1280x800 page area (Q-0012-05) plus the 28 pt title bar and the menu bar
+          # and Dock insets; 1920x1080 is preferred when the runner offers it.
+          min_width=1280
+          min_height=860
+
+          brew install displayplacer
+
+          before="$RUNNER_TEMP/displayplacer-before.txt"
+          after="$RUNNER_TEMP/displayplacer-after.txt"
+          echo "displayplacer list (before):"
+          displayplacer list | tee "$before"
+
+          # The main enabled screen, and on it the largest 1920x1080-preferred mode that is not
+          # scaling:on: scaling:on is density 2.0, so only a scaling:off mode's res is the point
+          # size the window is fitted against.
+          chosen=$(awk -v minw="$min_width" -v minh="$min_height" '
+            /^Persistent screen id:/ { id = $4; ids[++n] = id; next }
+            /^Origin: / { origins[id] = $2; if ($0 ~ /main display/) mains[id] = 1; next }
+            /^Rotation: / { rotations[id] = $2; next }
+            /^Enabled: / { enableds[id] = $2; next }
+            /^  mode / && $0 !~ / scaling:on/ {
+              res = $3
+              sub(/^res:/, "", res)
+              split(res, size, "x")
+              if (size[1] + 0 < minw + 0 || size[2] + 0 < minh + 0) next
+              exact = (size[1] + 0 == 1920 && size[2] + 0 == 1080) ? 0 : 1
+              key = sprintf("%d %010d %010d", exact, 999999999 - size[1] * size[2], 999999 - size[1])
+              if (!(id in bestkey) || key < bestkey[id]) { bestkey[id] = key; bestres[id] = res }
+            }
+            END {
+              for (i = 1; i <= n; i++) if (enableds[ids[i]] == "true" && mains[ids[i]]) { want = ids[i]; break }
+              if (want == "") for (i = 1; i <= n; i++) if (enableds[ids[i]] == "true") { want = ids[i]; break }
+              if (want == "") { print "NOSCREEN"; exit }
+              if (!(want in bestres)) { print "NOMODE", want; exit }
+              print want, origins[want], rotations[want], bestres[want]
+            }
+          ' "$before")
+
+          case "$chosen" in
+            NOSCREEN)
+              echo "::error::displayplacer list shows no enabled display; displayplacer list (before) above"
+              exit 1
+              ;;
+            NOMODE\ *)
+              echo "::error::display ${chosen#NOMODE } has no scaling:off mode of at least ${min_width}x${min_height}, which a ${min_width}x800 page area plus the title bar needs; displayplacer list (before) above lists every mode the runner offers"
+              exit 1
+              ;;
+          esac
+          read -r screen origin rotation res <<<"$chosen"
+
+          echo "displayplacer: ${screen} -> res:${res} scaling:off"
+          displayplacer "id:${screen} res:${res} scaling:off origin:${origin} degree:${rotation}"
+
+          echo "displayplacer list (after):"
+          displayplacer list | tee "$after"
+
+          # A scaling:off display is density 1, so its Resolution: block line is also its point
+          # size: that is the display the window is fitted against, which this step has to prove.
+          state=$(awk -v want="$screen" '
+            /^Persistent screen id:/ { cur = ($4 == want); next }
+            cur && /^Resolution: / { resolution = $2 }
+            cur && /^Scaling: / { scaling = $2 }
+            END { print resolution, scaling }
+          ' "$after")
+          if [ "$state" != "$res off" ]; then
+            echo "::error::displayplacer left the display at '${state:-unknown}', not '${res} off'; displayplacer list (after) above"
+            exit 1
+          fi
+          echo "displayplacer: the display is ${res} points at density 1"
+
       # Seconds, not the two builds: a broken parser or verdict must fail before the benches run.
       - name: Check the tool's parsers and the noise decision
         run: bun harness/tools/frontend-bench.ts --self-check

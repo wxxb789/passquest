@@ -734,7 +734,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
         metrics: METRIC_NOTES,
         shots: {
           states: SHOT_STATES,
-          how: "one visible launch per state and per side, the desktop-ux settle style (desktop/web/styles/responsive.css:9) with clock readouts pinned; each shot records the page's css size and devicePixelRatio and the PNG's own pixel size (its IHDR), and a page area that is not the audited one fails the shot",
+          how: "one visible launch per state and per side, the desktop-ux settle style (desktop/web/styles/responsive.css:9) extended over the runner's cursor and this launch's own measurements: animations, transitions and the caret off, hit-testing inert (no driver step uses the pointer, so a window under the cursor cannot capture the hovered rendering — on Feedback a hovered option lights its own evidence, not the key's), the clock readouts, the answered-in chip's elapsed time and the reply's measured latency pinned, and the send's own budget re-read awaited before the capture; each shot records the page's css size and devicePixelRatio and the PNG's own pixel size (its IHDR), and a page area that is not the audited one fails the shot",
           a: shotState.a,
           b: shotState.b,
           allowlist: VISUAL_ALLOWLIST,
@@ -866,7 +866,7 @@ async function runSmoke(options: BenchOptions): Promise<number> {
         contentSize: CONTENT_SIZE,
         guards: `${GUARD_RULE}; ${PREPARE_GUARDS_WHY}`,
         states: SHOT_STATES,
-        how: "one visible launch per state of one build: the Linux job proves the states render, and compares no numbers",
+        how: "one visible launch per state of one build: the Linux job proves the states render, and compares no numbers; the same settle as the comparison run (hit-testing inert, the live readouts pinned, the send's budget re-read awaited before the capture)",
       },
       trees: { b: { root: tree.root, commit: tree.commit, binary: tree.display, shotHook: tree.hook, userAgent: engine, bundles: tree.bundles } },
       launches: { ...plan, total: run.launches, rows: run.rows },

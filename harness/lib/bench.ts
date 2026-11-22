@@ -717,6 +717,22 @@ const benchPinClocks = () => {
     el.removeAttribute("data-clock");
   }
 };
+// The answered-in chip and the reply's latency are this launch's own measurements (views/feedback.ts renders
+// fb.elapsed_ms, views/coach.ts the reply's latency_ms), so two launches of one build render two values:
+// each is pinned to the zero of its own format, like the clock views' initial text.
+const benchPinMeasurements = () => {
+  for (const [selector, text] of [['[data-testid="elapsed"] .num', "0:00"], ['[data-testid="coach-reply"] .rmeta .num', "0.0 s"]]) {
+    const el = q(selector);
+    if (el) el.textContent = text;
+  }
+};
+// A shot launch takes no pointer input (every driver step is a synthetic click, key or focus) and the
+// runner's cursor is wherever the OS left it: hit-testing goes inert so no capture shows a hovered element.
+const benchInertPointer = () => {
+  const style = document.createElement("style");
+  style.textContent = "*,*::before,*::after{pointer-events:none!important}";
+  document.head.append(style);
+};
 // Shot mode's own CSS rules (desktop/web/styles/responsive.css:9): ?shot=1 would need a reload, and the smoke hook evaluates the script on the first load only.
 const benchSettle = () => {
   const style = document.createElement("style");
@@ -726,8 +742,10 @@ const benchSettle = () => {
 const benchCapture = async (state) => {
   benchSettle();
   benchPinClocks();
+  benchPinMeasurements();
   await sleep(400);
   benchPinClocks();
+  benchPinMeasurements();
   return await window.mygo.call("SmokeShot.Capture", state);
 };
 let benchLoaf = { supported: false, entries: 0, totalMs: 0, maxMs: 0 };
@@ -772,8 +790,10 @@ await sleep(250);`,
   "feedback-coach": `await startFromSheet("start-skill", "${SKILL}");
 await answer("2");
 await until("the coach call strip", () => q('[data-act="coach-send"]') && !q('[data-act="coach-send"]').disabled, 30000);
+const budget = q('[data-testid="call-strip"] b.num')?.textContent ?? "";
 q('[data-act="coach-send"]').click();
-await until("the coach reply", () => q('[data-testid="coach-reply"]') || q('[data-testid="coach-failure"]'), 30000);
+const reply = await until("the coach reply", () => q('[data-testid="coach-reply"]') || q('[data-testid="coach-failure"]'), 30000);
+if (reply.matches('[data-testid="coach-reply"]')) await until("the spent budget slot", () => (q('[data-testid="call-strip"] b.num')?.textContent ?? "") !== budget, 30000);
 await sleep(200);`,
   "settings-row": `await today();
 location.hash = "#/settings";
@@ -844,6 +864,7 @@ const viewport = benchViewport();
 const guards = await benchRafGuard();
 if (guards.visibility !== "visible" || guards.ticks < ${RAF_TICKS}) return { engine, readyAt, viewport, guards, loaf: benchLoaf };
 if (!(window.mygo && typeof window.mygo.call === "function")) return { engine, readyAt, viewport, guards, shots: "no smoke runtime", loaf: benchLoaf };
+benchInertPointer();
 ${DRIVERS[state]}
 let file = "";
 try {
@@ -1345,6 +1366,19 @@ export function selfCheckCases(): SelfCheckCase[] {
         const script = prepareScript();
         const offenders = ["requestAnimationFrame", "benchRafGuard"].filter((token) => script.includes(token));
         return expect(offenders.length === 0, `prepareScript carries ${offenders.join(" and ")}: its window is hidden, a hidden page draws no frames on macOS and Linux, and a wait there never finishes`);
+      },
+    },
+    {
+      name: "shot: the feedback-coach script settles the pointer, the readouts and the send's re-read",
+      check: () => {
+        const script = shotScript("feedback-coach");
+        const missing = ["benchInertPointer()", "benchPinMeasurements()", '[data-testid="elapsed"] .num', '[data-testid="coach-reply"] .rmeta .num', "the spent budget slot"].filter((token) => !script.includes(token));
+        const inertAt = script.indexOf("benchInertPointer();");
+        const driverAt = script.indexOf('await startFromSheet("start-skill"');
+        return expect(
+          missing.length === 0 && inertAt !== -1 && driverAt !== -1 && inertAt < driverAt,
+          `the script is missing ${JSON.stringify(missing)} (inert hit-testing at ${inertAt}, the driver at ${driverAt}): a capture that does not settle these shows the runner's cursor, this launch's own measurements and a budget slot the send had not spent yet`,
+        );
       },
     },
     {
