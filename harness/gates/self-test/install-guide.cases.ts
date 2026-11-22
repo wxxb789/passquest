@@ -353,6 +353,28 @@ export function installGuideCases(): BrokenCase[] {
       },
       [`desktop/web/src/views/settings.ts: missing or unreadable`],
     ),
+    guideCase(
+      "the macOS section dropping the Keychain prompt's answer and why it appears",
+      (root) => {
+        const edits: [string, string, string][] = [
+          [ENGLISH_GUIDE, "and choose **Always Allow**", "and choose the button macOS offers"],
+          [CHINESE_GUIDE, "选择**始终允许**", "选择系统提供的按钮"],
+          [ENGLISH_GUIDE, "not signed by an Apple-issued identity", "not signed by a certificate Apple issued"],
+          [CHINESE_GUIDE, "没有 Apple 签发的签名标识", "没有 Apple 开发者签名"],
+        ];
+        for (const [file, anchor, replacement] of edits) {
+          const problem = patchCopy(root, file, anchor, replacement);
+          if (problem) return problem;
+        }
+        return null;
+      },
+      [
+        `${ENGLISH_GUIDE}: the "macOS" section must carry the Keychain prompt one upgrade brings, the answer to it and why it appears: missing "Always Allow"`,
+        `${CHINESE_GUIDE}: the "macOS" section must carry the Keychain prompt one upgrade brings, the answer to it and why it appears: missing "始终允许"`,
+        `${ENGLISH_GUIDE}: the "macOS" section must carry the Keychain prompt one upgrade brings, the answer to it and why it appears: missing "not signed by an Apple-issued identity"`,
+        `${CHINESE_GUIDE}: the "macOS" section must carry the Keychain prompt one upgrade brings, the answer to it and why it appears: missing "没有 Apple 签发的签名标识"`,
+      ],
+    ),
     // The cask half: every check in `caskProblems`, `placeholderProblems` and
     // the pinned render have a case here. A template edit fails its semantic
     // check and the golden line together, so each case names the check it

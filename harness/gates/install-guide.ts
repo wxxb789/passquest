@@ -166,6 +166,12 @@ const FACTS: readonly Fact[] = [
     chinese: [QUARANTINE_COMMAND],
   },
   {
+    section: "macOS",
+    what: "the Keychain prompt one upgrade brings, the answer to it and why it appears",
+    english: ["Always Allow", "not signed by an Apple-issued identity"],
+    chinese: ["始终允许", "没有 Apple 签发的签名标识"],
+  },
+  {
     section: "Where your data lives, and how to remove it",
     what: "the macOS data directory",
     english: [MACOS_DATA_DIRECTORY],

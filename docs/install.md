@@ -124,6 +124,11 @@ xattr -dr com.apple.quarantine "/Applications/Pass Quest.app"
 Do not disable Gatekeeper system-wide to get past the warning. The steps above are per-app, and the
 rest of the system stays protected.
 
+**The Keychain prompt after an upgrade.** After an upgrade — a new download, or `brew upgrade` — macOS
+asks once whether Pass Quest may use the model key it saved in your Keychain: enter your login password
+and choose **Always Allow**. The key stays in the Keychain; nothing is lost. macOS asks because the app
+is not signed by an Apple-issued identity, so each build looks like a new app to it.
+
 **Prerequisites.** macOS 26 (Tahoe) or macOS 27 (Golden Gate), on Apple silicon — the two latest
 majors, per Apple's [Find out which macOS your Mac is
 using](https://support.apple.com/en-us/109033). Nothing else: WKWebView is part of the system and

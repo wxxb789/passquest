@@ -365,8 +365,11 @@ runner; the `adhoc` arm is the only one that runs without a secret.
 ## Coordinator actions needed
 
 The P1 run needs none — it can run on the pull request as soon as the workflow file is on the branch. Everything
-below belongs to the coordinator and is needed only if P1's stop conditions do not fire, before P3's proof can run;
-the private key never leaves the coordinator's shell and no local copy survives:
+below belongs to the coordinator and is needed only if P1's stop conditions do not fire, before P3's proof can run.
+**Not taken:** the goal is parked (amendment 19 dropped P2–P4; Q-0018-03 adds no identity and no secret), so this
+block is kept only as the route a revisit would take — with a Developer ID, store it as the two secrets, add
+`project` to the workflow's `arm` matrix, then run it by `workflow_dispatch`. The private key never leaves the
+coordinator's shell and no local copy survives:
 
 ```sh
 work="$(mktemp -d)" && cd "$work" && umask 077
@@ -388,7 +391,7 @@ openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 3650 -config openssl.cnf
   -keyout passquest-signing-key.pem -out passquest-signing-cert.pem
 export P12_PASSWORD="$(openssl rand -base64 24 | tr -d '\n')"
 openssl pkcs12 -export -inkey passquest-signing-key.pem -in passquest-signing-cert.pem \
-  -name "Pass Quest Project Signing" -out passquest-signing.p12 -passout "pass:$P12_PASSWORD"
+  -name "Pass Quest Project Signing" -out passquest-signing.p12 -passout env:P12_PASSWORD
 base64 < passquest-signing.p12 | tr -d '\n' | gh secret set PASSQUEST_MACOS_SIGNING_P12 --repo wxxb789/passquest
 printf '%s' "$P12_PASSWORD" | gh secret set PASSQUEST_MACOS_SIGNING_PASSWORD --repo wxxb789/passquest
 # No secret names the identity: P2 pins the CN above in harness/lib/signing.ts, and the certificate's CN must be
@@ -534,9 +537,35 @@ comments reduced to the keep-list; the design intent they carried is recorded he
     `--keychain` now chooses only where the app stores and reads its credential; the simulated allow's
     `set-generic-password-partition-list` remains the one partition-list write a login-mode run cannot make, and its exit
     stays that skip's reason.
+19. **P2–P4 are dropped by the goal's second stop condition (owner's decision, 2026-11-22).** The decisive run is
+    44994402573 on commit 5dd680b — four jobs, all green: adhoc × experiment `blocked` / `refusesBy: application` with no
+     partition entry; adhoc × login `blocked` / `refusesBy: both`, partition `cdhash:b9bc…` not admitting
+     `cdhash:f9ea…`; self-signed × experiment `read` with `drSame: true` but an item that carries no partition entry;
+     self-signed × login `blocked` / `refusesBy: partition` with `requirementMatch: exact` — partition `cdhash:0734…` not
+     admitting `cdhash:20ca…` even though both builds' designated requirement (identifier
+     `com.github.wxxb789.passquest`, certificate root `H"8ca4ef16…"`) is byte-equal. A self-signed identity therefore
+     cannot meet Done-when 2 (`securityd/src/clientid.cpp` in `Security-61901.120.67:282-286` is why: non-team-ID signed
+     code gets a `cdhash:` partition), so the owner decided to record and park: no identity is added, no secret is
+     created, and the package and release path are unchanged. The plan's defaults 3, 6, 7, 8 and 9 are **not taken**;
+     default 10 is taken, with the guides disclosing the re-prompt. Q-0018-02…04 and
+     [`../evidence/0018-keychain-survives-upgrade.md`](../evidence/0018-keychain-survives-upgrade.md) carry the values.
+20. **The workflow's `pull_request` trigger is narrowed to the parked scope (coordinator, 2026-11-22).**
+    `.github/workflows/keychain.yml` now runs on `pull_request` only for changes to the workflow itself,
+    `harness/tools/keychain-experiment.ts` or that tool's repo-local import closure (`harness/lib/{appimage,desktop,
+    desktop-page,go,hash,json,notices,package,package-build,process,repo,types}.ts`), plus `workflow_dispatch`;
+    `mygo.json`, `go.mod`, `go.sum`, `package.json`, `bun.lock`, `internal/desktop/**` and
+    `desktop/web/src/views/settings.ts` are out of the filter (supersedes amendment 4's semantic inputs) — four macOS
+    jobs of two package builds on every desktop change is too costly for a parked goal. Re-measuring a product change is
+    a `workflow_dispatch` run; Q-0018-04 keeps that as the revisit path, and the `project` arm that would finish
+    Done-when 2 is **not** in the matrix today (`arm: [adhoc, self-signed]`, and no step passes the two signing
+    secrets): with a Developer ID, store it as the two secrets, add `project` to the `arm` matrix, then run the
+    workflow by `workflow_dispatch`.
 
 ## Status
 
-This file is the plan for goal 0018; P1 is the first implementer run, and P2–P4 are conditional on P1's evidence.
+This file is the plan for goal 0018. P1 ran (run 44994402573 closed it), the second stop condition fired, and
+P2–P4 are dropped by the owner's decision of 2026-11-22: record and park until a Developer ID exists (amendments
+19 and 20; Q-0018-02…04). The decision's evidence is
+[`../evidence/0018-keychain-survives-upgrade.md`](../evidence/0018-keychain-survives-upgrade.md).
 
 STATUS: DONE

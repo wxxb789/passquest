@@ -4,399 +4,202 @@ Contract: [`../goals/0018-keychain-survives-upgrade.md`](../goals/0018-keychain-
 Plan: [`../plans/2026-11-22-0100-0018-keychain-survives-upgrade.md`](../plans/2026-11-22-0100-0018-keychain-survives-upgrade.md).
 Experiment: [`.github/workflows/keychain.yml`](../../.github/workflows/keychain.yml) and
 [`harness/tools/keychain-experiment.ts`](../../harness/tools/keychain-experiment.ts).
-Decisions: Q-0011-03, Q-0013-08, Q-0017-* in [`../decisions/OPEN-QUESTIONS.md`](../decisions/OPEN-QUESTIONS.md).
+Decisions: Q-0011-03, Q-0013-08, Q-0018-* in [`../decisions/OPEN-QUESTIONS.md`](../decisions/OPEN-QUESTIONS.md).
 
-**State: draft.** Run 44931358398 established the problem on a macOS 26 runner and its facts are
-below, each read from its `keychain-record` artifact. What run 44931358398 could not answer — the
-learner's own keychain, where securityd may add a partition entry, and the self-signed arm, which
-that run never reached — was the pending half: the four-job run (one arm × one keychain per artifact)
-named in the run table is run 44983246217, whose answers stand in *What run 44983246217 (the matrix
-run) showed*; the self-signed arm's own readings stay pending the identity check of plan amendment 17.
-No outcome was written by hand: every
-value names the artifact and JSON path it is read from, and the "Local checks" tables hold only what
-already happened on this Windows machine (which cannot run the macOS experiment at all).
+**State: parked (owner's decision, 2026-11-22; Q-0018-03).** The decisive run is the `keychain`
+workflow's run 44994402573 on commit `5dd680b`: four jobs, all green. Its `self-signed` × `login`
+job — the keychain a learner's app stores into — is refused by the item's partition list, whose
+value (`cdhash:…`) is the storing build's code hash and moves with every build, so a project-owned
+self-signed identity cannot meet Done-when 2 and the goal stops at its second stop condition. No
+identity was created, no secret exists, and the package and release path are unchanged; both install
+guides disclose the one Keychain prompt an upgrade brings, and `install-guide` pins that statement.
+Every value below is read from the named artifact's `keychain-record.json` (or the job log named for
+a log line) and quoted with its field path; nothing is written from prose, and this document quotes
+no runner temp path — the artifacts carry those themselves.
 
-## The run this record cites
+## The runs this record cites
 
-| Run | Workflow | What it is | Result |
-|---|---|---|---|
-| 44931358398 | `keychain` | the P1 experiment on `macos-26`, the three-arm shape: two packages built (A = the pull request base sha, B = its head), arms `adhoc,self-signed,project` in one job | the ad-hoc arm's read was **blocked** — a SecurityAgent was up in 20 of the 23 probes, the window never rendered the provider row — and the arm guard (since removed: one arm runs per job now) stopped the run before the self-signed arm; the item carried no partition entry and refuses by application (`keychain-record.json`: `arms[0]`) |
-| `<pending: run id>` | `keychain` | the matrix run this tree drives: `arm: [adhoc, self-signed]` × `keychain: [experiment, login]`, one arm against one keychain per job, `fail-fast: false` | `<pending: the four jobs' outcomes>` |
+| Run | What it is | Result |
+|---|---|---|
+| 44994402573 | the decisive run: `arm: [adhoc, self-signed]` × `keychain: [experiment, login]`, one arm against one keychain per `macos-26` job, two packages built per job (A = `3250fb0`, B = `5dd680b`) | four jobs `status: ok`, empty `failures`; 17 assertions in each ad-hoc job, 28 in each self-signed job, `[self-check] 19 of 19` in all four |
+| 44986005367 | history: the shape that still imported the throwaway identity into the keychain the app stores into | `self-signed` × `experiment` green (`identity.partitionList.exit: 0`, `read.outcome: read`, `drSame: true`); `self-signed` × `login` red (`partitionList.exit: 1` — the login keychain's password is not available to a run — `read.outcome: not-run`); plan amendment 18 |
+| 44983246217 | history: the first four-job matrix run | both ad-hoc jobs green with `blocked` reads; both self-signed jobs stopped at the import check, `security import exited 0 or imported no identity: (no output)` (`SecPKCS12Import` prints nothing); plan amendment 17 |
+| 44931358398 | history: the first three-arm single-job shape | the ad-hoc read was `blocked` (a SecurityAgent in 20 of 23 probes) and the arm guard stopped the run before the self-signed arm; the item carried no partition entry; plan amendments 12, 15 |
+| 44928776617 | history: the first run | red at the item guard: the ad-hoc item carried no partition entry, which the guard read as a value nobody would want; plan amendment 12 |
 
-Artifacts: run 44931358398 uploaded `keychain-record`; the matrix run uploads
-`keychain-record-<arm>-<keychain>` (four names), each holding `keychain-record.json` and
-`keychain-experiment.log`, retained 30 days.
+Artifacts: each job of run 44994402573 uploaded `keychain-record-<arm>-<keychain>` holding
+`keychain-record.json` and `keychain-experiment.log` (30 days); the earlier runs uploaded their own
+`keychain-record…` names. The four decisive artifacts were downloaded on 2026-11-22 and every table
+below reads them.
 
-Filling it:
-
-```sh
-gh run download 44931358398 -n keychain-record --dir /tmp/0018
-jq '{runs, guards, keychain, status, failures}' /tmp/0018/keychain-record.json
-jq '.arms[0] | {id, identity, skipped, keySha256, a, b, drSame, itemAfterStore, itemAfterRead, read, allow, third, failures}' /tmp/0018/keychain-record.json
-gh run download <matrix run id> -n keychain-record-self-signed-login --dir /tmp/0018/ssl
-jq '.arms[0] | {id, identity, skipped, keySha256, a, b, drSame, itemAfterStore, read, allow, third, failures}' /tmp/0018/ssl/keychain-record.json
-```
-
-The record's vocabulary, so a value cannot be read as more than it is:
-
-- `arms[i].read.outcome`, classified from what happened and never from a message:
-  - `read`: the row showed present and the loopback stub received the key bytes.
-  - `refused`: the app ran to completion and its window reported the credential absent or
-    unreadable (`detail` quotes the page state and any error bar; the item stays in the dump).
-  - `blocked`: the read did not complete — the tool's own watchdog kill, the launch helper's hard
-    timeout, or a window that never rendered the row (the script's own 15 s/20 s bounds, or the
-    smoke hook's 40 s bound) — **and** the
-    `read.launch.agentScan` samples show a `SecurityAgent` process while the launch ran (one
-    `pgrep -lf SecurityAgent` probe a second; every probe and every hit is in the record). Nothing
-    else counts as blocked.
-  - `failed`: anything else, with the failure lines. A `failed` read fails the run (exit non-zero):
-    a green run is one where the experiment actually happened.
-  - `not-run`: the arm stopped before its read step. Also a failure.
-- `arms[i].read.classification.refusesBy`: `partition`, `application`, `both`, `neither` or
-  `unknown` — computed from the item's dump against the build's `cdhash:` partition id and its
-  designated requirement: the partition list (or `partition: "none"` with
-  `itemAfterStore.partitionEntry` false — an item with no partition entry has no partition check to
-  refuse it) and the decrypt entry's application list with every trusted application's
-  `requirement:`. `neither` with a refused read would say the lists admit the build and the refusal
-  came from elsewhere.
-- `arms[i].read.bInDecryptAcl`: whether the build's designated requirement matches a `requirement:`
-  in the decrypt entry's application list (false when the list names none, e.g. an any-application
-  entry) — the application-side half of what a learner's Always Allow would record, and the
-  decisive comparison for an item whose ACL is the run-44928776617 shape.
-- `arms[i].a.implied` / `arms[i].b.implied`: `codesign -d -r-` prints a stored requirement as
-  `designated => …` and, for code that carries none (an ad-hoc signature), the implied one as a
-  source comment (`# designated => cdhash H"…"`, CODESIGN(1), `-r`). `implied: true` is expected for
-  the ad-hoc arm's builds; a build re-signed by an identity arm that still prints the implied form
-  fails that arm (the re-sign did not take), so both arms' `implied` values and the DR strings are
-  read, never assumed.
-- `arms[i].allow`: after a read that was not a success, the simulated allow — the partition half of
-  a learner's Always Allow, the only half a runner can write. It is `{"skipped": "no partition
-  entry"}` when the item carries no partition entry, because there is nothing to add; the
-  application-list half is never simulated, so such an item keeps only that half. In the login
-  variant the partition write needs the login keychain's password, which a run cannot present, so
-  the skip reason there is the write's own exit; a skipped allow runs no third build.
-- `arms[i].third.read`: C is B's bundle with a bumped `CFBundleShortVersionString`, signed the way
-  its arm signs; `expected` is `refused`, and the record keeps `expected` and the observed outcome
-  side by side. It runs with the allow (a skipped allow runs no third build).
-- `arms[i].identity.partitionList`: `security set-key-partition-list -S apple-tool:,apple: -s -k ""`
-  and its exit — the write that lets `codesign` use an imported key (`security.1:810`) and that
-  needs the keychain's password (`security.1:736-742`). It aims at the temporary signing keychain
-  `arms[i].signingKeychain` names, whose empty password this run set itself, so a non-zero exit is a
-  failure of the write and not a keychain the run cannot open; such an exit stops that arm before it
-  signs (a prompt nobody can click would otherwise hold the job to its own timeout), and the exit is
-  in the record.
-- `arms[i].signs`: every `codesign --force --deep --sign …` this arm ran, in order, with its
-  `where` label (`<arm>-a`, `<arm>-b`, `<arm>-c`), the `signer` it used — the identity's SHA-1 as
-  `security find-identity -p codesigning` prints it, its CN on the retry, `-` for the ad-hoc third
-  build — the exit, and the last 60 output lines.
-- `keychain.variant`: `experiment` (the app's keychain created, made the user default and the sole
-  search entry, restored and deleted in the `finally`) or `login` (the app's store left alone: the
-  item goes into the runner's default login keychain, as a learner's would, and the `finally`
-  deletes the synthetic item). It names the app's credential keychain only; `arms[i].credentialKeychain`
-  repeats it per arm, and `arms[i].signingKeychain` names the identity's own keychain (`"temporary"`,
-  or `"none"` for an arm that signs nothing).
-- `keychain.loginPath` and `arms[i].login`: the learner's keychain in the experiment variant, looked
-  up for each of this run's synthetic services before and after the arm and swept in the run's
-  `finally` (`exit 0` is "present"; the lookup never passes `-g`, which would withdraw the secret).
-  A hit is deleted and fails the run: the item belongs in the experiment keychain this run measured.
-- `keychain.loginCleanup` (login variant): the synthetic services looked up and deleted in the login
-  keychain by the `finally`, each with the lookup's exit and the delete's exit (`null`: nothing to
-  delete).
-- `keychain.signing`: the temporary signing keychain the run's identity lives in — `path`, `created`,
-  `uses` (one entry per `codesign` call: the user search list `before` and `during`, the
-  `list-keychains` and `unlock-keychain` exits, and the restoration's exit with `restored` saying
-  whether the list went back) and `deleted` with the `delete-keychain` exit (`deleted: null` when
-  the arm imported no identity). The identity and its key leave with that keychain: no variant
-  imports one into the app's keychain, and `identity <arm>: the app's keychain holds nothing this
-  arm imported` fails the run if one does.
-- `arms[i].read.securityAgent`: the SecurityAgent a read that did not complete left behind — the
-  pids seen before the kill, whether the kill was issued, the pids seen after it, and
-  `respawned: true` when a pid after the kill was not there before (launchd holds SecurityAgent as
-  an on-demand service and restarts it). One arm runs per job, so this is recorded, never a stop.
+Reading the record: each job ran exactly one arm, so the job's arm is `arms[0]`.
+`arms[0].read.classification.refusesBy` is computed from the item's dump against the build's
+`cdhash:` partition id and its designated requirement (`partition`, `application`, `both`,
+`neither` or `unknown`), and `arms[0].read.bInDecryptAcl` says whether the build's designated
+requirement matches a `requirement:` in the decrypt entry's application list. `implied: false` on a
+designated requirement means `codesign -d -r-` printed the stored form; an ad-hoc signature carries
+none and prints the implied one (`implied: true`).
 
 ## Done when 1 — the problem is established first
 
-Run 44931358398's `keychain-record` artifact is the ad-hoc arm against the tool's own experiment
-keychain. Each matrix job uploads one arm against one keychain and every record holds that arm as
-`arms[0]`. The `<pending>` rows belong to the matrix run: run 44931358398 never reached the
-self-signed arm, and login-variant rows are new with this tree.
+No fix was ever designed: this run is the experiment the goal's first item demands, and it precedes
+every change the later steps would have made. Each job built two packages (A from the pull request
+base, B from the head), installed A from its `.dmg` into one temp prefix, stored a fresh key
+through A's window (the row renders `[data-credential="present"]`, which is itself a read), dumped
+the item's ACL, installed B over the same prefix (re-signed in place for an identity arm), launched
+B's read script, and classified the outcome under the launch contract's hard timeout.
 
 | Reading | Artifact | Record path | Value |
 |---|---|---|---|
-| the runner's macOS version and architecture | `keychain-record` (44931358398) | `platform.swVers`, `platform.machine` | `26.7.2`, `arm64` |
-| A's commit (the pull request base sha) and B's commit (the head) | `keychain-record` | `runs.a.commit`, `runs.b.commit` | `3250fb0edff8be11ebcbc369a6d93d1e8b62aea8` (main's tip, the 0017 merge), `f1f85c456495a3295047beacdb244d6b2dfe3f0d` |
-| the two packages' names and bytes | `keychain-record` | `runs.a.dmg`, `runs.b.dmg` (`.name`, `.bytes`) | `pass-quest-0.15.0-arm64.dmg` 31 944 704 bytes; the same name, 31 945 728 bytes |
-| the two `.dmg` SHA-256s | `keychain-record` | `runs.a.dmg.sha256`, `runs.b.dmg.sha256` | `8247c93264113988655e4c4a524a0bd3290d5ca6ec84ac9bb29c743c84f34e2f`, `81567c0f787efcc4e2a5921acf577654ad306146ff738f28f6bd161e9179bc73` |
-| the two built cdhashes, and that they differ (the premise every real upgrade has) | `keychain-record` | `guards.aCdhash`, `guards.bCdhash`, `guards.buildsDiffer` | `b9bcd4b4f4cab7f45281383a3b1b0ae7016da185`, `54b4a4b191d819ddf66afab80a898407237838e3`, `true` |
-| the ad-hoc arm: A's designated requirement and that it is the implied one | `keychain-record` | `arms[0].a.designatedRequirement`, `arms[0].a.implied` | `cdhash H"b9bcd4b4f4cab7f45281383a3b1b0ae7016da185"`, `true` |
-| the ad-hoc arm: B's designated requirement (the DR moves with every ad-hoc build) | `keychain-record` | `arms[0].b.designatedRequirement`, `arms[0].b.implied` | `cdhash H"54b4a4b191d819ddf66afab80a898407237838e3"`, `true` |
-| the ad-hoc arm: A's and B's cdhashes | `keychain-record` | `arms[0].a.cdhash`, `arms[0].b.cdhash` | the two `guards` values above |
-| the ad-hoc arm: whether A's item carries a partition entry, the stored list, and the computed value (as `codesign -dvvv` sees it) | `keychain-record` | `arms[0].itemAfterStore.partitionEntry`, `arms[0].itemAfterStore.partitions`, `arms[0].a.computedPartition` | `false`, `[]`, `cdhash:b9bcd4b4f4cab7f45281383a3b1b0ae7016da185` |
-| the ad-hoc arm: the item's ACL after A stores it — application list | `keychain-record` | `arms[0].itemAfterStore.anyApplication`, `arms[0].itemAfterStore.requirements` | `false`; one entry (1) carries `cdhash H"b9bcd4b4f4cab7f45281383a3b1b0ae7016da185"` (the encrypt entry's any-application list is not the verdict) |
-| the ad-hoc arm: the item's ACL after B's read (the raw dump block is in the record) | `keychain-record` | `arms[0].itemAfterRead.partitionEntry`, `arms[0].itemAfterRead.partitions`, `arms[0].itemAfterRead.anyApplication`, `arms[0].itemAfterRead.block` | `false`, `[]`, `false`; the same 3-entry ACL as after the store: `encrypt` any-application / `decrypt derive export_clear export_wrapped mac sign` naming A's requirement / `change_acl` empty |
-| the ad-hoc arm: B's read, whether B's designated requirement is in the decrypt entry's list, and which check refused it | `keychain-record` | `arms[0].read.outcome`, `arms[0].read.bInDecryptAcl`, `arms[0].read.classification.refusesBy`, `arms[0].read.classification.detail` | `blocked`; `false`; `application` (partition `none`); "the item carries no partition entry, so no partition list weighs on the read; the decrypt entry's application list is specific requirements that do not match the designated requirement" |
-| the ad-hoc arm: the read itself (a prompt nobody could click) | `keychain-record` | `arms[0].read.detail` | "the window never rendered the provider row inside its own 15 s bound; the SecurityAgent sampler saw a SecurityAgent in 20 of 23 probe(s), last at 2026-11-21T17:43:21.819Z: 7557 …/SecurityAgent …; a read that did not complete while a SecurityAgent was up is the prompt path" |
-| the ad-hoc arm: the SecurityAgent samples taken while B's read ran | `keychain-record` | `arms[0].read.launch.agentScan.probes`, `.matches`, `.error` | 23 probes, 20 samples (each with its timestamp and the `7557` line), `error: null` |
-| the ad-hoc arm: the SecurityAgent it left, and that launchd respawned it | `keychain-record` | `arms[0].read.securityAgent.found`, `.killed`, `.left` | `7557 …/SecurityAgent`; `true`; a new pid, `8112 …/SecurityAgent` — this run's guard then stopped the experiment (removed: the record now carries `respawned`) |
-| the self-signed arm: the throwaway identity's CN and certificate SHA-1 | `keychain-record-self-signed-experiment`, `keychain-record-self-signed-login` | `arms[0].identity.cn`, `arms[0].identity.sha1` | `<pending: Pass Quest Keychain Experiment>`, `<pending>` |
-| the self-signed arm: the partition-list write that lets `codesign` use the key | `keychain-record-self-signed-experiment`, `keychain-record-self-signed-login` | `arms[0].identity.partitionList.exit` | `<pending: 0 in the experiment keychain; the login keychain's password is not available to a run>` |
-| the self-signed arm: A's and B's designated requirements (both stored, `implied: false`), and whether they are equal | `keychain-record-self-signed-experiment`, `keychain-record-self-signed-login` | `arms[0].a.designatedRequirement`, `arms[0].b.designatedRequirement`, `arms[0].a.implied`, `arms[0].b.implied`, `arms[0].drSame` | `<pending: expected identifier "com.github.wxxb789.passquest" and certificate root = H"…", drSame true>` |
-| the self-signed arm: A's and B's cdhashes | `keychain-record-self-signed-experiment`, `keychain-record-self-signed-login` | `arms[0].a.cdhash`, `arms[0].b.cdhash` | `<pending>` |
-| the self-signed arm: the item's ACL after A stores it and after B's read (the raw dump blocks are in the record) | `keychain-record-self-signed-experiment`, `keychain-record-self-signed-login` | `arms[0].itemAfterStore.block`, `arms[0].itemAfterRead.block` | `<pending>` |
-| the self-signed arm: B's read, whether B's designated requirement is in the decrypt entry's list, and which check refused it | `keychain-record-self-signed-experiment`, `keychain-record-self-signed-login` | `arms[0].read.outcome`, `arms[0].read.bInDecryptAcl`, `arms[0].read.classification.refusesBy` | `<pending>` |
-| each refused/blocked arm: whether the allow was skipped | `keychain-record` | `arms[0].allow.skipped` | `no partition entry` (the item carried none, so the partition half had nothing to add) |
-| each refused/blocked arm with a partition entry: B's own item (its runtime partition id) | `<pending: no run yet>` | `arms[0].allow.bPartition`, `arms[0].allow.bPartitionComputed`, `arms[0].allow.bItem.partitions` | `<pending: the items of run 44931358398 carry no partition entry>` |
-| each refused/blocked arm with a partition entry: the simulated allow's new list and exit | `<pending: no run yet>` | `arms[0].allow.command`, `arms[0].allow.exit`, `arms[0].allow.list` | `<pending: in the login variant the write needs the login keychain's password and its exit lands in the allow.skipped field>` |
-| each refused/blocked arm with a partition entry: B's read after the allow (expected `read`) | `<pending: no run yet>` | `arms[0].allow.reread.outcome` | `<pending: read>` |
-| each refused/blocked arm with a partition entry: the third build C (version, cdhash, read, DR equal to B's) | `<pending: no run yet>` | `arms[0].third.versionBefore`, `.versionAfter`, `.signature.cdhash`, `.read.outcome`, `.drEqualsB` | `<pending: refused>` |
-| the keychain the run used, that it was the only store the app could reach, and that it was restored and deleted | `keychain-record` | `keychain.variant`, `keychain.defaultDuring`, `keychain.searchListDuring`, `keychain.defaultBefore`, `keychain.defaultAfter`, `keychain.searchListBefore`, `keychain.searchListAfter`, `keychain.deleted` | `experiment` (a throwaway `experiment.keychain` under the runner temp dir — the record carries the full path); during the run it was the user default and the sole search entry; before and after, both were `~/Library/Keychains/login.keychain-db`; deleted |
-| the login variant: the item in the learner's keychain, and the cleanup that deletes it | `keychain-record-adhoc-login`, `keychain-record-self-signed-login` | `keychain.variant`, `arms[0].itemAfterStore.partitionEntry`, `arms[0].itemAfterStore.partitions`, `arms[0].itemAfterStore.block`, `keychain.loginCleanup` | `<pending: this is the open question — whether the login keychain's item carries the partition entry the experiment keychain's does not>` |
-| the login variant: the identity and its key leaving with the temporary signing keychain | `keychain-record-self-signed-login` | `arms[0].signingKeychain`, `keychain.signing.deleted`, `keychain.signing.uses[].restored` | `<pending: "temporary", true, all true — no identity enters the app's keychain>` |
-| the learner's keychain, and every synthetic service found there (expected: none) | `keychain-record` | `keychain.loginPath`, `keychain.loginResidue` | `~/Library/Keychains/login.keychain-db`, `[]` |
-| the key never left its homes | `keychain-record` | `arms[0].keySha256`; `guards.log.keyBytes` | `631aff91851105e305e809b0c9848a8fd5074802de3f4ff103e9ee893f9daeab`; `0` (254 printed lines scanned) |
+| the runner | all four | `platform.swVers`, `platform.machine` | `26.7.2`, `arm64` |
+| A's and B's commits | all four | `runs.a.commit`, `runs.b.commit` | `3250fb0edff8be11ebcbc369a6d93d1e8b62aea8`, `5dd680b86de7e58b828f32ab779ae3a5df1fdcd1` |
+| that the two builds are different programs | all four | `guards.buildsDiffer`, `guards.aCdhash`, `guards.bCdhash` | `true`; `b9bcd4b4f4cab7f45281383a3b1b0ae7016da185`, `f9ea3de0665c6298db160d2337d12345c9db91a3` |
+| the two packages each job built | all four | `runs.a.dmg.sha256`, `runs.b.dmg.sha256` | adhoc-experiment `5cc2150f321276c6a8ea1af4de86cf70dd1f9ff276bb3d2da7f2b5fe87b686ec` / `fb996dba5f71f211abdd787b07288189227d827a3a7a74e2ff583756607ff237`; adhoc-login `2c2823abba3a32426d8b67a69cb6b37ee63f8c22077c07a340ba4ebf69f3e010` / `c6fb47015fd1e0b99704b79f76ac6d133c5f0f8e38e7097b30bbeef535e1d70c`; self-signed-experiment `ea12c52beb492c31795cec316f910645d5e68fe7023030918d4a2fc93dba612f` / `6d696cbad95403539fed03cf2b0470c3053d261308fa8a3c8211d0774532bea8`; self-signed-login `5d53e05f2b5032749395fdd5c3f9528d3aa42da35de029f0f787950935c80084` / `25531b8c9aac32f8ee7230d5c29c5f7e70e750580324856460d17d221eab0e6f` (all four pairs share the name `pass-quest-0.15.0-arm64.dmg`; the digests differ per job because a package build is not byte-reproducible across runner jobs) |
+| each arm's fresh key, and that no key byte reached the log | all four | `arms[0].keySha256`; `guards.log` | `c554de46d6665f8a246ac85bd5817aa642c1a1ec490c5fec7e43ed025b222e64` (adhoc × experiment), `5d37a4da30a7857c1a226ae0d93715e211f199130bc6b7f129de7bc9c6ce0477` (adhoc × login), `7d6bbc998388c8f3bacdb3aaaa3b9de3aa8fd816926cb1002647108f199d55a6` (self-signed × experiment), `304dc415c9c79af8a1cc76eecd71b03108d19acf9dee5ad9cc3c8889d2a913e7` (self-signed × login); `{prints: 260, keyBytes: 0}`, `{prints: 313, keyBytes: 0}`, `{prints: 314, keyBytes: 0}`, `{prints: 408, keyBytes: 0}` |
+| the ad-hoc builds' designated requirements (the code has none; both print the implied form) | adhoc-experiment, adhoc-login | `arms[0].a.designatedRequirement`, `arms[0].b.designatedRequirement`, `arms[0].a.implied`, `arms[0].b.implied`, `arms[0].drSame` | `cdhash H"b9bcd4b4f4cab7f45281383a3b1b0ae7016da185"`, `cdhash H"f9ea3de0665c6298db160d2337d12345c9db91a3"`, `true`, `true`, `false` — the requirement moves with every build |
+| ad-hoc × experiment: what macOS wrote into the item, and what B's read met | keychain-record-adhoc-experiment | `arms[0].itemAfterStore.partitionEntry`, `arms[0].itemAfterStore.partitions`, `arms[0].itemAfterStore.requirements`, `arms[0].read.outcome`, `arms[0].read.bInDecryptAcl`, `arms[0].read.classification.refusesBy`, `arms[0].read.classification.detail` | `false`, `[]`, one entry (`entry: 0`) naming `cdhash H"b9bcd4b4f4cab7f45281383a3b1b0ae7016da185"`; `blocked`; `false`; `application`; "the item carries no partition entry, so no partition list weighs on the read; the decrypt entry's application list is specific requirements that do not match the designated requirement" |
+| ad-hoc × login: the item this time carries a partition entry, and B's read still does not complete | keychain-record-adhoc-login | `arms[0].itemAfterStore.partitionEntry`, `arms[0].itemAfterStore.partitions`, `arms[0].read.outcome`, `arms[0].read.bInDecryptAcl`, `arms[0].read.classification.refusesBy`, `arms[0].read.classification.detail` | `true`, `["cdhash:b9bcd4b4f4cab7f45281383a3b1b0ae7016da185"]`; `blocked`; `false`; `both`; "the partition list does not admit cdhash:f9ea3de0665c6298db160d2337d12345c9db91a3; the decrypt entry's application list is specific requirements that do not match the designated requirement" |
+| what the two blocked reads met: the prompt path, with the samples | adhoc-experiment, adhoc-login | `arms[0].read.detail`, `arms[0].read.launch.agentScan.probes`, `.matches`, `arms[0].read.securityAgent` | "the window never rendered the provider row inside its own 15 s bound" with a SecurityAgent in 20 of 23 probes (adhoc × experiment) and 20 of 24 (adhoc × login); `found` a SecurityAgent, `killed: true`, a new pid in `left`, `respawned: true` in both — launchd restarts the on-demand daemon |
+| the keychain each job's app stored into, restored afterwards | adhoc-experiment, adhoc-login | `keychain.variant`, `keychain.defaultBefore`, `keychain.defaultAfter`, `keychain.deleted`, `keychain.loginCleanup`, `keychain.loginResidue` | `experiment`: the user default was the runner's login keychain (`/Users/runner/Library/Keychains/login.keychain-db`) before and after, the run's keychain deleted, `[]`; `login`: the same login keychain throughout, one synthetic item deleted (`{lookedUp: 0, deleted: 0}`), residue `[]` |
 
-The project arm is not in the matrix this tree drives (`arm: [adhoc, self-signed]`); a `project` run
-still records `arms[0].skipped` by name when the two signing secrets are absent, which is the P3 path.
+Conclusion: on macOS 26.7.2, an ad-hoc B could not read A's item without a prompt in either
+keychain — the premise stands, Done-when 1 holds, and nothing was fixed on the strength of a guess.
 
-## What run 44931358398 showed
+## Done when 2 — upgrades keep Keychain access: not achievable without an Apple-issued identity
 
-1. Both checkouts and both `bun run package` steps were green; `runs.a.commit` and `runs.b.commit`
-   differ and the two `.dmg`s carry the SHA-256s in the table above.
-2. `guards.buildsDiffer` is `true`, with both cdhashes quoted.
-3. The empty-password `security` calls this shape reaches were accepted: `create-keychain -p ""`
-   and `unlock-keychain -p ""` (the log shows both exit 0). No `set-*-partition-list -k ""` ran —
-   the ad-hoc arm imports no identity, and the item carried no partition entry, so the allow was
-   skipped; those writes are the matrix run's identity arms. The identity step's export and its
-   `-P` passphrase (redacted in the log) are unchanged from run 44928776617, whose `-P ""` against
-   OpenSSL's default PKCS#12 encryption failed with `SecKeychainItemImport: The user name or
-   passphrase you entered is not correct.`
-4. The `adhoc` arm: `store.stored` `true`; `itemAfterStore.partitionEntry` `false` (so the
-   partition guard stayed conditional and the item guard passed); `a.implied` and `b.implied` both
-   `true`; `read.outcome` `blocked` with `read.bInDecryptAcl` `false`,
-   `classification.refusesBy` `application`, the two raw dump blocks and the agent samples — all in
-   the table above.
-5. The `self-signed` arm did not run: the arm guard (since removed — one arm per job means nothing
-   needs it gone) stopped the experiment after the ad-hoc arm's blocked read. The matrix run's
-   `keychain-record-self-signed-experiment` and `keychain-record-self-signed-login` artifacts carry
-   it.
-6. The `project` arm did not run either: it is not in this tree's matrix (the P3 path).
-7. The log carries every `security`/`codesign`/`hdiutil`/`openssl`/`plutil`/`ditto`/`pgrep` argv,
-   the two `[cleanup]` lines (the default keychain and the search list restored, the experiment
-   keychain deleted), the workflow's always() `keychain: deleted …` line for the throwaway
-   directory, and no key bytes: `guards.log` is `{prints: 254, keyBytes: 0}`.
-8. The `keychain-record` artifact holds both files, and the run's early step printed
-   `[self-check] 15 of 15 case(s) passed` (this tree's tool prints 17).
-
-## What the matrix run must show (pending)
-
-1. Four artifacts, `keychain-record-<arm>-<keychain>`, each with its own record and log, and each
-   job's self-check line; the job's log names the arm and the keychain it ran against, and
-   `guards.log.keyBytes` stays `0`.
-2. The two login jobs: `keychain.variant: login`; `keychain.defaultBefore` is the runner's login
-   keychain; nothing switched it; the item's full ACL after the store and after the read is in
-   `arms[0].itemAfterStore.block` / `itemAfterRead.block` — the open question is
-   `itemAfterStore.partitionEntry` there, because the experiment keychain's item carries none; and
-   `keychain.loginCleanup` carries the delete's exit for every synthetic service.
-3. The two self-signed jobs: `identity.cn` is the throwaway CN, `identity.sha1` is set,
-   `identity.partitionList.exit` is recorded (in the login job it may stop the arm with the record
-   saying why), both DRs are stored (`implied` false) and `drSame` is `true` (expected — the
-   requirement names the certificate, the partition does not); `keychain.identityCleanup` carries
-   the `security delete-identity -c <CN>` exit.
-4. Every read outcome and classification exactly like the ad-hoc arm's, and — for an item that
-   carries a partition entry — the allow's partition write, the reread and the third build.
-
-## What run 44983246217 (the matrix run) showed
-
-Run 44983246217 is the matrix run this table was waiting for: four jobs, four artifacts
-`keychain-record-<arm>-<keychain>`, each holding a record and a log. Its two ad-hoc jobs are green
-(`status: ok`, `17 assertion(s) passed, 0 failed`, empty `failures`); its two self-signed jobs
-stopped at the identity import, which plan amendment 17 fixes. Every value below is read from that
-run's artifacts:
-
-```sh
-gh run download 44983246217 --dir /tmp/0018-r5   # four artifact directories
-jq '{status, platform, guards, failures}' /tmp/0018-r5/keychain-record-adhoc-login/keychain-record.json
-```
+The same four-job run carries the identity arms. Each identity arm re-signed A and B in place with
+the job's own throwaway certificate (the temporary signing keychain, plan amendment 18), so the
+designated requirement of both builds names that certificate instead of a code hash.
 
 | Reading | Artifact | Record path | Value |
 |---|---|---|---|
-| the two ad-hoc jobs: status, runner, and the printed-line scan | `keychain-record-adhoc-experiment`, `keychain-record-adhoc-login` | `status`, `platform.swVers`, `platform.machine`, `guards.log` | `ok`; `26.7.2`, `arm64`; `{prints: 262, keyBytes: 0}` and `{prints: 319, keyBytes: 0}` |
-| the commits, and that the two jobs' builds are not byte-identical | both ad-hoc records | `runs.a.commit`, `runs.b.commit`, `runs.a.dmg.sha256`, `runs.b.dmg.sha256` | A `3250fb0edff8be11ebcbc369a6d93d1e8b62aea8`, B `d340a08d69165473294a5a53f1cc5a4507f548e9`; the experiment job `c618f7b53a20094b8e8d423d130e3f8f07a71a432b72bb4909136c04f8279422` / `07afa5f2a732f7d2e5bca25e9e39d00be54698cf4dd3864d33c6698e8a9f310c`, the login job `aaf81a7be2a40dca0f52dc9f29f441ddfa6d24a509b5dcedfbb014ebb8b4adee` / `a7e558c46d023547f042505fd8e0ddb1465875f2edf0bb0c4a4e73f8c2e72a04` |
-| the two builds differ, and their cdhashes | both ad-hoc records | `guards.buildsDiffer`, `guards.aCdhash`, `guards.bCdhash` | `true`; `b9bcd4b4f4cab7f45281383a3b1b0ae7016da185`, `7d974323112626c1e88098342bc115b5a3e55b61` |
-| the ad-hoc DRs move with the build (both the implied form) | both ad-hoc records | `arms[0].a.designatedRequirement`, `arms[0].a.implied`, `arms[0].b.designatedRequirement`, `arms[0].b.implied`, `arms[0].drSame` | `cdhash H"b9bc…185"` and `cdhash H"7d97…b61"`, both `implied: true`, `drSame: false` |
-| the open question of this record: the experiment keychain's item carries no partition entry, the learner's login keychain's does | `keychain-record-adhoc-experiment`, `keychain-record-adhoc-login` | `arms[0].itemAfterStore.partitionEntry`, `arms[0].itemAfterStore.partitions`, `arms[0].a.computedPartition` | `false`, `[]` versus `true`, `["cdhash:b9bcd4b4f4cab7f45281383a3b1b0ae7016da185"]`; the computed value equals the stored one in both |
-| B's read in both ad-hoc jobs: blocked, and which check refuses it | both ad-hoc records | `arms[0].read.outcome`, `arms[0].read.bInDecryptAcl`, `arms[0].read.classification.refusesBy` | `blocked`, `false`; `application` in the experiment keychain (no partition list to weigh), `both` in the login keychain (whose stored partition list names A) |
-| the blocked read: the prompt it met, and the SecurityAgent launchd respawned | both ad-hoc records | `arms[0].read.detail`, `arms[0].read.launch.agentScan.probes`, `arms[0].read.launch.agentScan.matches`, `arms[0].read.securityAgent` | "the window never rendered the provider row inside its own 15 s bound" with a SecurityAgent sampled in 20 of 24 probes; `{found: [12515 …], killed: true, left: [13184 …], respawned: true}` and `{found: [5926 …], killed: true, left: [6428 …], respawned: true}` |
-| the login variant's allow: the partition write a run cannot make | `keychain-record-adhoc-login` | `arms[0].allow.skipped` | `security set-generic-password-partition-list … exited 1 (keychain: "/Users/runner/Library/Keychains/login.keychain-db" \| version: 512)` — the login keychain's password is not available to a run, so no third build ran (`arms[0].third` absent) |
-| the learner's keychain after the login job | `keychain-record-adhoc-login` | `keychain.variant`, `keychain.loginCleanup` | `login`; one synthetic service, `{lookedUp: 0, deleted: 0}` |
-| the two self-signed jobs: where they stopped | `keychain-record-self-signed-experiment`, `keychain-record-self-signed-login` | `status`, `failures`, `guards.log.keyBytes` | `failed`; `identity self-signed: security import: security import exited 0 or imported no identity: (no output)` — `security import -f pkcs12` prints nothing at all (plan amendment 17) — then `the arm did not reach its read step`; `keyBytes: 0` |
+| the throwaway identity and that `codesign` could use it | self-signed-experiment, self-signed-login | `arms[0].identity.cn`, `arms[0].identity.sha1`, `arms[0].identity.partitionList.exit`, `arms[0].signingKeychain`, `arms[0].credentialKeychain` | `Pass Quest Keychain Experiment`; `0eebac795e36fbf96b34e2fc17debc0bffedf704` (experiment) and `8ca4ef16d8ae3cfbb64dce49c63241731356e29c` (login — a fresh certificate per job); `0` in both; `temporary`; `experiment` / `login` |
+| self-signed × experiment: A's and B's designated requirements, byte-equal, both stored (`implied: false`) | keychain-record-self-signed-experiment | `arms[0].a.designatedRequirement`, `arms[0].b.designatedRequirement`, `arms[0].drSame` | `identifier "com.github.wxxb789.passquest" and certificate root = H"0eebac795e36fbf96b34e2fc17debc0bffedf704"` for both; `true` |
+| self-signed × experiment: the read this keychain allowed | keychain-record-self-signed-experiment | `arms[0].itemAfterStore.partitionEntry`, `arms[0].read.outcome`, `arms[0].read.providerCarriedKey`, `arms[0].read.bInDecryptAcl`, `arms[0].read.classification.requirementMatch` | `false` — this keychain's item carries no partition list at all; `read`; `true` (the loopback provider stub received the key bytes); `true`; `exact` |
+| self-signed × login: the same byte-equal requirement pair | keychain-record-self-signed-login | `arms[0].a.designatedRequirement`, `arms[0].b.designatedRequirement`, `arms[0].drSame` | `identifier "com.github.wxxb789.passquest" and certificate root = H"8ca4ef16d8ae3cfbb64dce49c63241731356e29c"` for both; `true` |
+| self-signed × login: the item's partition list, and the read the requirement could not save | keychain-record-self-signed-login | `arms[0].itemAfterStore.partitionEntry`, `arms[0].itemAfterStore.partitions`, `arms[0].read.outcome`, `arms[0].read.bInDecryptAcl`, `arms[0].read.classification.requirementMatch`, `arms[0].read.classification.refusesBy`, `arms[0].read.classification.detail` | `true`, `["cdhash:073434e460fa6fe9aec4ffa6ff11a417d04bd95e"]`; `blocked`; `true`; `exact`; `partition`; "the partition list does not admit cdhash:20cab049524809e62e5fa69c285639ee16382a84; the decrypt entry's application list is a requirement matching the designated requirement (exact)" |
+| the blocked identity read: the same prompt path | keychain-record-self-signed-login | `arms[0].read.detail`, `arms[0].read.launch.agentScan.probes`, `.matches`, `arms[0].read.securityAgent` | "the window never rendered the provider row inside its own 15 s bound" with a SecurityAgent in 20 of 24 probes; `killed: true`, `respawned: true` |
+| the login variant's simulated allow: the one write a run cannot make | both login artifacts | `arms[0].allow.skipped` | `security set-generic-password-partition-list … exited 1` — "the login keychain's password is not available to this run, so the partition half of a learner's allow cannot be written here, and the third build measures nothing about an unrecorded allow"; no `third` ran |
 
-The placeholder rows in the table above stay for the coordinator's evidence pass; this section
-records the run, it does not rewrite that table, and the self-signed arm's own rows are unanswered
-until the identity check of amendment 17 reaches CI. The `project` arm is not in the matrix.
+Why this settles Done-when 2: the two self-signed builds carry the **same** designated requirement,
+and the learner's keychain still refuses the second build. `requirementMatch: exact` says the
+decrypt entry's application list admits B — the requirement half of a learner's "Always Allow"
+travels across builds under a self-signed certificate, exactly as MyGo documents — but the
+partition half does not: macOS 26 wrote `cdhash:<A's code hash>` into the item's partition entry
+when A stored it, and the check runs on every read, so it refuses any build whose code hash
+differs. The Apple source says why no self-signed identity can change that: only Apple-signed and
+team-ID-bearing code (Mac App Store, TestFlight, Developer ID, development) gets a stable
+`apple:`/`teamid:` partition, and every other signed process gets `cdhash:` — the value of the
+storing build (`securityd/src/clientid.cpp`, tag `Security-61901.120.67`, `:282-286`; plan fact 2;
+the plan's fact 2 also quotes the partition write on the storing side and the ACL's validation of
+it). The experiment keychain's `read` is not a counterexample: that keychain's item carries **no**
+partition entry (`partitionEntry: false`), so only the requirement half weighed on the read;
+the learner's login keychain is the one that stores a partition entry, and both login arms show it.
 
-## What each outcome means for the next step (the plan's stop conditions)
+So the plan's second stop condition fired (default 10): Done-when 2 needs an Apple-issued
+certificate with a team ID. The owner's decision of 2026-11-22 is to record and park — no identity
+is added, and the guides disclose the one prompt an upgrade brings (Done-when 4). Q-0018-02…04
+carry the decision, the "not taken" plan defaults (3, 6, 7, 8, 9) and the revisit trigger (a
+Developer ID exists → store it as the two secrets, add `project` to the workflow's `arm` matrix,
+then run it by `workflow_dispatch`).
 
-- Run 44931358398's ad-hoc read is `blocked`: on that runner, in the tool's own experiment keychain,
-  an ad-hoc B did **not** read A's item without a prompt — Done-when 1's problem is established for
-  that shape, and the premise is not falsified. The login variant is what closes Done-when 1: the
-  learner's item may be the one that carries a partition entry.
-- `arms[0].read.outcome == "read"` in `keychain-record-adhoc-experiment` or
-  `keychain-record-adhoc-login` (an ad-hoc B reads A's item without a prompt): the goal's premise is
-  false for that shape — stop, report the run, add no identity.
-- `arms[0].read.outcome` is `refused` or `blocked` in the self-signed artifacts: a project-owned
-  self-signed identity cannot meet Done-when 2; `read.bInDecryptAcl`, `classification.refusesBy` and
-  the `allow`/`third` rows say which side refused it (with the observed ACL shape: the decrypt
-  entry's application list and a `skipped` allow; when the item does carry a partition entry: the
-  partition list and the third build C's outcome). Then the owner's decision (plan default 10) is
-  the only way forward: an Apple-issued certificate, or accepting a re-prompt per upgrade — note
-  that in the login variant the simulated allow's write is the one partition-list write a run cannot
-  make (the login keychain's password is not available), so an item that carries a partition entry
-  gets a `skipped` allow and the third build C does not run; the read outcome itself is measured
-  either way.
-- `arms[0].read.outcome == "read"` in the self-signed artifacts: P2–P4 proceed (the identity keeps
-  access across builds); the pinned DR string for P2 is read from
-  `arms[0].a.designatedRequirement` (or `arms[0].b.designatedRequirement`; they must be byte-equal
-  in a passing run).
-- `arms[0].read.outcome == "failed"` or `"not-run"`: the run is red; nothing about that arm was
-  established, and its `read.detail` and `failures` say what broke. No stop-condition reading is
-  made from it.
-- `arms[0].read.classification.refusesBy == "application"`: the item's application list holds
-  requirements that refuse the build; the simulated allow (partition half only) would not repair
-  it, and the record says so instead of pretending otherwise.
-- `arms[0].third.read.outcome == "read"` (C is admitted): the allow recorded something
-  build-independent — report it; the partition half of the model would be contradicted by the run.
-- A named SecurityAgent is recorded, never a failure: `read.securityAgent` carries the pids before
-  the kill, that the kill was issued, the pids after it and whether launchd respawned the daemon
-  (it did in run 44931358398: `7557` → `8112`). One arm runs per job, so nothing follows that a
-  lingering daemon could hold back, and the kill stays as cleanup.
+## Done when 3 — the private key cannot leak: not applicable, no key was created
 
-## Local checks in this step (the P1 implementer run, Windows 11)
+This goal created no signing key. The only certificates that ever existed are the two throwaway
+identities the decisive run's self-signed jobs generated inside their own `RUNNER_TEMP` (one per
+job), imported into a temporary signing keychain the tool creates and deletes in its `finally`;
+they were deleted with it in the same run, and nothing in the repository, the package or the release
+path carries signing material (the plan's P2–P4, which would have introduced the project identity,
+are dropped — Q-0018-02, amendment 19). Cited from the artifacts:
 
-The experiment itself is macOS-only (the tool exits 2 elsewhere); everything below is the pure
-parser/guard/classifier check, the must-fail fixtures and the text gates.
+| Reading | Artifact | Record path / log line | Value |
+|---|---|---|---|
+| the signing keychain, its use and its deletion | both self-signed records | `keychain.signing.created`, `.uses[].restored`, `.deleted`, `.deleteExit` | `created: true`; every `codesign` call's `restored: true` (the user search list went back); `deleted: true`, `deleteExit: 0` |
+| the tool's own cleanup lines | both self-signed jobs' `keychain-experiment.log` | the `Run the experiment` step | `[cleanup] deleted the temporary signing keychain … (exit 0); the identity and its key go with it` |
+| the workflow's backstop deleted the throwaway files too | both self-signed jobs' job log | the `Delete the throwaway identity files` step (`always()`) | `keychain: deleted …/keychain-throwaway` |
+| the login keychain lost the synthetic item | self-signed job, `login` job log | `Run the experiment` step; `keychain.loginCleanup` | `[cleanup] the login keychain: security delete-generic-password … -> exit 0`; `{lookedUp: 0, deleted: 0}` |
+| no key byte reached any home the run printed into | all four records | `guards.log.keyBytes`; `[guard]` lines | `0` in all four (260/313/314/408 printed lines scanned); `[guard] no key bytes under … outside the keychain that holds them`, `[guard] no key bytes in the <N> line(s) this tool printed`, `[guard] no signing passphrase in the <N> line(s) this tool printed` |
+| the package and release path | this branch's diff | — | no file under `harness/lib/package-build.ts`, `harness/package.ts`, `mygo.json` or `.github/workflows/{gate,release,cask}.yml` changed; the package contents scan and the package smoke's `credential` case are untouched |
 
-| Check | Result |
-|---|---|
-| `mise exec -- bun harness/tools/keychain-experiment.ts --self-check` | PASS — `15 of 15 case(s) passed`: the dump fixtures (partition entry, any-application owner, an unparsable partition description that must leave the list empty, and run 44928776617's 3-entry no-partition-entry ACL), the build/partition/item guards (including the must-fail equal-cdhash case), the refusal classifier (partition, application, matched requirement, unmatched requirement), the `bInDecryptAcl` comparison, the designated-requirement parser (the commented implied form and the plain stored form, plus the re-sign rule that refuses an implied requirement) and the read classifier (a kill or a stuck window is `blocked` only with a SecurityAgent sample, `refused` for a missing row, `read` only when the stub carried the key) |
-| must-fail fixtures, round 1 (`Q:/scratch/omp/g18/P1/mustfail/`) | PASS — with the parser narrowed to the plain form `12 of 13 case(s) passed ... the commented form was not read as the implied one`; with the classifier reading `killed` instead of the samples `12 of 13 ... a kill with no SecurityAgent sampled gave blocked` — each new case fails on a deliberately broken input, and the repo copy is untouched |
-| must-fail fixtures, round 3 (`Q:/scratch/omp/g18/p1-r3/mustfail/`) | PASS — with `itemGuardProblem` back to failing on any empty partition list the no-partition-entry case fails (`14 of 15 case(s) passed ... the item guard failed the observed ACL: the item carries a partition entry whose value cannot be read …`); with `decryptAclAdmits` reading the `encrypt` entry instead of the `decrypt` entry the `bInDecryptAcl` case fails (`14 of 15 ... A's own requirement was not matched in the decrypt entry`) — each new case catches its deliberate break, and the repo copy is untouched |
-| the workflow's identity step, run locally (`Q:/scratch/omp/g18/p1-r3/`, Git's OpenSSL 3.5.9) | PASS — the step script passes `bash -n`, chooses `pkcs12 pbe flags -legacy` for `OpenSSL 3.5.9`, and with an empty `OPENSSL_MODULES` the first export fails (`pkcs12: unable to load provider legacy`) and the retry produces `MAC: sha1`, `PKCS7 Encrypted data: pbeWithSHA1And3-KeyTripleDES-CBC`, `Shrouded Keybag: pbeWithSHA1And3-KeyTripleDES-CBC`; the passphrase appears on the step's stdout zero times (`::add-mask::` is consumed by the runner, `OmitEcho`), and the throwaway key, certificate and p12 were deleted in the same run |
-| dry run of the whole tool (`Q:/scratch/omp/g18/p1-r3/dryrun/`, Windows) | PASS — the macOS commands are stand-in stubs (`security`, `codesign`, `hdiutil`, `ditto`, `plutil`, `pgrep`, `sw_vers`, `uname`), the stubbed `security dump-keychain` prints the 3-entry no-partition ACL, and the app is a fake smoke hook: `--arms adhoc,self-signed,project` → tool exit 0, `status: ok`, 30 assertions, `guards.buildsDiffer: true`, `guards.log: {prints: 366, keyBytes: 0}`; both arms record `itemAfterStore.partitionEntry: false`, `read.outcome: refused`, `read.bInDecryptAcl: false`, `classification.refusesBy: application`, `allow: {"skipped": "no partition entry"}` and no `third`; the self-signed arm's import line is logged `-P "<passphrase-redacted>"`, the stub fails the import unless `-P` is exactly the passphrase the env carries, and the passphrase appears in neither the log nor the record (`[guard] no signing passphrase in the 367 line(s) this tool printed`); the "user default and sole search entry" check passes on the one resolved form. Round 1's runs of the same stub harness covered the `blocked` path (a stubbed SecurityAgent) and the login-keychain sweep's failure; those paths are unchanged by this round |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts typecheck.ts typecheck` | PASS — `0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts secrets.ts secrets` | PASS — `775 files, 0 findings` |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts docs-links.ts docsLinks` | PASS — `327 checked, 0 broken` |
-| Go checks (`gofmt -l`, `go vet`, `go build`, `go test`) | not run: this step changes no Go file (`harness/`, `.github/` and `docs/` only) |
+## Done when 4 — the learner is told the truth
 
-## Local checks of the one-arm-per-job tree (round 4, Windows 11)
-
-| Check | Result |
-|---|---|
-| `mise exec -- bun harness/tools/keychain-experiment.ts --self-check` | PASS — `17 of 17 case(s) passed`: the 15 cases above plus the argument rules (one `--arms`, one `--keychain`, both required) and the SecurityAgent respawn comparison |
-| must-fail fixtures, round 4 (`Q:/scratch/omp/g18/r4/mustfail/`) | PASS — with `agentRespawned` forced to `false` the respawn case fails (`16 of 17 case(s) passed … a new pid was not read as a respawn`); with the single-arm check disabled the argument case fails (`16 of 17 … two arms were accepted`) — each new case catches its deliberate break, and the repo copy is untouched |
-| dry run, round 4 (`Q:/scratch/omp/g18/r4/dryrun/`, Windows) | PASS — the stubs model per-keychain item maps and a login keychain whose password is unknown unless `PQ_STUB_LOGIN_PASSWORD=""`, and the app stub writes the item's requirement and, with `PQ_STUB_ITEM_PARTITION=self`, a partition entry. `--arms adhoc --keychain experiment` → exit 0, `refused`, `allow: {"skipped": "no partition entry"}`; `--arms adhoc --keychain login` → exit 0, the item deleted from login (`loginCleanup` `{lookedUp: 0, deleted: 0}`); `--arms self-signed --keychain experiment` → exit 0, both DRs explicit and `drSame: true`, the identity deleted, the keychain deleted; `--arms self-signed --keychain login` with the login password unknown → exit 1, `identity.partitionList.exit: 51` and the man-page reason, the identity still deleted in the finally; the same with an empty login password → exit 0 with `loginCleanup`/`identityCleanup` exit 0; the partition-entry run → the allow applied, the reread `read`, the third `refused`, both items deleted; the agent-sample run → `read.outcome: blocked` with 6 of 6 samples in `agentScan` |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts typecheck.ts typecheck` | PASS — `0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts docs-links.ts docsLinks` | PASS — `327 checked, 0 broken` |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts secrets.ts secrets` | PASS — `775 files, 0 findings` |
-| the workflow's YAML | PASS — parsed with `Bun.YAML.parse`: `jobs.experiment.strategy.matrix` is `{arm: [adhoc, self-signed], keychain: [experiment, login]}`, `fail-fast: false`, and the upload step's `with.name` is `keychain-record-${{ matrix.arm }}-${{ matrix.keychain }}` |
-
-## Local checks of the find-identity tree (round 5, Windows 11)
-
-This tree's change is the identity check and the signer of plan amendment 17: `security import
--f pkcs12` prints nothing, so the import is verified by `security find-identity -p codesigning`
-without `-v`, whose listing carries the identity's SHA-1 — the value `codesign --force --deep --sign
-<SHA-1> --keychain <keychain>` now signs with.
-
-| Check | Result |
-|---|---|
-| `mise exec -- bun harness/tools/keychain-experiment.ts --self-check` | PASS — `18 of 18 case(s) passed`: the round-4 cases plus `an identity the system does not trust is listed only by find-identity without -v`, whose fixture is the plain listing (`Matching identities`, `1) <SHA-1> "CN" (CSSMERR_TP_NOT_TRUSTED)`, `1 identities found`) against the `-v` listing of the same run (`0 valid identities found`): the SHA-1 is read from the plain listing, and the `-v` listing yields nothing |
-| must-fail fixtures, round 5 (`Q:/scratch/omp/g18/r5/mustfail/`) | PASS — with the identity line's pattern anchored to the end of the line (so a trust error after the label hides the identity) the new case fails (`17 of 18 case(s) passed … the full output gave 0 identity line(s)`); with the SHA-1 group narrowed to lowercase, which `find-identity` never prints, it fails the same way (`17 of 18 …`); each run restored the repo copy (`git diff --stat` unchanged after both) |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts typecheck.ts typecheck` | PASS — `0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts docs-links.ts docsLinks` | PASS — `327 checked, 0 broken` |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts secrets.ts secrets` | PASS — `775 files, 0 findings` |
-| the tool's platform guard and argument path (`--arms self-signed --keychain login`) | PASS — exit 2, `this tool asserts a Keychain experiment, which is macOS-only (process.platform = win32)` — no arm ran, and nothing was written |
-| Go checks (`gofmt -l`, `go vet`, `go build`, `go test`) | not run: this step changes no Go file (`harness/` and `docs/` only) |
-
-What this round cannot prove on Windows: that a runner's `security find-identity -p codesigning`
-listing holds an imported, untrusted, self-signed identity (the parser case is a fixture in the
-form `identity_find.m` prints), and that `codesign --keychain <keychain> --sign <SHA-1>` signs with
-it. Both are the self-signed jobs' answer in the next `keychain` run.
-
-## Local checks of the temporary-signing-keychain tree (round 6, Windows 11)
-
-This tree's change is plan amendment 18, from run 44986005367's finding: that run's `self-signed` ×
-`login` job imported the throwaway identity into the login keychain and its
-`security set-key-partition-list -S apple-tool:,apple: -s -k ""` exited 1 (the login keychain's
-password is not available to a run), so `codesign` never signed and the arm ended `not-run`; its
-`self-signed` × `experiment` job imported into the run's own keychain, where the same write exited 0,
-signed both builds and read the item (`read.outcome: read`, `drSame: true`, `partitionList.exit: 0`).
-The identity now always lives in a temporary signing keychain of its own, and the vocabulary above is
-rewritten where the record changed (`keychain.signing` replaces `keychain.identityCleanup`; the login
-variant's limit is the allow's write alone).
-
-| Check | Result |
-|---|---|
-| `mise exec -- bun harness/tools/keychain-experiment.ts --self-check` | PASS — `19 of 19 case(s) passed`: the round-5 cases plus `the credential keychain and the signing keychain are two different keychains` (`keychainPaths` for `login` and for `experiment` must differ from the signing keychain and keep it under the run's temp tree) |
-| dry run, round 6 (`Q:/scratch/omp/g18/p1r6/dryrun/`, Windows) | PASS — the stub `security` now models per-keychain identity maps, so `codesign --force --deep --sign <SHA-1> --keychain <keychain>` exits 0 only where the identity was imported and its partition list was written. Green: `--arms adhoc --keychain experiment` and `--keychain login` (`signingKeychain: "none"`, `keychain.signing.created: false`, `uses: []`, `deleted: null`); `--arms self-signed --keychain login` with the login keychain's password unknown → exit 0, `identity.partitionList.exit: 0` on the temporary signing keychain, both signs exit 0 `--keychain <signing keychain>`, `drSame: true`, every `keychain.signing.uses[].restored: true` (`setExit`/`unlockExit`/`restoreExit` all 0), `keychain.signing.deleted: true`, the item deleted from the login keychain (`loginCleanup` `{lookedUp: 0, deleted: 0}`), `keychain.defaultBefore` = `defaultAfter` and the search list unchanged, `26 assertion(s) passed, 0 failed`, `guards.log.keyBytes: 0`; `--arms self-signed --keychain experiment` with a stored partition entry → the allow written (`exit: 0`), its reread `read`, the third build `refused` with `drEqualsB: true`, and three restored uses (the third build signs through the same path) |
-| must-fail fixtures, round 6 (`Q:/scratch/omp/g18/p1r6/dryrun/`, Windows) | PASS, four deliberate breaks, each catching its own: the pre-fix shape (the identity imported into the app's keychain, mutation `credential-import`) fails in login mode with `identity self-signed: the app's keychain holds nothing this arm imported … lists this arm's identity e40425…` **and** `set-key-partition-list … exited 51` → `the arm did not reach its read step` (run 44986005367's finding reproduced end to end), and in experiment mode with the same check alone while both signs still exit 0, so the check catches the design error where the write would have succeeded; leaving the signing keychain in the search list (`restore-during`) fails `sign self-signed-a: the search list change made for signing was restored … but it was <experiment.keychain> before the codesign call`; naming the app's keychain as the signing keychain (`keychainPaths`) fails the new self-check case (`18 of 19 case(s) passed … experiment: the identity would land in the app's own keychain`). Every fixture mutates the scratch copy `Q:/scratch/omp/g18/p1r6/dryrun/harness/tools/keychain-experiment.ts`; the repository file is untouched |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts typecheck.ts typecheck` | PASS — `0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts secrets.ts secrets` | PASS — `775 files, 0 findings` |
-| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts docs-links.ts docsLinks` | PASS — `327 checked, 0 broken` |
-| Go checks (`gofmt -l`, `go vet`, `go build`, `go test`) | not run: this step changes no Go file (`harness/`, `.github/` and `docs/` only) |
-
-What this round cannot prove on Windows: that a real `codesign --keychain <temporary signing
-keychain>` signs an installed bundle with an untrusted self-signed identity after
-`security list-keychains -d user -s` prepended that keychain (both parts have a CI-proven analogue in
-run 44986005367's `experiment` job, which signed with `--keychain` and set the search list; the
-combination and the per-call restore are the self-signed jobs' answer in the next `keychain` run),
-and that a runner's `security default-keychain -d user` reads the login keychain (the record's
-`keychain.defaultBefore` is the read itself).
-
-What the next `keychain` run must show: `arms[0].signingKeychain: "temporary"` and
-`arms[0].credentialKeychain` equal to `keychain.variant` in both self-signed artifacts;
-`identity.partitionList.exit: 0` in the `login` job too — the value that was `1` in run 44986005367
-and the finding this round fixes; `keychain.signing.created` and `.deleted` both true with one `use`
-per sign, each `restored: true`; `keychain.defaultAfter` equal to `keychain.defaultBefore` and
-`searchListAfter` equal to `searchListBefore` in both variants, with the login job's synthetic item
-deleted (`keychain.loginCleanup`).
+Both guides' macOS sections now say: after an upgrade — a new download, or `brew upgrade` — macOS
+asks once whether Pass Quest may use the model key it saved in your Keychain (enter the login
+password, choose **Always Allow**); the key stays in the Keychain; and the prompt exists because the
+app is not signed by an Apple-issued identity, so each build looks like a new app to it
+([`install.md`](../install.md) and [`install.zh-CN.md`](../install.zh-CN.md), macOS section).
+`install-guide` pins the statement in both languages (the FACTS entry "the Keychain prompt one
+upgrade brings, the answer to it and why it appears": en `Always Allow` and `not signed by an
+Apple-issued identity`, zh `始终允许` and `没有 Apple 签发的签名标识`), and the self-test feeds the
+gate a broken pair that drops the answer and the reason (the login password sentence stays) and
+requires the gate to fail naming every missing pin — so a later edit that keeps the section talking
+about the Keychain but drops what the learner should do, or why the prompt appears, is caught. The
+gate pass line: `7 sections, 4 code blocks and 7 screenshot places
+agree; 6 links and 5 URLs agree; 6 quoted app strings match their sources; … floor 26.0 from
+mygo.json`.
 
 ## Known limits of this record
 
-- A runner cannot click a Keychain prompt. A read that does not complete is therefore reported as
+- A runner cannot click a Keychain prompt. A read that did not complete is therefore reported as
   `blocked` only when the sampler saw a `SecurityAgent` while the launch ran (the prompt path), and
-  as `failed` (a red run) when it did not; the record carries the samples, never an assumption.
-- The sampler is one `pgrep` a second, so a `SecurityAgent` that both appears and disappears between
-  two probes would be missed; a miss turns the read into `failed`, which is loud, and never into
-  `read`.
-- A runner cannot click a Keychain prompt, so the simulated allow can write only the **partition**
-  half of a real "Always Allow"; the application-list half (the requester's code requirement) is
-  never written by this tool. Run 44928776617's item carried no partition entry at all, so for that
-  shape the allow is recorded as `skipped: no partition entry` and neither half is simulated — the
-  decisive comparison there is `read.bInDecryptAcl`, which is why the record keeps it beside the
-  read outcome.
-- A runner does not know the login keychain's password, and `security` takes it on argv only
-  (`security.1:736-742`), so in the login variant the simulated allow's partition-list write carries
-  an empty password and its exit is recorded: an item that carries a partition entry gets a
-  `skipped` allow instead of a written one, and the experiment records that the partition half of a
-  learner's allow is not measurable on a GitHub runner. The identity's own partition-list write is
-  not in that class — it aims at the temporary signing keychain this run creates with an empty
-  password, so the login variant measures what the experiment exists to measure. The login variant's
-  delete (`security delete-generic-password` per synthetic item) is bounded at 30 s so a prompt on
-  it is killed and recorded rather than holding the job; an exit that is neither 0 nor "item absent"
-  fails the run.
-- One arm runs per job, so a `SecurityAgent` a blocked read left behind is recorded
-  (`read.securityAgent`: the pids before the kill, that the kill was issued, the pids after it, and
-  `respawned` — launchd restarts the on-demand daemon) and killed as cleanup; nothing that follows
-  in the job depends on it being gone, and its presence never fails the run.
-- macOS 27 has no runner and its Security source is not published; the citations are
-  `Security-61901.120.67`, one macOS 26-era tag (`docs/plans/2026-11-22-0100-0018-keychain-survives-upgrade.md`,
-  fact 2), and the record names the runner's `sw_vers`.
-- The log scan covers the text the tool itself printed; the workflow's own `echo` lines (paths
-  only) are not part of it.
-- The dry runs' numbers are the orchestration's, not macOS's: their `security`, `codesign` and
-  `hdiutil` output is written by stubs in the documented formats, so they prove the flow, the record
-  and the guards, never what the real Keychain answers — and the round-4 run's `agentScan` path
-  cannot exercise `read.securityAgent.found` on Windows, where no real SecurityAgent exists (the
-  self-check's respawn case covers that pure comparison).
-- The record is an artifact, not a published file: it holds the runner's own temp paths, and no
-  secret, key byte or passphrase.
+  as `failed` (a red run) when it did not; the record carries the samples, never an assumption. All
+  three non-`read` outcomes of the decisive run were `blocked` with samples, and each left a
+  SecurityAgent that is recorded and killed (launchd respawns it; `read.securityAgent.found/left`,
+  `respawned: true`). What the learner would see is the prompt these samples stand for.
+- The sampler is one `pgrep` a second, so a `SecurityAgent` that both appears and disappears
+  between two probes would be missed; a miss turns the read into `failed`, which is loud, and never
+  into `read`.
+- A runner cannot write the **partition** half of a real "Always Allow" in the login keychain:
+  `security` takes that keychain's password on argv only, and the write's exit 1 is recorded as the
+  login arms' `allow.skipped`; no third build C ran in either login arm, so the third-build
+  question stays unmeasured on a runner. The read outcome itself — the decisive measurement — is
+  unaffected. (In the experiment arm whose read succeeded, no allow ran at all.)
+- The experiment keychain the tool creates with an empty password is **not** the learner's login
+  keychain: its items carried no partition entry where the login keychain's did
+  (`itemAfterStore.partitionEntry` false vs true, in both the ad-hoc and the self-signed pair), so
+  the experiment variant understates the checks and its `read` must not be read as real-world
+  access. The login variant exists exactly for that difference.
+- macOS 27 is not run: no GitHub runner carries it and its Security source is not published; the
+  citations are the one published tag `Security-61901.120.67`, and the runner was macOS 26.7.2
+  (`platform.swVers` in all four records).
+- The `project` arm is untested and not reachable today: the workflow's matrix is `arm: [adhoc,
+  self-signed]`, nothing passes `PASSQUEST_MACOS_SIGNING_P12`/`_PASSWORD` to the run step
+  (`harness/tools/keychain-experiment.ts` reads them there and skips the arm, by name, when unset),
+  so a `workflow_dispatch` repeats the same four jobs and never selects it. It never ran with the
+  two secrets (a fork pull request carries none, and no run has dispatched it), and its coordinator
+  route exports the `.p12` with `openssl pkcs12 -export`'s default PBE (AES-256/PBKDF2 on OpenSSL
+  3+) — the throwaway path's `security import` only passed after the export switched to `-legacy` or
+  explicit PBE flags (plan amendment 13), so the re-export must follow that route when the arm first
+  runs. The revisit is therefore: with a Developer ID, store it as the two secrets, add `project` to
+  the workflow's `arm` matrix, then run it by `workflow_dispatch` (Q-0018-04).
+- The log scan covers the text the tool itself printed; the workflow's own `echo` lines (paths only)
+  are not part of it, and the record is an artifact, not a published file — the artifacts hold the
+  runner's own temp paths, which this document does not quote.
+- The dry runs of the P1 rounds (below) prove the orchestration, the record and the guards with
+  stubbed `security`/`codesign`/`hdiutil` output; they never prove what a real Keychain answers.
+
+## P1's local rounds (before the decisive run, Windows 11)
+
+The tool and workflow were built and rehearsed in six local rounds; each round's full table stood in
+this record before the decisive run (the commits 613af0c…5dd680b carry them). Compressed:
+
+| Round | Change | Checkpoints |
+|---|---|---|
+| 1 | the first tool, the workflow, the dump parser, the guards, the classifier | 15 self-check cases; two must-fail fixtures (`12 of 13` each with the parser narrowed to the plain form, and with the classifier reading `killed` instead of the samples); typecheck/secrets/docs-links pass |
+| 3 | the identity step's PKCS#12 export (Git's OpenSSL 3.5.9; `-legacy` first, explicit PBE flags as the retry, passphrase masked and absent from stdout), the no-partition-entry item, the decrypt-entry comparison | 15 cases; two must-fail fixtures (`14 of 15` each); a full stubbed dry run: exit 0, `status: ok`, 30 assertions |
+| 4 | one arm and one keychain per job | 17 cases; two must-fail fixtures (`16 of 17` each); dry runs of all four arm × keychain combinations, including the login keychain whose password is unknown |
+| 5 | `security find-identity` without `-v`, signing with the SHA-1 it prints | 18 cases; two must-fail fixtures (`17 of 18` each) |
+| 6 | the temporary signing keychain (plan amendment 18) | 19 cases; four must-fail fixtures in the stubbed dry runs, each reproducing the design error it guards (the pre-fix import shape, an unrestored search list, the app's keychain named as the signing one) |
+
+## Local checks of the parking round (2026-11-22, Windows 11)
+
+| Check | Result |
+|---|---|
+| `mise exec -- bun harness/tools/keychain-experiment.ts --self-check` | PASS — `19 of 19 case(s) passed` |
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts typecheck.ts typecheck` | PASS — `0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts install-guide.ts installGuide` | PASS — `7 sections, 4 code blocks and 7 screenshot places agree; 6 links and 5 URLs agree; 6 quoted app strings match their sources; the release notes name the tap command and both guides; the cask template renders v0.15.0 with the release's SHA-256, and a synthetic pair, into Casks/pass-quest.rb; floor 26.0 from mygo.json` |
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts docs-links.ts docsLinks` | PASS — `331 checked, 0 broken` |
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts secrets.ts secrets` | PASS — `775 files, 0 findings` |
+| the new case's failure path, run as the self-test's own case object against a fixture root (`Always Allow` and `not signed by an Apple-issued identity` replaced in the en guide, `始终允许` and `没有 Apple 签发的签名标识` in the zh guide) | PASS — `installGuide` fails with exactly the four lines the case expects: `docs/install.md: the "macOS" section must carry the Keychain prompt one upgrade brings, the answer to it and why it appears: missing "Always Allow"`, the same for `missing "not signed by an Apple-issued identity"`, and the zh pair (`missing "始终允许"`, `missing "没有 Apple 签发的签名标识"`); the fixture found every anchor, so neither replacement slipped |
+| the full `self-test` gate | FAIL on this Windows machine, attributed to load, not to this round: all 149 cases ran (15 must pass, counted from the tree) and the only failures were two desktop-ux **window** cases — "did not report `no-focus-indicator` on a stylesheet that removes focus outlines and paints Today's title in its background colour" and "the broken Updates row broke an earlier stage: … timed out waiting for a practice item [route #/today]". No install-guide case failed, so the new Keychain-prompt case holds. Attribution: the two cases read product sources and `harness/lib/ux-page.ts`, none touched by this round, and their failure lines are this machine's documented 100 %-CPU artifacts (`child process(es) outlived the app: …msedgewebview2.exe`, `timed out waiting for a practice item`, seen on base trees); re-running those two cases alone at the same load reproduced both the same way. CI is the authority for window gates. |
+| Go checks (`gofmt -l`, `go vet`, `go build`, `go test`) | not run: this round changes no Go file (`harness/`, `.github/` and `docs/` only) |

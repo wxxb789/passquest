@@ -1,6 +1,6 @@
 # 0018 — macOS upgrades keep the learner's Keychain permission
 
-**State:** Ready (defined 2026-11-20)
+**State:** Parked (2026-11-22): Done-when 1 is proven, and Done-when 2 is not achievable without an Apple-issued identity; see [the evidence record](../evidence/0018-keychain-survives-upgrade.md) and Q-0018-*. Revisit when the owner has a Developer ID. (Defined 2026-11-20.)
 **Prerequisite:** None. It can run before or after 0016 and 0017. All three change the macOS package or the release workflow, so do not run them at the same time on one tree.
 
 ## Larger purpose

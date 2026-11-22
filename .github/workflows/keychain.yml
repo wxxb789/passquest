@@ -17,13 +17,6 @@ on:
       - harness/lib/process.ts
       - harness/lib/repo.ts
       - harness/lib/types.ts
-      - mygo.json
-      - go.mod
-      - go.sum
-      - package.json
-      - bun.lock
-      - internal/desktop/**
-      - desktop/web/src/views/settings.ts
   workflow_dispatch:
     inputs:
       a-ref:
