@@ -80,24 +80,35 @@ The record's vocabulary, so a value cannot be read as more than it is:
   side by side. It runs with the allow (a skipped allow runs no third build).
 - `arms[i].identity.partitionList`: `security set-key-partition-list -S apple-tool:,apple: -s -k ""`
   and its exit — the write that lets `codesign` use an imported key (`security.1:810`) and that
-  needs the keychain's password (`security.1:736-742`). In the login variant the password is not
-  available, so a non-zero exit stops that arm before it signs (a prompt nobody can click would
-  otherwise hold the job to its own timeout), with the exit in the record.
+  needs the keychain's password (`security.1:736-742`). It aims at the temporary signing keychain
+  `arms[i].signingKeychain` names, whose empty password this run set itself, so a non-zero exit is a
+  failure of the write and not a keychain the run cannot open; such an exit stops that arm before it
+  signs (a prompt nobody can click would otherwise hold the job to its own timeout), and the exit is
+  in the record.
 - `arms[i].signs`: every `codesign --force --deep --sign …` this arm ran, in order, with its
   `where` label (`<arm>-a`, `<arm>-b`, `<arm>-c`), the `signer` it used — the identity's SHA-1 as
   `security find-identity -p codesigning` prints it, its CN on the retry, `-` for the ad-hoc third
   build — the exit, and the last 60 output lines.
-- `keychain.variant`: `experiment` (a throwaway keychain created, made the sole store,
-  restored and deleted in the `finally`) or `login` (nothing created or switched; the app stores
-  into the runner's default login keychain, as a learner's would).
+- `keychain.variant`: `experiment` (the app's keychain created, made the user default and the sole
+  search entry, restored and deleted in the `finally`) or `login` (the app's store left alone: the
+  item goes into the runner's default login keychain, as a learner's would, and the `finally`
+  deletes the synthetic item). It names the app's credential keychain only; `arms[i].credentialKeychain`
+  repeats it per arm, and `arms[i].signingKeychain` names the identity's own keychain (`"temporary"`,
+  or `"none"` for an arm that signs nothing).
 - `keychain.loginPath` and `arms[i].login`: the learner's keychain in the experiment variant, looked
   up for each of this run's synthetic services before and after the arm and swept in the run's
   `finally` (`exit 0` is "present"; the lookup never passes `-g`, which would withdraw the secret).
   A hit is deleted and fails the run: the item belongs in the experiment keychain this run measured.
 - `keychain.loginCleanup` (login variant): the synthetic services looked up and deleted in the login
   keychain by the `finally`, each with the lookup's exit and the delete's exit (`null`: nothing to
-  delete). `keychain.identityCleanup`: every imported throwaway CN and the `security delete-identity
-  -c <CN>` exit; a failed delete fails the run.
+  delete).
+- `keychain.signing`: the temporary signing keychain the run's identity lives in — `path`, `created`,
+  `uses` (one entry per `codesign` call: the user search list `before` and `during`, the
+  `list-keychains` and `unlock-keychain` exits, and the restoration's exit with `restored` saying
+  whether the list went back) and `deleted` with the `delete-keychain` exit (`deleted: null` when
+  the arm imported no identity). The identity and its key leave with that keychain: no variant
+  imports one into the app's keychain, and `identity <arm>: the app's keychain holds nothing this
+  arm imported` fails the run if one does.
 - `arms[i].read.securityAgent`: the SecurityAgent a read that did not complete left behind — the
   pids seen before the kill, whether the kill was issued, the pids seen after it, and
   `respawned: true` when a pid after the kill was not there before (launchd holds SecurityAgent as
@@ -140,7 +151,7 @@ self-signed arm, and login-variant rows are new with this tree.
 | each refused/blocked arm with a partition entry: the third build C (version, cdhash, read, DR equal to B's) | `<pending: no run yet>` | `arms[0].third.versionBefore`, `.versionAfter`, `.signature.cdhash`, `.read.outcome`, `.drEqualsB` | `<pending: refused>` |
 | the keychain the run used, that it was the only store the app could reach, and that it was restored and deleted | `keychain-record` | `keychain.variant`, `keychain.defaultDuring`, `keychain.searchListDuring`, `keychain.defaultBefore`, `keychain.defaultAfter`, `keychain.searchListBefore`, `keychain.searchListAfter`, `keychain.deleted` | `experiment` (a throwaway `experiment.keychain` under the runner temp dir — the record carries the full path); during the run it was the user default and the sole search entry; before and after, both were `~/Library/Keychains/login.keychain-db`; deleted |
 | the login variant: the item in the learner's keychain, and the cleanup that deletes it | `keychain-record-adhoc-login`, `keychain-record-self-signed-login` | `keychain.variant`, `arms[0].itemAfterStore.partitionEntry`, `arms[0].itemAfterStore.partitions`, `arms[0].itemAfterStore.block`, `keychain.loginCleanup` | `<pending: this is the open question — whether the login keychain's item carries the partition entry the experiment keychain's does not>` |
-| the login variant: the identity deleted in the `finally` | `keychain-record-self-signed-login` | `keychain.identityCleanup` | `<pending: {cn, exit}>` |
+| the login variant: the identity and its key leaving with the temporary signing keychain | `keychain-record-self-signed-login` | `arms[0].signingKeychain`, `keychain.signing.deleted`, `keychain.signing.uses[].restored` | `<pending: "temporary", true, all true — no identity enters the app's keychain>` |
 | the learner's keychain, and every synthetic service found there (expected: none) | `keychain-record` | `keychain.loginPath`, `keychain.loginResidue` | `~/Library/Keychains/login.keychain-db`, `[]` |
 | the key never left its homes | `keychain-record` | `arms[0].keySha256`; `guards.log.keyBytes` | `631aff91851105e305e809b0c9848a8fd5074802de3f4ff103e9ee893f9daeab`; `0` (254 printed lines scanned) |
 
@@ -239,9 +250,10 @@ until the identity check of amendment 17 reaches CI. The `project` arm is not in
   entry's application list and a `skipped` allow; when the item does carry a partition entry: the
   partition list and the third build C's outcome). Then the owner's decision (plan default 10) is
   the only way forward: an Apple-issued certificate, or accepting a re-prompt per upgrade — note
-  that in the login variant the identity's `partitionList` failure can stop the arm before its read,
-  which is itself a limit of a self-signed identity on a machine whose keychain password a run does
-  not hold.
+  that in the login variant the simulated allow's write is the one partition-list write a run cannot
+  make (the login keychain's password is not available), so an item that carries a partition entry
+  gets a `skipped` allow and the third build C does not run; the read outcome itself is measured
+  either way.
 - `arms[0].read.outcome == "read"` in the self-signed artifacts: P2–P4 proceed (the identity keeps
   access across builds); the pinned DR string for P2 is read from
   `arms[0].a.designatedRequirement` (or `arms[0].b.designatedRequirement`; they must be byte-equal
@@ -310,6 +322,44 @@ listing holds an imported, untrusted, self-signed identity (the parser case is a
 form `identity_find.m` prints), and that `codesign --keychain <keychain> --sign <SHA-1>` signs with
 it. Both are the self-signed jobs' answer in the next `keychain` run.
 
+## Local checks of the temporary-signing-keychain tree (round 6, Windows 11)
+
+This tree's change is plan amendment 18, from run 44986005367's finding: that run's `self-signed` ×
+`login` job imported the throwaway identity into the login keychain and its
+`security set-key-partition-list -S apple-tool:,apple: -s -k ""` exited 1 (the login keychain's
+password is not available to a run), so `codesign` never signed and the arm ended `not-run`; its
+`self-signed` × `experiment` job imported into the run's own keychain, where the same write exited 0,
+signed both builds and read the item (`read.outcome: read`, `drSame: true`, `partitionList.exit: 0`).
+The identity now always lives in a temporary signing keychain of its own, and the vocabulary above is
+rewritten where the record changed (`keychain.signing` replaces `keychain.identityCleanup`; the login
+variant's limit is the allow's write alone).
+
+| Check | Result |
+|---|---|
+| `mise exec -- bun harness/tools/keychain-experiment.ts --self-check` | PASS — `19 of 19 case(s) passed`: the round-5 cases plus `the credential keychain and the signing keychain are two different keychains` (`keychainPaths` for `login` and for `experiment` must differ from the signing keychain and keep it under the run's temp tree) |
+| dry run, round 6 (`Q:/scratch/omp/g18/p1r6/dryrun/`, Windows) | PASS — the stub `security` now models per-keychain identity maps, so `codesign --force --deep --sign <SHA-1> --keychain <keychain>` exits 0 only where the identity was imported and its partition list was written. Green: `--arms adhoc --keychain experiment` and `--keychain login` (`signingKeychain: "none"`, `keychain.signing.created: false`, `uses: []`, `deleted: null`); `--arms self-signed --keychain login` with the login keychain's password unknown → exit 0, `identity.partitionList.exit: 0` on the temporary signing keychain, both signs exit 0 `--keychain <signing keychain>`, `drSame: true`, every `keychain.signing.uses[].restored: true` (`setExit`/`unlockExit`/`restoreExit` all 0), `keychain.signing.deleted: true`, the item deleted from the login keychain (`loginCleanup` `{lookedUp: 0, deleted: 0}`), `keychain.defaultBefore` = `defaultAfter` and the search list unchanged, `26 assertion(s) passed, 0 failed`, `guards.log.keyBytes: 0`; `--arms self-signed --keychain experiment` with a stored partition entry → the allow written (`exit: 0`), its reread `read`, the third build `refused` with `drEqualsB: true`, and three restored uses (the third build signs through the same path) |
+| must-fail fixtures, round 6 (`Q:/scratch/omp/g18/p1r6/dryrun/`, Windows) | PASS, four deliberate breaks, each catching its own: the pre-fix shape (the identity imported into the app's keychain, mutation `credential-import`) fails in login mode with `identity self-signed: the app's keychain holds nothing this arm imported … lists this arm's identity e40425…` **and** `set-key-partition-list … exited 51` → `the arm did not reach its read step` (run 44986005367's finding reproduced end to end), and in experiment mode with the same check alone while both signs still exit 0, so the check catches the design error where the write would have succeeded; leaving the signing keychain in the search list (`restore-during`) fails `sign self-signed-a: the search list change made for signing was restored … but it was <experiment.keychain> before the codesign call`; naming the app's keychain as the signing keychain (`keychainPaths`) fails the new self-check case (`18 of 19 case(s) passed … experiment: the identity would land in the app's own keychain`). Every fixture mutates the scratch copy `Q:/scratch/omp/g18/p1r6/dryrun/harness/tools/keychain-experiment.ts`; the repository file is untouched |
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts typecheck.ts typecheck` | PASS — `0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts secrets.ts secrets` | PASS — `775 files, 0 findings` |
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts docs-links.ts docsLinks` | PASS — `327 checked, 0 broken` |
+| Go checks (`gofmt -l`, `go vet`, `go build`, `go test`) | not run: this step changes no Go file (`harness/`, `.github/` and `docs/` only) |
+
+What this round cannot prove on Windows: that a real `codesign --keychain <temporary signing
+keychain>` signs an installed bundle with an untrusted self-signed identity after
+`security list-keychains -d user -s` prepended that keychain (both parts have a CI-proven analogue in
+run 44986005367's `experiment` job, which signed with `--keychain` and set the search list; the
+combination and the per-call restore are the self-signed jobs' answer in the next `keychain` run),
+and that a runner's `security default-keychain -d user` reads the login keychain (the record's
+`keychain.defaultBefore` is the read itself).
+
+What the next `keychain` run must show: `arms[0].signingKeychain: "temporary"` and
+`arms[0].credentialKeychain` equal to `keychain.variant` in both self-signed artifacts;
+`identity.partitionList.exit: 0` in the `login` job too — the value that was `1` in run 44986005367
+and the finding this round fixes; `keychain.signing.created` and `.deleted` both true with one `use`
+per sign, each `restored: true`; `keychain.defaultAfter` equal to `keychain.defaultBefore` and
+`searchListAfter` equal to `searchListBefore` in both variants, with the login job's synthetic item
+deleted (`keychain.loginCleanup`).
+
 ## Known limits of this record
 
 - A runner cannot click a Keychain prompt. A read that does not complete is therefore reported as
@@ -325,15 +375,14 @@ it. Both are the self-signed jobs' answer in the next `keychain` run.
   decisive comparison there is `read.bInDecryptAcl`, which is why the record keeps it beside the
   read outcome.
 - A runner does not know the login keychain's password, and `security` takes it on argv only
-  (`security.1:736-742`), so the login variant's partition-list writes carry an empty password and
-  their exit is recorded. If the runner's login keychain has a non-empty password — likely, but the
-  matrix run is what records it — the self-signed login arm stops before it signs (its
-  `identity.partitionList.exit`) and an item that carries a partition entry gets a `skipped` allow
-  instead of a written one; the experiment then records that this combination is not measurable on
-  a GitHub runner, which is itself an answer about a self-signed identity.
-  The login variant's deletes (`security delete-generic-password` per synthetic item,
-  `security delete-identity -c <CN>` per import) are bounded at 30 s each so a prompt on them is
-  killed and recorded rather than holding the job; an exit that is neither 0 nor "item absent"
+  (`security.1:736-742`), so in the login variant the simulated allow's partition-list write carries
+  an empty password and its exit is recorded: an item that carries a partition entry gets a
+  `skipped` allow instead of a written one, and the experiment records that the partition half of a
+  learner's allow is not measurable on a GitHub runner. The identity's own partition-list write is
+  not in that class — it aims at the temporary signing keychain this run creates with an empty
+  password, so the login variant measures what the experiment exists to measure. The login variant's
+  delete (`security delete-generic-password` per synthetic item) is bounded at 30 s so a prompt on
+  it is killed and recorded rather than holding the job; an exit that is neither 0 nor "item absent"
   fails the run.
 - One arm runs per job, so a `SecurityAgent` a blocked read left behind is recorded
   (`read.securityAgent`: the pids before the kill, that the kill was issued, the pids after it, and

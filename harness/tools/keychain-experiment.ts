@@ -1,5 +1,5 @@
-// security(1) takes keychain passwords on argv only, so the experiment keychain stays passphrase-less and the
-// one import that must carry a passphrase (the throwaway identity's) logs its argv with the passphrase replaced.
+// security(1) takes keychain passwords on argv only, so both keychains this run creates take an empty password,
+// and the one import that must carry a passphrase logs its argv with the passphrase replaced.
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -43,11 +43,11 @@ const USAGE = `Run the goal-0018 P1 Keychain experiment on this macOS machine.
   --out <file>    where the JSON record is written (always written, also on a failed run)
   --arms <arm>    the one arm to run: ${ARMS.join(", ")}
   --keychain <mode>
-      experiment  create a throwaway keychain under the temp tree, make it the user default and the
-                  sole search entry for the run, and restore and delete it in the finally
-      login       leave the keychains alone: the app stores into the runner's default login keychain,
-                  as a learner's would, and the finally deletes every synthetic item and every
-                  throwaway identity the arm left there
+      experiment  this run creates the app's keychain under the temp tree, makes it the user default
+                  and the sole search entry, and restores and deletes it in the finally
+      login       the app's store is left alone: the item goes into the runner's default login
+                  keychain, as a learner's would, and the finally deletes the synthetic item it left
+                  there
   --self-check    run the parser, requirement, guard and classifier cases over fixtures (any OS)
   --help          this text
 
@@ -62,10 +62,14 @@ An arm whose material is absent is recorded as skipped by name: a fork pull requ
 project secrets, so the project arm is the normal skip. Every other skip fails the run — the
 self-signed arm's material always exists on the runner the workflow builds it for.
 
-The login keychain's password is not available to a login-mode run, so the partition-list writes it
-must make (security set-key-partition-list, security set-generic-password-partition-list) carry an
-empty password and their exit is recorded; when codesign would need the list that could not be
-written, the arm fails with that reason instead of waiting on a prompt.
+The signing identity never enters the keychain the app stores its credential in: this run creates a
+temporary signing keychain with an empty password, imports the identity there, adds that keychain to
+the user search list only around the codesign calls (removed again after each call, logged), signs
+with the identity's SHA-1, and deletes the keychain, identity and key with it in the finally.
+--keychain chooses the app's store alone. The login keychain's password is not available to a
+login-mode run, so the one partition-list write such a run still has to make (the simulated allow's
+security set-generic-password-partition-list) carries an empty password and its exit is recorded as
+that skip's reason.
 
 Exit codes: 0 every arm and guard passed (the project arm's secret-driven skip is not a failure), 1
 a guard or an arm failed, an arm selected for this run did not reach its read step, or a read came
@@ -758,6 +762,21 @@ const SELF_CASES: readonly SelfCase[] = [
       return agentRespawned([], after) ? null : "the first SecurityAgent seen was not read as a respawn";
     },
   },
+  {
+    name: "the credential keychain and the signing keychain are two different keychains",
+    run: () => {
+      const login = "/Users/runner/Library/Keychains/login.keychain-db";
+      const temp = path.join("/private/var/folders/q2/passquest-keychain-experiment-IJLZJa");
+      const expectedCredential = { experiment: path.join(temp, "experiment.keychain"), login };
+      for (const mode of KEYCHAINS) {
+        const paths = keychainPaths(mode, login, temp);
+        if (paths.credential !== expectedCredential[mode]) return `${mode}: the credential keychain is ${paths.credential}`;
+        if (paths.credential === paths.signing) return `${mode}: the identity would land in the app's own keychain (${paths.credential})`;
+        if (path.dirname(paths.signing) !== temp) return `${mode}: the signing keychain ${paths.signing} is not under the run's temp tree`;
+      }
+      return null;
+    },
+  },
 ];
 
 function selfCheck(): number {
@@ -905,6 +924,25 @@ interface SignRecord {
   output: string;
 }
 
+interface SigningSignUse {
+  where: string;
+  before: string[];
+  during: string[];
+  setExit: number;
+  unlockExit: number;
+  restoreExit: number | null;
+  restored: boolean | null;
+}
+
+interface SigningKeychainRecord {
+  path: string;
+  password: string;
+  created: boolean;
+  uses: SigningSignUse[];
+  deleted: boolean | null;
+  deleteExit: number | null;
+}
+
 type ArmAllow =
   | { skipped: string }
   | {
@@ -923,6 +961,8 @@ type ArmAllow =
 
 interface ArmRecord {
   id: ArmId;
+  signingKeychain: "none" | "temporary";
+  credentialKeychain: KeychainMode;
   signs: SignRecord[];
   identity: {
     kind: "none" | "self-signed" | "project";
@@ -977,7 +1017,7 @@ interface ExperimentRecord {
     loginPath: string;
     loginResidue: { service: string; found: number; deleted: boolean }[];
     loginCleanup: { service: string; lookedUp: number; deleted: number | null }[];
-    identityCleanup: { cn: string; exit: number }[];
+    signing: SigningKeychainRecord;
   };
   guards: { buildsDiffer: boolean | null; aCdhash: string; bCdhash: string; log: { prints: number; keyBytes: number } };
   arms: ArmRecord[];
@@ -1007,7 +1047,7 @@ interface Ctx {
   stopReason: string | null;
   guardsDone: boolean;
   loginPath: string;
-  identitiesImported: { cn: string }[];
+  signingKeychain: string | null;
 }
 
 class StopRun extends Error {}
@@ -1292,6 +1332,97 @@ async function keychainSnapshot(): Promise<{ default: string | null; list: strin
   };
 }
 
+function keychainPaths(mode: KeychainMode, loginPath: string, temp: string): { credential: string; signing: string } {
+  return {
+    credential: mode === "login" ? loginPath : path.join(temp, "experiment.keychain"),
+    signing: path.join(temp, "signing.keychain"),
+  };
+}
+
+async function ensureSigningKeychain(ctx: Ctx): Promise<string> {
+  if (ctx.signingKeychain !== null) return ctx.signingKeychain;
+  const signing = keychainPaths(ctx.keychainMode, ctx.loginPath, ctx.temp).signing;
+  const create = await tool("security", ["create-keychain", "-p", "", signing]);
+  if (
+    !ctx.checker.check(
+      "keychain: create the temporary signing keychain",
+      create.code === 0,
+      `security create-keychain -p "" <signing keychain> -> exit 0`,
+      `security create-keychain exited ${create.code}: ${observedTail(create)}`,
+    )
+  ) {
+    throw new ArmFailure("the temporary signing keychain could not be created");
+  }
+  const unlock = await tool("security", ["unlock-keychain", "-p", "", signing]);
+  ctx.checker.check(
+    "keychain: unlock the temporary signing keychain",
+    unlock.code === 0,
+    `security unlock-keychain -p "" <signing keychain> -> exit 0`,
+    `security unlock-keychain exited ${unlock.code}: ${observedTail(unlock)}`,
+  );
+  ctx.signingKeychain = signing;
+  ctx.record.keychain.signing.path = signing;
+  ctx.record.keychain.signing.created = true;
+  console.log(
+    `[keychain] the identity's own keychain ${signing} is created (empty password) and unlocked (exit ${unlock.code}); the app's ${ctx.keychainMode} keychain is not touched by this`,
+  );
+  return signing;
+}
+
+async function addSigningSearchEntry(ctx: Ctx, where: string): Promise<SigningSignUse | null> {
+  const signing = ctx.signingKeychain;
+  if (signing === null) return null;
+  const snapshot = await keychainSnapshot();
+  const before = snapshot.list ?? [];
+  const during = [signing, ...before.filter((entry) => entry !== signing)];
+  const set = await tool("security", ["list-keychains", "-d", "user", "-s", ...during]);
+  const unlock = await tool("security", ["unlock-keychain", "-p", "", signing]);
+  const use: SigningSignUse = { where, before, during, setExit: set.code, unlockExit: unlock.code, restoreExit: null, restored: null };
+  ctx.record.keychain.signing.uses.push(use);
+  console.log(
+    `[sign ${where}] the user search list is now ${during.join(", ") || "(empty)"} (exit ${set.code}) and ${signing} is unlocked (exit ${unlock.code}), so codesign reaches the identity`,
+  );
+  const reading = await keychainSnapshot();
+  ctx.checker.check(
+    `sign ${where}: the signing keychain is in the user search list for codesign`,
+    set.code === 0 && (reading.list ?? []).join(", ") === during.join(", "),
+    `security list-keychains -d user -> ${during.join(", ") || "(empty)"}`,
+    `security list-keychains exited ${set.code} and the list is ${(reading.list ?? []).join(", ") || "(empty)"}; codesign would not reach ${signing}: ${observedTail(set)}`,
+  );
+  return use;
+}
+
+async function restoreSigningSearchEntry(ctx: Ctx, use: SigningSignUse): Promise<void> {
+  const restore = await tool("security", ["list-keychains", "-d", "user", "-s", ...use.before]);
+  const reading = await keychainSnapshot();
+  use.restoreExit = restore.code;
+  use.restored = (reading.list ?? []).join(", ") === use.before.join(", ");
+  console.log(`[sign ${use.where}] restored the user search list to ${use.before.join(", ") || "(empty)"} (exit ${restore.code}); restored: ${String(use.restored)}`);
+  ctx.checker.check(
+    `sign ${use.where}: the search list change made for signing was restored`,
+    use.restoreExit === 0 && use.restored,
+    `the search list is ${(reading.list ?? []).join(", ") || "(empty)"}, as before the codesign call`,
+    `the search list is ${(reading.list ?? []).join(", ") || "(empty)"}, but it was ${use.before.join(", ") || "(empty)"} before the codesign call (restore exit ${restore.code})`,
+  );
+}
+
+async function releaseSigningKeychain(checker: Checker, record: ExperimentRecord): Promise<void> {
+  const signing = record.keychain.signing;
+  if (!signing.created) return;
+  const deleted = await boundedTool("security", ["delete-keychain", signing.path], CLEANUP_TIMEOUT_MS);
+  signing.deleted = deleted.code === 0;
+  signing.deleteExit = deleted.code;
+  console.log(
+    `[cleanup] deleted the temporary signing keychain ${signing.path} (exit ${deleted.code}${deleted.timedOut ? `, killed after ${CLEANUP_TIMEOUT_MS / 1000} s` : ""}); the identity and its key go with it`,
+  );
+  checker.check(
+    "keychain: the temporary signing keychain was deleted",
+    deleted.code === 0,
+    `security delete-keychain <signing keychain> -> exit 0`,
+    `security delete-keychain exited ${deleted.code}${deleted.timedOut ? `, killed after ${CLEANUP_TIMEOUT_MS / 1000} s on a prompt nobody can answer` : ""}: ${observedTail(deleted)}`,
+  );
+}
+
 /**
  * A lookup by exit code only: `-g` and `-w` would withdraw the secret (security.1:577-580), so
  * neither is a neutral presence test; exit 0 is "present".
@@ -1445,6 +1576,8 @@ async function importP12(keychain: string, file: string, password: string): Prom
 
 async function importIdentity(ctx: Ctx, arm: ArmRecord, id: ArmId, input: IdentityInput, dir: string): Promise<Identity> {
   if (input.password !== null && input.password !== "") signingPassphrases.push(input.password);
+  const signing = await ensureSigningKeychain(ctx);
+  arm.signingKeychain = "temporary";
   let importable: string;
   let password = "";
   if (input.kind === "self-signed") {
@@ -1485,7 +1618,7 @@ async function importIdentity(ctx: Ctx, arm: ArmRecord, id: ArmId, input: Identi
       throw new ArmFailure("the project p12 could not be re-exported with an empty passphrase");
     }
   }
-  const imported = await importP12(ctx.keychain, importable, password);
+  const imported = await importP12(signing, importable, password);
   // `security import -f pkcs12` prints nothing: SecPKCS12Import returns dictionaries, not identities, so
   // keychain_import.c's item counters all stay zero (SecurityTool/macOS/keychain_import.c:152-201, Security-61901.120.67).
   ctx.checker.check(
@@ -1495,9 +1628,9 @@ async function importIdentity(ctx: Ctx, arm: ArmRecord, id: ArmId, input: Identi
     `security import exited ${imported.code}: ${observedTail(imported)}`,
   );
   if (imported.code !== 0) throw new ArmFailure(`the ${id} identity could not be imported`);
-  const listed = await tool("security", ["find-identity", "-p", "codesigning", ctx.keychain]);
+  const listed = await tool("security", ["find-identity", "-p", "codesigning", signing]);
   console.log(`[identity ${id}] security find-identity -p codesigning prints:\n${redact(resultText(listed).trim() || "(no output)")}`);
-  const valid = await tool("security", ["find-identity", "-v", "-p", "codesigning", ctx.keychain]);
+  const valid = await tool("security", ["find-identity", "-v", "-p", "codesigning", signing]);
   console.log(`[identity ${id}] security find-identity -v -p codesigning (for information) prints:\n${redact(resultText(valid).trim() || "(no output)")}`);
   const listedIds = findIdentityLines(listed.stdout);
   let cn = input.cn;
@@ -1512,7 +1645,6 @@ async function importIdentity(ctx: Ctx, arm: ArmRecord, id: ArmId, input: Identi
     console.log(`[identity ${id}] derived the certificate's CN ${JSON.stringify(cn)} from ${certificateOut.code === 0 ? "the imported p12" : "security find-identity"}`);
   }
   if (cn === null || cn === "") throw new ArmFailure(`the ${id} identity's CN could not be named; set the environment's CN variable`);
-  ctx.identitiesImported.push({ cn });
   const sha1 = listedIds.find((line) => line.label === cn)?.sha1 ?? null;
   ctx.checker.check(
     `identity ${id}: find-identity lists ${JSON.stringify(cn)}`,
@@ -1521,8 +1653,16 @@ async function importIdentity(ctx: Ctx, arm: ArmRecord, id: ArmId, input: Identi
     `security find-identity -p codesigning exited ${listed.code} and did not list ${JSON.stringify(cn)}: a self-signed certificate is not trusted, so only the output without -v can list it — ${observedTail(listed)}`,
   );
   if (sha1 === null) throw new ArmFailure(`the ${id} identity is imported but security find-identity -p codesigning does not list it`);
-  const partitioned = await tool("security", ["set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", "", ctx.keychain]);
-  const partitionCommand = `security set-key-partition-list -S apple-tool:,apple: -s -k "" <keychain: ${ctx.keychainMode}>`;
+  const inCredential = await tool("security", ["find-identity", "-p", "codesigning", ctx.keychain]);
+  const credentialIdentities = findIdentityLines(inCredential.stdout);
+  ctx.checker.check(
+    `identity ${id}: the app's keychain holds nothing this arm imported`,
+    inCredential.code === 0 && !credentialIdentities.some((line) => line.sha1 === sha1),
+    `security find-identity -p codesigning <the ${ctx.keychainMode} keychain> -> exit ${inCredential.code}, ${credentialIdentities.length} identity line(s), none of them this arm's ${sha1}`,
+    `security find-identity -p codesigning exited ${inCredential.code} on the ${ctx.keychainMode} keychain and ${credentialIdentities.some((line) => line.sha1 === sha1) ? `lists this arm's identity ${sha1}` : "cannot be read"}: the identity must live only in the temporary signing keychain — ${observedTail(inCredential)}`,
+  );
+  const partitioned = await tool("security", ["set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", "", signing]);
+  const partitionCommand = `security set-key-partition-list -S apple-tool:,apple: -s -k "" <keychain: the temporary signing keychain>`;
   const partitionList: PartitionListWrite = { command: partitionCommand, exit: partitioned.code, outputTail: tail(redact(resultText(partitioned).trim()), 3) };
   arm.identity.partitionList = partitionList;
   ctx.checker.check(
@@ -1533,9 +1673,7 @@ async function importIdentity(ctx: Ctx, arm: ArmRecord, id: ArmId, input: Identi
   );
   if (partitioned.code !== 0) {
     throw new ArmFailure(
-      ctx.keychainMode === "login"
-        ? `codesign cannot use the ${id} identity in the login keychain: "apple:" must be in the key's partition list for codesign (security.1:810) and the list can only be written with the keychain's password (security.1:736-742), which this run cannot present; without it codesign could only prompt, so the arm stops here`
-        : `the ${id} identity could not be partitioned for codesign: set-key-partition-list exited ${partitioned.code} on the experiment keychain, which this run created with an empty password`,
+      `the ${id} identity could not be partitioned for codesign: set-key-partition-list ("apple:" must be in the key's partition list, security.1:810; the write needs the keychain's password, security.1:736-742) exited ${partitioned.code} on the signing keychain this run created with an empty password`,
     );
   }
   console.log(`[identity ${id}] set-key-partition-list prints: ${observedHead(partitioned, 3)}`);
@@ -1548,18 +1686,23 @@ async function signBundle(app: string, identity: string, keychain: string | null
   return boundedTool("codesign", args, SIGN_TIMEOUT_MS);
 }
 
-async function signAttempt(arm: ArmRecord, where: string, app: string, identity: string, keychain: string | null): Promise<RunResult & { timedOut: boolean }> {
-  const signed = await signBundle(app, identity, keychain);
-  arm.signs.push({ where, signer: identity, exit: signed.code, output: observedTail(signed, OUTPUT_TAIL_LINES) });
-  console.log(`[sign ${where}] codesign --force --deep --sign ${identity}${keychain === null ? "" : " --keychain <keychain>"} exited ${signed.code}: ${observedTail(signed, OUTPUT_TAIL_LINES)}`);
-  return signed;
+async function signAttempt(ctx: Ctx, arm: ArmRecord, where: string, app: string, identity: string, keychain: string | null): Promise<RunResult & { timedOut: boolean }> {
+  const entry = await addSigningSearchEntry(ctx, where);
+  try {
+    const signed = await signBundle(app, identity, keychain);
+    arm.signs.push({ where, signer: identity, exit: signed.code, output: observedTail(signed, OUTPUT_TAIL_LINES) });
+    console.log(`[sign ${where}] codesign --force --deep --sign ${identity}${keychain === null ? "" : " --keychain <signing keychain>"} exited ${signed.code}: ${observedTail(signed, OUTPUT_TAIL_LINES)}`);
+    return signed;
+  } finally {
+    if (entry !== null) await restoreSigningSearchEntry(ctx, entry);
+  }
 }
 
 async function signOrFail(ctx: Ctx, arm: ArmRecord, where: string, identity: Identity, app: string): Promise<void> {
-  let signed = await signAttempt(arm, where, app, identity.sha1, ctx.keychain);
+  let signed = await signAttempt(ctx, arm, where, app, identity.sha1, ctx.signingKeychain);
   if (signed.code !== 0 && !signed.timedOut) {
     console.log(`[sign ${where}] retrying with the certificate's CN ${JSON.stringify(identity.cn)} (a CN may name another identity; the SHA-1 above cannot)`);
-    signed = await signAttempt(arm, where, app, identity.cn, ctx.keychain);
+    signed = await signAttempt(ctx, arm, where, app, identity.cn, ctx.signingKeychain);
   }
   if (signed.code !== 0) {
     identity.couldNotSign = true;
@@ -1613,6 +1756,8 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
   const service = `passquest-keychain-experiment-${process.pid}-${Date.now()}-${id}`;
   const arm: ArmRecord = {
     id,
+    signingKeychain: "none",
+    credentialKeychain: ctx.keychainMode,
     signs: [],
     identity: { kind: id === "adhoc" ? "none" : id },
     service,
@@ -1903,7 +2048,7 @@ async function thirdBuild(
     throw new ArmFailure("the third build's version could not be bumped");
   }
   const signer = spec.identity === null ? "-" : spec.identity.sha1;
-  const signed = await signAttempt(arm, `${arm.id}-c`, cApp, signer, spec.identity === null ? null : ctx.keychain);
+  const signed = await signAttempt(ctx, arm, `${arm.id}-c`, cApp, signer, spec.identity === null ? null : ctx.signingKeychain);
   if (
     !ctx.checker.check(
       `third ${arm.id}: sign the bumped bundle`,
@@ -2058,7 +2203,7 @@ async function releaseExperimentKeychain(checker: Checker, record: ExperimentRec
 }
 
 /** The login variant's finally: the synthetic item is here by design, so its deletion is the cleanup, not a failure. */
-async function sweepLoginKeychain(checker: Checker, record: ExperimentRecord, keychain: string, identitiesImported: readonly { cn: string }[]): Promise<void> {
+async function sweepLoginKeychain(checker: Checker, record: ExperimentRecord, keychain: string): Promise<void> {
   const after = await keychainSnapshot();
   record.keychain.defaultAfter = after.default;
   record.keychain.searchListAfter = after.list;
@@ -2098,16 +2243,6 @@ async function sweepLoginKeychain(checker: Checker, record: ExperimentRecord, ke
       }
     }
   }
-  for (const identity of identitiesImported) {
-    const deletion = await boundedTool("security", ["delete-identity", "-c", identity.cn, keychain], CLEANUP_TIMEOUT_MS);
-    record.keychain.identityCleanup.push({ cn: identity.cn, exit: deletion.code });
-    console.log(`[cleanup] security delete-identity -c ${JSON.stringify(identity.cn)} <keychain> -> exit ${deletion.code}${deletion.timedOut ? ` (killed after ${CLEANUP_TIMEOUT_MS / 1000} s)` : ""}`);
-    if (deletion.code !== 0) {
-      checker.fail(
-        `the throwaway identity ${JSON.stringify(identity.cn)} could not be deleted from the login keychain (exit ${deletion.code}${deletion.timedOut ? `, killed after ${CLEANUP_TIMEOUT_MS / 1000} s on a prompt nobody can answer` : ""})`,
-      );
-    }
-  }
 }
 
 async function runExperiment(options: Options): Promise<number> {
@@ -2144,13 +2279,14 @@ async function runExperiment(options: Options): Promise<number> {
       loginPath,
       loginResidue: [],
       loginCleanup: [],
-      identityCleanup: [],
+      signing: { path: "", password: "empty (see the tool header)", created: false, uses: [], deleted: null, deleteExit: null },
     },
     guards: { buildsDiffer: null, aCdhash: "", bCdhash: "", log: { prints: 0, keyBytes: 0 } },
     arms: [],
     failures: [],
     notes: [
-      "The key is recorded only as its SHA-256; the launch scripts that carried it for the window are removed after each launch, and the cleanup deletes the experiment keychain (experiment variant) or every synthetic item and throwaway identity the arm left in the login keychain (login variant).",
+      "The key is recorded only as its SHA-256; the launch scripts that carried it for the window are removed after each launch, and the cleanup deletes the experiment keychain (experiment variant) or every synthetic item the arm left in the login keychain (login variant).",
+      "The signing identity never enters the app's keychain: it is imported into a temporary signing keychain this run creates (`keychain.signing`), which is added to the user search list for the codesign calls alone (each addition and its restoration are in `keychain.signing.uses` and in the log) and deleted in the finally, taking the identity and its key with it.",
       "A read is classified from what happened, never from a message: `read`, `refused`, `blocked` (the read did not complete and the one-probe-a-second SecurityAgent sampler saw a SecurityAgent while the launch ran) or `failed`; a `failed` read fails the run, so a green run is one where the experiment actually happened.",
       "Experiment variant: the login keychain is left as found — each arm's service is looked up there before and after the arm (the lookup's exit code only, never -g, which would withdraw the secret), and the finally deletes any hit and fails the run. Login variant: the item lives there by design, and the finally deletes it and records the exit.",
       "The simulated allow adds a partition id only: when an item carries no partition entry (partitions empty, partitionEntry false) the allow is recorded as skipped, the application-list half of a learner's Always Allow is then not simulated, and in the login variant a keychain password that cannot be presented is recorded as the attempt's exit in the skip reason.",
@@ -2159,8 +2295,7 @@ async function runExperiment(options: Options): Promise<number> {
   };
   // macOS resolves /var to /private/var in security's output, so the tool carries one resolved form from here on.
   const temp = realpathSync(mkdtempSync(path.join(tmpdir(), "passquest-keychain-experiment-")));
-  const keychain = keychainMode === "experiment" ? path.join(temp, "experiment.keychain") : loginPath;
-  const identitiesImported: { cn: string }[] = [];
+  const keychain = keychainPaths(keychainMode, loginPath, temp).credential;
   const registry = path.join(temp, "registry.json");
   const provider = startProviderStub();
   writeStubRegistry(registry, provider.endpoint);
@@ -2179,9 +2314,9 @@ async function runExperiment(options: Options): Promise<number> {
       record.keychain.searchListBefore = before.list;
       console.log(`[keychain] login variant: the user default is ${before.default ?? "(none)"}; the search list is ${(before.list ?? []).join(", ") || "(none)"}`);
       checker.check(
-        "keychain: the user default keychain is the login keychain",
+        "credential keychain: the login variant stores into the runner's login keychain",
         before.default === keychain,
-        `security default-keychain -d user -> ${before.default ?? "(none)"}`,
+        `security default-keychain -d user -> ${before.default ?? "(none)"}, the login keychain the app stores its credential in`,
         `the runner's default keychain is ${before.default ?? "(none)"}, not ${keychain}; the app would store where this run does not measure`,
       );
     }
@@ -2220,7 +2355,7 @@ async function runExperiment(options: Options): Promise<number> {
       );
     }
 
-    const ctx: Ctx = { keychainMode, temp, keychain, provider, registry, record, checker, a, b, stopReason: null, guardsDone: false, loginPath, identitiesImported };
+    const ctx: Ctx = { keychainMode, temp, keychain, provider, registry, record, checker, a, b, stopReason: null, guardsDone: false, loginPath, signingKeychain: null };
     const id = options.arms[0]!;
     console.log(`\n[arm ${id}] starting`);
     try {
@@ -2242,17 +2377,11 @@ async function runExperiment(options: Options): Promise<number> {
     else throw error;
   } finally {
     provider.stop();
+    await releaseSigningKeychain(checker, record);
     if (keychainMode === "experiment") {
-      for (const identity of identitiesImported) {
-        const deletion = await boundedTool("security", ["delete-identity", "-c", identity.cn, keychain], CLEANUP_TIMEOUT_MS);
-        record.keychain.identityCleanup.push({ cn: identity.cn, exit: deletion.code });
-        console.log(
-          `[cleanup] security delete-identity -c ${JSON.stringify(identity.cn)} <keychain> -> exit ${deletion.code}; the keychain is deleted next, so a failure here leaves nothing behind`,
-        );
-      }
       await releaseExperimentKeychain(checker, record, keychain);
     } else {
-      await sweepLoginKeychain(checker, record, keychain, identitiesImported);
+      await sweepLoginKeychain(checker, record, keychain);
     }
     const leaks = filesUnder(temp)
       .filter((file) => path.resolve(file) !== path.resolve(keychain))

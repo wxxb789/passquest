@@ -516,6 +516,24 @@ comments reduced to the keep-list; the design intent they carried is recorded he
     with the CN kept as the retry; every codesign attempt and its output are recorded in the arm's `signs`, and a
     failed sign prints the last 60 output lines. `security find-certificate -a -Z`, whose only purpose was the SHA-1,
     is gone.
+18. **P1 the identity signs from a keychain of its own (run 44986005367's finding).** That run's `login` job imported the
+    throwaway identity into the login keychain, where `security set-key-partition-list -S apple-tool:,apple: -s -k ""`
+    exited 1 — the login keychain's password is not available to a run — so `codesign` could not use the key and the arm
+    stopped before its read (`identity.partitionList.exit: 1`, `arms[0].read.outcome: not-run`); its `experiment` job
+    signed and read fine (`partitionList.exit: 0`, `read.outcome: read`, `drSame: true`). The signing identity never needs
+    to live in the keychain the app stores its credential in: every identity arm now imports into a temporary signing
+    keychain this run creates with an empty password (`keychain.signing`), adds it to the user search list for each
+    `codesign` call alone (each addition and its restoration are recorded in `keychain.signing.uses` and logged, and both
+    variants end with the default keychain and the search list as they began), signs with the identity's SHA-1 through
+    `codesign --force --deep --sign <SHA-1> --keychain <signing keychain>`, and deletes the keychain — identity and key
+    with it — in the finally (the workflow's `always()` backstop deletes a leftover keychain of either name). The arm
+    records `signingKeychain: "temporary" | "none"` and `credentialKeychain: "<experiment|login>"`, and two checks hold
+    the split: after the import, `security find-identity -p codesigning` on the app's keychain must list nothing this arm
+    imported (`identity <arm>: the app's keychain holds nothing this arm imported`), and the login variant asserts the
+    app's credential keychain is the runner's login keychain as `security default-keychain -d user` prints it.
+    `--keychain` now chooses only where the app stores and reads its credential; the simulated allow's
+    `set-generic-password-partition-list` remains the one partition-list write a login-mode run cannot make, and its exit
+    stays that skip's reason.
 
 ## Status
 

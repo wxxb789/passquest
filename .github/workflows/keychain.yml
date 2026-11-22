@@ -179,7 +179,7 @@ jobs:
             --out "$RUNNER_TEMP/keychain-record.json" --arms ${{ matrix.arm }} --keychain ${{ matrix.keychain }} \
             2>&1 | tee "$RUNNER_TEMP/keychain-experiment.log"
 
-      # Backstop for a run killed before the tool's own finally: delete a leftover experiment
+      # Backstop for a run killed before the tool's own finally: delete a leftover app or signing
       # keychain and restore the login keychain as the user default and sole search entry.
       - name: Delete the throwaway identity files
         if: ${{ always() }}
@@ -199,11 +199,16 @@ jobs:
             [ -n "$base" ] || continue
             for tree in "$base"/passquest-keychain-experiment-*; do
               [ -d "$tree" ] || continue
-              if [ -e "$tree/experiment.keychain" ]; then
-                security delete-keychain "$tree/experiment.keychain" || true
+              leftover=""
+              for keychain in "$tree"/*.keychain; do
+                [ -e "$keychain" ] || continue
+                security delete-keychain "$keychain" || true
+                leftover="$keychain"
+              done
+              if [ -n "$leftover" ]; then
                 security default-keychain -d user -s "$login" || true
                 security list-keychains -d user -s "$login" || true
-                echo "keychain: deleted the leftover experiment keychain under $tree and restored $login"
+                echo "keychain: deleted the leftover keychains under $tree and restored $login"
               fi
               rm -rf "$tree"
               echo "keychain: removed the leftover tool directory $tree"
