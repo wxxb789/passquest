@@ -477,6 +477,31 @@ comments reduced to the keep-list; the design intent they carried is recorded he
     (`/private/var/folders/…` for `os.tmpdir()`'s `/var/folders/…`), which failed the "user default and sole
     search entry" check although the swap had taken (run 44928776617); `realpathSync` on the mkdtemp result makes
     the record and every comparison carry one form.
+15. **P1 the experiment runs one arm against one keychain per job (run 44931358398's finding).** That run's
+    ad-hoc read landed *blocked* — a SecurityAgent was up in 20 of 23 probes, the window never rendered the
+    provider row, the item carried no partition entry and refuses by application — and the arm guard stopped the
+    run before the self-signed arm. The workflow is now a `fail-fast: false` matrix `arm: [adhoc, self-signed]` ×
+    `keychain: [experiment, login]`, each job calls the tool with exactly one `--arms <arm>` and one
+    `--keychain <mode>` and uploads `keychain-record-<arm>-<keychain>`; a SecurityAgent a blocked read left is
+    recorded (pids before and after the kill, `read.securityAgent.respawned`) and killed as cleanup instead of
+    stopping anything, because nothing follows in a one-arm job; and `codesign` and the finally's deletes are
+    bounded, so a Keychain prompt nobody can answer can never hold a job to its own 90-minute timeout (a
+    cancelled job uploads no artifact). The simulated allow and the third build C keep their amendment-7 rule
+    (they run for every read that was not a success), and the allow is skipped, with the write's exit recorded,
+    where a keychain password the run does not hold is needed.
+16. **P1 the login variant stores where a learner does.** It creates and switches nothing: it records
+    `security default-keychain -d user` and `security list-keychains -d user` first, checks the default is the
+    login keychain (`keychain.variant: login`), the app stores into it, and the finally deletes every synthetic
+    item (`security delete-generic-password -s <service> -a <account>`) and every throwaway identity the arm
+    imported into it (`security delete-identity -c <CN>`, run in both variants; in the experiment variant the
+    keychain's own deletion is what removes it), with the exits in `keychain.loginCleanup` and
+    `keychain.identityCleanup`. Both partition-list writes the login variant needs — the identity's
+    `set-key-partition-list` and the allow's `set-generic-password-partition-list` — carry an empty password
+    because the login keychain's real one is not available to a run; a failed identity write stops that arm
+    before it signs (the record names the man page reason: `security.1:810`, `:736-742`) rather than letting
+    `codesign` wait on a prompt, and a failed allow write is recorded as the skip's reason. On a GitHub runner
+    whose login keychain has a non-empty password the login×self-signed combination can therefore be
+    unmeasurable; the record states which happened, and that is the answer the login variant exists to give.
 
 ## Status
 

@@ -22,20 +22,32 @@ const ACCOUNT = `api-key:${STUB_PROVIDER}`;
 const UNREACHABLE_ANKI = "http://127.0.0.1:1";
 const ARMS = ["adhoc", "self-signed", "project"] as const;
 type ArmId = (typeof ARMS)[number];
+const KEYCHAINS = ["experiment", "login"] as const;
+type KeychainMode = (typeof KEYCHAINS)[number];
 const AGENT_PROBE_MS = 1000;
 /** 5 s inside the launch helper's hard timeout, so the helper's kill stays the backstop of a hung launch. */
 const WATCHDOG_KILL_MS = LAUNCH_TIMEOUT_MS - 5000;
+/** A codesign that waits on a Keychain prompt nobody can answer must not hold the job to its own timeout. */
+const SIGN_TIMEOUT_MS = 60_000;
+/** The same bound for the finally's deletes, which can meet a prompt on items the run did not create. */
+const CLEANUP_TIMEOUT_MS = 30_000;
 const OUTPUT_TAIL_LINES = 60;
 
 const USAGE = `Run the goal-0018 P1 Keychain experiment on this macOS machine.
 
   mise exec -- bun harness/tools/keychain-experiment.ts --a-root <dir> --b-root <dir> --out <file> \\
-      [--arms ${ARMS.join(",")}]
+      --arms <one of ${ARMS.join(", ")}> --keychain <experiment|login>
 
   --a-root <dir>  the older tree; its own harness must have run \`bun run package\`
   --b-root <dir>  the tree B (usually the pull request head); the same
   --out <file>    where the JSON record is written (always written, also on a failed run)
-  --arms <list>   the arms to run, in the given order; default ${ARMS.join(",")}
+  --arms <arm>    the one arm to run: ${ARMS.join(", ")}
+  --keychain <mode>
+      experiment  create a throwaway keychain under the temp tree, make it the user default and the
+                  sole search entry for the run, and restore and delete it in the finally
+      login       leave the keychains alone: the app stores into the runner's default login keychain,
+                  as a learner's would, and the finally deletes every synthetic item and every
+                  throwaway identity the arm left there
   --self-check    run the parser, requirement, guard and classifier cases over fixtures (any OS)
   --help          this text
 
@@ -50,24 +62,30 @@ An arm whose material is absent is recorded as skipped by name: a fork pull requ
 project secrets, so the project arm is the normal skip. Every other skip fails the run — the
 self-signed arm's material always exists on the runner the workflow builds it for.
 
+The login keychain's password is not available to a login-mode run, so the partition-list writes it
+must make (security set-key-partition-list, security set-generic-password-partition-list) carry an
+empty password and their exit is recorded; when codesign would need the list that could not be
+written, the arm fails with that reason instead of waiting on a prompt.
+
 Exit codes: 0 every arm and guard passed (the project arm's secret-driven skip is not a failure), 1
 a guard or an arm failed, an arm selected for this run did not reach its read step, or a read came
 back \`failed\` (the record names it and the failure lines are printed; a SecurityAgent a read left
-behind fails its arm by design), 2 usage or the wrong platform. This tool never runs on Windows or
-Linux.`;
+behind is recorded and killed, never a failure — one arm runs per job), 2 usage or the wrong
+platform. This tool never runs on Windows or Linux.`;
 
 interface Options {
   aRoot: string;
   bRoot: string;
   out: string;
   arms: ArmId[];
+  keychain: KeychainMode | null;
   selfCheck: boolean;
   help: boolean;
   error: string | null;
 }
 
 function parseArgs(argv: readonly string[]): Options {
-  const options: Options = { aRoot: "", bRoot: "", out: "", arms: [...ARMS], selfCheck: false, help: false, error: null };
+  const options: Options = { aRoot: "", bRoot: "", out: "", arms: [], keychain: null, selfCheck: false, help: false, error: null };
   const arms: ArmId[] = [];
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index] ?? "";
@@ -76,27 +94,33 @@ function parseArgs(argv: readonly string[]): Options {
       options.selfCheck = true;
       continue;
     }
-    if (arg === "--a-root" || arg === "--b-root" || arg === "--out" || arg === "--arms") {
+    if (arg === "--a-root" || arg === "--b-root" || arg === "--out" || arg === "--arms" || arg === "--keychain") {
       const next = argv[++index];
       if (next === undefined || next === "") return { ...options, error: `${arg} needs a value` };
       if (arg === "--a-root") options.aRoot = next;
       else if (arg === "--b-root") options.bRoot = next;
       else if (arg === "--out") options.out = next;
-      else {
+      else if (arg === "--keychain") {
+        if (!(KEYCHAINS as readonly string[]).includes(next)) return { ...options, error: `--keychain ${next} is not one of ${KEYCHAINS.join(", ")}` };
+        options.keychain = next as KeychainMode;
+      } else {
         for (const name of next.split(",")) {
           if (!(ARMS as readonly string[]).includes(name)) return { ...options, error: `--arms ${name} is not one of ${ARMS.join(", ")}` };
-          if (!arms.includes(name as ArmId)) arms.push(name as ArmId);
+          arms.push(name as ArmId);
         }
+        if (arms.length > 1) return { ...options, error: `--arms takes exactly one arm (${arms.join(", ")} given); this tool runs one arm per job, against one keychain` };
       }
       continue;
     }
     return { ...options, error: `unknown argument '${arg}'` };
   }
-  if (arms.length > 0) options.arms = arms;
+  options.arms = arms;
   if (!options.selfCheck && !options.help) {
     if (options.aRoot === "") return { ...options, error: "--a-root <dir> is required" };
     if (options.bRoot === "") return { ...options, error: "--b-root <dir> is required" };
     if (options.out === "") return { ...options, error: "--out <file> is required" };
+    if (options.arms.length === 0) return { ...options, error: `--arms <one of ${ARMS.join(", ")}> is required` };
+    if (options.keychain === null) return { ...options, error: `--keychain <${KEYCHAINS.join("|")}> is required` };
   }
   return options;
 }
@@ -173,6 +197,36 @@ function childEnv(extra: Record<string, string> = {}): Record<string, string> {
 
 async function tool(command: string, args: readonly string[], extra: Record<string, string> = {}): Promise<RunResult> {
   return loggedRun(command, [...args], { env: childEnv(extra), replaceEnv: true });
+}
+
+/**
+ * `tool` under a deadline: a command waiting on a Keychain prompt nobody can answer would hold the job to its
+ * own 90-minute timeout and the record would never be written (a cancelled job runs no upload step).
+ */
+async function boundedTool(command: string, args: readonly string[], timeoutMs: number): Promise<RunResult & { timedOut: boolean }> {
+  const shown = [command, ...args].map((arg) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(arg) ? arg : JSON.stringify(arg)));
+  console.log(`[run] ${shown.join(" ")}`);
+  let proc: Bun.Subprocess;
+  try {
+    proc = Bun.spawn({ cmd: [command, ...args], stdin: "ignore", stdout: "pipe", stderr: "pipe", env: childEnv() });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`[run] exit 127 (could not spawn: ${message})`);
+    return { code: 127, stdout: "", stderr: message, timedOut: false };
+  }
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void killTree(proc.pid);
+  }, timeoutMs);
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout as ReadableStream).text(),
+    new Response(proc.stderr as ReadableStream).text(),
+  ]);
+  const code = await proc.exited;
+  clearTimeout(timer);
+  console.log(`[run] exit ${code}${timedOut ? ` (killed after ${timeoutMs / 1000} s: the command waited on a Keychain prompt nobody can answer)` : ""}`);
+  return { code, stdout, stderr, timedOut };
 }
 
 async function sha256File(file: string): Promise<string> {
@@ -665,6 +719,30 @@ const SELF_CASES: readonly SelfCase[] = [
       return null;
     },
   },
+  {
+    name: "one arm and one keychain per run",
+    run: () => {
+      const run = parseArgs(["--a-root", "a", "--b-root", "b", "--out", "o", "--arms", "adhoc", "--keychain", "login"]);
+      if (run.error !== null) return `a valid one-arm login run was rejected: ${run.error}`;
+      if (run.arms.join(",") !== "adhoc" || run.keychain !== "login") return `parsed arms=${run.arms.join(",")} keychain=${String(run.keychain)}`;
+      if (parseArgs(["--a-root", "a", "--b-root", "b", "--out", "o", "--arms", "adhoc,self-signed", "--keychain", "login"]).error === null) return "two arms were accepted";
+      if (parseArgs(["--a-root", "a", "--b-root", "b", "--out", "o", "--arms", "adhoc", "--keychain", "keychain"]).error === null) return "an unknown --keychain was accepted";
+      if (parseArgs(["--a-root", "a", "--b-root", "b", "--out", "o", "--keychain", "login"]).error === null) return "a run without --arms was accepted";
+      if (parseArgs(["--a-root", "a", "--b-root", "b", "--out", "o", "--arms", "adhoc"]).error === null) return "a run without --keychain was accepted";
+      return null;
+    },
+  },
+  {
+    name: "a SecurityAgent record tells a launchd respawn from the same process",
+    run: () => {
+      const before = ["7557 /System/Library/Frameworks/Security.framework/Versions/A/MachServices/SecurityAgent.bundle/Contents/MacOS/SecurityAgent"];
+      const after = ["8112 /System/Library/Frameworks/Security.framework/Versions/A/MachServices/SecurityAgent.bundle/Contents/MacOS/SecurityAgent"];
+      if (!agentRespawned(before, after)) return "a new pid was not read as a respawn";
+      if (agentRespawned(before, before)) return "the same pid was read as a respawn";
+      if (agentRespawned(before, [])) return "an empty after-list was read as a respawn";
+      return agentRespawned([], after) ? null : "the first SecurityAgent seen was not read as a respawn";
+    },
+  },
 ];
 
 function selfCheck(): number {
@@ -796,6 +874,13 @@ interface SecurityAgentRecord {
   found: string[];
   killed: boolean;
   left: string[];
+  respawned: boolean;
+}
+
+interface PartitionListWrite {
+  command: string;
+  exit: number;
+  outputTail: string;
 }
 
 type ArmAllow =
@@ -816,7 +901,14 @@ type ArmAllow =
 
 interface ArmRecord {
   id: ArmId;
-  identity: { kind: "none" | "self-signed" | "project"; cn?: string; source?: string; sha1?: string; couldNotSign?: boolean };
+  identity: {
+    kind: "none" | "self-signed" | "project";
+    cn?: string;
+    source?: string;
+    sha1?: string;
+    couldNotSign?: boolean;
+    partitionList?: PartitionListWrite;
+  };
   skipped?: string;
   service: string;
   account: string;
@@ -849,6 +941,7 @@ interface ExperimentRecord {
   platform: { swVers: string; machine: string };
   runs: { a?: RootRecord; b?: RootRecord };
   keychain: {
+    variant: KeychainMode;
     path: string;
     password: string;
     defaultBefore: string | null;
@@ -860,6 +953,8 @@ interface ExperimentRecord {
     deleted: boolean;
     loginPath: string;
     loginResidue: { service: string; found: number; deleted: boolean }[];
+    loginCleanup: { service: string; lookedUp: number; deleted: number | null }[];
+    identityCleanup: { cn: string; exit: number }[];
   };
   guards: { buildsDiffer: boolean | null; aCdhash: string; bCdhash: string; log: { prints: number; keyBytes: number } };
   arms: ArmRecord[];
@@ -877,6 +972,7 @@ interface LaunchOutcome {
 }
 
 interface Ctx {
+  keychainMode: KeychainMode;
   temp: string;
   keychain: string;
   provider: ProviderStub;
@@ -888,6 +984,7 @@ interface Ctx {
   stopReason: string | null;
   guardsDone: boolean;
   loginPath: string;
+  identitiesImported: { cn: string }[];
 }
 
 class StopRun extends Error {}
@@ -1148,7 +1245,7 @@ function readLine(arm: ArmId, label: string, read: ReadRecord, expected: string)
 }
 
 async function dumpItem(ctx: Ctx, dir: string, label: string, service: string): Promise<{ record: ItemRecord; raw: DumpItem }> {
-  await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
+  if (ctx.keychainMode === "experiment") await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
   const result = await tool("security", ["dump-keychain", "-a", ctx.keychain]);
   const file = path.join(dir, `dump-${label}.txt`);
   writeFileSync(file, result.stdout);
@@ -1258,6 +1355,7 @@ interface Identity {
   findIdentity: string;
   couldNotSign: boolean;
   source: string;
+  partitionList: PartitionListWrite;
 }
 
 interface IdentityInput {
@@ -1311,7 +1409,7 @@ async function importP12(keychain: string, file: string, password: string): Prom
   return result;
 }
 
-async function importIdentity(ctx: Ctx, id: ArmId, input: IdentityInput, dir: string): Promise<Identity> {
+async function importIdentity(ctx: Ctx, arm: ArmRecord, id: ArmId, input: IdentityInput, dir: string): Promise<Identity> {
   if (input.password !== null && input.password !== "") signingPassphrases.push(input.password);
   let importable: string;
   let password = "";
@@ -1362,14 +1460,24 @@ async function importIdentity(ctx: Ctx, id: ArmId, input: IdentityInput, dir: st
     `security import exited ${imported.code} or imported no identity: ${observedTail(imported)}`,
   );
   if (imported.code !== 0 || importedCount === "0") throw new ArmFailure(`the ${id} identity could not be imported`);
+  if (input.cn !== null && input.cn !== "") ctx.identitiesImported.push({ cn: input.cn });
   const partitioned = await tool("security", ["set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", "", ctx.keychain]);
+  const partitionCommand = `security set-key-partition-list -S apple-tool:,apple: -s -k "" <keychain: ${ctx.keychainMode}>`;
+  const partitionList: PartitionListWrite = { command: partitionCommand, exit: partitioned.code, outputTail: tail(redact(resultText(partitioned).trim()), 3) };
+  arm.identity.partitionList = partitionList;
   ctx.checker.check(
     `identity ${id}: set-key-partition-list`,
     partitioned.code === 0,
-    `security set-key-partition-list -S apple-tool:,apple: -s -k "" -> exit 0`,
-    `security set-key-partition-list exited ${partitioned.code}: ${observedTail(partitioned)}`,
+    `${partitionCommand} -> exit 0`,
+    `${partitionCommand} exited ${partitioned.code}: ${observedTail(partitioned)}`,
   );
-  if (partitioned.code !== 0) throw new ArmFailure("codesign cannot use the imported key without its partition list");
+  if (partitioned.code !== 0) {
+    throw new ArmFailure(
+      ctx.keychainMode === "login"
+        ? `codesign cannot use the ${id} identity in the login keychain: "apple:" must be in the key's partition list for codesign (security.1:810) and the list can only be written with the keychain's password (security.1:736-742), which this run cannot present; without it codesign could only prompt, so the arm stops here`
+        : `the ${id} identity could not be partitioned for codesign: set-key-partition-list exited ${partitioned.code} on the experiment keychain, which this run created with an empty password`,
+    );
+  }
   console.log(`[identity ${id}] set-key-partition-list prints: ${observedHead(partitioned, 3)}`);
   const listed = await tool("security", ["find-identity", "-p", "codesigning", ctx.keychain]);
   console.log(`[identity ${id}] security find-identity -p codesigning -> exit ${listed.code}: ${observedHead(listed, 4)}`);
@@ -1388,16 +1496,17 @@ async function importIdentity(ctx: Ctx, id: ArmId, input: IdentityInput, dir: st
   const certificate = await tool("security", ["find-certificate", "-a", "-Z", "-c", cn, ctx.keychain]);
   const sha1 = /SHA-1 hash: ([0-9a-fA-F]{40})/.exec(certificate.stdout)?.[1]?.toLowerCase() ?? null;
   console.log(`[identity ${id}] imported (${imported.stdout.trim() || "(no output)"}); certificate SHA-1 ${sha1 ?? "(not printed)"}; signing as ${JSON.stringify(cn)}`);
-  return { cn, sha1, findIdentity: listed.stdout.trim(), couldNotSign: false, source: input.source };
+  if (input.cn === null || input.cn === "") ctx.identitiesImported.push({ cn });
+  return { cn, sha1, findIdentity: listed.stdout.trim(), couldNotSign: false, source: input.source, partitionList };
 }
 
-async function signBundle(app: string, identity: string): Promise<RunResult> {
-  return tool("codesign", ["--force", "--deep", "--sign", identity, app]);
+async function signBundle(app: string, identity: string): Promise<RunResult & { timedOut: boolean }> {
+  return boundedTool("codesign", ["--force", "--deep", "--sign", identity, app], SIGN_TIMEOUT_MS);
 }
 
 async function signOrFail(ctx: Ctx, arm: ArmRecord, identity: Identity, app: string): Promise<void> {
   let signed = await signBundle(app, identity.cn);
-  if (signed.code !== 0) {
+  if (signed.code !== 0 && !signed.timedOut) {
     console.log(`[sign ${arm.id}] codesign with ${JSON.stringify(identity.cn)} exited ${signed.code}: ${observedTail(signed)}`);
     if (identity.sha1 !== null) {
       console.log(`[sign ${arm.id}] retrying with the certificate's SHA-1 ${identity.sha1} (the plan's fallback)`);
@@ -1408,33 +1517,48 @@ async function signOrFail(ctx: Ctx, arm: ArmRecord, identity: Identity, app: str
     identity.couldNotSign = true;
     arm.identity.couldNotSign = true;
     ctx.checker.fail(
-      `arm ${arm.id}: the identity could not sign the installed bundle; security find-identity -p codesigning prints: ${identity.findIdentity || "(no output)"}; codesign's last output: ${observedTail(signed)}`,
+      `arm ${arm.id}: the identity could not sign the installed bundle${signed.timedOut ? ` (codesign was killed after ${SIGN_TIMEOUT_MS / 1000} s, so it was waiting on a Keychain prompt nobody can answer)` : ""}; security find-identity -p codesigning prints: ${identity.findIdentity || "(no output)"}; codesign's last output: ${observedTail(signed)}`,
     );
     throw new ArmFailure(`the ${arm.id} arm could not sign (could not sign is not a self-signed result)`);
   }
 }
 
+function securityAgents<T extends { command: string }>(items: readonly T[]): T[] {
+  return items.filter((entry) => (entry.command.split(" ")[0] ?? "").endsWith("/SecurityAgent") || entry.command === "SecurityAgent");
+}
+
+/** launchd holds SecurityAgent as an on-demand service: a pid after the kill that was not there before is a respawn. */
+function agentRespawned(found: readonly string[], left: readonly string[]): boolean {
+  const pids = new Set(found.map((line) => line.split(" ")[0]!));
+  return left.some((line) => !pids.has(line.split(" ")[0]!));
+}
+
+/** One arm per job: a SecurityAgent a read left behind is recorded (pids before and after the kill, respawned) and
+ * killed as cleanup — never a failure, because nothing that follows in the job needs it gone. */
 async function settleSecurityAgent(ctx: Ctx, arm: ArmRecord, into: ReadRecord): Promise<void> {
   const table = await listProcesses();
   if ("error" in table) {
     ctx.checker.fail(`arm ${arm.id}: the process table cannot be read after the ${into.outcome} read: ${table.error}`);
     return;
   }
-  const agents = table.items.filter((entry) => (entry.command.split(" ")[0] ?? "").endsWith("/SecurityAgent") || entry.command === "SecurityAgent");
+  const agents = securityAgents(table.items);
   if (agents.length === 0) {
-    into.securityAgent = { found: [], killed: false, left: [] };
+    into.securityAgent = { found: [], killed: false, left: [], respawned: false };
     console.log(`[agent ${arm.id}] no SecurityAgent after the ${into.outcome} read`);
     return;
   }
   const lines = agents.map((entry) => `${entry.pid} ${entry.command}`);
   console.log(`[agent ${arm.id}] SecurityAgent left by the ${into.outcome} read: ${lines.join(" | ")}; killing it (a prompt nobody could click), then re-checking`);
-  ctx.checker.fail(`arm ${arm.id}: a SecurityAgent was left by the ${into.outcome} read — ${lines.join(" | ")} — killed so the next arm starts clean (the plan's guard fails the arm)`);
   for (const entry of agents) await killTree(entry.pid);
   await sleep(1500);
   const again = await listProcesses();
-  const left = "error" in again ? [] : again.items.filter((entry) => (entry.command.split(" ")[0] ?? "").endsWith("/SecurityAgent") || entry.command === "SecurityAgent");
-  into.securityAgent = { found: lines, killed: true, left: left.map((entry) => `${entry.pid} ${entry.command}`) };
-  if (left.length > 0) throw new StopRun(`a SecurityAgent survived the kill: ${into.securityAgent.left.join(" | ")}; stopping before the next arm`);
+  const left = "error" in again ? [] : securityAgents(again.items).map((entry) => `${entry.pid} ${entry.command}`);
+  into.securityAgent = { found: lines, killed: true, left, respawned: agentRespawned(lines, left) };
+  console.log(
+    left.length === 0
+      ? `[agent ${arm.id}] no SecurityAgent after the kill`
+      : `[agent ${arm.id}] a SecurityAgent survived the kill: ${left.join(" | ")}; launchd respawns the daemon (${String(into.securityAgent.respawned)}), and one arm per job means this is recorded, not a stop`,
+  );
 }
 
 async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
@@ -1465,14 +1589,16 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
   try {
-    arm.login = { before: { service, exit: await loginLookup(service, ctx.loginPath) }, after: [] };
-    console.log(`[login ${id}] before the arm: the login keychain lookup for ${service} exited ${arm.login.before.exit} (0 would mean the item is already there)`);
+    if (ctx.keychainMode === "experiment") {
+      arm.login = { before: { service, exit: await loginLookup(service, ctx.loginPath) }, after: [] };
+      console.log(`[login ${id}] before the arm: the login keychain lookup for ${service} exited ${arm.login.before.exit} (0 would mean the item is already there)`);
+    }
     let identity: Identity | null = null;
     if (input !== null) {
-      identity = await importIdentity(ctx, id, input, dir);
-      arm.identity = { kind: input.kind, cn: identity.cn, source: identity.source, sha1: identity.sha1 ?? undefined };
+      identity = await importIdentity(ctx, arm, id, input, dir);
+      arm.identity = { kind: input.kind, cn: identity.cn, source: identity.source, sha1: identity.sha1 ?? undefined, partitionList: identity.partitionList };
     }
-    await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
+    if (ctx.keychainMode === "experiment") await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
 
     const prefix = path.join(dir, "install");
     const installedA = await installFromDmg(ctx, ctx.a.dmg, prefix, `${id}-a`);
@@ -1542,7 +1668,7 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
       `[state ${id}] A and B carry the same designated requirement: ${arm.drSame} (A ${arm.a.implied ? "implied " : ""}${arm.a.designatedRequirement}; B ${arm.b.implied ? "implied " : ""}${arm.b.designatedRequirement})`,
     );
 
-    await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
+    if (ctx.keychainMode === "experiment") await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
     ctx.provider.received.length = 0;
     const read = await launchWith(ctx, {
       binary: installedB.executable,
@@ -1658,11 +1784,17 @@ async function simulateAllow(
   const list = [...existing, bPartition].join(",");
   const set = await tool("security", ["set-generic-password-partition-list", "-S", list, "-k", "", "-s", service, "-a", ACCOUNT, ctx.keychain]);
   const command = `security set-generic-password-partition-list -S "${list}" -k "" -s ${service} -a ${ACCOUNT} <keychain>`;
+  if (set.code !== 0 && ctx.keychainMode === "login") {
+    const skip = `${command} exited ${set.code} (${observedHead(set, 2)}): the login keychain's password is not available to this run, so the partition half of a learner's allow cannot be written here, and the third build measures nothing about an unrecorded allow`;
+    arm.allow = { skipped: skip };
+    console.log(`[allow ${arm.id}] skipped: ${skip}`);
+    return;
+  }
   if (!ctx.checker.check(`allow ${arm.id}: add B's partition to the item`, set.code === 0, `${command} -> exit 0`, `${command} exited ${set.code}: ${observedTail(set)}`)) {
     throw new ArmFailure("the simulated allow could not add B's partition id");
   }
   console.log(`[allow ${arm.id}] ${command} (the learner's Always Allow records the requester's requirement and partition; a runner can click nothing, so this simulates the partition half)`);
-  await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
+  if (ctx.keychainMode === "experiment") await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
   const afterAllow = await dumpItem(ctx, dir, `${arm.id}-after-allow`, service);
   const applied = [...arm.itemAfterStore.partitions, bPartition].every((value) =>
     afterAllow.raw.partitions.some((stored) => stored.toLowerCase() === value.toLowerCase()),
@@ -1723,7 +1855,14 @@ async function thirdBuild(
   }
   const identity = arm.identity.kind === "none" ? "-" : (arm.identity.cn ?? "");
   const signed = await signBundle(cApp, identity);
-  if (!ctx.checker.check(`third ${arm.id}: sign the bumped bundle`, signed.code === 0, `codesign --force --deep --sign ${JSON.stringify(identity)} -> exit 0`, `codesign exited ${signed.code}: ${observedTail(signed)}`)) {
+  if (
+    !ctx.checker.check(
+      `third ${arm.id}: sign the bumped bundle`,
+      signed.code === 0,
+      `codesign --force --deep --sign ${JSON.stringify(identity)} -> exit 0`,
+      `codesign exited ${signed.code}${signed.timedOut ? ` (killed after ${SIGN_TIMEOUT_MS / 1000} s on a Keychain prompt nobody can answer)` : ""}: ${observedTail(signed)}`,
+    )
+  ) {
     throw new ArmFailure("the third build could not be signed");
   }
   rmSync(installed.app, { recursive: true, force: true });
@@ -1822,7 +1961,109 @@ function writeRecord(record: ExperimentRecord, checker: Checker, stopReason: str
   console.log(`[record] wrote ${out} (${Buffer.byteLength(text, "utf8")} bytes, status ${record.status})`);
 }
 
+async function releaseExperimentKeychain(checker: Checker, record: ExperimentRecord, keychain: string): Promise<void> {
+  if (record.keychain.defaultBefore !== null) {
+    const restored = await tool("security", ["default-keychain", "-d", "user", "-s", record.keychain.defaultBefore]);
+    console.log(`[cleanup] restored the default keychain to ${record.keychain.defaultBefore} (exit ${restored.code})`);
+  }
+  if (record.keychain.searchListBefore !== null && record.keychain.searchListBefore.length > 0) {
+    const restored = await tool("security", ["list-keychains", "-d", "user", "-s", ...record.keychain.searchListBefore]);
+    console.log(`[cleanup] restored the user search list to ${record.keychain.searchListBefore.join(", ")} (exit ${restored.code})`);
+  }
+  const after = await keychainSnapshot();
+  record.keychain.defaultAfter = after.default;
+  record.keychain.searchListAfter = after.list;
+  if (record.keychain.defaultBefore !== null) {
+    checker.check(
+      "keychain: the user default keychain was restored",
+      after.default === record.keychain.defaultBefore,
+      `default ${after.default ?? "(none)"}, as before the run`,
+      `the default keychain is ${after.default ?? "(none)"}; this run found ${record.keychain.defaultBefore}`,
+    );
+  }
+  if (record.keychain.searchListBefore !== null) {
+    const want = record.keychain.searchListBefore.join(", ");
+    checker.check(
+      "keychain: the user search list was restored",
+      (after.list ?? []).join(", ") === want,
+      `search list ${(after.list ?? []).join(", ") || "(none)"}, as before the run`,
+      `the search list is ${(after.list ?? []).join(", ") || "(none)"}; this run found ${want || "(empty)"}`,
+    );
+  }
+  const deleted = await tool("security", ["delete-keychain", keychain]);
+  record.keychain.deleted = deleted.code === 0;
+  console.log(`[cleanup] deleted the experiment keychain ${keychain} (exit ${deleted.code})`);
+  for (const arm of record.arms) {
+    if (arm.skipped !== undefined) continue;
+    for (const service of armServices(arm)) {
+      const found = await loginLookup(service, record.keychain.loginPath);
+      if (found !== 0) continue;
+      const deletion = await tool("security", ["delete-generic-password", "-s", service, record.keychain.loginPath]);
+      record.keychain.loginResidue.push({ service, found, deleted: deletion.code === 0 });
+      checker.fail(
+        `the login keychain held the synthetic item ${service} (find-generic-password exit 0); it was deleted (exit ${deletion.code}) — the item should have been in the experiment keychain`,
+      );
+    }
+  }
+  console.log(`[cleanup] the login keychain ${record.keychain.loginPath}: ${record.keychain.loginResidue.length} hit(s) (a hit is deleted and fails the run)`);
+}
+
+/** The login variant's finally: the synthetic item is here by design, so its deletion is the cleanup, not a failure. */
+async function sweepLoginKeychain(checker: Checker, record: ExperimentRecord, keychain: string, identitiesImported: readonly { cn: string }[]): Promise<void> {
+  const after = await keychainSnapshot();
+  record.keychain.defaultAfter = after.default;
+  record.keychain.searchListAfter = after.list;
+  if (record.keychain.defaultBefore !== null) {
+    checker.check(
+      "keychain: the run did not switch the user default keychain",
+      after.default === record.keychain.defaultBefore,
+      `default ${after.default ?? "(none)"}, as before the run`,
+      `the default keychain is ${after.default ?? "(none)"}; this run found ${record.keychain.defaultBefore}`,
+    );
+  }
+  if (record.keychain.searchListBefore !== null) {
+    const want = record.keychain.searchListBefore.join(", ");
+    checker.check(
+      "keychain: the run did not switch the user search list",
+      (after.list ?? []).join(", ") === want,
+      `search list ${(after.list ?? []).join(", ") || "(none)"}, as before the run`,
+      `the search list is ${(after.list ?? []).join(", ") || "(none)"}; this run found ${want || "(empty)"}`,
+    );
+  }
+  for (const arm of record.arms) {
+    if (arm.skipped !== undefined) continue;
+    for (const service of armServices(arm)) {
+      const lookedUp = await loginLookup(service, keychain);
+      if (lookedUp !== 0) {
+        record.keychain.loginCleanup.push({ service, lookedUp, deleted: null });
+        console.log(`[cleanup] the login keychain: ${service} -> lookup exit ${lookedUp}, nothing to delete`);
+        continue;
+      }
+      const deletion = await boundedTool("security", ["delete-generic-password", "-s", service, "-a", ACCOUNT, keychain], CLEANUP_TIMEOUT_MS);
+      record.keychain.loginCleanup.push({ service, lookedUp, deleted: deletion.code });
+      console.log(`[cleanup] the login keychain: security delete-generic-password -s ${service} -a ${ACCOUNT} <keychain> -> exit ${deletion.code}${deletion.timedOut ? ` (killed after ${CLEANUP_TIMEOUT_MS / 1000} s)` : ""}`);
+      if (deletion.code !== 0) {
+        checker.fail(
+          `the synthetic item ${service} could not be deleted from the login keychain (exit ${deletion.code}${deletion.timedOut ? `, killed after ${CLEANUP_TIMEOUT_MS / 1000} s on a prompt nobody can answer` : ""})`,
+        );
+      }
+    }
+  }
+  for (const identity of identitiesImported) {
+    const deletion = await boundedTool("security", ["delete-identity", "-c", identity.cn, keychain], CLEANUP_TIMEOUT_MS);
+    record.keychain.identityCleanup.push({ cn: identity.cn, exit: deletion.code });
+    console.log(`[cleanup] security delete-identity -c ${JSON.stringify(identity.cn)} <keychain> -> exit ${deletion.code}${deletion.timedOut ? ` (killed after ${CLEANUP_TIMEOUT_MS / 1000} s)` : ""}`);
+    if (deletion.code !== 0) {
+      checker.fail(
+        `the throwaway identity ${JSON.stringify(identity.cn)} could not be deleted from the login keychain (exit ${deletion.code}${deletion.timedOut ? `, killed after ${CLEANUP_TIMEOUT_MS / 1000} s on a prompt nobody can answer` : ""})`,
+      );
+    }
+  }
+}
+
 async function runExperiment(options: Options): Promise<number> {
+  const keychainMode = options.keychain;
+  if (keychainMode === null) throw new Error("--keychain is required; parseArgs rejects a run without it");
   const checker = new Checker();
   const printed: string[] = [];
   for (const level of ["log", "error"] as const) {
@@ -1841,8 +2082,9 @@ async function runExperiment(options: Options): Promise<number> {
     platform: { swVers: "", machine: "" },
     runs: {},
     keychain: {
+      variant: keychainMode,
       path: "",
-      password: "empty (see the tool header)",
+      password: keychainMode === "experiment" ? "empty (see the tool header)" : "not known to this run (the login keychain)",
       defaultBefore: null,
       searchListBefore: null,
       defaultDuring: null,
@@ -1852,21 +2094,24 @@ async function runExperiment(options: Options): Promise<number> {
       deleted: false,
       loginPath,
       loginResidue: [],
+      loginCleanup: [],
+      identityCleanup: [],
     },
     guards: { buildsDiffer: null, aCdhash: "", bCdhash: "", log: { prints: 0, keyBytes: 0 } },
     arms: [],
     failures: [],
     notes: [
-      "The key is recorded only as its SHA-256; the launch scripts that carried it for the window are removed after each launch, and the keychain is deleted with the run.",
+      "The key is recorded only as its SHA-256; the launch scripts that carried it for the window are removed after each launch, and the cleanup deletes the experiment keychain (experiment variant) or every synthetic item and throwaway identity the arm left in the login keychain (login variant).",
       "A read is classified from what happened, never from a message: `read`, `refused`, `blocked` (the read did not complete and the one-probe-a-second SecurityAgent sampler saw a SecurityAgent while the launch ran) or `failed`; a `failed` read fails the run, so a green run is one where the experiment actually happened.",
-      "The login keychain is left as found: each arm's service is looked up there before and after the arm (the lookup's exit code only, never -g, which would withdraw the secret), and the finally deletes any hit and fails the run.",
-      "The simulated allow adds a partition id only: when an item carries no partition entry (partitions empty, partitionEntry false) the allow is recorded as skipped, and the application-list half of a learner's Always Allow is then not simulated.",
+      "Experiment variant: the login keychain is left as found — each arm's service is looked up there before and after the arm (the lookup's exit code only, never -g, which would withdraw the secret), and the finally deletes any hit and fails the run. Login variant: the item lives there by design, and the finally deletes it and records the exit.",
+      "The simulated allow adds a partition id only: when an item carries no partition entry (partitions empty, partitionEntry false) the allow is recorded as skipped, the application-list half of a learner's Always Allow is then not simulated, and in the login variant a keychain password that cannot be presented is recorded as the attempt's exit in the skip reason.",
     ],
     status: "running",
   };
   // macOS resolves /var to /private/var in security's output, so the tool carries one resolved form from here on.
   const temp = realpathSync(mkdtempSync(path.join(tmpdir(), "passquest-keychain-experiment-")));
-  const keychain = path.join(temp, "experiment.keychain");
+  const keychain = keychainMode === "experiment" ? path.join(temp, "experiment.keychain") : loginPath;
+  const identitiesImported: { cn: string }[] = [];
   const registry = path.join(temp, "registry.json");
   const provider = startProviderStub();
   writeStubRegistry(registry, provider.endpoint);
@@ -1879,6 +2124,18 @@ async function runExperiment(options: Options): Promise<number> {
 
   let stopReason: string | null = null;
   try {
+    if (keychainMode === "login") {
+      const before = await keychainSnapshot();
+      record.keychain.defaultBefore = before.default;
+      record.keychain.searchListBefore = before.list;
+      console.log(`[keychain] login variant: the user default is ${before.default ?? "(none)"}; the search list is ${(before.list ?? []).join(", ") || "(none)"}`);
+      checker.check(
+        "keychain: the user default keychain is the login keychain",
+        before.default === keychain,
+        `security default-keychain -d user -> ${before.default ?? "(none)"}`,
+        `the runner's default keychain is ${before.default ?? "(none)"}, not ${keychain}; the app would store where this run does not measure`,
+      );
+    }
     const a = await inspectRoot(path.resolve(options.aRoot), "a", checker);
     const b = await inspectRoot(path.resolve(options.bRoot), "b", checker);
     record.runs = { a, b };
@@ -1886,48 +2143,45 @@ async function runExperiment(options: Options): Promise<number> {
       checker.fail(`A and B are the same commit ${a.commit}; an upgrade needs two`);
     }
 
-    const create = await tool("security", ["create-keychain", "-p", "", keychain]);
-    if (!checker.check("keychain: security create-keychain", create.code === 0, `security create-keychain -p "" ${keychain} -> exit 0`, `security create-keychain exited ${create.code}: ${observedTail(create)}`)) {
-      throw new StopRun("the experiment keychain could not be created");
-    }
-    const before = await keychainSnapshot();
-    record.keychain.defaultBefore = before.default;
-    record.keychain.searchListBefore = before.list;
-    console.log(`[keychain] before: default ${before.default ?? "(none)"}; search list ${(before.list ?? []).join(", ") || "(none)"}`);
-    const setDefault = await tool("security", ["default-keychain", "-d", "user", "-s", keychain]);
-    const setList = await tool("security", ["list-keychains", "-d", "user", "-s", keychain]);
-    checker.check(
-      "keychain: made the experiment keychain the user default and sole search entry",
-      setDefault.code === 0 && setList.code === 0,
-      `security default-keychain -s -> ${setDefault.code}; security list-keychains -s -> ${setList.code}`,
-      `security default-keychain exited ${setDefault.code}, security list-keychains exited ${setList.code}: ${observedTail(setDefault.code === 0 ? setList : setDefault)}`,
-    );
-    const during = await keychainSnapshot();
-    record.keychain.defaultDuring = during.default;
-    record.keychain.searchListDuring = during.list;
-    checker.check(
-      "keychain: the experiment keychain is the user default and the sole search entry",
-      during.default === keychain && (during.list ?? []).length === 1 && during.list?.[0] === keychain,
-      `default ${during.default ?? "(none)"}; search list ${(during.list ?? []).join(", ") || "(none)"}`,
-      `the app can still reach another store: default ${during.default ?? "(none)"}, search list ${(during.list ?? []).join(", ") || "(none)"}; the item would land somewhere this run does not measure`,
-    );
-
-    const ctx: Ctx = { temp, keychain, provider, registry, record, checker, a, b, stopReason: null, guardsDone: false, loginPath };
-    for (const id of options.arms) {
-      if (ctx.stopReason !== null) break;
-      console.log(`\n[arm ${id}] starting`);
-      try {
-        await runArm(ctx, id);
-      } catch (error) {
-        if (error instanceof StopRun) {
-          ctx.stopReason = error.message;
-          break;
-        }
-        throw error;
+    if (keychainMode === "experiment") {
+      const create = await tool("security", ["create-keychain", "-p", "", keychain]);
+      if (!checker.check("keychain: security create-keychain", create.code === 0, `security create-keychain -p "" ${keychain} -> exit 0`, `security create-keychain exited ${create.code}: ${observedTail(create)}`)) {
+        throw new StopRun("the experiment keychain could not be created");
       }
+      const before = await keychainSnapshot();
+      record.keychain.defaultBefore = before.default;
+      record.keychain.searchListBefore = before.list;
+      console.log(`[keychain] before: default ${before.default ?? "(none)"}; search list ${(before.list ?? []).join(", ") || "(none)"}`);
+      const setDefault = await tool("security", ["default-keychain", "-d", "user", "-s", keychain]);
+      const setList = await tool("security", ["list-keychains", "-d", "user", "-s", keychain]);
+      checker.check(
+        "keychain: made the experiment keychain the user default and sole search entry",
+        setDefault.code === 0 && setList.code === 0,
+        `security default-keychain -s -> ${setDefault.code}; security list-keychains -s -> ${setList.code}`,
+        `security default-keychain exited ${setDefault.code}, security list-keychains exited ${setList.code}: ${observedTail(setDefault.code === 0 ? setList : setDefault)}`,
+      );
+      const during = await keychainSnapshot();
+      record.keychain.defaultDuring = during.default;
+      record.keychain.searchListDuring = during.list;
+      checker.check(
+        "keychain: the experiment keychain is the user default and the sole search entry",
+        during.default === keychain && (during.list ?? []).length === 1 && during.list?.[0] === keychain,
+        `default ${during.default ?? "(none)"}; search list ${(during.list ?? []).join(", ") || "(none)"}`,
+        `the app can still reach another store: default ${during.default ?? "(none)"}, search list ${(during.list ?? []).join(", ") || "(none)"}; the item would land somewhere this run does not measure`,
+      );
+    }
+
+    const ctx: Ctx = { keychainMode, temp, keychain, provider, registry, record, checker, a, b, stopReason: null, guardsDone: false, loginPath, identitiesImported };
+    const id = options.arms[0]!;
+    console.log(`\n[arm ${id}] starting`);
+    try {
+      await runArm(ctx, id);
+    } catch (error) {
+      if (error instanceof StopRun) ctx.stopReason = error.message;
+      else throw error;
     }
     if (record.guards.buildsDiffer === null) {
-      checker.fail("guard: the two builds' cdhashes were never compared (no arm reached the pair guard), so the run's premise is unproven");
+      checker.fail("guard: the two builds' cdhashes were never compared (the arm did not reach the pair guard), so the run's premise is unproven");
     }
     for (const arm of record.arms) {
       if (arm.skipped === undefined || arm.id === "project") continue;
@@ -1939,52 +2193,18 @@ async function runExperiment(options: Options): Promise<number> {
     else throw error;
   } finally {
     provider.stop();
-    if (record.keychain.defaultBefore !== null) {
-      const restored = await tool("security", ["default-keychain", "-d", "user", "-s", record.keychain.defaultBefore]);
-      console.log(`[cleanup] restored the default keychain to ${record.keychain.defaultBefore} (exit ${restored.code})`);
-    }
-    if (record.keychain.searchListBefore !== null && record.keychain.searchListBefore.length > 0) {
-      const restored = await tool("security", ["list-keychains", "-d", "user", "-s", ...record.keychain.searchListBefore]);
-      console.log(`[cleanup] restored the user search list to ${record.keychain.searchListBefore.join(", ")} (exit ${restored.code})`);
-    }
-    const after = await keychainSnapshot();
-    record.keychain.defaultAfter = after.default;
-    record.keychain.searchListAfter = after.list;
-    if (record.keychain.defaultBefore !== null) {
-      checker.check(
-        "keychain: the user default keychain was restored",
-        after.default === record.keychain.defaultBefore,
-        `default ${after.default ?? "(none)"}, as before the run`,
-        `the default keychain is ${after.default ?? "(none)"}; this run found ${record.keychain.defaultBefore}`,
-      );
-    }
-    if (record.keychain.searchListBefore !== null) {
-      const want = record.keychain.searchListBefore.join(", ");
-      checker.check(
-        "keychain: the user search list was restored",
-        (after.list ?? []).join(", ") === want,
-        `search list ${(after.list ?? []).join(", ") || "(none)"}, as before the run`,
-        `the search list is ${(after.list ?? []).join(", ") || "(none)"}; this run found ${want || "(empty)"}`,
-      );
-    }
-    const deleted = await tool("security", ["delete-keychain", keychain]);
-    record.keychain.deleted = deleted.code === 0;
-    console.log(`[cleanup] deleted the experiment keychain ${keychain} (exit ${deleted.code})`);
-    let loginLookups = 0;
-    for (const arm of record.arms) {
-      if (arm.skipped !== undefined) continue;
-      for (const service of armServices(arm)) {
-        loginLookups += 1;
-        const found = await loginLookup(service, loginPath);
-        if (found !== 0) continue;
-        const deletion = await tool("security", ["delete-generic-password", "-s", service, loginPath]);
-        record.keychain.loginResidue.push({ service, found, deleted: deletion.code === 0 });
-        checker.fail(
-          `the login keychain held the synthetic item ${service} (find-generic-password exit 0); it was deleted (exit ${deletion.code}) — the item should have been in the experiment keychain`,
+    if (keychainMode === "experiment") {
+      for (const identity of identitiesImported) {
+        const deletion = await boundedTool("security", ["delete-identity", "-c", identity.cn, keychain], CLEANUP_TIMEOUT_MS);
+        record.keychain.identityCleanup.push({ cn: identity.cn, exit: deletion.code });
+        console.log(
+          `[cleanup] security delete-identity -c ${JSON.stringify(identity.cn)} <keychain> -> exit ${deletion.code}; the keychain is deleted next, so a failure here leaves nothing behind`,
         );
       }
+      await releaseExperimentKeychain(checker, record, keychain);
+    } else {
+      await sweepLoginKeychain(checker, record, keychain, identitiesImported);
     }
-    console.log(`[cleanup] the login keychain ${loginPath}: ${loginLookups} lookup(s), ${record.keychain.loginResidue.length} hit(s) (a hit is deleted and fails the run)`);
     const leaks = filesUnder(temp)
       .filter((file) => path.resolve(file) !== path.resolve(keychain))
       .map((file) => ({ file, count: keyOccurrences(file, generatedKeys) }))
@@ -1992,7 +2212,7 @@ async function runExperiment(options: Options): Promise<number> {
     if (leaks.length > 0) {
       checker.fail(`the key bytes reached the filesystem: ${leaks.map((entry) => `${entry.file} (${entry.count})`).join(", ")}`);
     } else {
-      console.log(`[guard] no key bytes under ${temp} outside the keychain itself (which the run deletes)`);
+      console.log(`[guard] no key bytes under ${temp} outside the keychain that holds them`);
     }
     const logHits = generatedKeys.filter((key) => printed.join("\n").includes(key));
     record.guards.log = { prints: printed.length, keyBytes: logHits.length };
