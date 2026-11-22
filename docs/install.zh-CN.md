@@ -88,6 +88,8 @@ xattr -dr com.apple.quarantine "/Applications/Pass Quest.app"
 
 不要为了绕过警告而全局关闭 Gatekeeper。上面的步骤只针对这一个应用，系统其余部分仍然受保护。
 
+**升级后的钥匙串提示。** 升级之后——无论是重新下载，还是 `brew upgrade`——macOS 会询问一次是否允许 Pass Quest 使用它保存在钥匙串里的模型密钥：输入登录密码，选择**始终允许**（Always Allow）。密钥不会丢：它一直留在钥匙串里。macOS 之所以会询问，是因为应用没有 Apple 签发的签名标识，会把每个构建都当作新应用。
+
 **依赖。** macOS 26（Tahoe）或 macOS 27（Golden Gate），Apple 芯片——最新两个大版本，见 Apple 的 [Find out which macOS your Mac is using](https://support.apple.com/en-us/109033)。没有别的依赖：WKWebView 属于系统，其余需要的都在包里。
 
 ## Linux

@@ -2261,3 +2261,99 @@ Entry format:
 - Revisit when: GitHub provides a macOS 27 runner, or Homebrew's cask sandbox makes the tap
   install runnable without the network (a fixture cask, like the mutants' scratch tap).
 
+### Q-0018-01 — How does the Keychain experiment run?
+- Status: decided(default taken)
+- Context: P1 had to settle, on a runner where nobody can click a Keychain prompt, whether the next
+  ad-hoc or self-signed build can read what the build installed before it stored in the learner's
+  Keychain. The first shape (three arms in one job) ended at the ad-hoc arm's blocked read before the
+  self-signed arm ran (run `44931358398`); a later shape imported the throwaway identity into the
+  login keychain, where `security set-key-partition-list -k ""` exits 1 — the login keychain's
+  password is not available to a run — so `codesign` never signed (run `44986005367`).
+- Options considered: (A) one job per arm and keychain, the identity always in a temporary signing
+  keychain the run creates itself with an empty password and signs with the SHA-1 `security
+  find-identity` prints; (B) one job carrying every arm; (C) the throwaway identity imported into the
+  keychain the app stores its credential in.
+- Default taken: (A). `.github/workflows/keychain.yml` is a `fail-fast: false` matrix `arm: [adhoc,
+  self-signed]` × `keychain: [experiment, login]` on `macos-26`; each job builds two packages (A from
+  the pull request base, B from the head) and runs one arm against one keychain. The `project` arm
+  exists in the tool but sits outside the matrix and records its skip by name without the two signing
+  secrets (a fork pull request has none). Plan amendments 15 and 18 record the shape; reversal is
+  running one arm by hand or deleting the workflow.
+- Revisit when: the goal reopens (Q-0018-04). If the `project` arm is wanted, it is not in the matrix:
+  with a Developer ID, store it as the two secrets, add `project` to the workflow's `arm` matrix, then
+  run the workflow by `workflow_dispatch`.
+
+### Q-0018-02 — What did the decisive run show, and does a self-signed identity keep Keychain access?
+- Status: decided(default taken)
+- Context: the decisive run is `keychain` 44994402573 on commit `5dd680b`: four jobs, all green
+  (`status: ok`, empty `failures`; 17 assertions in each ad-hoc job, 28 in each self-signed job,
+  `[self-check] 19 of 19` in all four). A is `3250fb0`, B is `5dd680b`; the builds differ
+  (`guards.buildsDiffer: true`, cdhashes `b9bcd4b4…` and `f9ea3de0…`). Each reading below is from the
+  named artifact's `keychain-record.json` and is quoted with its field path in the evidence record.
+- What the run showed: the two ad-hoc jobs' reads were `blocked` by a prompt (`refusesBy:
+  application` in the tool's own keychain, `both` in the login keychain). The self-signed arm in the
+  login keychain — the learner's shape — was `blocked` with `refusesBy: partition` while
+  `requirementMatch: exact`: both builds carry the byte-equal designated requirement `identifier
+  "com.github.wxxb789.passquest" and certificate root = H"8ca4ef16…"`, and the item's partition list
+  `["cdhash:073434e4…"]` still does not admit B's `cdhash:20cab049…`. The self-signed arm in the
+  tool's own keychain reads (`read.outcome: read`, the stub received the key) only because that
+  keychain's item carries no partition entry (`partitionEntry: false`); the login keychain's item
+  does carry one. Apple's source agrees: only Apple-signed and team-ID-bearing code (Mac App Store,
+  TestFlight, Developer ID, development) gets a stable `apple:`/`teamid:` partition, and every other
+  signed process gets `cdhash:` — the value of the build that stored the item
+  (`securityd/src/clientid.cpp`, tag `Security-61901.120.67`, `:282-286`; plan fact 2).
+- Options considered: (A) stop and report — the plan's second stop condition; (B) ship the
+  self-signed identity anyway; (C) read the tool keychain's `read` as the answer.
+- Default taken: (A). Done-when 2 is not achievable without an Apple-issued certificate with a team
+  ID, and the plan's defaults 3 (a `project` arm in the pull request run), 6 (the project identity),
+  7 (`-sign` in `package-build.ts`), 8 (the pinned DR) and 9 (the CI wiring) are **not taken**;
+  default 10 is taken with the owner's decision in Q-0018-03. Reversal: a Developer ID exists, then
+  Q-0018-04 runs.
+- Revisit when: a Developer ID exists (Q-0018-04).
+
+### Q-0018-03 — What happens to goal 0018 now that a self-signed identity cannot keep Keychain access?
+- Status: resolved
+- Resolution: (owner, 2026-11-22) record and park. No identity is added, no secret is created, and
+  nothing in the package or release path changes; the goal stops at its second stop condition, P2–P4
+  are dropped (plan amendment 19), and both install guides say in their macOS section that an
+  upgrade — a new download, or `brew upgrade` — asks once whether Pass Quest may use the saved key
+  (enter the login password, choose **Always Allow**), that the key stays in the Keychain, and that
+  the prompt exists because the app is not signed by an Apple-issued identity. `install-guide` pins
+  the statement in both languages.
+- Context: the decisive run's self-signed × login job refuses on the partition list (Q-0018-02), so
+  a project-owned self-signed certificate cannot meet Done-when 2; Done-when 3 is not applicable —
+  no key was created, and the throwaway identities lived only inside the CI jobs and were deleted
+  with their temporary signing keychains (cited in `docs/evidence/0018-keychain-survives-upgrade.md`).
+- Options considered: (A) record and park until a Developer ID exists, with the guides disclosing the
+  prompt; (B) ship a self-signed identity anyway; (C) leave the guides silent and treat the prompt as
+  expected behaviour.
+- Default taken: (A). Reversal: the owner says the cost of a Developer ID is not worth it (then (C)'s
+  silence becomes the only alternative) or supplies one (Q-0018-04).
+- Revisit when: a Developer ID exists.
+
+### Q-0018-04 — When and how is the parked goal revisited?
+- Status: open
+- Context: the goal can only be finished by an Apple-issued identity: a Developer ID gives the app a
+  `teamid:` partition that does not move with the build, and the workflow's `project` arm exists to
+  measure exactly that. The parked run cost is also recorded here: four macOS jobs of two package
+  builds each is too much for every desktop change, so `keychain.yml`'s `pull_request` trigger now
+  lists only the workflow and `harness/tools/keychain-experiment.ts` plus that tool's repo-local
+  import closure (plan amendment 20), and `workflow_dispatch` is the standing way to re-measure after
+  a product change.
+- Options considered: (A) keep the workflow dispatchable and, when a Developer ID exists, add the
+  `project` arm to its matrix and run it; (B) delete the workflow now and rebuild it later; (C) widen
+  the `pull_request` trigger back to the product sources.
+- Default taken: (A). `.github/workflows/keychain.yml` runs `arm: [adhoc, self-signed]` and its run
+  step's `env:` carries the throwaway self-signed variables only — nothing passes
+  `PASSQUEST_MACOS_SIGNING_P12`/`_PASSWORD` to the tool — so a `workflow_dispatch` today repeats the
+  same four jobs and never selects the `project` arm (`grep -n project .github/workflows/keychain.yml`
+  is empty). The arm is therefore untested: it never ran with the two signing secrets, and the plan's
+  coordinator route exports the `.p12` with `openssl pkcs12 -export`'s default PBE (AES-256/PBKDF2 on
+  OpenSSL 3+), which the throwaway path had to replace with `-legacy` or explicit PBE flags before
+  `security import` accepted it (plan amendment 13) — the re-export must follow that route. When the
+  arm first runs, the DR it prints is read from the run's record before anything is pinned.
+- Revisit when: a Developer ID (or an equivalent team-ID-bearing certificate) exists; then store it as
+  the two secrets, add `project` to the workflow's `arm` matrix, and run `keychain.yml` by
+  `workflow_dispatch` against a released package, continuing at plan P2/P3 with the identity's own DR
+  and fingerprint.
+

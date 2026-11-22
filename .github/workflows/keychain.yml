@@ -1,0 +1,222 @@
+name: keychain
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/keychain.yml
+      - harness/tools/keychain-experiment.ts
+      - harness/lib/appimage.ts
+      - harness/lib/desktop-page.ts
+      - harness/lib/desktop.ts
+      - harness/lib/go.ts
+      - harness/lib/hash.ts
+      - harness/lib/json.ts
+      - harness/lib/notices.ts
+      - harness/lib/package-build.ts
+      - harness/lib/package.ts
+      - harness/lib/process.ts
+      - harness/lib/repo.ts
+      - harness/lib/types.ts
+  workflow_dispatch:
+    inputs:
+      a-ref:
+        description: The older commit A's package is built from
+        required: true
+        default: 963aa6f
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keychain-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  experiment:
+    name: keychain experiment (${{ matrix.arm }}, ${{ matrix.keychain }} keychain)
+    runs-on: macos-26
+    # One job runs one arm against one keychain: two package builds plus one arm fit inside 90 minutes.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [adhoc, self-signed]
+        keychain: [experiment, login]
+    steps:
+      - name: Resolve the two commits
+        id: refs
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DISPATCH_A: ${{ github.event.inputs['a-ref'] }}
+          HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request) a="$BASE_SHA"; b="$HEAD_SHA" ;;
+            workflow_dispatch) a="$DISPATCH_A"; b="$HEAD" ;;
+            *) echo "::error::this workflow handles pull_request and workflow_dispatch, not $EVENT_NAME"; exit 1 ;;
+          esac
+          for sha in "$a" "$b"; do
+            if [[ ! "$sha" =~ ^[0-9a-f]{7,40}$ ]]; then
+              echo "::error::commit '${sha}' does not look like a commit id"; exit 1
+            fi
+          done
+          echo "keychain: event=$EVENT_NAME A=$a B=$b"
+          echo "a=$a" >> "$GITHUB_OUTPUT"
+          echo "b=$b" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout B
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.refs.outputs.b }}
+          fetch-depth: 2
+
+      - name: Checkout A
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.refs.outputs.a }}
+          path: a
+          fetch-depth: 2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+
+      - name: Install the harness dependencies (B)
+        run: bun install --frozen-lockfile
+
+      - name: Install the harness dependencies (A)
+        working-directory: a
+        run: bun install --frozen-lockfile
+
+      - name: Check the tool's dump parser, guards and classifier
+        run: bun harness/tools/keychain-experiment.ts --self-check
+
+      - name: Build B's package
+        run: bun run package
+
+      - name: Build A's package
+        working-directory: a
+        run: bun run package
+
+      - name: Create the throwaway self-signed identity
+        id: identity
+        if: ${{ matrix.arm == 'self-signed' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/keychain-throwaway"
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          chmod 700 "$dir"
+          cat > "$dir/openssl.cnf" <<'EOF'
+          [req]
+          distinguished_name = dn
+          x509_extensions = ext
+          prompt = no
+          [dn]
+          CN = Pass Quest Keychain Experiment
+          O  = Pass Quest
+          [ext]
+          basicConstraints = critical, CA:TRUE
+          keyUsage = critical, digitalSignature
+          extendedKeyUsage = critical, codeSigning
+          subjectKeyIdentifier = hash
+          EOF
+          version="$(openssl version)"
+          echo "keychain: $version"
+          case "$version" in
+            OpenSSL\ [3-9]*) pbe=(-legacy) ;;
+            *) pbe=(-keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1) ;;
+          esac
+          pass="$(openssl rand -base64 24 | tr -d '\n')"
+          echo "::add-mask::$pass"
+          echo "password=$pass" >> "$GITHUB_OUTPUT"
+          openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 3650 -config "$dir/openssl.cnf" \
+            -keyout "$dir/key.pem" -out "$dir/cert.pem"
+          printf '%s' "$pass" > "$dir/passphrase"
+          chmod 600 "$dir/passphrase"
+          export_p12() {
+            openssl pkcs12 -export "${pbe[@]}" -inkey "$dir/key.pem" -in "$dir/cert.pem" \
+              -name "Pass Quest Keychain Experiment" -out "$dir/identity.p12" -passout "file:$dir/passphrase"
+          }
+          echo "keychain: pkcs12 pbe flags ${pbe[*]}"
+          if ! export_p12; then
+            pbe=(-keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1)
+            echo "keychain: the first export failed; retrying with the explicit PBE flags ${pbe[*]}"
+            export_p12
+          fi
+          rm -f "$dir/passphrase"
+          chmod 600 "$dir"/key.pem "$dir"/cert.pem "$dir"/identity.p12
+          openssl x509 -in "$dir/cert.pem" -noout -subject
+          ls -l "$dir"
+          echo "keychain: throwaway identity at $dir (deleted in the always() step)"
+
+      - name: Run the experiment
+        shell: bash
+        env:
+          PASSQUEST_KEYCHAIN_SELF_SIGNED_P12: ${{ runner.temp }}/keychain-throwaway/identity.p12
+          PASSQUEST_KEYCHAIN_SELF_SIGNED_IDENTITY: Pass Quest Keychain Experiment
+          PASSQUEST_KEYCHAIN_SELF_SIGNED_PASSWORD: ${{ steps.identity.outputs.password }}
+        run: |
+          set -euo pipefail
+          bun harness/tools/keychain-experiment.ts --a-root a --b-root . \
+            --out "$RUNNER_TEMP/keychain-record.json" --arms ${{ matrix.arm }} --keychain ${{ matrix.keychain }} \
+            2>&1 | tee "$RUNNER_TEMP/keychain-experiment.log"
+
+      # Backstop for a run killed before the tool's own finally: delete a leftover app or signing
+      # keychain and restore the login keychain as the user default and sole search entry.
+      - name: Delete the throwaway identity files
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          dir="$RUNNER_TEMP/keychain-throwaway"
+          if [ -e "$dir" ]; then
+            rm -rf "$dir"
+            echo "keychain: deleted $dir"
+          else
+            echo "keychain: $dir was already gone"
+          fi
+          login="$HOME/Library/Keychains/login.keychain-db"
+          # os.tmpdir() points at $TMPDIR, else at getconf DARWIN_USER_TEMP_DIR — where the
+          # tool's mkdtemp tree lives.
+          for base in "${TMPDIR:-}" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"; do
+            [ -n "$base" ] || continue
+            for tree in "$base"/passquest-keychain-experiment-*; do
+              [ -d "$tree" ] || continue
+              leftover=""
+              for keychain in "$tree"/*.keychain; do
+                [ -e "$keychain" ] || continue
+                security delete-keychain "$keychain" || true
+                leftover="$keychain"
+              done
+              if [ -n "$leftover" ]; then
+                security default-keychain -d user -s "$login" || true
+                security list-keychains -d user -s "$login" || true
+                echo "keychain: deleted the leftover keychains under $tree and restored $login"
+              fi
+              rm -rf "$tree"
+              echo "keychain: removed the leftover tool directory $tree"
+            done
+          done
+          echo "keychain: keychain files left under $RUNNER_TEMP and the user temp dirs:"
+          find "$RUNNER_TEMP" "${TMPDIR:-/tmp}" -maxdepth 1 -name '*.keychain*' -print 2>/dev/null || true
+
+      - name: Upload the record and the log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: keychain-record-${{ matrix.arm }}-${{ matrix.keychain }}
+          path: |
+            ${{ runner.temp }}/keychain-record.json
+            ${{ runner.temp }}/keychain-experiment.log
+          if-no-files-found: error
+          retention-days: 30

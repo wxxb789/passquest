@@ -1,6 +1,6 @@
 # 0017 — Install on current Windows and macOS without fighting the operating system: evidence
 
-Contract: [`../goals/0017-first-tier-install-experience.md`](../goals/0017-first-tier-install-experience.md).
+Contract: [`../goals/archive/0017-first-tier-install-experience.md`](../goals/archive/0017-first-tier-install-experience.md).
 Plan: [`../plans/2026-11-21-1000-0017-first-tier-install.md`](../plans/2026-11-21-1000-0017-first-tier-install.md).
 Guides: [`../install.md`](../install.md), [`../install.zh-CN.md`](../install.zh-CN.md).
 Decisions: Q-0017-01…09 in [`../decisions/OPEN-QUESTIONS.md`](../decisions/OPEN-QUESTIONS.md).
@@ -265,3 +265,12 @@ not run yet — the first release after the merge exercises it.
 - **The `~/Library` listing is name-based** (`*passquest*` / `*pass quest*` under two levels); a
   path the app writes under another name would not be listed. The cask's `zap trash:` is the
   boundary, and the tool asserts every path that list names.
+
+## Note (2026-11-21, after the merge)
+
+The final apply round (`7cae52d`, `e92c564`) moved a template comment, so the rendered cask changed. The coordinator re-seeded
+the tap once more with a temporary deploy key and removed that key afterwards. The re-seed is tap commit `5e56a95`, owner
+identity; its file sha256 `578f57a7b2232488874a5bdf638e4fb08f0f594404157c3aeb3f09d6fb01b4b6` equals the merged golden. The
+merged head `e92c564` was then proven by gate run `44918071785` (12/12; self-test 148 cases, 15 must pass, 25/25 gates on
+all three OSes) and cask run `44918071374` (tap mode 21/21, the three mutants at 10/10 each). The pull request was
+squash-merged as `3250fb0` (#40). The tap's write credential is the `HOMEBREW_TAP_DEPLOY_KEY` secret's key only.
