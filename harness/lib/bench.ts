@@ -704,6 +704,26 @@ export function visualFindings(rows: readonly ShotRow[], entries: readonly Visua
 const HELPERS = `
 const benchNow = () => performance.now();
 const benchLoading = () => q('#stage [aria-busy="true"]');
+// A measured interaction ends at the instant its condition first held, at the engine's own clock resolution: the shared until (desktop-page.ts PRELUDE) polls every 50 ms, so a metric taken through it lands on that poll's grid and a same-build pair reads a bucket flip as a real regression.
+// Every condition these launches wait on is a selector query, so it can only flip on a DOM mutation; the deadline throws until's own message.
+const benchWaitAt = (what, probe, ms = 15000) => {
+  const deadline = benchNow() + ms;
+  const first = probe() ? benchNow() : null;
+  if (first !== null) return Promise.resolve(first);
+  const { promise, resolve, reject } = Promise.withResolvers();
+  const timeout = new Error("timed out waiting for " + what + situation());
+  const observer = new MutationObserver(() => {
+    const at = probe() ? benchNow() : null;
+    if (at !== null) resolve(at);
+    else if (benchNow() > deadline) reject(timeout);
+  });
+  observer.observe(document, { childList: true, subtree: true, attributes: true, characterData: true });
+  const timer = setTimeout(() => reject(timeout), ms);
+  return promise.finally(() => {
+    observer.disconnect();
+    clearTimeout(timer);
+  });
+};
 const benchViewport = () => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio });
 const benchFrames = (frames) => {
   const durations = [];
@@ -914,21 +934,18 @@ sampling = false;
 {
   const at = benchNow();
   press("2");
-  await until("a selected option", () => q('.opt[aria-checked="true"]'));
-  metrics.answerSelectMs = benchNow() - at;
+  metrics.answerSelectMs = (await benchWaitAt("a selected option", () => q('.opt[aria-checked="true"]'))) - at;
 }
 {
   const at = benchNow();
   press("Enter");
-  await until("the feedback card", () => q('[data-testid="feedback"]'));
-  metrics.submitFeedbackMs = benchNow() - at;
+  metrics.submitFeedbackMs = (await benchWaitAt("the feedback card", () => q('[data-testid="feedback"]'))) - at;
 }
 await until("the coach call strip", () => q('[data-act="coach-send"]') && !q('[data-act="coach-send"]').disabled, 30000);
 {
   const at = benchNow();
   q('[data-act="coach-send"]').click();
-  await until("the coach reply", () => q('[data-testid="coach-reply"]') || q('[data-testid="coach-failure"]'), 30000);
-  metrics.coachReplyMs = benchNow() - at;
+  metrics.coachReplyMs = (await benchWaitAt("the coach reply", () => q('[data-testid="coach-reply"]') || q('[data-testid="coach-failure"]'), 30000)) - at;
 }
 const rooms = [
   ["report", () => q('[data-testid="report"]')],
@@ -939,8 +956,7 @@ const rooms = [
 for (const [room, alive] of rooms) {
   const at = benchNow();
   location.hash = "#/" + room;
-  await until("the " + room + " room", () => (benchLoading() ? null : alive()), 15000);
-  metrics["roomSwitch." + room] = benchNow() - at;
+  metrics["roomSwitch." + room] = (await benchWaitAt("the " + room + " room", () => (benchLoading() ? null : alive()), 15000)) - at;
 }
 return { engine, readyAt, viewport, guards, metrics, durations: benchFrames(frames), loaf: benchLoaf };
 `);
@@ -1378,6 +1394,18 @@ export function selfCheckCases(): SelfCheckCase[] {
         return expect(
           missing.length === 0 && inertAt !== -1 && driverAt !== -1 && inertAt < driverAt,
           `the script is missing ${JSON.stringify(missing)} (inert hit-testing at ${inertAt}, the driver at ${driverAt}): a capture that does not settle these shows the runner's cursor, this launch's own measurements and a budget slot the send had not spent yet`,
+        );
+      },
+    },
+    {
+      name: "timing: a measured interaction ends on the mutation that made it true, never on the 50 ms until poll",
+      check: () => {
+        const script = timingScript();
+        const blocks = [...script.matchAll(/const at = benchNow\(\);[\s\S]*?metrics(?:\.\w+|\[[^\]]+\]) = [^;]+;/g)].map((match) => match[0]);
+        const offenders = blocks.filter((block) => !block.includes("await benchWaitAt(") || block.includes("until("));
+        return expect(
+          blocks.length === 4 && offenders.length === 0 && script.includes("new MutationObserver"),
+          `4 measured blocks (the three single metrics and the room loop) want the mutation-driven waiter; ${blocks.length} block(s), offenders ${JSON.stringify(offenders)}: a metric taken through the shared 50 ms until poll lands on that poll's grid, so a same-build pair reads a bucket flip as a regression`,
         );
       },
     },

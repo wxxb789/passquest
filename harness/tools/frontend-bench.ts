@@ -67,16 +67,18 @@ const ORPHAN_GRACE_MS = 30_000;
 /** Nothing listens on port 1: the app's Anki probe reports "not running" at once instead of waiting on a socket. */
 const UNREACHABLE_ANKI = "http://127.0.0.1:1";
 const COACH_REPLY = "Check the notice: which option states the Saturday closing time?";
+/** Where every interaction metric ends (the page scripts' mutation-driven waiter): the mutation that made the condition true, not the shared poll's next tick. */
+const INTERACTION_END = "ending at the mutation that made it true, not on a poll tick";
 /** What each metric row measures; the record carries this so a number is never read without it. */
 const METRIC_NOTES: Record<string, string> = {
-  readyMs: "the tool's launch call to the page observing window.__pq.ready (a 50 ms poll: its granularity is part of every sample)",
-  answerSelectMs: "the option keypress to .opt[aria-checked=true]",
-  submitFeedbackMs: "the Enter keypress on a chosen option to [data-testid=feedback]",
-  coachReplyMs: "the coach send click to [data-testid=coach-reply] or [data-testid=coach-failure]",
-  "roomSwitch.report": "location.hash = #/report to [data-testid=report] with no loading card",
-  "roomSwitch.anki": "location.hash = #/anki to [data-testid=note] with no loading card",
-  "roomSwitch.settings": "location.hash = #/settings to a provider row with no loading card",
-  "roomSwitch.assess": "location.hash = #/assess to [data-act=run-ask] with no loading card",
+  readyMs: "the tool's launch call to the page observing window.__pq.ready (a 50 ms poll: its granularity is part of every readyMs sample)",
+  answerSelectMs: `the option keypress to .opt[aria-checked=true], ${INTERACTION_END}`,
+  submitFeedbackMs: `the Enter keypress on a chosen option to [data-testid=feedback], ${INTERACTION_END}`,
+  coachReplyMs: `the coach send click to [data-testid=coach-reply] or [data-testid=coach-failure], ${INTERACTION_END}`,
+  "roomSwitch.report": `location.hash = #/report to [data-testid=report] with no loading card, ${INTERACTION_END}`,
+  "roomSwitch.anki": `location.hash = #/anki to [data-testid=note] with no loading card, ${INTERACTION_END}`,
+  "roomSwitch.settings": `location.hash = #/settings to a provider row with no loading card, ${INTERACTION_END}`,
+  "roomSwitch.assess": `location.hash = #/assess to [data-act=run-ask] with no loading card, ${INTERACTION_END}`,
   "frames.median": "per launch: the median frame duration of the sheet-open + scroll sample",
   "frames.p95": "per launch: the 95th percentile of that sample",
   "frames.longest": "per launch: the longest frame of that sample",
@@ -122,6 +124,8 @@ interface LaunchRow {
   /** Why this launch carries no guard reading; "" when it carries one (PREPARE_GUARDS_WHY). */
   guardsWhy: string;
   loaf: LoafTotals | null;
+  /** The launch's graded timing metrics where its reading parsed; a launch the viewport check rejects still carries them, so a display that cannot grade the sample still leaves its numbers in the record. */
+  metrics: Record<string, number> | null;
   shots: string;
   error: string;
   result: "ok" | "guard-failed" | "failed" | "no result";
@@ -209,7 +213,7 @@ async function launch(run: Run, tree: Tree, spec: LaunchSpec): Promise<Started |
   const dir = path.join(run.temp, "launches", spec.label);
   mkdirSync(dir, { recursive: true });
   run.launches++;
-  const row: LaunchRow = { label: spec.label, tree: tree.key, kind: spec.kind, hidden: spec.hidden !== false, engine: "", guards: null, guardsWhy: spec.kind === "prepare" ? PREPARE_GUARDS_WHY : "", loaf: null, shots: "", error: "", result: "no result" };
+  const row: LaunchRow = { label: spec.label, tree: tree.key, kind: spec.kind, hidden: spec.hidden !== false, engine: "", guards: null, guardsWhy: spec.kind === "prepare" ? PREPARE_GUARDS_WHY : "", loaf: null, metrics: null, shots: "", error: "", result: "no result" };
   run.rows.push(row);
   const env: Record<string, string> = {
     PASSQUEST_DESKTOP_DATA: spec.data,
@@ -284,6 +288,8 @@ function graded(run: Run, started: Started, strict: boolean): { reading: LaunchR
     printTail(started.launched);
     return null;
   }
+  const metrics: Record<string, number> = { ...reading.metrics, [READY_METRIC]: reading.readyAt - started.startedAt };
+  started.row.metrics = metrics;
   const viewportMessages = viewportProblems(label, reading.viewport);
   if (viewportMessages.length > 0) {
     started.row.result = "failed";
@@ -294,7 +300,6 @@ function graded(run: Run, started: Started, strict: boolean): { reading: LaunchR
     return null;
   }
   started.row.result = "ok";
-  const metrics: Record<string, number> = { ...reading.metrics, [READY_METRIC]: reading.readyAt - started.startedAt };
   return { reading, metrics };
 }
 
