@@ -246,6 +246,10 @@ export interface PageLaunch {
   /** App variables on top of the clean environment and the smoke hook's own. */
   env: Record<string, string | undefined>;
   check: Check;
+  /** False launches a visible window: the frontend bench measures what a shown window composites. */
+  hidden?: boolean;
+  /** How long a process the app started may take to exit; the gates keep the tight default. */
+  orphanGraceMs?: number;
   /** Probes listening TCP sockets of the app and its children while it runs. */
   probeListeners?: boolean;
   /** Polled while the app runs; true kills the process tree with the watchdog's kill. */
@@ -265,10 +269,10 @@ function describe(processes: ProcessInfo[]): string {
 }
 
 /**
- * Launches the hidden window once with a script and returns the script's
- * value, or null after a failed check. While the app runs it remembers the
- * app's children (POSIX reparents orphans) and optionally probes listeners;
- * after exit nothing the app started may outlive it.
+ * Launches the window once with a script (hidden unless `hidden: false`) and
+ * returns the script's value, or null after a failed check. While the app runs
+ * it remembers the app's children (POSIX reparents orphans) and optionally
+ * probes listeners; after exit nothing the app started may outlive it.
  */
 export async function launchPage(spec: PageLaunch): Promise<Launched | null> {
   const { check, where } = spec;
@@ -280,7 +284,7 @@ export async function launchPage(spec: PageLaunch): Promise<Launched | null> {
     ...cleanEnv(),
     PASSQUEST_DESKTOP_SCRIPT: scriptPath,
     PASSQUEST_DESKTOP_RESULT: resultPath,
-    PASSQUEST_DESKTOP_HIDDEN: "1",
+    ...(spec.hidden === false ? {} : { PASSQUEST_DESKTOP_HIDDEN: "1" }),
     // A fresh profile per launch, removed with the gate's temporary tree once
     // the orphan check has seen every WebView2 helper exit.
     WEBVIEW2_USER_DATA_FOLDER: path.join(spec.dir, `${spec.label}.webview2`),
@@ -358,7 +362,7 @@ export async function launchPage(spec: PageLaunch): Promise<Launched | null> {
   if (!check(!result.timedOut, `${where}: timeout after ${LAUNCH_TIMEOUT_MS} ms; killed\n${shortOutput}`)) return null;
 
   let survivors: ProcessInfo[] = [];
-  const deadline = Date.now() + ORPHAN_GRACE_MS;
+  const deadline = Date.now() + (spec.orphanGraceMs ?? ORPHAN_GRACE_MS);
   for (;;) {
     const remembered = await stillRunning([...seen.values()]);
     // Windows keeps the dead app's pid on its orphans: children created between the app's start and its exit.

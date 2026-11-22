@@ -18,6 +18,17 @@ if (diag) {
 }
 const node = stage();
 const errors = document.querySelectorAll("#errbar, .error-bar");
+let shotBound = null;
+let shotError = "";
+if (window.mygo && typeof window.mygo.call === "function") {
+  try {
+    await window.mygo.call("SmokeShot.Capture", "boot");
+    shotBound = true;
+  } catch (error) {
+    shotBound = false;
+    shotError = String((error && error.message) || error);
+  }
+}
 return {
   textLength: document.body.innerText.length,
   stageChildren: node ? node.children.length : -1,
@@ -28,6 +39,8 @@ return {
   ready: window.__pq === undefined ? null : window.__pq.ready === true,
   probe: diag ? diag.probe : null,
   opaqueErrors: diag ? diag.opaque : null,
+  shotBound,
+  shotError,
 };
 `;
 
@@ -56,6 +69,16 @@ export const boot: Scenario = {
     s.check(
       ready === null || ready === true,
       `boot: window.__pq.ready = ${JSON.stringify(ready)}; the stage shows: ${String(field(value, "stageText") ?? "")}`,
+    );
+    const shotBound = field(value, "shotBound");
+    s.check(
+      typeof shotBound === "boolean",
+      `boot: no mygo runtime in the page (bound ${JSON.stringify(shotBound)}), so SmokeShot.Capture cannot be called to prove the hook is unbound`,
+    );
+    const shotError = String(field(value, "shotError") ?? "");
+    s.check(
+      shotBound === false && shotError.includes("SmokeShot.Capture"),
+      `boot: a call to SmokeShot.Capture without PASSQUEST_DESKTOP_SHOT_DIR answered ${JSON.stringify(shotError)} (bound ${JSON.stringify(shotBound)})`,
     );
   },
 };

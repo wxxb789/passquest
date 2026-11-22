@@ -1,0 +1,188 @@
+name: frontend-bench
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/frontend-bench.yml
+      - agent/**
+      - cmd/**
+      - desktop/**
+      - go.mod
+      - go.sum
+      - harness/frontend-visual-allow.json
+      - harness/lib/**
+      - harness/tools/frontend-bench.ts
+      - internal/**
+      - mise.toml
+  workflow_dispatch:
+    inputs:
+      a-ref:
+        description: The base commit A; empty is the dispatched ref itself (a same-build control pair)
+        required: false
+        default: ""
+      b-ref:
+        description: The head commit B; empty is the dispatched ref itself
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-bench-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # One job per OS, so a failure costs one platform's wall time and "Re-run failed jobs" repeats
+  # only that platform. Both trees are checked out on the runner: A into a/, B at the root, and the
+  # tool builds each with the root tree's harness, serially on this one machine.
+  bench:
+    name: frontend bench (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # Two builds, one seeded template and 65 visible launches (the tool asserts its plan's own
+    # total) fit well inside an hour; the ceiling is there for a hung webview, not for the work.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-26]
+    steps:
+      - name: Resolve the two commits
+        id: refs
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DISPATCH_A: ${{ github.event.inputs['a-ref'] }}
+          DISPATCH_B: ${{ github.event.inputs['b-ref'] }}
+          HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request) a="$BASE_SHA"; b="$HEAD_SHA" ;;
+            workflow_dispatch) a="${DISPATCH_A:-$HEAD}"; b="${DISPATCH_B:-$HEAD}" ;;
+            *) echo "::error::this workflow handles pull_request and workflow_dispatch, not $EVENT_NAME"; exit 1 ;;
+          esac
+          for sha in "$a" "$b"; do
+            if [[ ! "$sha" =~ ^[0-9a-f]{7,40}$ ]]; then
+              echo "::error::commit '${sha}' does not look like a commit id"; exit 1
+            fi
+          done
+          echo "frontend-bench: event=$EVENT_NAME A=$a B=$b"
+          echo "a=$a" >> "$GITHUB_OUTPUT"
+          echo "b=$b" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout B
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.refs.outputs.b }}
+          fetch-depth: 1
+
+      - name: Checkout A
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.refs.outputs.a }}
+          path: a
+          fetch-depth: 1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+
+      - name: Install the harness dependencies
+        run: bun install --frozen-lockfile
+
+      # A visible window is measured, so the runner's display must host a 1280x800 page area; the
+      # Windows runner's own default (1024x768) would clamp it, as it does for the gate's ux gate.
+      - name: Desktop display size
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+
+      # Seconds, not the two builds: a broken parser or verdict must fail before the benches run.
+      - name: Check the tool's parsers and the noise decision
+        run: bun harness/tools/frontend-bench.ts --self-check
+
+      - name: Run the bench
+        shell: bash
+        run: |
+          set -o pipefail
+          bun harness/tools/frontend-bench.ts --a-root a --b-root . \
+            --out "$RUNNER_TEMP/frontend-bench-record.json" \
+            --shots "$RUNNER_TEMP/frontend-bench-shots" \
+            --label "${{ matrix.os }} a=${{ steps.refs.outputs.a }} b=${{ steps.refs.outputs.b }}" \
+            2>&1 | tee "$RUNNER_TEMP/frontend-bench.log"
+
+      - name: Upload the record, the log and the shots
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-bench-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/frontend-bench-record.json
+            ${{ runner.temp }}/frontend-bench.log
+            ${{ runner.temp }}/frontend-bench-shots
+          if-no-files-found: error
+          retention-days: 30
+
+  # Linux is second-tier (Q-0000-07): this job only proves the states render in a visible WebKitGTK
+  # window on a virtual display. It compares no numbers, which would come from another engine.
+  linux-smoke:
+    name: frontend bench (ubuntu-latest render smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+
+      # WebKitGTK 4.1 plus a virtual display, and a keyring on a private session bus: the same
+      # arrangement the gate's desktop group runs in.
+      - name: Install the desktop webview prerequisites
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb gnome-keyring libsecret-1-0 dbus-daemon
+
+      - name: Install the harness dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check the tool's parsers and the noise decision
+        run: bun harness/tools/frontend-bench.ts --self-check
+
+      - name: Render smoke (a visible window on the virtual display)
+        shell: bash
+        # The window is measured visibly, so the display is Xvfb's, with the screen size stated
+        # rather than implied: a clamp would be reported as a page area that is not 1280x800.
+        run: |
+          set -o pipefail
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1920x1080x24" bash -c 'echo -n ci | gnome-keyring-daemon --unlock --components=secrets && bun harness/tools/frontend-bench.ts --root . --smoke --out "$RUNNER_TEMP/frontend-bench-smoke.json" --shots "$RUNNER_TEMP/frontend-bench-smoke-shots" --label ubuntu-latest' 2>&1 | tee "$RUNNER_TEMP/frontend-bench-smoke.log"
+
+      - name: Upload the smoke record, the log and the shots
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-bench-ubuntu-smoke
+          path: |
+            ${{ runner.temp }}/frontend-bench-smoke.json
+            ${{ runner.temp }}/frontend-bench-smoke.log
+            ${{ runner.temp }}/frontend-bench-smoke-shots
+          if-no-files-found: error
+          retention-days: 30

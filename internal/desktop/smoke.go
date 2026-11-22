@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -28,6 +29,11 @@ import (
 // viewport it asked for rather than whatever size the last window had
 // (Q-0012-05). It is read only when EnvScript is set.
 const EnvContentSize = "PASSQUEST_DESKTOP_CONTENT_SIZE"
+
+// EnvShotDir (a scripted launch only) is where the page's own screenshot
+// calls write; without it no SmokeShot service is bound, so a normal launch
+// and a timing launch expose nothing new (harness/tools/frontend-bench.ts).
+const EnvShotDir = "PASSQUEST_DESKTOP_SHOT_DIR"
 
 // smokeTimeout bounds the script; smokeLoadGrace is the extra time the page
 // gets to finish loading before the hook gives up on it.
@@ -52,6 +58,8 @@ type smokeHook struct {
 	quit        func()
 	// contentW and contentH are EnvContentSize; zero leaves the window as it is.
 	contentW, contentH int
+	// shotDir is EnvShotDir; empty binds no SmokeShot service.
+	shotDir string
 }
 
 // Smoke phases. The hook waits for the page; exactly one of the first load
@@ -110,6 +118,7 @@ func smokeFromEnv(getenv func(string) string, quit func()) (*smokeHook, error) {
 		return nil, fmt.Errorf("%s is set but %s is not", EnvScript, EnvResult)
 	}
 	h := &smokeHook{resultPath: resultPath, timeout: smokeTimeout, loadTimeout: smokeTimeout + smokeLoadGrace, quit: quit}
+	h.shotDir = strings.TrimSpace(getenv(EnvShotDir))
 	if size := strings.TrimSpace(getenv(EnvContentSize)); size != "" {
 		w, ht, err := parseContentSize(size)
 		if err != nil {
@@ -183,6 +192,45 @@ func (h *smokeHook) finish(value any, err error) {
 // way a window failure would, and never waits on a dialog.
 func (h *smokeHook) writeFailure(err error) error {
 	return os.WriteFile(h.resultPath, smokeResult(nil, err), 0o644)
+}
+
+// bindShots binds the shot service when the launch asked for a shot directory.
+// The window is resolved at the capture: it is created after this binding.
+func (h *smokeHook) bindShots(window func() *mygo.Window) {
+	if h == nil || h.shotDir == "" {
+		return
+	}
+	mygo.BindAs("SmokeShot", &shotService{dir: h.shotDir, window: window})
+}
+
+// A capture name becomes <name>.png inside EnvShotDir; the frontend bench's
+// state names are lowercase words joined by dashes.
+var shotNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
+
+// shotService writes one PNG per capture of the page.
+type shotService struct {
+	dir    string
+	window func() *mygo.Window
+}
+
+// Capture writes the visible page as <name>.png and returns the path it wrote.
+func (s *shotService) Capture(name string) (string, error) {
+	if !shotNamePattern.MatchString(name) {
+		return "", fmt.Errorf("capture name %q: want %s", name, shotNamePattern)
+	}
+	win := s.window()
+	if win == nil {
+		return "", errors.New("the window does not exist yet")
+	}
+	png, err := win.CapturePage()
+	if err != nil {
+		return "", err
+	}
+	file := filepath.Join(s.dir, name+".png")
+	if err := os.WriteFile(file, png, 0o600); err != nil {
+		return "", err
+	}
+	return file, nil
 }
 
 // smokeResult encodes the result document.

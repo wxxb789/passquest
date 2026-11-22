@@ -45,6 +45,32 @@ export function desktopSmokeCases(): BrokenCase[] {
     },
     {
       gate: desktopSmoke,
+      label: "desktop window where the smoke hook answers without the shot directory",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest-desktop/main.go": `package main\n\nimport "os"\n\nfunc main() {\n\tanswered := \`{"ok":true,"value":{"textLength":900,"stageChildren":3,"stageTextLength":800,"errorBars":0,"ready":true,"probe":"clear","opaqueErrors":0,"shotBound":true,"shotError":""}}\`\n\t_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), []byte(answered), 0o600)\n}\n`,
+        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("boot: a call to SmokeShot.Capture without PASSQUEST_DESKTOP_SHOT_DIR"))
+          ? null
+          : `desktop-smoke: did not report the smoke hook that answered: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      gate: desktopSmoke,
+      label: "desktop window whose page has no mygo runtime",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest-desktop/main.go": `package main\n\nimport "os"\n\nfunc main() {\n\truntime := \`{"ok":true,"value":{"textLength":900,"stageChildren":3,"stageTextLength":800,"errorBars":0,"ready":true,"probe":"clear","opaqueErrors":0,"shotBound":null,"shotError":""}}\`\n\t_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), []byte(runtime), 0o600)\n}\n`,
+        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("boot: no mygo runtime in the page"))
+          ? null
+          : `desktop-smoke: did not report the missing runtime: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      gate: desktopSmoke,
       label: "desktop binary whose generated client differs from the committed one",
       files: {
         "go.mod": GO_MOD,

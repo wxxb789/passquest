@@ -118,6 +118,7 @@ func start(deps appDeps) int {
 	}
 
 	var win *mygo.Window
+	smoke.bindShots(func() *mygo.Window { return win })
 	mygo.App.OnSecondInstance(func([]string, string) {
 		if win == nil {
 			return
