@@ -502,6 +502,20 @@ comments reduced to the keep-list; the design intent they carried is recorded he
     `codesign` wait on a prompt, and a failed allow write is recorded as the skip's reason. On a GitHub runner
     whose login keychain has a non-empty password the login×self-signed combination can therefore be
     unmeasurable; the record states which happened, and that is the answer the login variant exists to give.
+17. **P1 the identity is judged by `security find-identity` without `-v` and picked by the SHA-1 that output carries
+    (run 44983246217).** Both self-signed jobs stopped at the import check's `security import exited 0 or imported no
+    identity: (no output)`: `security import -f pkcs12` prints nothing whatever it imports, because `SecPKCS12Import`
+    returns dictionaries, not identities, so `keychain_import.c`'s identity/key/certificate counters
+    (`SecurityTool/macOS/keychain_import.c:152-201`, tag `Security-61901.120.67`) stay zero and the count the check
+    parsed can never be nonzero; and `-v` "Show valid identities only (default is to show all identities)"
+    (`security.1:896`) hides an identity whose trust evaluation fails, which is every self-signed one. The import check
+    now requires exit 0 alone, the arm requires the CN to appear in the plain `find-identity -p codesigning` listing
+    (`identity_find.m:198-259,352-390`, whose line carries the certificate's SHA-1 and any trust error), both that
+    listing and the `-v` one are logged in full, and the re-sign signs with that SHA-1
+    (`codesign --force --deep --sign <SHA-1> --keychain <keychain>`) so an ambiguous CN cannot pick another identity,
+    with the CN kept as the retry; every codesign attempt and its output are recorded in the arm's `signs`, and a
+    failed sign prints the last 60 output lines. `security find-certificate -a -Z`, whose only purpose was the SHA-1,
+    is gone.
 
 ## Status
 

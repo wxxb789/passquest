@@ -9,8 +9,10 @@ Decisions: Q-0011-03, Q-0013-08, Q-0017-* in [`../decisions/OPEN-QUESTIONS.md`](
 **State: draft.** Run 44931358398 established the problem on a macOS 26 runner and its facts are
 below, each read from its `keychain-record` artifact. What run 44931358398 could not answer — the
 learner's own keychain, where securityd may add a partition entry, and the self-signed arm, which
-that run never reached — is the pending half: the four-job run (one arm × one keychain per artifact)
-named in the run table, whose values are still placeholders. No outcome was written by hand: every
+that run never reached — was the pending half: the four-job run (one arm × one keychain per artifact)
+named in the run table is run 44983246217, whose answers stand in *What run 44983246217 (the matrix
+run) showed*; the self-signed arm's own readings stay pending the identity check of plan amendment 17.
+No outcome was written by hand: every
 value names the artifact and JSON path it is read from, and the "Local checks" tables hold only what
 already happened on this Windows machine (which cannot run the macOS experiment at all).
 
@@ -81,6 +83,10 @@ The record's vocabulary, so a value cannot be read as more than it is:
   needs the keychain's password (`security.1:736-742`). In the login variant the password is not
   available, so a non-zero exit stops that arm before it signs (a prompt nobody can click would
   otherwise hold the job to its own timeout), with the exit in the record.
+- `arms[i].signs`: every `codesign --force --deep --sign …` this arm ran, in order, with its
+  `where` label (`<arm>-a`, `<arm>-b`, `<arm>-c`), the `signer` it used — the identity's SHA-1 as
+  `security find-identity -p codesigning` prints it, its CN on the retry, `-` for the ad-hoc third
+  build — the exit, and the last 60 output lines.
 - `keychain.variant`: `experiment` (a throwaway keychain created, made the sole store,
   restored and deleted in the `finally`) or `login` (nothing created or switched; the app stores
   into the runner's default login keychain, as a learner's would).
@@ -188,6 +194,36 @@ still records `arms[0].skipped` by name when the two signing secrets are absent,
 4. Every read outcome and classification exactly like the ad-hoc arm's, and — for an item that
    carries a partition entry — the allow's partition write, the reread and the third build.
 
+## What run 44983246217 (the matrix run) showed
+
+Run 44983246217 is the matrix run this table was waiting for: four jobs, four artifacts
+`keychain-record-<arm>-<keychain>`, each holding a record and a log. Its two ad-hoc jobs are green
+(`status: ok`, `17 assertion(s) passed, 0 failed`, empty `failures`); its two self-signed jobs
+stopped at the identity import, which plan amendment 17 fixes. Every value below is read from that
+run's artifacts:
+
+```sh
+gh run download 44983246217 --dir /tmp/0018-r5   # four artifact directories
+jq '{status, platform, guards, failures}' /tmp/0018-r5/keychain-record-adhoc-login/keychain-record.json
+```
+
+| Reading | Artifact | Record path | Value |
+|---|---|---|---|
+| the two ad-hoc jobs: status, runner, and the printed-line scan | `keychain-record-adhoc-experiment`, `keychain-record-adhoc-login` | `status`, `platform.swVers`, `platform.machine`, `guards.log` | `ok`; `26.7.2`, `arm64`; `{prints: 262, keyBytes: 0}` and `{prints: 319, keyBytes: 0}` |
+| the commits, and that the two jobs' builds are not byte-identical | both ad-hoc records | `runs.a.commit`, `runs.b.commit`, `runs.a.dmg.sha256`, `runs.b.dmg.sha256` | A `3250fb0edff8be11ebcbc369a6d93d1e8b62aea8`, B `d340a08d69165473294a5a53f1cc5a4507f548e9`; the experiment job `c618f7b53a20094b8e8d423d130e3f8f07a71a432b72bb4909136c04f8279422` / `07afa5f2a732f7d2e5bca25e9e39d00be54698cf4dd3864d33c6698e8a9f310c`, the login job `aaf81a7be2a40dca0f52dc9f29f441ddfa6d24a509b5dcedfbb014ebb8b4adee` / `a7e558c46d023547f042505fd8e0ddb1465875f2edf0bb0c4a4e73f8c2e72a04` |
+| the two builds differ, and their cdhashes | both ad-hoc records | `guards.buildsDiffer`, `guards.aCdhash`, `guards.bCdhash` | `true`; `b9bcd4b4f4cab7f45281383a3b1b0ae7016da185`, `7d974323112626c1e88098342bc115b5a3e55b61` |
+| the ad-hoc DRs move with the build (both the implied form) | both ad-hoc records | `arms[0].a.designatedRequirement`, `arms[0].a.implied`, `arms[0].b.designatedRequirement`, `arms[0].b.implied`, `arms[0].drSame` | `cdhash H"b9bc…185"` and `cdhash H"7d97…b61"`, both `implied: true`, `drSame: false` |
+| the open question of this record: the experiment keychain's item carries no partition entry, the learner's login keychain's does | `keychain-record-adhoc-experiment`, `keychain-record-adhoc-login` | `arms[0].itemAfterStore.partitionEntry`, `arms[0].itemAfterStore.partitions`, `arms[0].a.computedPartition` | `false`, `[]` versus `true`, `["cdhash:b9bcd4b4f4cab7f45281383a3b1b0ae7016da185"]`; the computed value equals the stored one in both |
+| B's read in both ad-hoc jobs: blocked, and which check refuses it | both ad-hoc records | `arms[0].read.outcome`, `arms[0].read.bInDecryptAcl`, `arms[0].read.classification.refusesBy` | `blocked`, `false`; `application` in the experiment keychain (no partition list to weigh), `both` in the login keychain (whose stored partition list names A) |
+| the blocked read: the prompt it met, and the SecurityAgent launchd respawned | both ad-hoc records | `arms[0].read.detail`, `arms[0].read.launch.agentScan.probes`, `arms[0].read.launch.agentScan.matches`, `arms[0].read.securityAgent` | "the window never rendered the provider row inside its own 15 s bound" with a SecurityAgent sampled in 20 of 24 probes; `{found: [12515 …], killed: true, left: [13184 …], respawned: true}` and `{found: [5926 …], killed: true, left: [6428 …], respawned: true}` |
+| the login variant's allow: the partition write a run cannot make | `keychain-record-adhoc-login` | `arms[0].allow.skipped` | `security set-generic-password-partition-list … exited 1 (keychain: "/Users/runner/Library/Keychains/login.keychain-db" \| version: 512)` — the login keychain's password is not available to a run, so no third build ran (`arms[0].third` absent) |
+| the learner's keychain after the login job | `keychain-record-adhoc-login` | `keychain.variant`, `keychain.loginCleanup` | `login`; one synthetic service, `{lookedUp: 0, deleted: 0}` |
+| the two self-signed jobs: where they stopped | `keychain-record-self-signed-experiment`, `keychain-record-self-signed-login` | `status`, `failures`, `guards.log.keyBytes` | `failed`; `identity self-signed: security import: security import exited 0 or imported no identity: (no output)` — `security import -f pkcs12` prints nothing at all (plan amendment 17) — then `the arm did not reach its read step`; `keyBytes: 0` |
+
+The placeholder rows in the table above stay for the coordinator's evidence pass; this section
+records the run, it does not rewrite that table, and the self-signed arm's own rows are unanswered
+until the identity check of amendment 17 reaches CI. The `project` arm is not in the matrix.
+
 ## What each outcome means for the next step (the plan's stop conditions)
 
 - Run 44931358398's ad-hoc read is `blocked`: on that runner, in the tool's own experiment keychain,
@@ -251,6 +287,28 @@ parser/guard/classifier check, the must-fail fixtures and the text gates.
 | `mise exec -- bun Q:/scratch/pq-harness-run/run.ts docs-links.ts docsLinks` | PASS — `327 checked, 0 broken` |
 | `mise exec -- bun Q:/scratch/pq-harness-run/run.ts secrets.ts secrets` | PASS — `775 files, 0 findings` |
 | the workflow's YAML | PASS — parsed with `Bun.YAML.parse`: `jobs.experiment.strategy.matrix` is `{arm: [adhoc, self-signed], keychain: [experiment, login]}`, `fail-fast: false`, and the upload step's `with.name` is `keychain-record-${{ matrix.arm }}-${{ matrix.keychain }}` |
+
+## Local checks of the find-identity tree (round 5, Windows 11)
+
+This tree's change is the identity check and the signer of plan amendment 17: `security import
+-f pkcs12` prints nothing, so the import is verified by `security find-identity -p codesigning`
+without `-v`, whose listing carries the identity's SHA-1 — the value `codesign --force --deep --sign
+<SHA-1> --keychain <keychain>` now signs with.
+
+| Check | Result |
+|---|---|
+| `mise exec -- bun harness/tools/keychain-experiment.ts --self-check` | PASS — `18 of 18 case(s) passed`: the round-4 cases plus `an identity the system does not trust is listed only by find-identity without -v`, whose fixture is the plain listing (`Matching identities`, `1) <SHA-1> "CN" (CSSMERR_TP_NOT_TRUSTED)`, `1 identities found`) against the `-v` listing of the same run (`0 valid identities found`): the SHA-1 is read from the plain listing, and the `-v` listing yields nothing |
+| must-fail fixtures, round 5 (`Q:/scratch/omp/g18/r5/mustfail/`) | PASS — with the identity line's pattern anchored to the end of the line (so a trust error after the label hides the identity) the new case fails (`17 of 18 case(s) passed … the full output gave 0 identity line(s)`); with the SHA-1 group narrowed to lowercase, which `find-identity` never prints, it fails the same way (`17 of 18 …`); each run restored the repo copy (`git diff --stat` unchanged after both) |
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts typecheck.ts typecheck` | PASS — `0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts docs-links.ts docsLinks` | PASS — `327 checked, 0 broken` |
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts secrets.ts secrets` | PASS — `775 files, 0 findings` |
+| the tool's platform guard and argument path (`--arms self-signed --keychain login`) | PASS — exit 2, `this tool asserts a Keychain experiment, which is macOS-only (process.platform = win32)` — no arm ran, and nothing was written |
+| Go checks (`gofmt -l`, `go vet`, `go build`, `go test`) | not run: this step changes no Go file (`harness/` and `docs/` only) |
+
+What this round cannot prove on Windows: that a runner's `security find-identity -p codesigning`
+listing holds an imported, untrusted, self-signed identity (the parser case is a fixture in the
+form `identity_find.m` prints), and that `codesign --keychain <keychain> --sign <SHA-1>` signs with
+it. Both are the self-signed jobs' answer in the next `keychain` run.
 
 ## Known limits of this record
 

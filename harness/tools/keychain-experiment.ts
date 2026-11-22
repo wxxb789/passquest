@@ -650,6 +650,21 @@ const SELF_CASES: readonly SelfCase[] = [
     },
   },
   {
+    name: "an identity the system does not trust is listed only by find-identity without -v",
+    run: () => {
+      const cn = "Pass Quest Keychain Experiment";
+      const sha1 = "0123456789abcdef0123456789abcdef01234567";
+      const all = `\nPolicy: Code Signing\n  Matching identities\n  1) 0123456789ABCDEF0123456789ABCDEF01234567 "${cn}" (CSSMERR_TP_NOT_TRUSTED)\n     1 identities found\n\n  Valid identities only\n     0 valid identities found\n`;
+      const validOnly = `     0 valid identities found\n`;
+      const listed = findIdentityLines(all);
+      if (listed.length !== 1) return `the full output gave ${listed.length} identity line(s)`;
+      if (listed[0]!.sha1 !== sha1) return `the SHA-1 was read as ${listed[0]!.sha1}`;
+      if (listed[0]!.label !== cn) return `the label was read as ${JSON.stringify(listed[0]!.label)}`;
+      if (findIdentityLines(validOnly).length !== 0) return "the -v listing carries an identity line, although none of the run's identities is valid";
+      return null;
+    },
+  },
+  {
     name: "a read is classified from what happened, and only a SecurityAgent sample makes it blocked",
     run: () => {
       const provider: ProviderStub = { endpoint: "", received: [], respond: () => new Response("{}"), stop: () => {} };
@@ -883,6 +898,13 @@ interface PartitionListWrite {
   outputTail: string;
 }
 
+interface SignRecord {
+  where: string;
+  signer: string;
+  exit: number;
+  output: string;
+}
+
 type ArmAllow =
   | { skipped: string }
   | {
@@ -901,6 +923,7 @@ type ArmAllow =
 
 interface ArmRecord {
   id: ArmId;
+  signs: SignRecord[];
   identity: {
     kind: "none" | "self-signed" | "project";
     cn?: string;
@@ -1351,7 +1374,7 @@ async function installFromDmg(ctx: Ctx, dmg: RootRecord["dmg"], prefix: string, 
 
 interface Identity {
   cn: string;
-  sha1: string | null;
+  sha1: string;
   findIdentity: string;
   couldNotSign: boolean;
   source: string;
@@ -1394,6 +1417,17 @@ function identityInput(id: ArmId): IdentityInput | null {
 function commonNameOf(subjectOutput: string): string | null {
   const match = /CN\s*=\s*([^,\n/]+)/.exec(subjectOutput);
   return match === null ? null : match[1]!.trim();
+}
+
+/**
+ * find-identity prints `<ordinal>) <40 hex SHA-1 of the certificate> "<label>"`, with the trust error in
+ * parentheses when the trust evaluation fails (SecurityTool/macOS/identity_find.m:198-259, Security-61901.120.67).
+ */
+function findIdentityLines(output: string): { sha1: string; label: string }[] {
+  return [...output.matchAll(/^[ \t]*[0-9]+\)[ \t]+([0-9A-Fa-f]{40})[ \t]+"([^"]*)"/gm)].map((match) => ({
+    sha1: match[1]!.toLowerCase(),
+    label: match[2]!,
+  }));
 }
 
 /**
@@ -1452,15 +1486,41 @@ async function importIdentity(ctx: Ctx, arm: ArmRecord, id: ArmId, input: Identi
     }
   }
   const imported = await importP12(ctx.keychain, importable, password);
-  const importedCount = /([0-9]+) identit(?:y|ies) imported/.exec(imported.stdout)?.[1] ?? "0";
+  // `security import -f pkcs12` prints nothing: SecPKCS12Import returns dictionaries, not identities, so
+  // keychain_import.c's item counters all stay zero (SecurityTool/macOS/keychain_import.c:152-201, Security-61901.120.67).
   ctx.checker.check(
     `identity ${id}: security import`,
-    imported.code === 0 && importedCount !== "0",
+    imported.code === 0,
     `security import … -P ${password === "" ? '""' : '"<passphrase-redacted>"'} -> exit ${imported.code}: ${observedHead(imported, 2)}`,
-    `security import exited ${imported.code} or imported no identity: ${observedTail(imported)}`,
+    `security import exited ${imported.code}: ${observedTail(imported)}`,
   );
-  if (imported.code !== 0 || importedCount === "0") throw new ArmFailure(`the ${id} identity could not be imported`);
-  if (input.cn !== null && input.cn !== "") ctx.identitiesImported.push({ cn: input.cn });
+  if (imported.code !== 0) throw new ArmFailure(`the ${id} identity could not be imported`);
+  const listed = await tool("security", ["find-identity", "-p", "codesigning", ctx.keychain]);
+  console.log(`[identity ${id}] security find-identity -p codesigning prints:\n${redact(resultText(listed).trim() || "(no output)")}`);
+  const valid = await tool("security", ["find-identity", "-v", "-p", "codesigning", ctx.keychain]);
+  console.log(`[identity ${id}] security find-identity -v -p codesigning (for information) prints:\n${redact(resultText(valid).trim() || "(no output)")}`);
+  const listedIds = findIdentityLines(listed.stdout);
+  let cn = input.cn;
+  if (cn === null) {
+    const certFile = path.join(dir, "identity-cert.pem");
+    const certificateOut = await tool("openssl", ["pkcs12", "-in", importable, "-nokeys", "-passin", "pass:", "-out", certFile]);
+    const subject = await tool("openssl", ["x509", "-in", certFile, "-noout", "-subject"]);
+    cn =
+      certificateOut.code === 0 && subject.code === 0
+        ? commonNameOf(`${subject.stdout}${subject.stderr}`)
+        : (listedIds[0]?.label ?? null);
+    console.log(`[identity ${id}] derived the certificate's CN ${JSON.stringify(cn)} from ${certificateOut.code === 0 ? "the imported p12" : "security find-identity"}`);
+  }
+  if (cn === null || cn === "") throw new ArmFailure(`the ${id} identity's CN could not be named; set the environment's CN variable`);
+  ctx.identitiesImported.push({ cn });
+  const sha1 = listedIds.find((line) => line.label === cn)?.sha1 ?? null;
+  ctx.checker.check(
+    `identity ${id}: find-identity lists ${JSON.stringify(cn)}`,
+    listed.code === 0 && sha1 !== null,
+    `security find-identity -p codesigning -> exit ${listed.code}: ${cn} with SHA-1 ${String(sha1)}`,
+    `security find-identity -p codesigning exited ${listed.code} and did not list ${JSON.stringify(cn)}: a self-signed certificate is not trusted, so only the output without -v can list it — ${observedTail(listed)}`,
+  );
+  if (sha1 === null) throw new ArmFailure(`the ${id} identity is imported but security find-identity -p codesigning does not list it`);
   const partitioned = await tool("security", ["set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", "", ctx.keychain]);
   const partitionCommand = `security set-key-partition-list -S apple-tool:,apple: -s -k "" <keychain: ${ctx.keychainMode}>`;
   const partitionList: PartitionListWrite = { command: partitionCommand, exit: partitioned.code, outputTail: tail(redact(resultText(partitioned).trim()), 3) };
@@ -1479,45 +1539,33 @@ async function importIdentity(ctx: Ctx, arm: ArmRecord, id: ArmId, input: Identi
     );
   }
   console.log(`[identity ${id}] set-key-partition-list prints: ${observedHead(partitioned, 3)}`);
-  const listed = await tool("security", ["find-identity", "-p", "codesigning", ctx.keychain]);
-  console.log(`[identity ${id}] security find-identity -p codesigning -> exit ${listed.code}: ${observedHead(listed, 4)}`);
-  let cn = input.cn;
-  if (cn === null) {
-    const certFile = path.join(dir, "identity-cert.pem");
-    const certificateOut = await tool("openssl", ["pkcs12", "-in", importable, "-nokeys", "-passin", "pass:", "-out", certFile]);
-    const subject = await tool("openssl", ["x509", "-in", certFile, "-noout", "-subject"]);
-    cn =
-      certificateOut.code === 0 && subject.code === 0
-        ? commonNameOf(`${subject.stdout}${subject.stderr}`)
-        : ([...listed.stdout.matchAll(/^[ \t]*[0-9]+\)[ \t]+[0-9A-Fa-f]{40}[ \t]+"([^"]+)"/gm)].map((match) => match[1]!)[0] ?? null);
-    console.log(`[identity ${id}] derived the certificate's CN ${JSON.stringify(cn)} from ${certificateOut.code === 0 ? "the imported p12" : "security find-identity"}`);
-  }
-  if (cn === null || cn === "") throw new ArmFailure(`the ${id} identity's CN could not be named; set the environment's CN variable`);
-  const certificate = await tool("security", ["find-certificate", "-a", "-Z", "-c", cn, ctx.keychain]);
-  const sha1 = /SHA-1 hash: ([0-9a-fA-F]{40})/.exec(certificate.stdout)?.[1]?.toLowerCase() ?? null;
-  console.log(`[identity ${id}] imported (${imported.stdout.trim() || "(no output)"}); certificate SHA-1 ${sha1 ?? "(not printed)"}; signing as ${JSON.stringify(cn)}`);
-  if (input.cn === null || input.cn === "") ctx.identitiesImported.push({ cn });
+  console.log(`[identity ${id}] signing as ${JSON.stringify(cn)}, picked by the SHA-1 ${sha1} find-identity printed`);
   return { cn, sha1, findIdentity: listed.stdout.trim(), couldNotSign: false, source: input.source, partitionList };
 }
 
-async function signBundle(app: string, identity: string): Promise<RunResult & { timedOut: boolean }> {
-  return boundedTool("codesign", ["--force", "--deep", "--sign", identity, app], SIGN_TIMEOUT_MS);
+async function signBundle(app: string, identity: string, keychain: string | null): Promise<RunResult & { timedOut: boolean }> {
+  const args = ["--force", "--deep", "--sign", identity, ...(keychain === null ? [] : ["--keychain", keychain]), app];
+  return boundedTool("codesign", args, SIGN_TIMEOUT_MS);
 }
 
-async function signOrFail(ctx: Ctx, arm: ArmRecord, identity: Identity, app: string): Promise<void> {
-  let signed = await signBundle(app, identity.cn);
+async function signAttempt(arm: ArmRecord, where: string, app: string, identity: string, keychain: string | null): Promise<RunResult & { timedOut: boolean }> {
+  const signed = await signBundle(app, identity, keychain);
+  arm.signs.push({ where, signer: identity, exit: signed.code, output: observedTail(signed, OUTPUT_TAIL_LINES) });
+  console.log(`[sign ${where}] codesign --force --deep --sign ${identity}${keychain === null ? "" : " --keychain <keychain>"} exited ${signed.code}: ${observedTail(signed, OUTPUT_TAIL_LINES)}`);
+  return signed;
+}
+
+async function signOrFail(ctx: Ctx, arm: ArmRecord, where: string, identity: Identity, app: string): Promise<void> {
+  let signed = await signAttempt(arm, where, app, identity.sha1, ctx.keychain);
   if (signed.code !== 0 && !signed.timedOut) {
-    console.log(`[sign ${arm.id}] codesign with ${JSON.stringify(identity.cn)} exited ${signed.code}: ${observedTail(signed)}`);
-    if (identity.sha1 !== null) {
-      console.log(`[sign ${arm.id}] retrying with the certificate's SHA-1 ${identity.sha1} (the plan's fallback)`);
-      signed = await signBundle(app, identity.sha1);
-    }
+    console.log(`[sign ${where}] retrying with the certificate's CN ${JSON.stringify(identity.cn)} (a CN may name another identity; the SHA-1 above cannot)`);
+    signed = await signAttempt(arm, where, app, identity.cn, ctx.keychain);
   }
   if (signed.code !== 0) {
     identity.couldNotSign = true;
     arm.identity.couldNotSign = true;
     ctx.checker.fail(
-      `arm ${arm.id}: the identity could not sign the installed bundle${signed.timedOut ? ` (codesign was killed after ${SIGN_TIMEOUT_MS / 1000} s, so it was waiting on a Keychain prompt nobody can answer)` : ""}; security find-identity -p codesigning prints: ${identity.findIdentity || "(no output)"}; codesign's last output: ${observedTail(signed)}`,
+      `arm ${arm.id}: the identity could not sign the installed bundle${signed.timedOut ? ` (codesign was killed after ${SIGN_TIMEOUT_MS / 1000} s, so it was waiting on a Keychain prompt nobody can answer)` : ""}; security find-identity -p codesigning prints: ${identity.findIdentity || "(no output)"}; codesign's last ${OUTPUT_TAIL_LINES} output lines: ${observedTail(signed, OUTPUT_TAIL_LINES)}`,
     );
     throw new ArmFailure(`the ${arm.id} arm could not sign (could not sign is not a self-signed result)`);
   }
@@ -1565,6 +1613,7 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
   const service = `passquest-keychain-experiment-${process.pid}-${Date.now()}-${id}`;
   const arm: ArmRecord = {
     id,
+    signs: [],
     identity: { kind: id === "adhoc" ? "none" : id },
     service,
     account: ACCOUNT,
@@ -1596,14 +1645,14 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
     let identity: Identity | null = null;
     if (input !== null) {
       identity = await importIdentity(ctx, arm, id, input, dir);
-      arm.identity = { kind: input.kind, cn: identity.cn, source: identity.source, sha1: identity.sha1 ?? undefined, partitionList: identity.partitionList };
+      arm.identity = { kind: input.kind, cn: identity.cn, source: identity.source, sha1: identity.sha1, partitionList: identity.partitionList };
     }
     if (ctx.keychainMode === "experiment") await tool("security", ["unlock-keychain", "-p", "", ctx.keychain]);
 
     const prefix = path.join(dir, "install");
     const installedA = await installFromDmg(ctx, ctx.a.dmg, prefix, `${id}-a`);
     const aBuilt = await readSignature(installedA.app, installedA.executable, `${id}-a-built`, false);
-    if (identity !== null) await signOrFail(ctx, arm, identity, installedA.app);
+    if (identity !== null) await signOrFail(ctx, arm, `${id}-a`, identity, installedA.app);
     arm.a = identity === null ? aBuilt : await readSignature(installedA.app, installedA.executable, `${id}-a`, true);
 
     const keyA = randomBytes(16).toString("hex");
@@ -1661,7 +1710,7 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
       }
       ctx.guardsDone = true;
     }
-    if (identity !== null) await signOrFail(ctx, arm, identity, installedB.app);
+    if (identity !== null) await signOrFail(ctx, arm, `${id}-b`, identity, installedB.app);
     arm.b = identity === null ? bBuilt : await readSignature(installedB.app, installedB.executable, `${id}-b`, true);
     arm.drSame = arm.a.designatedRequirement === arm.b.designatedRequirement;
     console.log(
@@ -1689,7 +1738,7 @@ async function runArm(ctx: Ctx, id: ArmId): Promise<void> {
     if (arm.read.outcome !== "read") await settleSecurityAgent(ctx, arm, arm.read);
     if (arm.read.outcome !== "read") {
       if (afterRead.raw.partitionEntry) {
-        await simulateAllow(ctx, arm, { dir, service, installed: installedB, keyA });
+        await simulateAllow(ctx, arm, { dir, service, installed: installedB, keyA, identity });
       } else {
         arm.allow = { skipped: "no partition entry" };
         console.log(`[allow ${id}] skipped: no partition entry — the partition half of the learner's allow has nothing to add here, and the application-list half is not simulated by this tool`);
@@ -1739,7 +1788,7 @@ function readFailure(ctx: Ctx, where: string, read: ReadRecord): void {
 async function simulateAllow(
   ctx: Ctx,
   arm: ArmRecord,
-  spec: { dir: string; service: string; installed: { app: string; executable: string; bundle: string }; keyA: string },
+  spec: { dir: string; service: string; installed: { app: string; executable: string; bundle: string }; keyA: string; identity: Identity | null },
 ): Promise<void> {
   const { dir, service, installed } = spec;
   const bService = `${service}-b`;
@@ -1827,13 +1876,13 @@ async function simulateAllow(
     reread: rereadRecord,
     expected: "read",
   };
-  await thirdBuild(ctx, arm, { dir, service, installed, keyA: spec.keyA });
+  await thirdBuild(ctx, arm, { dir, service, installed, keyA: spec.keyA, identity: spec.identity });
 }
 
 async function thirdBuild(
   ctx: Ctx,
   arm: ArmRecord,
-  spec: { dir: string; service: string; installed: { app: string; executable: string; bundle: string }; keyA: string },
+  spec: { dir: string; service: string; installed: { app: string; executable: string; bundle: string }; keyA: string; identity: Identity | null },
 ): Promise<void> {
   const { dir, service, installed } = spec;
   const cDir = path.join(dir, "third");
@@ -1853,13 +1902,13 @@ async function thirdBuild(
   if (!ctx.checker.check(`third ${arm.id}: bump CFBundleShortVersionString`, setVersion.code === 0, `plutil -replace CFBundleShortVersionString -string ${versionAfter} -> exit 0`, `plutil exited ${setVersion.code}: ${observedTail(setVersion)}`)) {
     throw new ArmFailure("the third build's version could not be bumped");
   }
-  const identity = arm.identity.kind === "none" ? "-" : (arm.identity.cn ?? "");
-  const signed = await signBundle(cApp, identity);
+  const signer = spec.identity === null ? "-" : spec.identity.sha1;
+  const signed = await signAttempt(arm, `${arm.id}-c`, cApp, signer, spec.identity === null ? null : ctx.keychain);
   if (
     !ctx.checker.check(
       `third ${arm.id}: sign the bumped bundle`,
       signed.code === 0,
-      `codesign --force --deep --sign ${JSON.stringify(identity)} -> exit 0`,
+      `codesign --force --deep --sign ${JSON.stringify(signer)} -> exit 0`,
       `codesign exited ${signed.code}${signed.timedOut ? ` (killed after ${SIGN_TIMEOUT_MS / 1000} s on a Keychain prompt nobody can answer)` : ""}: ${observedTail(signed)}`,
     )
   ) {
