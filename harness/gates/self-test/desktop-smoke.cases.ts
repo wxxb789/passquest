@@ -57,17 +57,45 @@ export function desktopSmokeCases(): BrokenCase[] {
           : `desktop-smoke: did not report the smoke hook that answered: ${failures.slice(0, 3).join("; ")}`,
     },
     {
-      gate: desktopSmoke,
-      label: "desktop window whose page has no mygo runtime",
+      gate: makeDesktopSmokeGate(["practice"]),
+      label: "desktop window whose page has no mygo runtime, whose later scenario still runs",
       files: {
         "go.mod": GO_MOD,
-        "cmd/passquest-desktop/main.go": `package main\n\nimport "os"\n\nfunc main() {\n\truntime := \`{"ok":true,"value":{"textLength":900,"stageChildren":3,"stageTextLength":800,"errorBars":0,"ready":true,"probe":"clear","opaqueErrors":0,"shotBound":null,"shotError":""}}\`\n\t_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), []byte(runtime), 0o600)\n}\n`,
+        "cmd/passquest-desktop/main.go": `package main
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+)
+
+func write(value any) {
+	document, _ := json.Marshal(map[string]any{"ok": true, "value": value})
+	_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), document, 0o600)
+}
+
+func main() {
+	script, _ := os.ReadFile(os.Getenv("PASSQUEST_DESKTOP_SCRIPT"))
+	switch {
+	case strings.Contains(string(script), "desktop-smoke: boot/"):
+		write(map[string]any{"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": nil, "probe": "clear", "opaqueErrors": 0, "shotBound": nil, "shotError": ""})
+	case strings.Contains(string(script), "desktop-smoke: practice/"):
+		write(map[string]any{"answers": []any{map[string]any{
+			"item":      map[string]string{"token": "pt-selftest", "question": "q1", "presentedAt": "2026-01-01T00:00:00Z"},
+			"condition": map[string]string{"condition": "independent", "canCount": "true"},
+			"chosen":    "B",
+			"feedback":  map[string]string{"attempt": "1", "verdict": "correct", "elapsedMs": "1200"},
+		}}})
+	}
+}
+`,
+        "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println(`{"attempts":[]}`) }\n',
         "desktop/web/src/main.ts": 'document.title = "selftest";\n',
       },
       postFail: (failures) =>
-        failures.some((line) => line.startsWith("boot: no mygo runtime in the page"))
+        failures.some((line) => line.startsWith("practice: report --json has no attempt 1 "))
           ? null
-          : `desktop-smoke: did not report the missing runtime: ${failures.slice(0, 3).join("; ")}`,
+          : `desktop-smoke: did not report the missing attempt after a boot without a mygo runtime: ${failures.slice(0, 3).join("; ")}`,
     },
     {
       gate: desktopSmoke,

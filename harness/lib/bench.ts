@@ -21,6 +21,9 @@ export const VERDICT_RULE = `head Q1 > base Q3 and the median gap >= max(${
   MEDIAN_GAP_FRACTION * 100
 }% of the base median, ${MEDIAN_GAP_FLOOR_MS} ms)`;
 export const GUARD_RULE = `document.visibilityState === "visible" and ${RAF_TICKS} requestAnimationFrame ticks within ${RAF_BUDGET_MS} ms`;
+/** Why the one prepare launch carries no guard reading: it measures nothing, and its hidden window's page draws no frames on macOS and Linux (mygo@v0.10.0 page.go: ThrottlingOff), where a wait on an animation frame never finishes. */
+export const PREPARE_GUARDS_WHY =
+  "the prepare launch is not measured and its window is hidden; a hidden window's page draws no frames on macOS and Linux (mygo@v0.10.0 page.go, ThrottlingOff), so its script waits on no animation frame";
 export const VISUAL_ALLOWLIST = "harness/frontend-visual-allow.json";
 export const SHOT_STATES = ["today", "sheet-open", "practice-independent", "feedback-coach", "settings-row", "report"] as const;
 export type ShotState = (typeof SHOT_STATES)[number];
@@ -232,9 +235,13 @@ export interface LaunchShapeRow {
   kind: string;
   /** WebView2 reports a hidden window as `visibility: "visible"` and keeps its ticks, so the request is the only witness that a measured launch was meant to be shown. */
   hidden: boolean;
+  /** The launch's frame-guard reading; null for a launch that waits on no animation frame (the prepare launch). */
+  guards: GuardReading | null;
+  /** Why there is no reading; empty when there is one (PREPARE_GUARDS_WHY). */
+  guardsWhy: string;
 }
 
-/** The record's own arithmetic, checked before it is written: one row per launch, the plan's total, one seeded template, and a shown window for every measured launch. */
+/** The record's own arithmetic, checked before it is written: one row per launch, the plan's total, one seeded template, a shown window for every measured launch, and no guard reading without the reason why a launch waits on no animation frame. */
 export function recordShapeProblems(input: {
   seeds: readonly string[];
   rows: readonly LaunchShapeRow[];
@@ -249,8 +256,15 @@ export function recordShapeProblems(input: {
     problems.push(`the launch plan says ${input.plan.total} launch(es), the run made ${input.launches} (${JSON.stringify(input.plan)})`);
   }
   for (const row of input.rows) {
-    if (row.hidden && (MEASURED_KINDS as readonly string[]).includes(row.kind)) {
+    const measured = (MEASURED_KINDS as readonly string[]).includes(row.kind);
+    if (row.hidden && measured) {
       problems.push(`${row.label}: a ${row.kind} launch requested the hidden window; every measured launch must request a shown one`);
+    }
+    if (!measured && row.guards !== null) {
+      problems.push(`${row.label}: a ${row.kind} launch carries a guard reading; only a measured launch waits on animation frames, and a hidden window's page draws none on macOS and Linux`);
+    }
+    if (!measured && row.guards === null && row.guardsWhy.trim() === "") {
+      problems.push(`${row.label}: a ${row.kind} launch carries no guard reading and no guardsWhy saying why`);
     }
   }
   return problems;
@@ -691,19 +705,6 @@ const HELPERS = `
 const benchNow = () => performance.now();
 const benchLoading = () => q('#stage [aria-busy="true"]');
 const benchViewport = () => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio });
-const benchRafGuard = async () => {
-  let ticks = 0;
-  const from = benchNow();
-  const { promise, resolve } = Promise.withResolvers();
-  const step = () => {
-    ticks++;
-    if (ticks >= ${RAF_TICKS} || benchNow() - from >= ${RAF_BUDGET_MS}) resolve();
-    else requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-  await promise;
-  return { visibility: document.visibilityState, ticks, elapsedMs: benchNow() - from };
-};
 const benchFrames = (frames) => {
   const durations = [];
   for (let i = 1; i < frames.length; i++) durations.push(frames[i] - frames[i - 1]);
@@ -743,6 +744,23 @@ if (typeof PerformanceObserver === "function" && (PerformanceObserver.supportedE
 }
 `;
 
+/** The frame-cadence guard, carried by the launches that measure a shown window and never by the prepare launch (PREPARE_GUARDS_WHY). */
+const GUARD_HELPERS = `
+const benchRafGuard = async () => {
+  let ticks = 0;
+  const from = benchNow();
+  const { promise, resolve } = Promise.withResolvers();
+  const step = () => {
+    ticks++;
+    if (ticks >= ${RAF_TICKS} || benchNow() - from >= ${RAF_BUDGET_MS}) resolve();
+    else requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  await promise;
+  return { visibility: document.visibilityState, ticks, elapsedMs: benchNow() - from };
+};
+`;
+
 /** The same script body drives a shot state in the bench and in the Linux render smoke. */
 const DRIVERS: Record<ShotState, string> = {
   today: `await today();`,
@@ -773,6 +791,8 @@ await until("the run report", () => q('[data-testid="report"]'), 15000);`,
  * refused before it, Q-0003-02), an accepted note, the coach's consent, and a finished assessment
  * run — the report state the desktop-ux gate audits shows a run that ended, and a fresh database
  * cannot open one (Q-0009-03 requires 20 qualifying unseen items).
+ * It measures nothing, so its hidden window records no guard reading and waits on no animation
+ * frame (PREPARE_GUARDS_WHY).
  */
 export function prepareScript(): string {
   return pageScript(`
@@ -811,13 +831,13 @@ for (let i = 0; i < 3; i++) {
   await until("the next item or the report", () => q('[data-testid="assess-item"]')?.dataset.position !== position || q('[data-testid="report"]'));
 }
 await until("the run report", () => q('[data-testid="report"]'));
-return { prepared: true, granted: !!grant, engine: { userAgent: navigator.userAgent }, viewport: benchViewport(), guards: await benchRafGuard(), loaf: benchLoaf };
+return { prepared: true, granted: !!grant, engine: { userAgent: navigator.userAgent }, viewport: benchViewport(), loaf: benchLoaf };
 `);
 }
 
 export function shotScript(state: ShotState): string {
   return pageScript(`
-${HELPERS}
+${HELPERS}${GUARD_HELPERS}
 const engine = { userAgent: navigator.userAgent };
 const readyAt = performance.timeOrigin + performance.now();
 const viewport = benchViewport();
@@ -838,7 +858,7 @@ return { engine, readyAt, viewport, guards, shots: "captured", file, loaf: bench
 
 export function timingScript(): string {
   return pageScript(`
-${HELPERS}
+${HELPERS}${GUARD_HELPERS}
 const engine = { userAgent: navigator.userAgent };
 const readyAt = performance.timeOrigin + performance.now();
 const viewport = benchViewport();
@@ -1286,14 +1306,13 @@ export function selfCheckCases(): SelfCheckCase[] {
       name: "record shape must fail: a measured launch that requested the hidden window",
       check: () => {
         const plan = { prepare: 1, warmup: 0, measured: 1, control: 0, shots: 0, controlShots: 0, total: 2 };
-        const prepareHidden = recordShapeProblems({ seeds: ["a"], rows: [{ label: "prepare-a", kind: "prepare", hidden: true }], launches: 1, plan: { ...plan, measured: 0, total: 1 } });
-        const sampleShown = recordShapeProblems({ seeds: ["a"], rows: [{ label: "sample-b-0", kind: "sample", hidden: false }], launches: 1, plan: { ...plan, prepare: 0, total: 1 } });
+        const prepareRow = { label: "prepare-a", kind: "prepare", hidden: true, guards: null, guardsWhy: PREPARE_GUARDS_WHY };
+        const sampleRow = { label: "sample-b-0", kind: "sample", hidden: false, guards: { visibility: "visible", ticks: 30, elapsedMs: 500 }, guardsWhy: "" };
+        const prepareHidden = recordShapeProblems({ seeds: ["a"], rows: [prepareRow], launches: 1, plan: { ...plan, measured: 0, total: 1 } });
+        const sampleShown = recordShapeProblems({ seeds: ["a"], rows: [sampleRow], launches: 1, plan: { ...plan, prepare: 0, total: 1 } });
         const sampleHidden = recordShapeProblems({
           seeds: ["a"],
-          rows: [
-            { label: "prepare-a", kind: "prepare", hidden: true },
-            { label: "sample-b-0", kind: "sample", hidden: true },
-          ],
+          rows: [prepareRow, { ...sampleRow, hidden: true }],
           launches: 2,
           plan,
         });
@@ -1301,6 +1320,31 @@ export function selfCheckCases(): SelfCheckCase[] {
           prepareHidden.length === 0 && sampleShown.length === 0 && sampleHidden.length === 1 && (sampleHidden[0] ?? "").includes("sample-b-0"),
           `prepareHidden ${JSON.stringify(prepareHidden)}, sampleShown ${JSON.stringify(sampleShown)}, sampleHidden ${JSON.stringify(sampleHidden)}`,
         );
+      },
+    },
+    {
+      name: "record shape must fail: the prepare launch carries a guard reading, or none without a reason",
+      check: () => {
+        const plan = { prepare: 1, warmup: 0, measured: 1, control: 0, shots: 0, controlShots: 0, total: 2 };
+        const silent = recordShapeProblems({ seeds: ["a"], rows: [{ label: "prepare-a", kind: "prepare", hidden: true, guards: null, guardsWhy: "" }], launches: 1, plan: { ...plan, measured: 0, total: 1 } });
+        const fake = recordShapeProblems({
+          seeds: ["a"],
+          rows: [{ label: "prepare-a", kind: "prepare", hidden: true, guards: { visibility: "visible", ticks: 30, elapsedMs: 500 }, guardsWhy: "" }],
+          launches: 1,
+          plan: { ...plan, measured: 0, total: 1 },
+        });
+        return expect(
+          silent.length === 1 && (silent[0] ?? "").includes("guardsWhy") && fake.length === 1 && (fake[0] ?? "").includes("carries a guard reading"),
+          `silent ${JSON.stringify(silent)}, fake ${JSON.stringify(fake)}`,
+        );
+      },
+    },
+    {
+      name: "prepare: the script must not wait for animation frames",
+      check: () => {
+        const script = prepareScript();
+        const offenders = ["requestAnimationFrame", "benchRafGuard"].filter((token) => script.includes(token));
+        return expect(offenders.length === 0, `prepareScript carries ${offenders.join(" and ")}: its window is hidden, a hidden page draws no frames on macOS and Linux, and a wait there never finishes`);
       },
     },
     {

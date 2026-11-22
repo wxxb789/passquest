@@ -14,10 +14,10 @@ import {
   loafTotals,
   metricRows,
   parseBenchArgs,
+  PREPARE_GUARDS_WHY,
   prepareScript,
   READY_METRIC,
   readLaunch,
-  readGuards,
   readLoaf,
   readShotLaunch,
   readVisualAllowlist,
@@ -111,7 +111,7 @@ interface Tree {
 
 type LaunchKind = "prepare" | "warmup" | "sample" | "control" | "shot" | "control-shot";
 
-/** One row per launch: its label, its tree, the window it requested (hidden or shown), the engine UA and the guard reading it produced, its LoAF totals, its shot outcome and why it failed. */
+/** One row per launch: its label, its tree, the window it requested (hidden or shown), the engine UA and the guard reading it produced (or why it carries none), its LoAF totals, its shot outcome and why it failed. */
 interface LaunchRow {
   label: string;
   tree: "a" | "b";
@@ -119,6 +119,8 @@ interface LaunchRow {
   hidden: boolean;
   engine: string;
   guards: GuardReading | null;
+  /** Why this launch carries no guard reading; "" when it carries one (PREPARE_GUARDS_WHY). */
+  guardsWhy: string;
   loaf: LoafTotals | null;
   shots: string;
   error: string;
@@ -207,7 +209,7 @@ async function launch(run: Run, tree: Tree, spec: LaunchSpec): Promise<Started |
   const dir = path.join(run.temp, "launches", spec.label);
   mkdirSync(dir, { recursive: true });
   run.launches++;
-  const row: LaunchRow = { label: spec.label, tree: tree.key, kind: spec.kind, hidden: spec.hidden !== false, engine: "", guards: null, loaf: null, shots: "", error: "", result: "no result" };
+  const row: LaunchRow = { label: spec.label, tree: tree.key, kind: spec.kind, hidden: spec.hidden !== false, engine: "", guards: null, guardsWhy: spec.kind === "prepare" ? PREPARE_GUARDS_WHY : "", loaf: null, shots: "", error: "", result: "no result" };
   run.rows.push(row);
   const env: Record<string, string> = {
     PASSQUEST_DESKTOP_DATA: spec.data,
@@ -253,6 +255,11 @@ function countGuard(run: Run, label: string, guards: GuardReading | null, strict
   if (problems.length > 0) run.guards.failed++;
   if (!strict) return [];
   return problems;
+}
+
+/** The record's guard totals: the launches whose reading was graded, and those that carry none by design (the prepare launch, PREPARE_GUARDS_WHY). */
+function guardsSummary(run: Run): { rule: string; checked: number; failed: number; notMeasured: number } {
+  return { rule: GUARD_RULE, checked: run.guards.checked, failed: run.guards.failed, notMeasured: run.rows.filter((row) => row.guards === null).length };
 }
 
 function graded(run: Run, started: Started, strict: boolean): { reading: LaunchReading; metrics: Record<string, number> } | null {
@@ -415,12 +422,9 @@ async function prepareTree(run: Run, tree: Tree): Promise<boolean> {
     printTail(started.launched);
     return false;
   }
-  const guards = readGuards(value);
   started.row.engine = stringField(field(value, "engine"), "userAgent") ?? "";
-  started.row.guards = guards;
   started.row.loaf = loafTotals(readLoaf(field(value, "loaf")));
-  countGuard(run, started.row.label, guards, false);
-  started.row.result = guardProblems(guards).length > 0 ? "guard-failed" : "ok";
+  started.row.result = "ok";
   return true;
 }
 
@@ -711,6 +715,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
 
     const identical = comparison.rows.filter((row) => row.identical).length;
     const controlIdentical = controlShots.rows.filter((row) => row.identical).length;
+    const guards = guardsSummary(run);
     Object.assign(record, {
       tool: "frontend-bench",
       version: 1,
@@ -725,7 +730,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
           ? "a and b are the same commit: the comparison above is the same-build pair"
           : `two interleaved sets of ${options.samples} launches of the B build, after the comparison phase`,
         verdict: VERDICT_RULE,
-        guards: `${GUARD_RULE}; a launch whose guard fails records no sample`,
+        guards: `${GUARD_RULE}; a launch whose guard fails records no sample; ${PREPARE_GUARDS_WHY}`,
         metrics: METRIC_NOTES,
         shots: {
           states: SHOT_STATES,
@@ -744,7 +749,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
         b: { root: run.b.root, commit: run.b.commit, binary: run.b.display, shotHook: run.b.hook, userAgent: engines.b ?? "", bundles: run.b.bundles },
       },
       launches: { ...plan, total: run.launches, rows: run.rows },
-      guards: { rule: GUARD_RULE, checked: run.guards.checked, failed: run.guards.failed },
+      guards,
       metrics,
       frames: {
         pooled: Object.fromEntries(Object.entries(pooled).map(([key, values]) => [key, summariseFrames(values)])),
@@ -775,7 +780,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
     say(`${options.label || "compare run"}`);
     say(`A ${run.a.root} ${run.a.commit} (shots ${shotState.a}); B ${run.b.root} ${run.b.commit} (shots ${shotState.b})`);
     say(`engine ${engineLine(engines)}`);
-    say(`launches ${run.launches}; guards checked ${run.guards.checked}, failed ${run.guards.failed}; ${cadenceLine(run)}`);
+    say(`launches ${run.launches}; guards checked ${guards.checked}, failed ${guards.failed}, not measured ${guards.notMeasured}; ${cadenceLine(run)}`);
     if (engines.a && engines.b && engines.a !== engines.b) say("the two trees report different engines: only a warning, the matrices do not pin one Chromium build");
     for (const row of metrics) {
       say(`${row.name}: A ${spreadLine(row.a)} | B ${spreadLine(row.b)} | verdict ${row.verdict.worse ? "WORSE" : "ok"} (${row.verdict.detail})`);
@@ -850,6 +855,7 @@ async function runSmoke(options: BenchOptions): Promise<number> {
       if (shot) shots[state] = shot;
       else launched.row.result = "failed";
     }
+    const guards = guardsSummary(run);
     Object.assign(record, {
       tool: "frontend-bench",
       version: 1,
@@ -858,13 +864,13 @@ async function runSmoke(options: BenchOptions): Promise<number> {
       template: { seededBy: tree.key, preparedBy: tree.key, trees: 1, reason: "the render smoke's one tree seeds and prepares its own template" },
       method: {
         contentSize: CONTENT_SIZE,
-        guards: GUARD_RULE,
+        guards: `${GUARD_RULE}; ${PREPARE_GUARDS_WHY}`,
         states: SHOT_STATES,
         how: "one visible launch per state of one build: the Linux job proves the states render, and compares no numbers",
       },
       trees: { b: { root: tree.root, commit: tree.commit, binary: tree.display, shotHook: tree.hook, userAgent: engine, bundles: tree.bundles } },
       launches: { ...plan, total: run.launches, rows: run.rows },
-      guards: { rule: GUARD_RULE, checked: run.guards.checked, failed: run.guards.failed },
+      guards,
       readyMs: ready,
       shots: { dir: options.shots, rows: SHOT_STATES.map((state) => ({ state, b: shots[state] ?? null, identical: false })) },
       notes: run.notes,
@@ -873,7 +879,7 @@ async function runSmoke(options: BenchOptions): Promise<number> {
     });
     say(`${options.label || "render smoke"} on ${tree.root} (${tree.commit})`);
     say(`engine ${engine}`);
-    say(`launches ${run.launches}; guards checked ${run.guards.checked}, failed ${run.guards.failed}`);
+    say(`launches ${run.launches}; guards checked ${guards.checked}, failed ${guards.failed}, not measured ${guards.notMeasured}`);
     say(`readyMs ${SHOT_STATES.map((state) => `${state}=${ready[state] ?? "-"}`).join(" ")}`);
     say(`shots ${SHOT_STATES.filter((state) => shots[state]).length}/${SHOT_STATES.length} written`);
   } catch (error) {

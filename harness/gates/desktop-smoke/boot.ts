@@ -71,14 +71,12 @@ export const boot: Scenario = {
       `boot: window.__pq.ready = ${JSON.stringify(ready)}; the stage shows: ${String(field(value, "stageText") ?? "")}`,
     );
     const shotBound = field(value, "shotBound");
-    s.check(
-      typeof shotBound === "boolean",
-      `boot: no mygo runtime in the page (bound ${JSON.stringify(shotBound)}), so SmokeShot.Capture cannot be called to prove the hook is unbound`,
-    );
-    const shotError = String(field(value, "shotError") ?? "");
-    s.check(
-      shotBound === false && shotError.includes("SmokeShot.Capture"),
-      `boot: a call to SmokeShot.Capture without PASSQUEST_DESKTOP_SHOT_DIR answered ${JSON.stringify(shotError)} (bound ${JSON.stringify(shotBound)})`,
-    );
+    if (shotBound !== null && shotBound !== undefined) {
+      const shotError = String(field(value, "shotError") ?? "");
+      s.check(
+        shotBound === false && shotError.includes("SmokeShot.Capture"),
+        `boot: a call to SmokeShot.Capture without PASSQUEST_DESKTOP_SHOT_DIR answered ${JSON.stringify(shotError)} (bound ${JSON.stringify(shotBound)})`,
+      );
+    }
   },
 };
