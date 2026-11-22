@@ -1,0 +1,269 @@
+name: frontend-bench
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/frontend-bench.yml
+      - agent/**
+      - cmd/**
+      - desktop/**
+      - go.mod
+      - go.sum
+      - harness/frontend-visual-allow.json
+      - harness/lib/**
+      - harness/tools/frontend-bench.ts
+      - internal/**
+      - mise.toml
+  workflow_dispatch:
+    inputs:
+      a-ref:
+        description: The base commit A; empty is the dispatched ref itself (a same-build control pair)
+        required: false
+        default: ""
+      b-ref:
+        description: The head commit B; empty is the dispatched ref itself
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-bench-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # One job per OS, so a failure costs one platform's wall time and "Re-run failed jobs" repeats
+  # only that platform. Both trees are checked out on the runner: A into a/, B at the root, and the
+  # tool builds each with the root tree's harness, serially on this one machine.
+  bench:
+    name: frontend bench (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # Two builds, one seeded template and 65 launches -- the hidden prepare launch (no frame guard) plus
+    # 64 shown -- fit well inside an hour; the ceiling is there for a hung webview, not for the work.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-26]
+    steps:
+      - name: Resolve the two commits
+        id: refs
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DISPATCH_A: ${{ github.event.inputs['a-ref'] }}
+          DISPATCH_B: ${{ github.event.inputs['b-ref'] }}
+          HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request) a="$BASE_SHA"; b="$HEAD_SHA" ;;
+            workflow_dispatch) a="${DISPATCH_A:-$HEAD}"; b="${DISPATCH_B:-$HEAD}" ;;
+            *) echo "::error::this workflow handles pull_request and workflow_dispatch, not $EVENT_NAME"; exit 1 ;;
+          esac
+          for sha in "$a" "$b"; do
+            if [[ ! "$sha" =~ ^[0-9a-f]{7,40}$ ]]; then
+              echo "::error::commit '${sha}' does not look like a commit id"; exit 1
+            fi
+          done
+          echo "frontend-bench: event=$EVENT_NAME A=$a B=$b"
+          echo "a=$a" >> "$GITHUB_OUTPUT"
+          echo "b=$b" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout B
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.refs.outputs.b }}
+          fetch-depth: 1
+
+      - name: Checkout A
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.refs.outputs.a }}
+          path: a
+          fetch-depth: 1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+
+      - name: Install the harness dependencies
+        run: bun install --frozen-lockfile
+
+      # A visible window is measured, so the runner's display must host a 1280x800 page area; the
+      # Windows runner's own default (1024x768) would clamp it, as it does for the gate's ux gate.
+      - name: Desktop display size
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+
+      # The macos-26 runner's own display is too small for the audited 1280x800 page area
+      # (Q-0012-05): AppKit fits a titled window to the screen (NSWindow
+      # constrainFrameRect:toScreen:), so the window comes back clamped. displayplacer is the
+      # macOS counterpart of the Windows step above; its list is printed before and after, so
+      # the log holds the display the bench really measured.
+      - name: Desktop display size (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The audited 1280x800 page area (Q-0012-05) plus the 28 pt title bar and the menu bar
+          # and Dock insets; 1920x1080 is preferred when the runner offers it.
+          min_width=1280
+          min_height=860
+
+          brew install displayplacer
+
+          before="$RUNNER_TEMP/displayplacer-before.txt"
+          after="$RUNNER_TEMP/displayplacer-after.txt"
+          echo "displayplacer list (before):"
+          displayplacer list | tee "$before"
+
+          # The main enabled screen, and on it the largest 1920x1080-preferred mode that is not
+          # scaling:on: scaling:on is density 2.0, so only a scaling:off mode's res is the point
+          # size the window is fitted against.
+          chosen=$(awk -v minw="$min_width" -v minh="$min_height" '
+            /^Persistent screen id:/ { id = $4; ids[++n] = id; next }
+            /^Origin: / { origins[id] = $2; if ($0 ~ /main display/) mains[id] = 1; next }
+            /^Rotation: / { rotations[id] = $2; next }
+            /^Enabled: / { enableds[id] = $2; next }
+            /^  mode / && $0 !~ / scaling:on/ {
+              res = $3
+              sub(/^res:/, "", res)
+              split(res, size, "x")
+              if (size[1] + 0 < minw + 0 || size[2] + 0 < minh + 0) next
+              exact = (size[1] + 0 == 1920 && size[2] + 0 == 1080) ? 0 : 1
+              key = sprintf("%d %010d %010d", exact, 999999999 - size[1] * size[2], 999999 - size[1])
+              if (!(id in bestkey) || key < bestkey[id]) { bestkey[id] = key; bestres[id] = res }
+            }
+            END {
+              for (i = 1; i <= n; i++) if (enableds[ids[i]] == "true" && mains[ids[i]]) { want = ids[i]; break }
+              if (want == "") for (i = 1; i <= n; i++) if (enableds[ids[i]] == "true") { want = ids[i]; break }
+              if (want == "") { print "NOSCREEN"; exit }
+              if (!(want in bestres)) { print "NOMODE", want; exit }
+              print want, origins[want], rotations[want], bestres[want]
+            }
+          ' "$before")
+
+          case "$chosen" in
+            NOSCREEN)
+              echo "::error::displayplacer list shows no enabled display; displayplacer list (before) above"
+              exit 1
+              ;;
+            NOMODE\ *)
+              echo "::error::display ${chosen#NOMODE } has no scaling:off mode of at least ${min_width}x${min_height}, which a ${min_width}x800 page area plus the title bar needs; displayplacer list (before) above lists every mode the runner offers"
+              exit 1
+              ;;
+          esac
+          read -r screen origin rotation res <<<"$chosen"
+
+          echo "displayplacer: ${screen} -> res:${res} scaling:off"
+          displayplacer "id:${screen} res:${res} scaling:off origin:${origin} degree:${rotation}"
+
+          echo "displayplacer list (after):"
+          displayplacer list | tee "$after"
+
+          # A scaling:off display is density 1, so its Resolution: block line is also its point
+          # size: that is the display the window is fitted against, which this step has to prove.
+          state=$(awk -v want="$screen" '
+            /^Persistent screen id:/ { cur = ($4 == want); next }
+            cur && /^Resolution: / { resolution = $2 }
+            cur && /^Scaling: / { scaling = $2 }
+            END { print resolution, scaling }
+          ' "$after")
+          if [ "$state" != "$res off" ]; then
+            echo "::error::displayplacer left the display at '${state:-unknown}', not '${res} off'; displayplacer list (after) above"
+            exit 1
+          fi
+          echo "displayplacer: the display is ${res} points at density 1"
+
+      # Seconds, not the two builds: a broken parser or verdict must fail before the benches run.
+      - name: Check the tool's parsers and the noise decision
+        run: bun harness/tools/frontend-bench.ts --self-check
+
+      - name: Run the bench
+        shell: bash
+        run: |
+          set -o pipefail
+          bun harness/tools/frontend-bench.ts --a-root a --b-root . \
+            --out "$RUNNER_TEMP/frontend-bench-record.json" \
+            --shots "$RUNNER_TEMP/frontend-bench-shots" \
+            --label "${{ matrix.os }} a=${{ steps.refs.outputs.a }} b=${{ steps.refs.outputs.b }}" \
+            2>&1 | tee "$RUNNER_TEMP/frontend-bench.log"
+
+      - name: Upload the record, the log and the shots
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-bench-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/frontend-bench-record.json
+            ${{ runner.temp }}/frontend-bench.log
+            ${{ runner.temp }}/frontend-bench-shots
+          if-no-files-found: error
+          retention-days: 30
+
+  # Linux is second-tier (Q-0000-07): this job only proves the states render in a visible WebKitGTK
+  # window on a virtual display. It compares no numbers, which would come from another engine.
+  linux-smoke:
+    name: frontend bench (ubuntu-latest render smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+
+      # WebKitGTK 4.1 plus a virtual display, and a keyring on a private session bus: the same
+      # arrangement the gate's desktop group runs in.
+      - name: Install the desktop webview prerequisites
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y libwebkit2gtk-4.1-0 xvfb gnome-keyring libsecret-1-0 dbus-daemon
+
+      - name: Install the harness dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check the tool's parsers and the noise decision
+        run: bun harness/tools/frontend-bench.ts --self-check
+
+      - name: Render smoke (a visible window on the virtual display)
+        shell: bash
+        # The window is measured visibly, so the display is Xvfb's, with the screen size stated
+        # rather than implied: a clamp would be reported as a page area that is not 1280x800.
+        run: |
+          set -o pipefail
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1920x1080x24" bash -c 'echo -n ci | gnome-keyring-daemon --unlock --components=secrets && bun harness/tools/frontend-bench.ts --root . --smoke --out "$RUNNER_TEMP/frontend-bench-smoke.json" --shots "$RUNNER_TEMP/frontend-bench-smoke-shots" --label ubuntu-latest' 2>&1 | tee "$RUNNER_TEMP/frontend-bench-smoke.log"
+
+      - name: Upload the smoke record, the log and the shots
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-bench-ubuntu-smoke
+          path: |
+            ${{ runner.temp }}/frontend-bench-smoke.json
+            ${{ runner.temp }}/frontend-bench-smoke.log
+            ${{ runner.temp }}/frontend-bench-smoke-shots
+          if-no-files-found: error
+          retention-days: 30

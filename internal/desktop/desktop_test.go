@@ -431,6 +431,56 @@ func TestSmokeHook(t *testing.T) {
 	}
 }
 
+func TestShotService(t *testing.T) {
+	dir := t.TempDir()
+	service := &shotService{dir: dir, window: func() *mygo.Window { return nil }}
+	for _, name := range []string{"", "Today", "sheet open", "a/b", "../x", "a.png", "-lead", strings.Repeat("a", 41)} {
+		_, err := service.Capture(name)
+		if err == nil || !strings.Contains(err.Error(), "capture name") {
+			t.Errorf("Capture(%q) = %v, want a capture name error", name, err)
+		}
+	}
+	if _, err := service.Capture("today"); err == nil || !strings.Contains(err.Error(), "window does not exist") {
+		t.Errorf("Capture without a window = %v, want the window error", err)
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Errorf("a refused capture wrote %d file(s) (%v)", len(entries), err)
+	}
+}
+
+// The shot service exists only with both EnvScript and EnvShotDir; a timing
+// launch and a normal launch bind nothing (the desktop smoke's boot case
+// checks the page side of this).
+func TestShotDirComesOnlyFromAScriptedLaunch(t *testing.T) {
+	var nilHook *smokeHook
+	nilHook.bindShots(nil)
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "scenario.js")
+	if err := os.WriteFile(script, []byte("return 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shoot := filepath.Join(dir, "shots")
+	env := map[string]string{EnvScript: script, EnvResult: filepath.Join(dir, "result.json"), EnvShotDir: "  " + shoot + "  "}
+	hook, err := smokeFromEnv(envOf(env), nil)
+	if err != nil || hook == nil {
+		t.Fatalf("smokeFromEnv = %v, %v", hook, err)
+	}
+	if hook.shotDir != shoot {
+		t.Fatalf("shotDir = %q, want %q", hook.shotDir, shoot)
+	}
+	hook.bindShots(func() *mygo.Window { return nil })
+
+	plain, err := smokeFromEnv(envOf(map[string]string{EnvScript: script, EnvResult: filepath.Join(dir, "result.json")}), nil)
+	if err != nil || plain == nil {
+		t.Fatalf("smokeFromEnv without a shot directory = %v, %v", plain, err)
+	}
+	if plain.shotDir != "" {
+		t.Fatalf("shotDir = %q without %s", plain.shotDir, EnvShotDir)
+	}
+	plain.bindShots(func() *mygo.Window { return nil })
+}
+
 // fakePage loads when told to and evaluates with eval.
 type fakePage struct {
 	mu     sync.Mutex
