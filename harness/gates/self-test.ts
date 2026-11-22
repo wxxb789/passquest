@@ -21,6 +21,7 @@ import { desktopSmokeCases } from "./self-test/desktop-smoke.cases.ts";
 import { desktopUxCases } from "./self-test/desktop-ux.cases.ts";
 import { docsLinksCases } from "./self-test/docs-links.cases.ts";
 import { findSmokeCases } from "./self-test/find-smoke.cases.ts";
+import { frontendBaselineCases, frontendBaselineUnitProblem } from "./self-test/frontend-baseline.cases.ts";
 import type { BrokenCase, PassCase } from "./self-test/fixture.ts";
 import { goBuildCases } from "./self-test/go-build.cases.ts";
 import { goTestCases } from "./self-test/go-test.cases.ts";
@@ -318,6 +319,7 @@ function brokenCases(): BrokenCase[] {
     ...secretsCases(),
     ...localOnlyCases(),
     ...portablePathsCases(),
+    ...frontendBaselineCases(),
     ...baselineCases(),
     ...goTestCases(),
     ...goVetCases(),
@@ -421,6 +423,7 @@ export const selfTest: Gate = {
       pageScriptEscapeProblem,
       endpointPinProblem,
       uxCoverageProblem,
+      frontendBaselineUnitProblem,
       packageNamingProblem,
       stagingRefusalsProblem,
       bundleEntryProblem,

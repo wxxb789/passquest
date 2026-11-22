@@ -8,6 +8,7 @@ import { desktopSmoke } from "./desktop-smoke.ts";
 import { desktopUx } from "./desktop-ux.ts";
 import { docsLinks } from "./docs-links.ts";
 import { findSmoke } from "./find-smoke.ts";
+import { frontendBaseline } from "./frontend-baseline.ts";
 import { goBuild } from "./go-build.ts";
 import { goTest } from "./go-test.ts";
 import { goTidy } from "./go-tidy.ts";
@@ -38,6 +39,7 @@ export const gates: Gate[] = [
   installGuide,
   secrets,
   localOnly,
+  frontendBaseline,
   baseline,
   importSmoke,
   tacticSmoke,

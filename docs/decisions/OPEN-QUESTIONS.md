@@ -2357,3 +2357,103 @@ Entry format:
   `workflow_dispatch` against a released package, continuing at plan P2/P3 with the identity's own DR
   and fingerprint.
 
+### Q-0019-01 — What is the frontend's engine baseline?
+- Status: decided(default taken)
+- Context: goal 0019 writes the frontend for the engines Pass Quest actually ships on, and the exact
+  baseline decides which workarounds may go. The grounds are the plan's fact 1 (scouted 2026-11-22):
+  the Windows runner's WebView2 Evergreen channel updates to current stable Chromium (157 at scout
+  time, `learn.microsoft.com/…/webview2/concepts/versioning`); the `macos-26` runner's WKWebView is
+  the OS's WebKit framework, Safari 26.6 on image `20260824.0517.1`; `ubuntu-latest` installs
+  `libwebkit2gtk-4.1-0` **2.52.6** (`packages.ubuntu.com/{noble,resolute}`), which MyGo `dlopen`s
+  (`mygo@v0.10.0/internal/linux/ffi.go:904-912`); and `bun build` has no browser-version target, so
+  the tsconfig `target`/`lib` is the only switch.
+- Options considered: (A) name the oldest engine each first-tier platform can run — Evergreen
+  WebView2, macOS 26's system WebKit, WebKitGTK 2.52.6 second-tier — and pin `ES2024` plus the CSS
+  level all three support; (B) write for the newest engines and take features the floor cannot run;
+  (C) keep ES2022 and the old-engine workarounds.
+- Default taken: (A). `desktop/web/README.md`'s engine-baseline section and `docs/conventions.md`
+  name it, `desktop/web/tsconfig.json` sets `target`/`lib` to `ES2024`, and the `frontend-baseline`
+  gate pins both values and the README, so a target cannot drift from the docs. Reversal: change the
+  documented values, the tsconfig and the gate together.
+- Revisit when: a first-tier platform's floor moves (a new macOS minimum, the app's Windows floor), or
+  an engine's build in the matrix stops supporting a feature the frontend uses.
+
+### Q-0019-02 — How is performance measured, before and after?
+- Status: decided(default taken)
+- Context: Done-when 4 needs launch time, the four main interactions, the translucent layers'
+  rendering cost and the bundle size, measured before and after without comparing numbers across
+  machines or runs. Hidden web-view windows throttle timers (WebKit also suspends animations), so
+  rendering cost needs a shown window, which no gate has ever used; the app's own
+  `Window.CapturePage()` (WebView2 `CapturePreview`, WKWebView `takeSnapshot`) avoids an OS-level
+  capture and the macOS screen-recording permission.
+- Options considered: (A) one `bun`-run tool (`harness/tools/frontend-bench.ts` + its workflow) that
+  measures A and B serially in one job, in shown windows, on both first-tier OSes; (B) numbers from
+  separate runs or machines; (C) a proxy measured in the hidden windows the gates use.
+- Default taken: (A). 2 warm-ups + 9 samples per build per metric, A and B alternated serially in one
+  job, median and IQR recorded, "worse beyond noise" = the head's Q1 above the base's Q3 **and** a
+  median gap of at least max(5 %, 5 ms); the same-build control pair is the noise floor. Every number
+  in `docs/evidence/0019-modern-frontend.md` is quoted from a named run's artifact. Reversal: change
+  the tool and the workflow together and re-run the control pair.
+- Revisit when: the same-build control pair itself reads "worse", or a metric's spread swamps the
+  difference the goal needs.
+
+### Q-0019-03 — What happens when a runner cannot show a window?
+- Status: decided(default taken)
+- Context: the bench's rendering-cost metric needs a genuinely visible window (Q-0019-02). A shared
+  runner may refuse or throttle one (macOS most likely); WebView2 cannot be canvassed this way — a
+  hidden window there reports `visible` and keeps ticking — so the guarantee that no number is
+  measured hidden is structural: every measured launch records the visibility it requested, and the
+  record's shape check fails a launch that requested the hidden window.
+- Options considered: (A) record the guard failure, measure nothing for that metric, and let the
+  owner decide; (B) accept a disclosed proxy (style/layout cost measured hidden, compositing
+  excluded); (C) change the contract's Done-when 4.
+- Default taken: (A). The run records the failure and the metric has no honest value until the owner
+  answers. No proxy is invented silently.
+- Revisit when: a bench run's guard rows show a runner that cannot hold a visible window.
+
+### Q-0019-04 — Is there a screenshot companion to the ux gate?
+- Status: decided(default taken)
+- Context: there is no pixel or screenshot comparison anywhere in the harness, and Q-0012-01 says
+  screenshots alone are not evidence while naming "the owner wants pixel-level screenshot diffs" as
+  the revisit trigger. The cheapest honest way to show "nothing visible changed" is the bench's PNG
+  captures: same runner, base vs head, byte equality.
+- Options considered: (A) PNG captures through the smoke hook, base vs head from the same runner,
+  with the same-build control pair required identical first, and `harness/frontend-visual-allow.json`
+  naming intended differences (a stale entry fails); (B) no visual check; (C) screenshots as the
+  primary oracle.
+- Default taken: (A) as a **companion** to `desktop-ux`, never a substitute (Q-0012-01): a screenshot
+  pair never excuses an audit finding, and the ux gate stays the primary oracle. Reversal: delete the
+  captures from the bench tool and the allowlist with it.
+- Revisit when: the captures prove nondeterministic on a runner (the same-build control pair differs
+  per state), or the owner decides image diffs need a tolerance instead of byte equality.
+
+### Q-0019-05 — Which modern features are left out, and why?
+- Status: decided(default taken)
+- Context: Done-when 3 wants every adoption and every refusal disclosed. Anchor positioning and
+  `<dialog>`-free focus trapping for the popovers would need a Linux run to prove the WebKitGTK
+  behaviour; `@scope`, scroll-driven animations, view transitions and `content-visibility` have no
+  hand-built part they would replace, or would change a behaviour the goal forbids.
+- Options considered: (A) adopt only what removes or simplifies hand-built code on the baseline, and
+  list each left-out candidate with its reason; (B) adopt anchor positioning and the rest
+  optimistically; (C) adopt nothing modern.
+- Default taken: (A). The evidence record lists each adopted feature with what it removed and each
+  left-out candidate with its reason; a left-out candidate is revisited only where the plan names
+  its evidence path (a Linux gate run for popover anchor positioning).
+- Revisit when: a first-tier or second-tier engine version change makes a left-out feature safe, or an
+  adopted feature's removal (P4–P8) is reverted with the finding that caused it.
+
+### Q-0019-06 — What WebKit-only constructs stay?
+- Status: decided(default taken)
+- Context: the workaround removal (P3) must leave the constructs the WebKit engines genuinely need:
+  `-webkit-font-smoothing` has no standard equivalent that keeps the design's text weight, and the
+  `::-webkit-scrollbar*` family is WebKit's own API with no equivalent for the design's 8 px thumb.
+- Options considered: (A) keep them, as allowlist entries in the `frontend-baseline` gate, each with
+  its reason, and fail on an entry that matches nothing; (B) remove them anyway; (C) keep them with no
+  machine check.
+- Default taken: (A). The gate's allowlist carries the reasons, an entry that matches nothing in the
+  source or in the built bundle fails the gate, and no new dependency is added for the visuals: the
+  shot comparison is byte equality, not an image library. Reversal: change the allowlist and the
+  stylesheets together.
+- Revisit when: a baseline engine gains a standard equivalent that preserves the design, or the
+  design changes the text weight or the scrollbar.
+
