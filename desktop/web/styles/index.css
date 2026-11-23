@@ -1,17 +1,23 @@
 /* Pass Quest desktop — C · Stage stylesheet. Order matches the prototype's cascade. */
-@import "./tokens.css";
-@import "./base.css";
-@import "./chrome.css";
-@import "./primitives.css";
-@import "./orbit.css";
-@import "./today.css";
-@import "./reading.css";
-@import "./feedback.css";
-@import "./coach.css";
-@import "./assess.css";
-@import "./report.css";
-@import "./layers.css";
-@import "./anki.css";
-@import "./settings.css";
-@import "./responsive.css";
-@import "./desktop.css";
+/* Cascade layers: the file order below is the cascade order, so a component's precedence among the
+   section stylesheets is this list, not the specificity a selector happens to carry across files. */
+@layer tokens, base, chrome, primitives, orbit, today, reading, feedback, coach, assess, report, layers, anki, settings, responsive, desktop;
+/* The two global !important blocks stay outside the layers (hence no layer() here): a layered
+   !important would outrank the harness's own unlayered settle/shot styles, which it must not. */
+@import "./motion.css";
+@import "./tokens.css" layer(tokens);
+@import "./base.css" layer(base);
+@import "./chrome.css" layer(chrome);
+@import "./primitives.css" layer(primitives);
+@import "./orbit.css" layer(orbit);
+@import "./today.css" layer(today);
+@import "./reading.css" layer(reading);
+@import "./feedback.css" layer(feedback);
+@import "./coach.css" layer(coach);
+@import "./assess.css" layer(assess);
+@import "./report.css" layer(report);
+@import "./layers.css" layer(layers);
+@import "./anki.css" layer(anki);
+@import "./settings.css" layer(settings);
+@import "./responsive.css" layer(responsive);
+@import "./desktop.css" layer(desktop);

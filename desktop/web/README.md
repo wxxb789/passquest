@@ -52,8 +52,12 @@ policy, not the build:
 
 ## Entry and build
 
-- Entry: `src/main.ts`. It imports `styles/index.css`, which `@import`s the prototype CSS split by
-  section (`tokens.css` … `responsive.css`, values verbatim) plus `desktop.css` (port-only additions).
+- Entry: `src/main.ts`. It imports `styles/index.css`, which declares the cascade layers in file order
+  (`@layer tokens … desktop`), `@import`s the prototype CSS split by section (`tokens.css` …
+  `responsive.css`, values verbatim, one `layer(…)` per file) plus `desktop.css` (port-only
+  additions), and imports `motion.css` unlayered: the reduce-motion and shot-mode `!important`
+  blocks must stay outside the layers, which would outrank the harness's own injected settle/shot
+  styles.
 - Build (what the harness runs):
 
   ```sh

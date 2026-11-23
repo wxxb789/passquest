@@ -1,0 +1,12 @@
+/* Reduced motion + shot mode — ported verbatim from design/prototypes/c-stage.html (lines 919-987).
+   These two global !important blocks stay OUTSIDE the cascade layers (index.css imports this file
+   unlayered): inside a layer an !important declaration outranks every unlayered !important one, which
+   would beat the harness's own injected settle/shot styles where it used to lose to them. */
+/* ---------- reduced motion + shot ---------- */
+@media (prefers-reduced-motion: reduce) {
+  /* Deviation from the prototype: no transitions at all. A 1 ms duration with the default transition-property
+     (all) turned every style change into a transition, and a page WebKit does not show never advances it,
+     so a card frame stayed at its old height (macOS CI). */
+  *, *::before, *::after, *::backdrop { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition: none !important; scroll-behavior: auto !important; }
+}
+html.shot *, html.shot *::before, html.shot *::after, html.shot *::backdrop { animation: none !important; transition: none !important; caret-color: transparent !important; }

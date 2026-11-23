@@ -119,14 +119,18 @@
 
 /* rooms: ambient light carries the attempt condition
    calm = between attempts · cool = independent (can count) · warm = assisted · still = assessment */
-[data-theme="light"] body[data-room="calm"]  { --a1: oklch(89% 0.045 278); --a2: oklch(92.5% 0.035 222); --a3: oklch(94% 0.03 40); }
-[data-theme="light"] body[data-room="cool"]  { --a1: oklch(85% 0.085 212); --a2: oklch(89% 0.07 190);  --a3: oklch(93% 0.04 232); }
-[data-theme="light"] body[data-room="warm"]  { --a1: oklch(86% 0.1 66);    --a2: oklch(89.5% 0.085 44); --a3: oklch(93% 0.055 86); }
-[data-theme="light"] body[data-room="still"] { --bg: oklch(96.4% 0.001 260); --a1: oklch(93.5% 0.001 260); --a2: oklch(95% 0.001 260); --a3: oklch(95.5% 0 0); }
-[data-theme="dark"]  body[data-room="calm"]  { --a1: oklch(33% 0.085 282); --a2: oklch(29% 0.07 236);  --a3: oklch(25% 0.05 320); }
-[data-theme="dark"]  body[data-room="cool"]  { --a1: oklch(36% 0.1 214);   --a2: oklch(31% 0.08 192);  --a3: oklch(24% 0.05 236); }
-[data-theme="dark"]  body[data-room="warm"]  { --a1: oklch(37% 0.09 62);   --a2: oklch(31% 0.075 38);  --a3: oklch(25% 0.045 84); }
-[data-theme="dark"]  body[data-room="still"] { --bg: oklch(18.5% 0.006 260); --a1: oklch(21.5% 0.004 260); --a2: oklch(20% 0.003 260); --a3: oklch(19.5% 0.002 260); }
+[data-theme="light"] body {
+  &[data-room="calm"]  { --a1: oklch(89% 0.045 278); --a2: oklch(92.5% 0.035 222); --a3: oklch(94% 0.03 40); }
+  &[data-room="cool"]  { --a1: oklch(85% 0.085 212); --a2: oklch(89% 0.07 190);  --a3: oklch(93% 0.04 232); }
+  &[data-room="warm"]  { --a1: oklch(86% 0.1 66);    --a2: oklch(89.5% 0.085 44); --a3: oklch(93% 0.055 86); }
+  &[data-room="still"] { --bg: oklch(96.4% 0.001 260); --a1: oklch(93.5% 0.001 260); --a2: oklch(95% 0.001 260); --a3: oklch(95.5% 0 0); }
+}
+[data-theme="dark"] body {
+  &[data-room="calm"]  { --a1: oklch(33% 0.085 282); --a2: oklch(29% 0.07 236);  --a3: oklch(25% 0.05 320); }
+  &[data-room="cool"]  { --a1: oklch(36% 0.1 214);   --a2: oklch(31% 0.08 192);  --a3: oklch(24% 0.05 236); }
+  &[data-room="warm"]  { --a1: oklch(37% 0.09 62);   --a2: oklch(31% 0.075 38);  --a3: oklch(25% 0.045 84); }
+  &[data-room="still"] { --bg: oklch(18.5% 0.006 260); --a1: oklch(21.5% 0.004 260); --a2: oklch(20% 0.003 260); --a3: oklch(19.5% 0.002 260); }
+}
 
 /* assess — the room goes still (prototype lines 602, 604-606) */
 body[data-room="still"] { --acc: var(--ink); --acc-hi: var(--ink-2); --acc-ink: var(--bg); --acc-soft: var(--well); --acc-tint: var(--well-2); --acc-line: var(--line-2); --acc-dim: var(--ink-2); }
