@@ -4,9 +4,9 @@
   /* Deviation from the prototype: no transitions at all. A 1 ms duration with the default transition-property
      (all) turned every style change into a transition, and a page WebKit does not show never advances it,
      so a card frame stayed at its old height (macOS CI). */
-  *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition: none !important; scroll-behavior: auto !important; }
+  *, *::before, *::after, *::backdrop { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition: none !important; scroll-behavior: auto !important; }
 }
-html.shot *, html.shot *::before, html.shot *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }
+html.shot *, html.shot *::before, html.shot *::after, html.shot *::backdrop { animation: none !important; transition: none !important; caret-color: transparent !important; }
 
 /* compact heights */
 @media (max-height: 820px) {

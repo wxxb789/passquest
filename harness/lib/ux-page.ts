@@ -586,7 +586,7 @@ const UX = (() => {
     // Controls: the centre of the visible part must hit the control itself.
     for (const el of vis.filter((e) => e.matches(INTERACTIVE))) {
       const c = clipRect(el);
-      if ((c.w >= vw * 0.9 && c.h >= vh * 0.9) || c.w < 2 || c.h < 2) continue; // a scrim, or clipped away
+      if ((c.w >= vw * 0.9 && c.h >= vh * 0.9) || c.w < 2 || c.h < 2) continue; // a full-viewport control, or clipped away
       const x = (c.l + c.r) / 2;
       const y = (c.t + c.b) / 2;
       if (x < 0 || y < 0 || x > vw || y > vh) {
@@ -600,10 +600,10 @@ const UX = (() => {
       } else add("interactive-covered", el, { by: path(hit) });
     }
 
-    // Keyboard: every control focusable (a scrim is pointer-only; Esc closes its layer) with a visible change.
+    // Keyboard: every control focusable with a visible change.
     const reachable = [];
     for (const el of vis.filter((e) => e.matches(CONTROLS))) {
-      if (el.matches(".scrim") || el.disabled) continue;
+      if (el.disabled) continue;
       const target = focusable(el) ? el : el.querySelector("button,a[href],input,select,textarea,[tabindex]:not([tabindex='-1'])");
       if (target && target.disabled) continue;
       if (!target || !focusable(target)) {
@@ -630,9 +630,18 @@ const UX = (() => {
       el.blur();
     }
     if (before && before.focus && before !== document.body) before.focus({ preventScroll: true });
+    // A modal traps focus when nothing outside it accepts it: the engine makes everything outside a
+    // native <dialog> shown with showModal() inert, and an [inert] subtree refuses focus too, so the
+    // check asks the page where focus can go instead of reading inert bookkeeping.
     if (scope.modal) {
-      const outside = Array.from(document.querySelectorAll("button,a[href],input,select,textarea,[tabindex]")).filter((e) => !scope.el.contains(e) && focusable(e) && visible(e));
-      if (outside.length) add("modal-not-trapping", scope.el, { outside: outside.slice(0, 3).map(desc).join(" ") });
+      const was = document.activeElement;
+      const escaping = Array.from(document.querySelectorAll("button,a[href],input,select,textarea,[tabindex]")).filter((e) => {
+        if (scope.el.contains(e) || !focusable(e) || !visible(e)) return false;
+        e.focus({ preventScroll: true });
+        return document.activeElement === e;
+      });
+      if (escaping.length) add("modal-not-trapping", scope.el, { outside: escaping.slice(0, 3).map(desc).join(" ") });
+      if (was instanceof HTMLElement && was !== document.activeElement) was.focus({ preventScroll: true });
     }
     return { label: label, issues: issues, folded: folded, ms: Math.round(performance.now() - t0) };
   }

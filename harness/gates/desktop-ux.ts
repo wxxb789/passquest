@@ -219,6 +219,47 @@ const closeDialog = async (name, openerPath) => {
   if (lost()) focus.push({ check: "dialog-focus-lost", el: name });
   else if (openerPath && UX.path(document.activeElement) !== openerPath) focus.push({ check: "dialog-focus-not-restored", el: name, active: UX.path(document.activeElement) });
 };
+// A modal dialog's backdrop hit-tests to the dialog itself, so the click that used to land on
+// div.scrim[data-act="close"] now lands on the dialog at the same point, outside its border box.
+const outsidePoint = (el) => {
+  const r = el.getBoundingClientRect();
+  const vw = innerWidth;
+  const vh = innerHeight;
+  const candidates = [[r.left / 2, r.top / 2], [(r.right + vw) / 2, r.top / 2], [r.left / 2, vh - 4], [(r.right + vw) / 2, vh - 4]];
+  let fallback = null;
+  for (const [x, y] of candidates) {
+    if (x < 2 || y < 2 || x > vw - 2 || y > vh - 2) continue;
+    const hit = document.elementFromPoint(x, y);
+    if (!hit || (hit !== el && el.contains(hit))) continue;
+    const point = { x: Math.round(x), y: Math.round(y), hit: hit, path: UX.path(hit) };
+    if (hit === el) return point;
+    fallback = fallback || point;
+  }
+  return fallback;
+};
+const dismissOutside = async (name, openerPath) => {
+  const el = q('#layer [aria-modal="true"]');
+  checked++;
+  const point = el ? outsidePoint(el) : null;
+  if (!point) {
+    focus.push({ check: "outside-click-no-point", el: name, layer: !!el });
+    return;
+  }
+  // detail 1 = a real pointer click; the dialog's dismissal ignores scripted clicks (detail 0).
+  point.hit.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: point.x, clientY: point.y, detail: 1 }));
+  const deadline = Date.now() + 4000;
+  while (layerOpen() && Date.now() < deadline) await sleep(50);
+  await sleep(150);
+  if (layerOpen()) {
+    focus.push({ check: "outside-click-not-closing", el: name, at: point.x + "," + point.y, hit: point.path });
+    press("Escape");
+    await until(name + " to close after the outside click", () => !layerOpen(), 5000);
+    return;
+  }
+  checked++;
+  if (lost()) focus.push({ check: "dialog-focus-lost", el: name });
+  else if (openerPath && UX.path(document.activeElement) !== openerPath) focus.push({ check: "dialog-focus-not-restored", el: name, active: UX.path(document.activeElement) });
+};
 let opener = null;
 let back = null;
 // No settle here: each part waits for its first state, and each() settles every mode before it audits.
@@ -239,6 +280,13 @@ await closeDialog("practice sheet", back);
 await openDialog("shortcut sheet", null, () => press("?"));
 await each("shortcut-sheet", true);
 await closeDialog("shortcut sheet", null);
+// The scrim is gone: the outside click that used to hit it must close a sheet and a centered dialog
+// alike, and the opener must get the focus back, as it did through the scrim's data-act="close".
+opener = q('[data-act="sheet"][data-v="pick"]');
+back = await openDialog("practice sheet", opener, () => opener.click());
+await dismissOutside("practice sheet", back);
+await openDialog("shortcut sheet", null, () => press("?"));
+await dismissOutside("shortcut sheet", null);
 opener = q('[data-act="sheet"][data-v="pick"]');
 await openDialog("practice sheet", opener, () => opener.click());
 await click('#layer [data-act="start-skill"][data-v="${SKILL}"]');
