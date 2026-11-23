@@ -17,9 +17,13 @@ export const RAF_TICKS = 30;
 export const RAF_BUDGET_MS = 4000;
 export const MEDIAN_GAP_FRACTION = 0.05;
 export const MEDIAN_GAP_FLOOR_MS = 5;
-export const VERDICT_RULE = `head Q1 > base Q3 and the median gap >= max(${
+const FLOOR_SOURCES = ["5ms", "5%", "control IQR"] as const;
+export type FloorSource = (typeof FLOOR_SOURCES)[number];
+export const VERDICT_RULE = `head Q1 > base Q3 and the median gap >= the floor = max(${MEDIAN_GAP_FLOOR_MS} ms, ${
   MEDIAN_GAP_FRACTION * 100
-}% of the base median, ${MEDIAN_GAP_FLOOR_MS} ms)`;
+}% of the base median, the larger of the two control-pair sides' IQRs (q3 - q1)) where the metric has control-pair samples, and max(${MEDIAN_GAP_FLOOR_MS} ms, ${
+  MEDIAN_GAP_FRACTION * 100
+}% of the base median) where it has none; every verdict names its floor and which term set it (${FLOOR_SOURCES.join(", ")})`;
 export const GUARD_RULE = `document.visibilityState === "visible" and ${RAF_TICKS} requestAnimationFrame ticks within ${RAF_BUDGET_MS} ms`;
 /** Why the one prepare launch carries no guard reading: it measures nothing, and its hidden window's page draws no frames on macOS and Linux (mygo@v0.10.0 page.go: ThrottlingOff), where a wait on an animation frame never finishes. */
 export const PREPARE_GUARDS_WHY =
@@ -305,23 +309,49 @@ export function spread(values: readonly number[]): Spread | null {
 
 export interface Verdict {
   worse: boolean;
+  /** The gap threshold read against, null when a side has no samples. */
+  floor: number | null;
+  /** Which term set the floor; VERDICT_RULE names the three. */
+  floorSource: FloorSource | null;
   detail: string;
 }
 
 const round2 = (value: number): number => Math.round(value * 100) / 100;
 
-export function worseBeyondNoise(base: Spread | null, head: Spread | null): Verdict {
-  if (!base || !head) return { worse: false, detail: `one side has no samples (base ${base ? base.n : 0}, head ${head ? head.n : 0})` };
+export function noiseFloor(baseMedian: number, controls: readonly (Spread | null)[]): { floor: number; floorSource: FloorSource } {
+  const fiveMs = MEDIAN_GAP_FLOOR_MS;
+  const fivePercent = baseMedian * MEDIAN_GAP_FRACTION;
+  const sides = controls.filter((side): side is Spread => side !== null);
+  if (sides.length > 0) {
+    const controlIqr = Math.max(...sides.map((side) => side.q3 - side.q1));
+    if (controlIqr >= fiveMs && controlIqr >= fivePercent) return { floor: controlIqr, floorSource: "control IQR" };
+  }
+  if (fiveMs >= fivePercent) return { floor: fiveMs, floorSource: "5ms" };
+  return { floor: fivePercent, floorSource: "5%" };
+}
+
+export function worseBeyondNoise(base: Spread | null, head: Spread | null, controls: readonly (Spread | null)[] = []): Verdict {
+  if (!base || !head) {
+    return { worse: false, floor: null, floorSource: null, detail: `one side has no samples (base ${base ? base.n : 0}, head ${head ? head.n : 0})` };
+  }
+  const { floor, floorSource } = noiseFloor(base.median, controls);
   const gap = head.median - base.median;
-  const floor = Math.max(base.median * MEDIAN_GAP_FRACTION, MEDIAN_GAP_FLOOR_MS);
   const above = head.q1 > base.q3;
   const beyond = gap >= floor;
   return {
     worse: above && beyond,
+    floor,
+    floorSource,
     detail: `q1 ${round2(head.q1)} vs base q3 ${round2(base.q3)} (${above ? "above" : "not above"}); median ${round2(base.median)} -> ${
       round2(head.median)
-    }, gap ${round2(gap)} vs floor ${round2(floor)} (${beyond ? "beyond" : "within"})`,
+    }, gap ${round2(gap)} (${beyond ? "beyond" : "within"})`,
   };
+}
+
+/** The floor as the record and the log state it: the rounded value and the term that set it, "floor none" without samples. */
+export function floorText(verdict: Verdict): string {
+  if (verdict.floor === null) return "floor none";
+  return `floor ${round2(verdict.floor)} (${verdict.floorSource})`;
 }
 
 export interface MetricSamples {
@@ -359,7 +389,15 @@ export function metricRows(samples: {
       const b = spread(samples.b[name] ?? []);
       const controlA = spread(samples.controlA[name] ?? []);
       const controlB = spread(samples.controlB[name] ?? []);
-      return { name, a, b, controlA, controlB, verdict: worseBeyondNoise(a, b), controlVerdict: worseBeyondNoise(controlA, controlB) };
+      return {
+        name,
+        a,
+        b,
+        controlA,
+        controlB,
+        verdict: worseBeyondNoise(a, b, [controlA, controlB]),
+        controlVerdict: worseBeyondNoise(controlA, controlB),
+      };
     });
 }
 
@@ -1094,6 +1132,78 @@ export function selfCheckCases(): SelfCheckCase[] {
         const head = spread(Array.from({ length: 9 }, (_, i) => 1100 + i));
         const verdict = worseBeyondNoise(base, head);
         return expect(verdict.worse && verdict.detail.includes("beyond"), `verdict = ${JSON.stringify(verdict)}`);
+      },
+    },
+    {
+      name: "verdict: the control IQR sets the floor and turns a WORSE into ok",
+      check: () => {
+        const base = spread([10, 20, 30, 40, 50]);
+        const head = spread([60, 70, 80, 90, 100]);
+        const controls = [spread([0, 10, 20, 30, 40]), spread([0, 10, 90, 100, 110])];
+        const fixed = worseBeyondNoise(base, head);
+        const measured = worseBeyondNoise(base, head, controls);
+        return expect(
+          fixed.worse && fixed.floor === 5 && fixed.floorSource === "5ms" && !measured.worse && measured.floor === 90 && measured.floorSource === "control IQR",
+          `fixed ${JSON.stringify(fixed)}, measured ${JSON.stringify(measured)}`,
+        );
+      },
+    },
+    {
+      name: "verdict must fail: a gap beyond the control IQR is still worse",
+      check: () => {
+        const base = spread([10, 20, 30, 40, 50]);
+        const head = spread([110, 120, 130, 140, 150]);
+        const controls = [spread([0, 10, 20, 30, 40]), spread([0, 10, 90, 100, 110])];
+        const verdict = worseBeyondNoise(base, head, controls);
+        return expect(verdict.worse && verdict.floor === 90 && verdict.floorSource === "control IQR", `verdict = ${JSON.stringify(verdict)}`);
+      },
+    },
+    {
+      name: "verdict: a metric without control samples keeps max(5 ms, 5%)",
+      check: () => {
+        const bytes = spread([186489]);
+        const large = worseBeyondNoise(bytes, bytes, [null, null]);
+        const short = worseBeyondNoise(spread([40, 50, 60]), spread([40, 50, 60]));
+        return expect(
+          large.floor === 186489 * MEDIAN_GAP_FRACTION &&
+            large.floorSource === "5%" &&
+            short.floor === MEDIAN_GAP_FLOOR_MS &&
+            short.floorSource === "5ms",
+          `large ${JSON.stringify(large)}, short ${JSON.stringify(short)}`,
+        );
+      },
+    },
+    {
+      name: "verdict: the record and log floor text names the rounded floor and the term that set it",
+      check: () => {
+        const measured = worseBeyondNoise(spread([10, 20, 30, 40, 50]), spread([60, 70, 80, 90, 100]), [spread([0, 10, 90, 100, 110])]);
+        const none = worseBeyondNoise(null, spread([1]));
+        return expect(
+          floorText(measured) === "floor 90 (control IQR)" && floorText(none) === "floor none",
+          `measured ${floorText(measured)}, none ${floorText(none)}`,
+        );
+      },
+    },
+    {
+      name: "metric rows: the A/B verdict reads the control pair, the control pair's own verdict keeps the fixed floor",
+      check: () => {
+        const rows = metricRows({
+          a: { m: [10, 20, 30, 40, 50] },
+          b: { m: [60, 70, 80, 90, 100] },
+          controlA: { m: [0, 10, 20, 30, 40] },
+          controlB: { m: [0, 10, 90, 100, 110] },
+        });
+        const row = rows[0];
+        return expect(
+          rows.length === 1 &&
+            row !== undefined &&
+            !row.verdict.worse &&
+            row.verdict.floor === 90 &&
+            row.verdict.floorSource === "control IQR" &&
+            row.controlVerdict.floor === 5 &&
+            row.controlVerdict.floorSource === "5ms",
+          `rows = ${JSON.stringify(rows)}`,
+        );
       },
     },
     {

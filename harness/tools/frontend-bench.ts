@@ -8,6 +8,7 @@ import {
   BUNDLE_METRICS,
   CONTENT_SIZE,
   compareShots,
+  floorText,
   GUARD_RULE,
   guardProblems,
   launchPlan,
@@ -678,12 +679,12 @@ async function runCompare(options: BenchOptions): Promise<number> {
         fail(
           run,
           run.sameBuild
-            ? `the same-build pair of ${row.name} reports a worse head (${row.verdict.detail}): one build measured twice moved beyond the noise, so this run's numbers are not readable`
-            : `metric ${row.name} is worse beyond noise: ${row.verdict.detail}`,
+            ? `the same-build pair of ${row.name} reports a worse head (${floorText(row.verdict)}; ${row.verdict.detail}): one build measured twice moved beyond the noise, so this run's numbers are not readable`
+            : `metric ${row.name} is worse beyond noise: ${floorText(row.verdict)}; ${row.verdict.detail}`,
         );
       }
       if (!run.sameBuild && row.controlVerdict.worse) {
-        fail(run, `the same-build control pair of ${row.name} reports a worse head (${row.controlVerdict.detail}): this run's comparison is not readable`);
+        fail(run, `the same-build control pair of ${row.name} reports a worse head (${floorText(row.controlVerdict)}; ${row.controlVerdict.detail}): this run's comparison is not readable`);
       }
     }
 
@@ -788,8 +789,16 @@ async function runCompare(options: BenchOptions): Promise<number> {
     say(`launches ${run.launches}; guards checked ${guards.checked}, failed ${guards.failed}, not measured ${guards.notMeasured}; ${cadenceLine(run)}`);
     if (engines.a && engines.b && engines.a !== engines.b) say("the two trees report different engines: only a warning, the matrices do not pin one Chromium build");
     for (const row of metrics) {
-      say(`${row.name}: A ${spreadLine(row.a)} | B ${spreadLine(row.b)} | verdict ${row.verdict.worse ? "WORSE" : "ok"} (${row.verdict.detail})`);
-      if (!run.sameBuild) say(`${row.name}: control ${spreadLine(row.controlA)} | ${spreadLine(row.controlB)} | ${row.controlVerdict.worse ? "WORSE" : "ok"} (${row.controlVerdict.detail})`);
+      say(
+        `${row.name}: A ${spreadLine(row.a)} | B ${spreadLine(row.b)} | ${floorText(row.verdict)} | verdict ${row.verdict.worse ? "WORSE" : "ok"} (${row.verdict.detail})`,
+      );
+      if (!run.sameBuild) {
+        say(
+          `${row.name}: control ${spreadLine(row.controlA)} | ${spreadLine(row.controlB)} | ${floorText(row.controlVerdict)} | ${
+            row.controlVerdict.worse ? "WORSE" : "ok"
+          } (${row.controlVerdict.detail})`,
+        );
+      }
     }
     if (shotsMeasured) say(`shots: ${identical}/${comparison.rows.length} state(s) byte-identical between A and B`);
     else say(`shots: not compared (A ${shotState.a}, B ${shotState.b})`);

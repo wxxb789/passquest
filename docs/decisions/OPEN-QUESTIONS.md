@@ -2391,11 +2391,29 @@ Entry format:
   separate runs or machines; (C) a proxy measured in the hidden windows the gates use.
 - Default taken: (A). 2 warm-ups + 9 samples per build per metric, A and B alternated serially in one
   job, median and IQR recorded, "worse beyond noise" = the head's Q1 above the base's Q3 **and** a
-  median gap of at least max(5 %, 5 ms); the same-build control pair is the noise floor. Every number
-  in `docs/evidence/0019-modern-frontend.md` is quoted from a named run's artifact. Reversal: change
-  the tool and the workflow together and re-run the control pair.
+  median gap of at least the metric's floor; the same-build control pair is the noise floor. Every
+  number in `docs/evidence/0019-modern-frontend.md` is quoted from a named run's artifact. Reversal:
+  change the tool and the workflow together and re-run the control pair.
+- Owner decision (2026-11-22, after run 45082668207): the floor uses the control pair's measured
+  noise. For each metric that has control-pair samples in the run, the floor is
+  `max(5 ms, 5 % of the base median, the larger of the two control-pair sides' IQRs (q3 - q1))`; a
+  metric without control samples (the bundle bytes) keeps `max(5 %, 5 ms)`. Every verdict in the
+  record and the log names its floor and which term set it (`5ms`, `5%` or `control IQR`) — the
+  record through `metrics[].verdict.floor`/`.floorSource`, the log through the metric lines. The
+  same-build control pair's own verdict keeps the fixed `max(5 %, 5 ms)` floor: there is no second
+  control pair to read noise from, and a control pair that reads WORSE must still make the run
+  unreadable. The run that forced it: P2's head (`82226bf`) had a byte-identical bundle to A
+  (`71c366b`) yet macOS read frames.p95 as WORSE (median gap 24.8 ms against the old 5 ms floor)
+  while the same job's control pair had measured frames.p95 IQRs of 17.85 ms and 25 ms — a false
+  positive the new floor removes (25 ms, so the gap reads within).
+- Disclosed limit (owner decision, 2026-11-22): on a noisy runner a regression whose median gap is
+  smaller than the control pair's IQR is not detectable (the head's Q1 above the base's Q3 still
+  gates every verdict separately, but a gap below the floor can never read WORSE). The macOS
+  frames.p95 control IQR of 25 ms in run 45082668207 is the example: a real regression of up to
+  25 ms on that metric would read ok there.
 - Revisit when: the same-build control pair itself reads "worse", or a metric's spread swamps the
-  difference the goal needs.
+  difference the goal needs (the disclosed limit: a regression below the control pair's IQR cannot
+  be detected).
 
 ### Q-0019-03 — What happens when a runner cannot show a window?
 - Status: decided(default taken)

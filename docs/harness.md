@@ -100,8 +100,11 @@ that hides a real surface is a harness defect.
   measures a base commit A and a head B on the same runner, one job per OS `windows-latest` and
   `macos-26`, alternating 2 warm-ups + 9 launches per build per metric in visible windows at a
   1280x800 page area (Q-0012-05), records each launch's engine user agent and the visibility guard,
-  and decides "worse beyond noise" per metric; the goal-0019 evidence record quotes every number from
-  a named run's `frontend-bench-<os>` artifact, and a same-build run (A = B) is the noise floor.
+  and decides "worse beyond noise" per metric against a floor the record names: `max(5 ms, 5 % of the
+  base median, the metric's larger control-pair IQR)` where the run measured a control pair, `max(5 %,
+  5 ms)` where it did not (Q-0019-02); the goal-0019 evidence record quotes every number from a named
+  run's `frontend-bench-<os>` artifact, and a same-build run (A = B) validates the method (its shots
+  byte-identical, its A/B verdict judged by the fixed `max(5 %, 5 ms)` floor).
   `--smoke` renders the six shot states in a visible WebKitGTK window on the Linux job, second-tier
   and comparing nothing: its record carries each state's `readyMs` but compares nothing; the tool's
   `--self-check` runs before the builds, so a broken parser fails in seconds
