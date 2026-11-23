@@ -4,6 +4,48 @@ Plain TypeScript, no framework, bundled by Bun (Q-0011-02). It ports the owner-c
 prototype (`design/prototypes/c-stage.html`) into modules; the DOM structure and class names are the
 prototype's, so its CSS applies unchanged.
 
+## Engine baseline
+
+The frontend is written for the engines Pass Quest ships on, and
+[Q-0019-01](../../docs/decisions/OPEN-QUESTIONS.md) names them. CI run `45045599642` on the P1 pull
+request's head `aa1580a` (its merge on main is `71c366b`) records the engines: its Windows and macOS
+jobs write every launch's engine UA into `launches.rows[].engine` (each tree keeps the same string
+once at `trees.<a|b>.userAgent`), and its `frontend bench (ubuntu-latest render smoke)` job renders
+every state green in a visible WebKitGTK window on Xvfb 1920x1080. The OS-level versions come from
+the runner images and the Ubuntu archive named per row; those images move, so the gate pins the
+policy, not the build:
+
+| Platform | Engine | Baseline | Where the version is recorded |
+|---|---|---|---|
+| Windows 11+ | WebView2 (Chromium) | Evergreen: current stable Chromium (Chrome/157 at scout time, 2026-11-22; the Evergreen runtime updates to the latest stable, `learn.microsoft.com/…/webview2/concepts/versioning`) | the bench record's `launches.rows[].engine` per launch; run `45045599642` recorded `Edg/157.0.0.0` (Chromium 157) |
+| macOS 26+ | WKWebView (system WebKit) | Safari 26.x WebKit (Safari 26.6 on the `macos-26` runner; macOS 27 is above the floor, not the baseline) | the `macos-26` runner image readme (`actions/runner-images` `images/macos/macos-26-Readme.md`: macOS 26.6.1, Safari 26.6 `21624.4.5.11.5`, plan fact 1, fetched 2026-11-22); the bench record's `launches.rows[].engine` per launch, which run `45045599642` recorded as `AppleWebKit/605.1.15`, Safari's UA component |
+| Linux (second-tier) | WebKitGTK | 2.52.6 on `ubuntu-latest` (the archive's `libwebkit2gtk-4.1-0`; MyGo `dlopen`s it) | `packages.ubuntu.com/{noble,resolute}/libwebkit2gtk-4.1-0` (`2.52.6-0ubuntu0.24.04.1` / `2.52.6-0ubuntu0.26.04.1`, fetched 2026-11-22); run `45045599642`'s `frontend bench (ubuntu-latest render smoke)` job renders every state green on its Xvfb display and records only the engine's user agent, not the WebKitGTK version |
+
+- **JavaScript level.** `desktop/web/tsconfig.json` holds the compiler half of the baseline; the
+  `frontend-baseline` gate (`harness/gates/frontend-baseline.ts`) pins these values:
+
+  | tsconfig key | Value |
+  |---|---|
+  | target | `"target": "ES2024"` |
+  | lib | `"lib": ["ES2024","DOM","DOM.Iterable"]` |
+
+  The bundle step stays one Bun call
+  (`bun build desktop/web/src/main.ts --outdir … --target browser --minify`): `bun build` has no
+  browser-version target (`--target` is `browser|bun|node`), so nothing downlevels the output and the
+  three engines' gate runs are the runtime proof.
+- **CSS level:** the features today's stylesheets use are supported by all three baseline engines
+  (WebKitGTK 2.52 is a later trunk generation than the Safari release each feature landed in; the
+  citations are in the plan's fact 1). The `frontend-baseline` gate fails on any vendor-prefixed
+  construct not on its allowlist. On this baseline the stylesheets still carry the two dead twins
+  (`-webkit-backdrop-filter` ×18, `-webkit-mask-image` ×2) and the minifier still injects
+  `:-webkit-any()`/`:-moz-any()` from `styles/desktop.css:38`; P3 removes them and rewrites that
+  selector to `:not(.q):not(.c)`, leaving the six WebKit-only constructs (`-webkit-font-smoothing`
+  and the five `::-webkit-scrollbar*` pseudo-elements) that the gate's allowlist keeps with their
+  reasons (Q-0019-06).
+- **Linux is second-tier** (Q-0000-07): it must still render and work, and no feature is adopted that
+  WebKitGTK 2.52.6 cannot run — the bench's `linux-smoke` job renders every state in a visible
+  WebKitGTK window on the runner's Xvfb.
+
 ## Entry and build
 
 - Entry: `src/main.ts`. It imports `styles/index.css`, which `@import`s the prototype CSS split by

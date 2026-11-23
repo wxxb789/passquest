@@ -25,7 +25,11 @@ Binding project conventions. Read this before writing code for any goal.
   endpoint need it.
 - **MyGo + WebView** is the desktop shell (`cmd/passquest-desktop`, `internal/desktop`, the TypeScript
   frontend in `desktop/web`) beside the scriptable CLI; the gates drive both, and screenshots and mock
-  UIs are not evidence.
+  UIs are not evidence. The frontend's engine baseline — WebView2 (current stable Chromium) on
+  Windows 11, WKWebView (Safari 26.x WebKit) on macOS 26, WebKitGTK 2.52.6 second-tier on Linux —
+  and the ES2024 level it allows are written down in
+  [`../desktop/web/README.md`](../desktop/web/README.md#engine-baseline) (Q-0019-01), and the
+  `frontend-baseline` gate pins them.
 - **Bun + TypeScript** is the harness runtime (`harness/`, gate modules under `harness/gates/`), not
   a product runtime. Chosen for one reason: the owner develops on Linux, macOS and Windows and the
   harness must run on all three without Git Bash or a system Python. The migration landed with goal
