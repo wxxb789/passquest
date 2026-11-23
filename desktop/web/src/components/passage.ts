@@ -208,6 +208,12 @@ export function hasPendingMark(): boolean {
   return pendingRange !== null;
 }
 
+/** showModal() light-dismisses the auto popover; a re-show while the mark still stands restores its state. */
+export function resumeMarkPop(): void {
+  if (!pendingRange) return;
+  document.querySelector<HTMLElement>('.markpop:not(:popover-open)')?.showPopover();
+}
+
 export function checkSelection(): void {
   const sel = window.getSelection();
   const box = document.getElementById('passage');
@@ -220,10 +226,12 @@ export function checkSelection(): void {
   document.querySelector('.markpop')?.remove();
   const p = document.createElement('div');
   p.className = 'markpop';
+  p.popover = 'auto';
   p.innerHTML = html`<span>${T('标记为笔记素材', 'Mark for a note')}</span><button data-mark>${ic('mark', 'xs')}${T('标记', 'Mark')}<kbd>M</kbd></button>`.value;
   p.style.left = Math.max(12, r.left + r.width / 2 - 110) + 'px';
   p.style.top = Math.max(12, r.top - 50) + 'px';
   document.body.appendChild(p);
+  p.showPopover();
   p.addEventListener('mousedown', (ev) => ev.preventDefault());
   p.querySelector('[data-mark]')?.addEventListener('click', () => markHandler());
 }
