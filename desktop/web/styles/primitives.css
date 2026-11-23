@@ -1,8 +1,8 @@
 /* Primitives: materials, type roles, chips, kbd, buttons, motion — ported verbatim from design/prototypes/c-stage.html (lines 270-334). Do not normalise values. */
 /* ---------- materials ---------- */
-.glass { background: var(--glass); backdrop-filter: blur(20px) saturate(1.35); -webkit-backdrop-filter: blur(20px) saturate(1.35);
+.glass { background: var(--glass); backdrop-filter: blur(20px) saturate(1.35);
   box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-1); }
-.card { background: var(--glass-2); backdrop-filter: blur(28px) saturate(1.4); -webkit-backdrop-filter: blur(28px) saturate(1.4);
+.card { background: var(--glass-2); backdrop-filter: blur(28px) saturate(1.4);
   border-radius: var(--r-xl); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
 .paper { background: var(--paper); color: var(--paper-ink); border-radius: var(--r-xl);
   box-shadow: inset 0 0 0 1px var(--paper-line), var(--sh-2); }
