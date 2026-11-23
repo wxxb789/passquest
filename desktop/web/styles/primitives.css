@@ -61,6 +61,5 @@ kbd { display: inline-grid; place-items: center; min-width: 20px; height: 20px; 
 @keyframes settle { from { opacity: 0; transform: translateY(8px) scale(.94); } }
 @keyframes unfold { from { opacity: .2; transform: perspective(1400px) rotateY(-12deg) scale(.96); } }
 @keyframes recede { from { transform: scale(1.03); opacity: .6; } }
-@keyframes fade { from { opacity: 0; } }
 .enter .rise { animation: rise var(--d3) var(--ease) both; animation-delay: calc(var(--i, 0) * 60ms); }
 .enter .settle { animation: settle var(--d3) var(--spring) both; animation-delay: calc(160ms + var(--i, 0) * 55ms); }

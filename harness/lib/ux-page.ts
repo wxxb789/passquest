@@ -747,6 +747,14 @@ const UX = (() => {
       .filter((a) => a instanceof CSSTransition)
       .map((a) => ({ check: "transition-under-reduce", el: path(a.effect && a.effect.target), at: label, name: a.transitionProperty, ms: a.effect.getComputedTiming().duration }));
   }
+  // The transitions an element or its pseudo-elements carry right now, with the pseudo named: an
+  // entry transition on a dialog and its ::backdrop are two rows here and one element in the DOM.
+  function transitionsOf(el) {
+    return document
+      .getAnimations()
+      .filter((a) => a instanceof CSSTransition && a.effect.target === el)
+      .map((a) => ({ el: path(el), property: a.transitionProperty, pseudo: (a.effect && a.effect.pseudoElement) || "", ms: a.effect.getComputedTiming().duration }));
+  }
   // Running transitions of the room colours (the .atmos custom properties or the page background),
   // leaving out the animations in except (those that were running before a condition change).
   function roomTransitions(except = new Set()) {
@@ -838,6 +846,6 @@ const UX = (() => {
     return result;
   }
 
-  return { audit: audit, primary: primary, hidden: hiddenPart, path: path, desc: desc, visible: visible, emulateReducedMotion: emulateReducedMotion, emulateNoPreference: emulateNoPreference, restoreMotion: restoreMotion, motionReport: motionReport, transitionReport: transitionReport, roomTransitions: roomTransitions, probes: probes };
+  return { audit: audit, primary: primary, hidden: hiddenPart, path: path, desc: desc, visible: visible, emulateReducedMotion: emulateReducedMotion, emulateNoPreference: emulateNoPreference, restoreMotion: restoreMotion, motionReport: motionReport, transitionReport: transitionReport, transitionsOf: transitionsOf, roomTransitions: roomTransitions, probes: probes };
 })();
 `;

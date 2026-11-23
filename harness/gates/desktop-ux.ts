@@ -505,6 +505,16 @@ const MOTION = `
 await today();
 const probes = await UX.probes(q('[data-testid="hero"]'));
 UX.emulateNoPreference();
+// Each open must leave its entry transition behind; only with motion allowed is there one to read.
+const entry = {};
+q('[data-act="sheet"][data-v="pick"]').click();
+entry.sheet = UX.transitionsOf(q('#layer dialog[open]'));
+press("Escape");
+await until("the closed entry sheet", () => !q('#layer [aria-modal="true"]'), 5000);
+press("?");
+entry.dlg = UX.transitionsOf(q('#layer dialog[open]'));
+press("Escape");
+await until("the closed entry dialog", () => !q('#layer [aria-modal="true"]'), 5000);
 await startFromSheet("start-skill", "${SKILL}");
 // Only transitions the condition change starts count. What entering practice started may still be
 // running, and in a window WebKit does not show (macOS runs this window hidden) CSS animations are
@@ -551,7 +561,7 @@ for (const route of ["report", "anki", "settings", "assess"]) {
   await sleep(300);
   await snap(route);
 }
-return { probes, room, motion };
+return { probes, room, entry, motion };
 `;
 
 interface AllowEntry {
@@ -792,6 +802,30 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
         mode: "light-zh",
         size: size0,
         detail: "",
+      });
+    }
+    const entry = field(motion, "entry");
+    const wantedEntry: ReadonlyArray<readonly [string, string, string]> = [
+      ["sheet", "transform", ""],
+      ["sheet", "opacity", "::backdrop"],
+      ["dlg", "opacity", ""],
+      ["dlg", "transform", ""],
+      ["dlg", "opacity", "::backdrop"],
+    ];
+    const missingEntry = wantedEntry.filter(
+      ([which, property, pseudo]) =>
+        !arrayField(entry, which).some(
+          (row) => stringField(row, "property") === property && stringField(row, "pseudo") === pseudo && (numberField(row, "ms") ?? 0) > 1,
+        ),
+    );
+    if (missingEntry.length > 0) {
+      out.findings.push({
+        check: "entry-transition-missing",
+        el: "dialog.sheet / dialog.dlg",
+        state: "today: open sheet and shortcut dialog",
+        mode: "light-zh",
+        size: size0,
+        detail: `no ${missingEntry.map(([which, property, pseudo]) => `${which} ${property}${pseudo}`).join(", ")} after the open`,
       });
     }
     for (const issue of arrayField(motion, "motion")) {

@@ -11,8 +11,10 @@ dialog:not([open]) { display: none; }
 /* bottom sheet */
 .sheet { position: fixed; left: 50%; bottom: 0; width: min(760px, calc(100vw - 64px)); max-height: 64vh; transform: translateX(-50%); display: flex; flex-direction: column; border-radius: var(--r-xl) var(--r-xl) 0 0;
   background: var(--glass-3); backdrop-filter: blur(30px) saturate(1.4); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
-.sheet.in { animation: sheetin var(--d3) var(--ease) both; }
-@keyframes sheetin { from { transform: translate(-50%, 100%); } }
+/* Entry transitions, not one-shot keyframes: @starting-style is the from-state of the first style update
+   (MDN <dialog>). .enter-layer gates what a background rebuild never replayed (the sheet's own slide did replay). */
+.sheet[open] { transition: transform var(--d3) var(--ease); }
+@starting-style { .sheet[open] { transform: translate(-50%, 100%); } }
 .sheet .grab { width: 40px; height: 4px; border-radius: 2px; background: var(--line-2); margin: 10px auto 0; flex: none; }
 .sh-h { display: flex; align-items: center; gap: 12px; padding: 14px 28px 0 30px; flex: none; }
 .sh-h .ico { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--well); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); flex: none; }
@@ -21,7 +23,8 @@ dialog:not([open]) { display: none; }
 .sh-h .icon-btn { margin-left: auto; }
 .sh-b { flex: 1; min-height: 0; overflow: auto; padding: 16px 30px 30px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 dialog::backdrop { background: oklch(20% 0.03 262 / .2); }
-.enter-layer dialog::backdrop { animation: fade var(--d2) both; }
+.enter-layer dialog[open]::backdrop { transition: opacity var(--d2); }
+@starting-style { .enter-layer dialog[open]::backdrop { opacity: 0; } }
 [data-theme="dark"] dialog::backdrop { background: oklch(5% 0.02 262 / .5); }
 .kv { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 10px 0; font-size: var(--t-sm); color: var(--ink-2); align-items: baseline; }
 .kv + .kv { border-top: 1px solid var(--line); }
@@ -39,8 +42,8 @@ dialog::backdrop { background: oklch(20% 0.03 262 / .2); }
 /* dialog */
 .dlg { position: fixed; left: 50%; top: 50%; width: 460px; transform: translate(-50%, -50%); padding: 28px 30px 24px; border-radius: var(--r-xl);
   background: var(--glass-3); backdrop-filter: blur(30px) saturate(1.4); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
-.enter-layer .dlg { animation: dlgin var(--d3) var(--spring) both; }
-@keyframes dlgin { from { opacity: 0; transform: translate(-50%, -46%) scale(.96); } }
+.enter-layer .dlg { transition: opacity var(--d3) var(--spring), transform var(--d3) var(--spring); }
+@starting-style { .enter-layer .dlg { opacity: 0; transform: translate(-50%, -46%) scale(.96); } }
 .dlg h2 { margin: 14px 0 8px; font-size: var(--t-xl); }
 .dlg p { margin: 0 0 10px; color: var(--ink-2); line-height: 1.65; }
 .dlg .acts { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
