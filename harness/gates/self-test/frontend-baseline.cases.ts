@@ -26,13 +26,10 @@ const BASELINE: Record<string, string> = {
   "desktop/web/src/extra.css": ".x { color: #000; }\n",
   "desktop/web/src/styles.css": [
     "body { -webkit-font-smoothing: antialiased; }",
-    ".a { -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }",
-    ".b { -webkit-mask-image: none; mask-image: none; }",
     "::-webkit-scrollbar { width: 8px; }",
     "::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }",
     "::-webkit-scrollbar-thumb { background: #000; }",
     "::-webkit-scrollbar-button { display: none; }",
-    ".note:not(.q, .c) .st { color: #999; }",
     "",
   ].join("\n"),
 };
@@ -73,21 +70,23 @@ export const frontendBaselineCases = (): BrokenCase[] => [
   },
   {
     gate: frontendBaseline,
-    label: "frontend baseline: a stray -moz-backdrop-filter in a stylesheet",
+    label: "frontend baseline: a stray -webkit-backdrop-filter in a stylesheet",
     files: {
       ...BASELINE,
-      "desktop/web/src/extra.css": ".a { -moz-backdrop-filter: blur(4px); }\n",
+      "desktop/web/src/extra.css": ".a { -webkit-backdrop-filter: blur(4px); }\n",
     },
     tracked: TRACKED,
     postFail: (failures) => {
       const broken = buildFailed(failures);
       if (broken) return broken;
       const source = failures.some(
-        (line) => line.includes("desktop/web/src/extra.css:") && line.includes("-moz-backdrop-filter is vendor-prefixed and not on the allowlist"),
+        (line) =>
+          line.includes("desktop/web/src/extra.css:") &&
+          line.includes("-webkit-backdrop-filter is vendor-prefixed and not on the allowlist"),
       );
-      if (!source) return `frontend-baseline: the stray -moz- construct is not named with its file: ${failures.join(" | ")}`;
+      if (!source) return `frontend-baseline: the stray construct is not named with its file: ${failures.join(" | ")}`;
       const built = failures.some(
-        (line) => line.startsWith("built ") && line.includes("-moz-backdrop-filter is vendor-prefixed and not on the allowlist"),
+        (line) => line.startsWith("built ") && line.includes("-webkit-backdrop-filter is vendor-prefixed and not on the allowlist"),
       );
       return built ? null : `frontend-baseline: the stray construct is not reported in the bundle it travels into: ${failures.join(" | ")}`;
     },
@@ -123,14 +122,17 @@ export const frontendBaselineCases = (): BrokenCase[] => [
     label: "frontend baseline: an allowlist entry that matches nothing in the source",
     files: {
       ...BASELINE,
-      "desktop/web/src/styles.css": BASELINE["desktop/web/src/styles.css"]!.replace("-webkit-mask-image: none; ", ""),
+      "desktop/web/src/styles.css": BASELINE["desktop/web/src/styles.css"]!.replace(
+        "body { -webkit-font-smoothing: antialiased; }\n",
+        "",
+      ),
     },
     tracked: TRACKED,
     postFail: (failures) => {
       const broken = buildFailed(failures);
       if (broken) return broken;
       const source = failures.some(
-        (line) => line.includes("allowlist entry -webkit-mask-image matches nothing in the source") && !line.includes("built"),
+        (line) => line.includes("allowlist entry -webkit-font-smoothing matches nothing in the source") && !line.includes("built"),
       );
       return source ? null : `frontend-baseline: the unfired source entry is not named: ${failures.join(" | ")}`;
     },
@@ -181,19 +183,27 @@ export const frontendBaselineCases = (): BrokenCase[] => [
   },
   {
     gate: frontendBaseline,
-    label: "frontend baseline: a bundle with no minifier-injected -any selector",
+    label: "frontend baseline: the bundler's -webkit-any/-moz-any injection from a :not(.q, .c) list",
     files: {
       ...BASELINE,
-      "desktop/web/src/styles.css": BASELINE["desktop/web/src/styles.css"]!.replace(".note:not(.q, .c) .st { color: #999; }\n", ""),
+      "desktop/web/src/styles.css": BASELINE["desktop/web/src/styles.css"]!.replace(
+        "body { -webkit-font-smoothing: antialiased; }",
+        "body { -webkit-font-smoothing: antialiased; }\n.notes-list .note:not(.q, .c) .st { color: #999; }",
+      ),
     },
     tracked: TRACKED,
     postFail: (failures) => {
       const broken = buildFailed(failures);
       if (broken) return broken;
-      const named = failures.some((line) =>
-        line.startsWith("built: allowlist entry -webkit-any matches nothing in the bundle"),
+      const missing = ["-webkit-any", "-moz-any"].filter(
+        (token) =>
+          !failures.some(
+            (line) => line.startsWith("built ") && line.includes(`${token} is vendor-prefixed and not on the allowlist`),
+          ),
       );
-      return named ? null : `frontend-baseline: the unfired built-side entry is not named: ${failures.join(" | ")}`;
+      return missing.length === 0
+        ? null
+        : `frontend-baseline: the injected ${missing.join(" and ")} is not named in the bundle: ${failures.join(" | ")}`;
     },
   },
   {
@@ -201,10 +211,7 @@ export const frontendBaselineCases = (): BrokenCase[] => [
     label: "frontend baseline: a case-varied -Webkit-backdrop-filter in a stylesheet",
     files: {
       ...BASELINE,
-      "desktop/web/src/styles.css": BASELINE["desktop/web/src/styles.css"]!.replace(
-        "-webkit-backdrop-filter: blur(4px)",
-        "-Webkit-backdrop-filter: blur(4px)",
-      ),
+      "desktop/web/src/extra.css": ".a { -Webkit-backdrop-filter: blur(4px); }\n",
     },
     tracked: TRACKED,
     postFail: (failures) => {
@@ -212,7 +219,7 @@ export const frontendBaselineCases = (): BrokenCase[] => [
       if (broken) return broken;
       const source = failures.some(
         (line) =>
-          line.startsWith("desktop/web/src/styles.css:") &&
+          line.startsWith("desktop/web/src/extra.css:") &&
           line.includes("-Webkit-backdrop-filter is vendor-prefixed and not on the allowlist"),
       );
       if (!source) return `frontend-baseline: the case-varied construct is not rejected in the source: ${failures.join(" | ")}`;
@@ -268,16 +275,15 @@ export async function frontendBaselineUnitProblem(): Promise<string | null> {
     if (bundle.code !== 0) return `frontend-baseline: the injection fixture did not bundle: ${bundle.stderr || bundle.stdout}`;
     const built = readFileSync(path.join(outDir, "main.css"), "utf8");
     // Bun injects `:-webkit-any(`/`:-moz-any(` only for a selector list whose every argument is one
-    // compound selector: desktop.css:38's :not(.q, .c) gets both twins, base.css:36's :is list with
-    // its complex `.reg-h p` argument gets none.
+    // compound selector: the fixture's own `.note:not(.q, .c)` list gets both twins, its `:is` list
+    // with the complex `.reg-h p` argument gets none.
     const webkit = (built.match(/-webkit-any/g) ?? []).length;
     const moz = (built.match(/-moz-any/g) ?? []).length;
     if (webkit !== 1 || moz !== 1) {
       return `frontend-baseline: the injection fixture bundled ${webkit} :-webkit-any( and ${moz} :-moz-any( token(s), want 1 and 1 (the :not(.q, .c) list's twins; the complex-argument :is list must inject none)`;
     }
-    const withoutAny = ALLOWLIST.filter((entry) => entry.side === "source" || !entry.construct.endsWith("-any"));
     // The fixture's entry is main.ts, so Bun writes main.css; name it as the built scan does.
-    const scan = scanVendor(["main.css"], [Buffer.from(built, "utf8")], withoutAny, "built");
+    const scan = scanVendor(["main.css"], [Buffer.from(built, "utf8")], ALLOWLIST, "built");
     const rejected = scan.violations.filter((line) => line.includes("-webkit-any") || line.includes("-moz-any"));
     if (rejected.length !== webkit + moz) {
       return `frontend-baseline: the built scan rejected ${rejected.length} of ${webkit + moz} injected -any token(s)`;

@@ -2469,9 +2469,10 @@ Entry format:
   its reason, and fail on an entry that matches nothing; (B) remove them anyway; (C) keep them with no
   machine check.
 - Default taken: (A). The gate's allowlist carries the reasons, an entry that matches nothing in the
-  source or in the built bundle fails the gate, and no new dependency is added for the visuals: the
-  shot comparison is byte equality, not an image library. Reversal: change the allowlist and the
-  stylesheets together.
+  source fails the gate (every entry is source-side, so the built scan has nothing to fire: on the
+  bundle side the guarantee is the violation direction — a vendor construct no entry covers is a
+  violation), and no new dependency is added for the visuals: the shot comparison is byte equality, not
+  an image library. Reversal: change the allowlist and the stylesheets together.
 - Revisit when: a baseline engine gains a standard equivalent that preserves the design, or the
   design changes the text weight or the scrollbar.
 

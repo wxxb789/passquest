@@ -11,7 +11,7 @@
 .ring .bg { stroke: var(--line-2); } .ring .fg { stroke: var(--ink); transition: stroke-dashoffset 1s linear; }
 .ring .ring-t { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
 .nav40 { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 16px; padding: 10px 10px 10px 20px; border-radius: var(--r-pill);
-  background: var(--glass-2); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-2); }
+  background: var(--glass-2); backdrop-filter: blur(24px); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-2); }
 .cells { display: grid; grid-template-columns: repeat(20, 16px); grid-auto-rows: 16px; gap: 4px; }
 .cell { width: 16px; height: 16px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--line-2); position: relative; transition: transform var(--d1) var(--spring); }
 .cell:hover { transform: scale(1.18); }

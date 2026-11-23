@@ -36,12 +36,16 @@ policy, not the build:
 - **CSS level:** the features today's stylesheets use are supported by all three baseline engines
   (WebKitGTK 2.52 is a later trunk generation than the Safari release each feature landed in; the
   citations are in the plan's fact 1). The `frontend-baseline` gate fails on any vendor-prefixed
-  construct not on its allowlist. On this baseline the stylesheets still carry the two dead twins
-  (`-webkit-backdrop-filter` ×18, `-webkit-mask-image` ×2) and the minifier still injects
-  `:-webkit-any()`/`:-moz-any()` from `styles/desktop.css:38`; P3 removes them and rewrites that
-  selector to `:not(.q):not(.c)`, leaving the six WebKit-only constructs (`-webkit-font-smoothing`
-  and the five `::-webkit-scrollbar*` pseudo-elements) that the gate's allowlist keeps with their
-  reasons (Q-0019-06).
+  construct not on its allowlist. P3 removed the two dead twins (`-webkit-backdrop-filter` and
+  `-webkit-mask-image`, each beside its unprefixed property) and the `:-webkit-any()`/`:-moz-any()`
+  selectors the minifier injected from `styles/desktop.css:38`'s `:not(.q, .c)` list, which now reads
+  `:not(.q):not(.c)`; the source's vendor tokens fell from 26 to 6 and the bundle's from 28 to 6: the
+  `6`s are the `frontend-baseline` gate's pass line (`6 vendor token(s) in the source, 6 in the
+  bundle`), the `26` is `git grep -oE -- "-webkit-[a-z-]*|-moz-[a-z-]*|-ms-[a-z-]*" 98752a7 --
+  desktop/web/styles | wc -l`, and the `28` the same `grep -oE` over the `main.css` of a
+  `git archive 98752a7 desktop/web` tree built with the bundle step above. That leaves the six
+  WebKit-only constructs (`-webkit-font-smoothing` and the five `::-webkit-scrollbar*`
+  pseudo-elements) that the gate's allowlist keeps with their reasons (Q-0019-06).
 - **Linux is second-tier** (Q-0000-07): it must still render and work, and no feature is adopted that
   WebKitGTK 2.52.6 cannot run — the bench's `linux-smoke` job renders every state in a visible
   WebKitGTK window on the runner's Xvfb.

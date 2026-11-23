@@ -29,20 +29,6 @@ export interface AllowlistEntry {
 
 export const ALLOWLIST: AllowlistEntry[] = [
   {
-    construct: "-webkit-backdrop-filter",
-    side: "source",
-    reason:
-      "dead under the baseline (Chromium unprefixed since 2019; Safari 18.0 no longer needs the prefix) - kept only until P3 removes each declaration",
-    fires: (token) => token === "-webkit-backdrop-filter",
-  },
-  {
-    construct: "-webkit-mask-image",
-    side: "source",
-    reason:
-      "dead under the baseline (mask-image unprefixed since Safari 15.4) - kept only until P3 removes each declaration",
-    fires: (token) => token === "-webkit-mask-image",
-  },
-  {
     construct: "-webkit-font-smoothing",
     side: "source",
     reason:
@@ -67,24 +53,12 @@ export const ALLOWLIST: AllowlistEntry[] = [
     reason: "WebKit's scrollbar pseudo-element family; no standard equivalent gives the design's 8 px thumb",
     fires: (token) => token === "-webkit-scrollbar-thumb",
   },
-  {
-    construct: "-webkit-any",
-    side: "built",
-    reason:
-      "Bun's minifier injects it beside desktop.css:38's :not(.q, .c) selector list; P3 rewrites that selector to :not(.q):not(.c), which stops the injection",
-    fires: (token) => token === "-webkit-any",
-  },
-  {
-    construct: "-moz-any",
-    side: "built",
-    reason: "Bun's twin of -webkit-any from the same desktop.css:38 selector; P3's rewrite removes it too",
-    fires: (token) => token === "-moz-any",
-  },
 ];
 
 export interface VendorScan {
   violations: string[];
   unfired: string[];
+  tokens: number;
 }
 
 export function scanVendor(
@@ -95,6 +69,7 @@ export function scanVendor(
 ): VendorScan {
   const fired = new Set<string>();
   const violations: string[] = [];
+  let tokens = 0;
   for (const [index, file] of files.entries()) {
     const bytes = contents[index];
     if (bytes === null) {
@@ -103,7 +78,9 @@ export function scanVendor(
     }
     const lines = bytes.toString("utf8").split(/\r?\n/);
     for (const [lineIndex, line] of lines.entries()) {
-      for (const token of line.match(VENDOR) ?? []) {
+      const matches = line.match(VENDOR) ?? [];
+      tokens += matches.length;
+      for (const token of matches) {
         const entry = allowlist.find((candidate) => (side === "source" ? candidate.side === "source" : true) && candidate.fires(token));
         if (entry) {
           fired.add(entry.construct);
@@ -115,6 +92,7 @@ export function scanVendor(
   }
   return {
     violations,
+    tokens,
     unfired: allowlist
       // Only the scanned side's entries must fire; the source scan is where the source constructs are read from.
       .filter((entry) => entry.side === side && !fired.has(entry.construct))
@@ -122,35 +100,46 @@ export function scanVendor(
   };
 }
 
-async function sourceProblems(root: string): Promise<string[]> {
+interface SideScan {
+  problems: string[];
+  tokens: number;
+}
+
+async function sourceProblems(root: string): Promise<SideScan> {
   const files = readdirSync(resolve(root, FRONTEND), { recursive: true, encoding: "utf8" })
     .map((file) => file.split(path.sep).join("/"))
     .filter((file) => SCANNED.test(file))
     .map((file) => `${FRONTEND}/${file}`)
     .sort();
   const scan = scanVendor(files, await readEach(root, files), ALLOWLIST, "source");
-  return [
-    ...scan.violations,
-    ...scan.unfired.map((construct) => `${FRONTEND}: allowlist entry ${construct} matches nothing in the source`),
-  ];
+  return {
+    tokens: scan.tokens,
+    problems: [
+      ...scan.violations,
+      ...scan.unfired.map((construct) => `${FRONTEND}: allowlist entry ${construct} matches nothing in the source`),
+    ],
+  };
 }
 
-async function builtProblems(ctx: GateContext): Promise<string[]> {
+async function builtProblems(ctx: GateContext): Promise<SideScan> {
   const outDir = mkdtempSync(path.join(tmpdir(), "passquest-frontend-baseline-"));
   try {
     const bundle = await bundleFrontend(ctx.root, outDir);
     if (bundle.code !== 0) {
-      return [`bun build ${FRONTEND_ENTRY} failed (exit ${bundle.code})`, ...outputLines(bundle)];
+      return { tokens: 0, problems: [`bun build ${FRONTEND_ENTRY} failed (exit ${bundle.code})`, ...outputLines(bundle)] };
     }
     const files = readdirSync(outDir, { encoding: "utf8" })
       .filter((file) => SCANNED.test(file))
       .sort();
-    if (files.length === 0) return [`bun build ${FRONTEND_ENTRY} emitted no scanned file`];
+    if (files.length === 0) return { tokens: 0, problems: [`bun build ${FRONTEND_ENTRY} emitted no scanned file`] };
     const scan = scanVendor(files, await readEach(outDir, files), ALLOWLIST, "built");
-    return [
-      ...scan.violations.map((violation) => `built ${violation}`),
-      ...scan.unfired.map((construct) => `built: allowlist entry ${construct} matches nothing in the bundle`),
-    ];
+    return {
+      tokens: scan.tokens,
+      problems: [
+        ...scan.violations.map((violation) => `built ${violation}`),
+        ...scan.unfired.map((construct) => `built: allowlist entry ${construct} matches nothing in the bundle`),
+      ],
+    };
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }
@@ -187,10 +176,12 @@ export const frontendBaseline: Gate = {
         );
       }
     }
-    problems.push(...(await sourceProblems(ctx.root)), ...(await builtProblems(ctx)));
+    const source = await sourceProblems(ctx.root);
+    const built = await builtProblems(ctx);
+    problems.push(...source.problems, ...built.problems);
     if (problems.length > 0) return fail(problems);
     return pass(
-      `${TARGET} target/lib pinned, README carries both, all ${ALLOWLIST.length} allowlist entries fire on their own side`,
+      `${TARGET} target/lib pinned, README carries both, all ${ALLOWLIST.length} allowlist entries fire on their own side; ${source.tokens} vendor token(s) in the source, ${built.tokens} in the bundle`,
     );
   },
 };
