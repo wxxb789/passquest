@@ -16,15 +16,57 @@ export const practice: Scenario = {
 await today();
 const promise = data('[data-testid="promise"]');
 press("Enter");
+// The passage selection opens the mark popover: it must be the engine's own popover, sit in
+// the top layer and take the mark when its button is clicked (the gates dispatch the click).
+await until("the practice passage", () => q('#passage[data-mode="practice"] .s'), 15000);
+const sentence = all('#passage[data-mode="practice"] .s').find((s) => s.textContent.length > 8);
+const text = Array.from(sentence.childNodes).find((node) => node.nodeType === 3 && node.length > 8);
+const range = document.createRange();
+range.setStart(text, 0);
+range.setEnd(text, 6);
+const selection = window.getSelection();
+selection.removeAllRanges();
+selection.addRange(range);
+const popover = await until("the mark popover", () => q(".markpop"), 10000);
+await sleep(150);
+const popBox = popover.getBoundingClientRect();
+const popHit = document.elementFromPoint(Math.round(popBox.left + popBox.width / 2), Math.round(popBox.top + popBox.height / 2));
+const markpop = {
+  popover: popover.getAttribute("popover") ?? "",
+  open: popover.matches(":popover-open") ? "true" : "false",
+  topLayer: popHit === popover || popover.contains(popHit) ? "true" : "false",
+  countBefore: q("#markcount")?.textContent ?? "",
+};
+popover.querySelector("[data-mark]").click();
+await until("the mark popover to close", () => !q(".markpop"), 10000);
+markpop.countAfter = q("#markcount")?.textContent ?? "";
+markpop.taken = markpop.countAfter === markpop.countBefore ? "false" : "true";
 const guided = await answer("1");
 await startFromSheet("start-skill", "${SKILL}");
 const independent = await answer("2");
 await startFromSheet("start-tactic", "${SKILL}|independent");
 const repeated = await answer("1");
-return { promise, answers: [guided, independent, repeated] };
+return { promise, markpop, answers: [guided, independent, repeated] };
 `),
     });
     if (!launched) return;
+    const markpop = field(launched.value, "markpop");
+    s.check(
+      stringField(markpop, "popover") === "auto",
+      `practice: the mark popover carries popover=${String(stringField(markpop, "popover"))}, want auto`,
+    );
+    s.check(
+      stringField(markpop, "open") === "true",
+      `practice: the mark popover after a selection reports :popover-open=${String(stringField(markpop, "open"))}`,
+    );
+    s.check(
+      stringField(markpop, "topLayer") === "true",
+      "practice: the mark popover is not the element on top at its own centre",
+    );
+    s.check(
+      stringField(markpop, "taken") === "true",
+      `practice: the Mark button left the count at ${String(stringField(markpop, "countAfter"))}, it was ${String(stringField(markpop, "countBefore"))}`,
+    );
     const answers = arrayField(launched.value, "answers");
     const attempts = attemptsOf(await cli(s, ["report"]));
     s.check(

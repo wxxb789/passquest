@@ -164,6 +164,53 @@ func main() {
           : `desktop-smoke: did not report the missing attempt: ${failures.slice(0, 3).join("; ")}`,
     },
     {
+      // The failure is decided in the practice scenario's mark-popover step; the later scenarios
+      // would only relaunch the stub.
+      gate: makeDesktopSmokeGate(["practice"]),
+      label: "desktop practice flow whose mark popover never shows",
+      files: {
+        "go.mod": GO_MOD,
+        // Claims the answer and the mark the scenario asks for, but the popover reports hidden.
+        "cmd/passquest-desktop/main.go": `package main
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+)
+
+func write(value any) {
+	document, _ := json.Marshal(map[string]any{"ok": true, "value": value})
+	_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), document, 0o600)
+}
+
+func main() {
+	script, _ := os.ReadFile(os.Getenv("PASSQUEST_DESKTOP_SCRIPT"))
+	switch {
+	case strings.Contains(string(script), "desktop-smoke: boot/"):
+		write(map[string]any{"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": true, "probe": "clear", "opaqueErrors": 0})
+	case strings.Contains(string(script), "desktop-smoke: practice/"):
+		write(map[string]any{
+			"markpop": map[string]string{"popover": "auto", "open": "false", "topLayer": "false", "taken": "false", "countBefore": "b", "countAfter": "b"},
+			"answers": []any{map[string]any{
+				"item":      map[string]string{"token": "pt-selftest", "question": "q1", "presentedAt": "2026-01-01T00:00:00Z"},
+				"condition": map[string]string{"condition": "independent", "canCount": "true"},
+				"chosen":    "B",
+				"feedback":  map[string]string{"attempt": "1", "verdict": "correct", "elapsedMs": "1200"},
+			}},
+		})
+	}
+}
+`,
+        "cmd/passquest/main.go": 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println(`{"attempts":[]}`) }\n',
+        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("practice: the mark popover after a selection"))
+          ? null
+          : `desktop-smoke: did not report the mark popover that never showed: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
       // The failure is decided in the update scenario: its own launch deviates
       // from the allowed request shape and nothing else runs it.
       gate: makeDesktopSmokeGate(["update"]),

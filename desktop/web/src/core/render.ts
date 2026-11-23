@@ -2,6 +2,7 @@
 // screens themselves are supplied by the app (src/screens.ts) so this module stays view-agnostic.
 // A modal layer is a native <dialog>; a rebuild replaces the element, which breaks the engine's own
 // focus restore, so the app still records the opener (ui.ret).
+import { resumeMarkPop } from '../components/passage';
 import { tickClocks } from './clock';
 import type { Html } from './html';
 import { ui, type Layer } from './state';
@@ -206,6 +207,8 @@ export function closeLayer(): void {
   layerDialog()?.close();
   renderLayer(false);
   if (was === 'pop') renderOrb();
+  // A modal's showModal() hides the mark popover; closing the layer re-shows it while the mark stands.
+  resumeMarkPop();
   if (ui.ret) {
     $(ui.ret)?.focus({ preventScroll: true });
     ui.ret = null;

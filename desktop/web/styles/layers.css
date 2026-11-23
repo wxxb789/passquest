@@ -4,6 +4,10 @@
    whatever display .sheet asks for. */
 dialog { inset: auto; margin: 0; padding: 0; border: 0; height: auto; max-width: none; max-height: none; overflow: visible; color: inherit; }
 dialog:not([open]) { display: none; }
+/* The UA's popover box (Chromium html.css [popover], hidden as [popover]:where(:not(:popover-open)); WebKit
+   css/popover.css) is not the design's; their hide is UA-origin, which any author display beats — the rule below restates it. */
+:where([popover]) { inset: auto; margin: 0; border: 0; padding: 0; overflow: visible; width: auto; height: auto; color: inherit; }
+[popover]:not(:popover-open):not(dialog[open]) { display: none; }
 /* bottom sheet */
 .sheet { position: fixed; left: 50%; bottom: 0; width: min(760px, calc(100vw - 64px)); max-height: 64vh; transform: translateX(-50%); display: flex; flex-direction: column; border-radius: var(--r-xl) var(--r-xl) 0 0;
   background: var(--glass-3); backdrop-filter: blur(30px) saturate(1.4); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
@@ -58,10 +62,10 @@ dialog::backdrop { background: oklch(20% 0.03 262 / .2); }
 .keys .row span:last-child { display: inline-flex; gap: 4px; flex: none; }
 
 /* toast + mark pop */
-.toast { position: fixed; left: 50%; top: 72px; z-index: 60; transform: translateX(-50%); max-width: min(720px, calc(100vw - 48px)); padding: 10px 18px; border-radius: 18px; background: var(--ink); color: var(--bg); font-size: var(--t-sm); font-weight: 550;
+.toast { position: fixed; left: 50%; top: 72px; transform: translateX(-50%); max-width: min(720px, calc(100vw - 48px)); padding: 10px 18px; border-radius: 18px; background: var(--ink); color: var(--bg); font-size: var(--t-sm); font-weight: 550;
   box-shadow: var(--sh-2); display: flex; align-items: center; gap: 8px; animation: toastin var(--d3) var(--spring) both; line-height: 1.5; }
 @keyframes toastin { from { opacity: 0; transform: translate(-50%, -10px) scale(.96); } }
-.markpop { position: fixed; z-index: 45; display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border-radius: var(--r-pill); background: var(--ink); color: var(--bg); font-size: var(--t-s); box-shadow: var(--sh-2); animation: settle var(--d2) var(--spring) both; }
+.markpop { position: fixed; display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border-radius: var(--r-pill); background: var(--ink); color: var(--bg); font-size: var(--t-s); box-shadow: var(--sh-2); animation: settle var(--d2) var(--spring) both; }
 .markpop button { height: 26px; padding: 0 10px; border-radius: var(--r-pill); background: oklch(100% 0 0 / .14); font-weight: 650; display: inline-flex; gap: 6px; align-items: center; }
 [data-theme="dark"] .markpop button { background: oklch(0% 0 0 / .08); }
 .markpop kbd { background: transparent; color: inherit; box-shadow: inset 0 0 0 1px currentColor; opacity: .7; }

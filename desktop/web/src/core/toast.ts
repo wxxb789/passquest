@@ -5,9 +5,11 @@ export function toast(message: string): void {
   document.querySelector('.toast')?.remove();
   const t = document.createElement('div');
   t.className = 'toast';
+  t.popover = 'manual';
   t.setAttribute('role', 'status');
   t.textContent = message;
   document.body.appendChild(t);
+  t.showPopover();
   clearTimeout(timer);
   timer = setTimeout(() => t.remove(), 2600);
 }
