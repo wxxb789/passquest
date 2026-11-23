@@ -505,14 +505,15 @@ const MOTION = `
 await today();
 const probes = await UX.probes(q('[data-testid="hero"]'));
 UX.emulateNoPreference();
-// Each open must leave its entry transition behind; only with motion allowed is there one to read.
+// Each open must leave its entry motion behind — the sheet's and dialog's transitions and the
+// backdrop's keyframe animation; only with motion allowed is there one to read.
 const entry = {};
 q('[data-act="sheet"][data-v="pick"]').click();
-entry.sheet = UX.transitionsOf(q('#layer dialog[open]'));
+entry.sheet = UX.entryMotion(q('#layer dialog[open]'));
 press("Escape");
 await until("the closed entry sheet", () => !q('#layer [aria-modal="true"]'), 5000);
 press("?");
-entry.dlg = UX.transitionsOf(q('#layer dialog[open]'));
+entry.dlg = UX.entryMotion(q('#layer dialog[open]'));
 press("Escape");
 await until("the closed entry dialog", () => !q('#layer [aria-modal="true"]'), 5000);
 await startFromSheet("start-skill", "${SKILL}");
@@ -805,17 +806,23 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
       });
     }
     const entry = field(motion, "entry");
-    const wantedEntry: ReadonlyArray<readonly [string, string, string]> = [
-      ["sheet", "transform", ""],
-      ["sheet", "opacity", "::backdrop"],
-      ["dlg", "opacity", ""],
-      ["dlg", "transform", ""],
-      ["dlg", "opacity", "::backdrop"],
+    // The backdrop rides the base's keyframe, not a transition: the baseline WebKit engines report
+    // no ::backdrop entry transition (CI run 45160799310), so none can be required there.
+    const wantedEntry: ReadonlyArray<readonly [string, string, string, string]> = [
+      ["sheet", "transform", "", "transition"],
+      ["sheet", "opacity", "::backdrop", "animation"],
+      ["dlg", "opacity", "", "transition"],
+      ["dlg", "transform", "", "transition"],
+      ["dlg", "opacity", "::backdrop", "animation"],
     ];
     const missingEntry = wantedEntry.filter(
-      ([which, property, pseudo]) =>
+      ([which, property, pseudo, kind]) =>
         !arrayField(entry, which).some(
-          (row) => stringField(row, "property") === property && stringField(row, "pseudo") === pseudo && (numberField(row, "ms") ?? 0) > 1,
+          (row) =>
+            stringField(row, "property") === property &&
+            stringField(row, "pseudo") === pseudo &&
+            stringField(row, "kind") === kind &&
+            (numberField(row, "ms") ?? 0) > 1,
         ),
     );
     if (missingEntry.length > 0) {

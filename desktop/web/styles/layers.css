@@ -23,8 +23,8 @@ dialog:not([open]) { display: none; }
 .sh-h .icon-btn { margin-left: auto; }
 .sh-b { flex: 1; min-height: 0; overflow: auto; padding: 16px 30px 30px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 dialog::backdrop { background: oklch(20% 0.03 262 / .2); }
-.enter-layer dialog[open]::backdrop { transition: opacity var(--d2); }
-@starting-style { .enter-layer dialog[open]::backdrop { opacity: 0; } }
+/* Keyframe, not a @starting-style transition: the baseline WebKit engines report no ::backdrop entry transition (CI run 45160799310). */
+.enter-layer dialog::backdrop { animation: fade var(--d2) both; }
 [data-theme="dark"] dialog::backdrop { background: oklch(5% 0.02 262 / .5); }
 .kv { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 10px 0; font-size: var(--t-sm); color: var(--ink-2); align-items: baseline; }
 .kv + .kv { border-top: 1px solid var(--line); }
