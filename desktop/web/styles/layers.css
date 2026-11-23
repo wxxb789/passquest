@@ -23,7 +23,7 @@ dialog:not([open]) { display: none; }
 .sh-h .icon-btn { margin-left: auto; }
 .sh-b { flex: 1; min-height: 0; overflow: auto; padding: 16px 30px 30px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 dialog::backdrop { background: oklch(20% 0.03 262 / .2); }
-/* Keyframe, not a @starting-style transition: the baseline WebKit engines report no ::backdrop entry transition (CI run 45160799310). */
+/* Keyframe, not a @starting-style transition: the base's own fade, kept for certainty — the baseline WebKit engines name no ::backdrop animation in getAnimations() (CI runs 45160799310, 45166530476). */
 .enter-layer dialog::backdrop { animation: fade var(--d2) both; }
 [data-theme="dark"] dialog::backdrop { background: oklch(5% 0.02 262 / .5); }
 .kv { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 10px 0; font-size: var(--t-sm); color: var(--ink-2); align-items: baseline; }

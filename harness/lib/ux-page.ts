@@ -768,6 +768,22 @@ const UX = (() => {
     }
     return rows;
   }
+  // Whether this engine lists a ::backdrop keyframe animation at all, read from the probe's own
+  // reference dialog (not the app's stylesheet, so a missing app rule stays findable; CI 45166530476).
+  function backdropReported() {
+    const st = document.createElement("style");
+    st.textContent = "@keyframes qa-cap{from{opacity:0}to{opacity:1}} dialog.qa-cap::backdrop{animation:qa-cap 300ms both}";
+    document.head.append(st);
+    const dlg = document.createElement("dialog");
+    dlg.className = "qa-cap";
+    document.body.append(dlg);
+    dlg.showModal();
+    const listed = document.getAnimations().some((a) => a instanceof CSSAnimation && a.effect && a.effect.pseudoElement === "::backdrop");
+    dlg.close();
+    dlg.remove();
+    st.remove();
+    return listed;
+  }
   // Running transitions of the room colours (the .atmos custom properties or the page background),
   // leaving out the animations in except (those that were running before a condition change).
   function roomTransitions(except = new Set()) {
@@ -859,6 +875,6 @@ const UX = (() => {
     return result;
   }
 
-  return { audit: audit, primary: primary, hidden: hiddenPart, path: path, desc: desc, visible: visible, emulateReducedMotion: emulateReducedMotion, emulateNoPreference: emulateNoPreference, restoreMotion: restoreMotion, motionReport: motionReport, transitionReport: transitionReport, entryMotion: entryMotion, roomTransitions: roomTransitions, probes: probes };
+  return { audit: audit, primary: primary, hidden: hiddenPart, path: path, desc: desc, visible: visible, emulateReducedMotion: emulateReducedMotion, emulateNoPreference: emulateNoPreference, restoreMotion: restoreMotion, motionReport: motionReport, transitionReport: transitionReport, entryMotion: entryMotion, backdropReported: backdropReported, roomTransitions: roomTransitions, probes: probes };
 })();
 `;
