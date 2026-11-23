@@ -1,6 +1,11 @@
 /* Layers: bottom sheet, dialogs, shortcut sheet, toast, markpop — ported verbatim from design/prototypes/c-stage.html (lines 690-750). Do not normalise values. */
+/* The layer's dialog element: the UA's own dialog box (insets, border, padding, margin, colour, size,
+   overflow) is not the design's, .sheet and .dlg position and paint it, and a closed dialog is hidden
+   whatever display .sheet asks for. */
+dialog { inset: auto; margin: 0; padding: 0; border: 0; height: auto; max-width: none; max-height: none; overflow: visible; color: inherit; }
+dialog:not([open]) { display: none; }
 /* bottom sheet */
-.sheet { position: fixed; left: 50%; bottom: 0; z-index: 40; width: min(760px, calc(100vw - 64px)); max-height: 64vh; transform: translateX(-50%); display: flex; flex-direction: column; border-radius: var(--r-xl) var(--r-xl) 0 0;
+.sheet { position: fixed; left: 50%; bottom: 0; width: min(760px, calc(100vw - 64px)); max-height: 64vh; transform: translateX(-50%); display: flex; flex-direction: column; border-radius: var(--r-xl) var(--r-xl) 0 0;
   background: var(--glass-3); backdrop-filter: blur(30px) saturate(1.4); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
 .sheet.in { animation: sheetin var(--d3) var(--ease) both; }
 @keyframes sheetin { from { transform: translate(-50%, 100%); } }
@@ -11,9 +16,9 @@
 .sh-h .sub { font-size: var(--t-s); color: var(--ink-3); }
 .sh-h .icon-btn { margin-left: auto; }
 .sh-b { flex: 1; min-height: 0; overflow: auto; padding: 16px 30px 30px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
-.scrim { position: fixed; inset: 0; z-index: 35; background: oklch(20% 0.03 262 / .2); }
-.enter-layer .scrim { animation: fade var(--d2) both; }
-[data-theme="dark"] .scrim { background: oklch(5% 0.02 262 / .5); }
+dialog::backdrop { background: oklch(20% 0.03 262 / .2); }
+.enter-layer dialog::backdrop { animation: fade var(--d2) both; }
+[data-theme="dark"] dialog::backdrop { background: oklch(5% 0.02 262 / .5); }
 .kv { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 10px 0; font-size: var(--t-sm); color: var(--ink-2); align-items: baseline; }
 .kv + .kv { border-top: 1px solid var(--line); }
 .kv b { color: var(--ink); font-weight: 600; }
@@ -28,7 +33,7 @@
 .fine b { color: var(--ink-2); font-weight: 600; }
 
 /* dialog */
-.dlg { position: fixed; left: 50%; top: 50%; z-index: 50; width: 460px; transform: translate(-50%, -50%); padding: 28px 30px 24px; border-radius: var(--r-xl);
+.dlg { position: fixed; left: 50%; top: 50%; width: 460px; transform: translate(-50%, -50%); padding: 28px 30px 24px; border-radius: var(--r-xl);
   background: var(--glass-3); backdrop-filter: blur(30px) saturate(1.4); box-shadow: inset 0 1px 0 var(--rim), inset 0 0 0 1px var(--line), var(--sh-3); }
 .enter-layer .dlg { animation: dlgin var(--d3) var(--spring) both; }
 @keyframes dlgin { from { opacity: 0; transform: translate(-50%, -46%) scale(.96); } }

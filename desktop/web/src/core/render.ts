@@ -1,6 +1,7 @@
 // Rendering mechanics (prototype render / renderLayer / openLayer / closeLayer / focusKey). The
 // screens themselves are supplied by the app (src/screens.ts) so this module stays view-agnostic.
-// Modal layers make the app, dock and orb `inert`; closing a layer restores the focus it took.
+// A modal layer is a native <dialog>; a rebuild replaces the element, which breaks the engine's own
+// focus restore, so the app still records the opener (ui.ret).
 import { tickClocks } from './clock';
 import type { Html } from './html';
 import { ui, type Layer } from './state';
@@ -123,19 +124,45 @@ function layerKey(el: Element | null): string | null {
 type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 const fieldsOf = (root: ParentNode): Field[] => Array.from(root.querySelectorAll<Field>('form[id] input[name], form[id] select[name], form[id] textarea[name]'));
 
+const layerDialog = (): HTMLDialogElement | null => $('#layer')?.querySelector<HTMLDialogElement>('dialog[open]') ?? null;
+
+/** Shows the layer's dialog with showModal(): the top layer blocks the page and keeps Tab inside. */
+function showDialog(layer: HTMLElement): void {
+  const dialog = layer.querySelector<HTMLDialogElement>('dialog');
+  if (!dialog || dialog.open) return;
+  dialog.addEventListener('click', (e) => {
+    // An engine's backdrop click reaches the dialog as its target (padding does too, so the point
+    // decides); a real pointer click carries a click count, a scripted or keyboard click carries 0.
+    if (e.target !== dialog || e.detail <= 0) return;
+    const r = dialog.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeLayer();
+  });
+  dialog.addEventListener('close', () => {
+    // The engine's own close (a real Escape reaches cancel) ends the layer; a rebuild's close of the
+    // replaced dialog must not.
+    if (!dialog.isConnected || !ui.layer) return;
+    closeLayer();
+  });
+  dialog.showModal();
+}
+
 /**
  * Rebuilding the layer that is already shown (a background load, a language switch) keeps what the
  * learner typed or chose in its forms, the caret, and the focus; only the surrounding markup is new.
- * Opening a different layer starts clean.
+ * Opening a different layer starts clean; a modal closes and shows its dialog around the swap, since
+ * an open <dialog> would keep the page blocked and the new element needs the focusing steps.
  */
 function rebuildLayer(layer: HTMLElement, markup: string): void {
   const same = !!ui.layer && layer.dataset.layer === ui.layer;
+  const shown = same ? layerDialog() : null;
   const active = same && layer.contains(document.activeElement) ? document.activeElement : null;
   const focus = layerKey(active);
   const caret = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] : null;
   const kept = same ? fieldsOf(layer).map((f) => ({ key: layerKey(f), value: f.value, checked: f instanceof HTMLInputElement ? f.checked : false })) : [];
+  shown?.close();
   layer.innerHTML = markup;
   layer.dataset.layer = ui.layer ?? '';
+  if (isModal(ui.layer)) showDialog(layer);
   for (const k of kept) {
     const f = k.key ? layer.querySelector<Field>(k.key) : null;
     if (!f) continue;
@@ -159,14 +186,8 @@ export function renderLayer(anim: boolean): void {
   if (!screens || !layer) return;
   layer.classList.toggle('enter-layer', anim);
   rebuildLayer(layer, screens.layer().value);
-  const modal = isModal(ui.layer);
-  for (const sel of ['.app', '#dock', '#orb']) {
-    const el = $(sel);
-    if (el) el.inert = modal;
-  }
-  // Focus enters a layer when it opens, and also when a modal's content arrives later (a dialog whose
-  // data was still loading opened empty): focus never stays behind the inert page.
-  if (ui.layer && (anim || (modal && !layer.contains(document.activeElement)))) {
+  // The coach pop is no <dialog>: the engine runs no focusing steps, so its focus entry is the app's.
+  if (ui.layer && anim && !isModal(ui.layer)) {
     const af = layer.querySelector<HTMLElement>('[autofocus]') ?? layer.querySelector<HTMLElement>('.sheet .icon-btn, .dlg button, .csheet button');
     af?.focus({ preventScroll: true });
   }
@@ -182,6 +203,7 @@ export function openLayer(name: Layer): void {
 export function closeLayer(): void {
   const was = ui.layer;
   ui.layer = null;
+  layerDialog()?.close();
   renderLayer(false);
   if (was === 'pop') renderOrb();
   if (ui.ret) {

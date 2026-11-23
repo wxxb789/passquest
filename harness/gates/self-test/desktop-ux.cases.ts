@@ -79,6 +79,24 @@ async function breakEveryUpdateAssertion(root: string): Promise<string | null> {
   );
 }
 
+/**
+ * The product whose modal layers are shown with `show()` instead of `showModal()`: the layer still
+ * declares itself modal (role=dialog aria-modal=true) but nothing blocks the page behind it.
+ */
+async function showLayerWithoutModal(root: string): Promise<string | null> {
+  if (copyProduct(root, DESKTOP_UX_SOURCES) === 0) return "no product source was copied into the fixture root";
+  return patchCopy(root, "desktop/web/src/core/render.ts", "dialog.showModal();", "dialog.show();");
+}
+
+/**
+ * The product whose layers ignore a click outside their box: the scrim's own dismissal never reached
+ * the native dialog, so a point on the backdrop leaves the layer open.
+ */
+async function ignoreOutsideClicks(root: string): Promise<string | null> {
+  if (copyProduct(root, DESKTOP_UX_SOURCES) === 0) return "no product source was copied into the fixture root";
+  return patchCopy(root, "desktop/web/src/core/render.ts", "    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeLayer();\n", "");
+}
+
 export function desktopUxCases(): BrokenCase[] {
   return [
     {
@@ -143,6 +161,36 @@ export function desktopUxCases(): BrokenCase[] {
         const missing = wanted.filter(([needle]) => !failures.some((line) => line.includes(needle))).map(([, what]) => what);
         if (missing.length > 0) return `desktop-ux: did not fail on ${missing.join(" and ")}`;
         return null;
+      },
+    },
+    {
+      // The sheets/dialog part at the first size only: a layer that claims aria-modal without blocking
+      // the page leaves controls a learner can really tab to behind it, and that must be reported.
+      gate: makeDesktopUxGate({ sizes: [UX_SIZES[0]], parts: ["one"] }),
+      label: "a layer shown with dialog.show() while the page behind it stays tabbable",
+      files: {},
+      prepare: showLayerWithoutModal,
+      postFail: (failures) => {
+        const earlier = failures.find((line) => /go build|bun build|viewport precondition|probes:|script failed|seed:/.test(line));
+        if (earlier) return `desktop-ux: the non-modal layer broke an earlier stage: ${earlier}`;
+        return failures.some((line) => line.startsWith("modal-not-trapping "))
+          ? null
+          : `desktop-ux: did not report modal-not-trapping: ${failures.slice(0, 3).join("; ")}`;
+      },
+    },
+    {
+      // The sheets/dialog part at the first size only: the scrim's own pointer dismissal must be a
+      // check of its own, so a layer that only closes on Escape or its button is reported.
+      gate: makeDesktopUxGate({ sizes: [UX_SIZES[0]], parts: ["one"] }),
+      label: "a layer that ignores a click outside its box while the dialog stays open",
+      files: {},
+      prepare: ignoreOutsideClicks,
+      postFail: (failures) => {
+        const earlier = failures.find((line) => /go build|bun build|viewport precondition|probes:|script failed|seed:/.test(line));
+        if (earlier) return `desktop-ux: the ignored outside click broke an earlier stage: ${earlier}`;
+        return failures.some((line) => line.startsWith("outside-click-not-closing "))
+          ? null
+          : `desktop-ux: did not report outside-click-not-closing: ${failures.slice(0, 3).join("; ")}`;
       },
     },
   ];
