@@ -97,6 +97,15 @@ async function ignoreOutsideClicks(root: string): Promise<string | null> {
   return patchCopy(root, "desktop/web/src/core/render.ts", "    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeLayer();\n", "");
 }
 
+/**
+ * The product whose practice sheet lost its entry transition: opening it with motion allowed leaves
+ * no transform transition on the dialog, so the entry check must name it.
+ */
+async function dropSheetEntryTransition(root: string): Promise<string | null> {
+  if (copyProduct(root, DESKTOP_UX_SOURCES) === 0) return "no product source was copied into the fixture root";
+  return patchCopy(root, "desktop/web/styles/layers.css", ".sheet[open] { transition: transform var(--d3) var(--ease); }\n", "");
+}
+
 export function desktopUxCases(): BrokenCase[] {
   return [
     {
@@ -191,6 +200,21 @@ export function desktopUxCases(): BrokenCase[] {
         return failures.some((line) => line.startsWith("outside-click-not-closing "))
           ? null
           : `desktop-ux: did not report outside-click-not-closing: ${failures.slice(0, 3).join("; ")}`;
+      },
+    },
+    {
+      // The entry transitions only: the prepare and motion launches run the whole time, so no audit
+      // part is needed and the run stays short.
+      gate: makeDesktopUxGate({ sizes: [UX_SIZES[0]], parts: [] }),
+      label: "a practice sheet whose entry transition was removed",
+      files: {},
+      prepare: dropSheetEntryTransition,
+      postFail: (failures) => {
+        const earlier = failures.find((line) => /go build|bun build|viewport precondition|probes:|script failed|seed:/.test(line));
+        if (earlier) return `desktop-ux: the removed entry transition broke an earlier stage: ${earlier}`;
+        return failures.some((line) => line.startsWith("entry-transition-missing ") && line.includes("sheet transform"))
+          ? null
+          : `desktop-ux: did not report the missing sheet entry transition: ${failures.slice(0, 3).join("; ")}`;
       },
     },
   ];

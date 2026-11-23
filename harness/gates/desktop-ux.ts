@@ -505,6 +505,18 @@ const MOTION = `
 await today();
 const probes = await UX.probes(q('[data-testid="hero"]'));
 UX.emulateNoPreference();
+// Each open must leave its entry motion behind — the sheet's and dialog's transitions and the
+// backdrop's keyframe animation; only with motion allowed is there one to read. Whether the engine
+// reports ::backdrop animations at all (its own reference dialog) decides the backdrop rows.
+const entry = { backdropReported: UX.backdropReported() };
+q('[data-act="sheet"][data-v="pick"]').click();
+entry.sheet = UX.entryMotion(q('#layer dialog[open]'));
+press("Escape");
+await until("the closed entry sheet", () => !q('#layer [aria-modal="true"]'), 5000);
+press("?");
+entry.dlg = UX.entryMotion(q('#layer dialog[open]'));
+press("Escape");
+await until("the closed entry dialog", () => !q('#layer [aria-modal="true"]'), 5000);
 await startFromSheet("start-skill", "${SKILL}");
 // Only transitions the condition change starts count. What entering practice started may still be
 // running, and in a window WebKit does not show (macOS runs this window hidden) CSS animations are
@@ -551,7 +563,7 @@ for (const route of ["report", "anki", "settings", "assess"]) {
   await sleep(300);
   await snap(route);
 }
-return { probes, room, motion };
+return { probes, room, entry, motion };
 `;
 
 interface AllowEntry {
@@ -646,6 +658,8 @@ export interface UxRun {
   states: number;
   focusChecks: number;
   probes: number;
+  /** What the motion probe's capability read allows for the backdrop rows, for the gate's own record. */
+  backdrop: string;
   seconds: number;
 }
 
@@ -666,7 +680,7 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
   const started = Date.now();
   const sizes = scope?.sizes ?? UX_SIZES;
   const parts: UxPart[] = scope?.parts ?? ["one", "two", "long", "many"];
-  const out: UxRun = { problems: [], findings: [], allowed: 0, staleEntries: [], audits: 0, auditMs: 0, states: 0, focusChecks: 0, probes: 0, seconds: 0 };
+  const out: UxRun = { problems: [], findings: [], allowed: 0, staleEntries: [], audits: 0, auditMs: 0, states: 0, focusChecks: 0, probes: 0, backdrop: "", seconds: 0 };
   const done = () => ({ ...out, seconds: Math.round((Date.now() - started) / 1000) });
   const check: Check = (condition, message) => {
     if (!condition) out.problems.push(message);
@@ -794,6 +808,42 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
         detail: "",
       });
     }
+    const entry = field(motion, "entry");
+    // The backdrop rides the base's keyframe: the baseline WebKit engines list no ::backdrop animation
+    // at all, even for it (CI run 45166530476), so the two backdrop rows are required only where the
+    // engine's own reference read reports backdrop animations; a read that is missing requires them.
+    const requireBackdrop = field(entry, "backdropReported") !== false;
+    out.backdrop = requireBackdrop ? "required" : "not reported by this engine";
+    const backdropRows: ReadonlyArray<readonly [string, string, string, string]> = [
+      ["sheet", "opacity", "::backdrop", "animation"],
+      ["dlg", "opacity", "::backdrop", "animation"],
+    ];
+    const wantedEntry: ReadonlyArray<readonly [string, string, string, string]> = [
+      ["sheet", "transform", "", "transition"],
+      ["dlg", "opacity", "", "transition"],
+      ["dlg", "transform", "", "transition"],
+      ...(requireBackdrop ? backdropRows : []),
+    ];
+    const missingEntry = wantedEntry.filter(
+      ([which, property, pseudo, kind]) =>
+        !arrayField(entry, which).some(
+          (row) =>
+            stringField(row, "property") === property &&
+            stringField(row, "pseudo") === pseudo &&
+            stringField(row, "kind") === kind &&
+            (numberField(row, "ms") ?? 0) > 1,
+        ),
+    );
+    if (missingEntry.length > 0) {
+      out.findings.push({
+        check: "entry-transition-missing",
+        el: "dialog.sheet / dialog.dlg",
+        state: "today: open sheet and shortcut dialog",
+        mode: "light-zh",
+        size: size0,
+        detail: `no ${missingEntry.map(([which, property, pseudo]) => `${which} ${property}${pseudo}`).join(", ")} after the open`,
+      });
+    }
     for (const issue of arrayField(motion, "motion")) {
       out.findings.push(toFinding(issue, `reduced:${String(stringField(issue, "at"))}`, "light-zh", size0));
     }
@@ -918,7 +968,7 @@ export function makeDesktopUxGate(scope?: UxScope): Gate {
         ...lines,
         ...result.staleEntries.map((entry) => `${ALLOWLIST}: entry matches nothing (remove it): ${entry}`),
       ];
-      const detail = `${result.audits} audits over ${result.states} states × ${MODES.length} modes × ${(scope?.sizes ?? UX_SIZES).length} sizes, ${result.probes} probes, ${result.focusChecks} focus checks, ${result.allowed} allowed, ${result.auditMs} ms in audits, ${result.seconds}s`;
+      const detail = `${result.audits} audits over ${result.states} states × ${MODES.length} modes × ${(scope?.sizes ?? UX_SIZES).length} sizes, ${result.probes} probes, ${result.focusChecks} focus checks, ${result.allowed} allowed, ${result.auditMs} ms in audits, ${result.seconds}s${result.backdrop ? `, backdrop rows ${result.backdrop}` : ""}`;
       if (failures.length > 0) return fail(failures, detail);
       return pass(detail);
     },
