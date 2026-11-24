@@ -2375,6 +2375,12 @@ Entry format:
   name it, `desktop/web/tsconfig.json` sets `target`/`lib` to `ES2024`, and the `frontend-baseline`
   gate pins both values and the README, so a target cannot drift from the docs. Reversal: change the
   documented values, the tsconfig and the gate together.
+- Confirmed (2026-11-24, P9): every bench record of the goal names the same engines — the Windows
+  job `Edg/157.0.0.0`, the macOS job the frozen `AppleWebKit/605.1.15`, the ubuntu smoke
+  `Version/60.5 Safari/605.1.15` (run 45338748380) — and the final tree's gate run 45336617606
+  reads the `frontend baseline` line green on all three OSes: `ES2024 target/lib pinned, README
+  carries both, all 4 allowlist entries fire on their own side; 6 vendor token(s) in the source, 6
+  in the bundle`.
 - Revisit when: a first-tier platform's floor moves (a new macOS minimum, the app's Windows floor), or
   an engine's build in the matrix stops supporting a feature the frontend uses.
 
@@ -2406,11 +2412,24 @@ Entry format:
   (`71c366b`) yet macOS read frames.p95 as WORSE (median gap 24.8 ms against the old 5 ms floor)
   while the same job's control pair had measured frames.p95 IQRs of 17.85 ms and 25 ms — a false
   positive the new floor removes (25 ms, so the gap reads within).
+- Owner input (2026-11-22; recorded 2026-11-24, P9): after choosing the control-IQR floor, the owner
+  said the macOS tests may be somewhat more lenient.
 - Disclosed limit (owner decision, 2026-11-22): on a noisy runner a regression whose median gap is
   smaller than the control pair's IQR is not detectable (the head's Q1 above the base's Q3 still
   gates every verdict separately, but a gap below the floor can never read WORSE). The macOS
   frames.p95 control IQR of 25 ms in run 45082668207 is the example: a real regression of up to
   25 ms on that metric would read ok there.
+- Owner decision to take (2026-11-24, P9): the final run 45338748380 ran twice. Attempt 1 failed on
+  macOS `frames.longest` (`A` median 81 -> `B` 107 ms, control 95/86, floor 23 = the control pair's
+  IQR; `q1 106 vs base q3 88 (above)`); attempt 2 read the same metric 146 -> 154 within its 71 ms
+  floor, and both attempts' Windows jobs read `frames.p95` 15.7 -> 15.7. Across the
+  goal-wide/bisect dispatch runs, macOS `frames.longest` reads `B`'s median above `A`'s in 8 of 12
+  rows, everything inside its floor except that attempt; the same-build control pairs read medians of
+  86–201 ms and set floors of 23–121 ms on this metric. The owner's remark above (the macOS tests may
+  be somewhat more lenient) is about how much weight a macOS reading gets; it does not by itself accept
+  this WORSE, so the attempt-1 reading stands as a disclosed, unresolved observation and Done-when 4's
+  macOS `frames.longest` item is open for the owner to accept or have investigated (the P9 evidence
+  record carries the per-run table).
 - Revisit when: the same-build control pair itself reads "worse", or a metric's spread swamps the
   difference the goal needs (the disclosed limit: a regression below the control pair's IQR cannot
   be detected).
@@ -2427,6 +2446,10 @@ Entry format:
   excluded); (C) change the contract's Done-when 4.
 - Default taken: (A). The run records the failure and the metric has no honest value until the owner
   answers. No proxy is invented silently.
+- Outcome (2026-11-24, P9): no run needed this. Every bench record reads `guards: 64 checked, 0
+  failed, not measured 1` per OS job (the not-measured launch is the hidden prepare), the guard
+  ticks fit their budget (the final run: `ticks 30..30, elapsed 444..530 ms` on Windows, `460..1087
+  ms` on macOS), and the ubuntu smoke reads `6 checked, 0 failed`. The decision stays unused.
 - Revisit when: a bench run's guard rows show a runner that cannot hold a visible window.
 
 ### Q-0019-04 — Is there a screenshot companion to the ux gate?
@@ -2442,6 +2465,14 @@ Entry format:
 - Default taken: (A) as a **companion** to `desktop-ux`, never a substitute (Q-0012-01): a screenshot
   pair never excuses an audit finding, and the ux gate stays the primary oracle. Reversal: delete the
   captures from the bench tool and the allowlist with it.
+- Outcome (2026-11-24, P9): the companion held through the goal. Every step run's and both final
+  attempts' A/B shot pair and same-build control pair read `6/6 state(s) byte-identical` (the P1 run's
+  A predates the hook, so its A/B pair is `not-measured` while its control pair reads 6/6), with one
+  exception: the rejected `will-change` candidate's Windows pair read `5/6` (run 45330890948:
+  `state sheet-open differs from the base and no allowlist entry names it`; macOS read 6/6 on the same
+  candidate). `harness/frontend-visual-allow.json` stayed empty. The goal's one intended stacking
+  difference (the toast above a modal, P5) is outside the bench's six states and is recorded in the
+  plan's amendments 14–15, not as an allowlist entry.
 - Revisit when: the captures prove nondeterministic on a runner (the same-build control pair differs
   per state), or the owner decides image diffs need a tolerance instead of byte equality.
 
@@ -2457,6 +2488,21 @@ Entry format:
 - Default taken: (A). The evidence record lists each adopted feature with what it removed and each
   left-out candidate with its reason; a left-out candidate is revisited only where the plan names
   its evidence path (a Linux gate run for popover anchor positioning).
+- Final left-out list (2026-11-24, P9), each with the evidence it rests on: the coach pop as a
+  popover (reverted — the manual popover's box-shadow painted over the orb; plan amendment 15);
+  native light dismiss as the only outside-click path for the mark popover (native dismissal does
+  not clear `pendingRange`, and `openAfterSyntheticOutsideClick=true` shows no gate can drive the
+  engine path; amendment 15); the backdrop as a transition or `transition-behavior: allow-discrete`
+  (the engines run the backdrop animation but do not name the `::backdrop` pseudo in
+  `getAnimations()`; amendment 16(e)); `@starting-style` for the sheet's slide (the restored
+  `sheetin` keyframe is the base's own entry and the measured frame step went back to the base's
+  level; amendment 19); container queries (the compact mode's gutter change makes the stage's
+  content width non-monotone at the 1340 boundary — 1292.00 px at 1340 vs 1261.33 px at 1341,
+  1330 and 1362 both present 1282.00 px — and with the coach column the stage is 952 px at 1440;
+  amendment 18); anchor positioning and `<dialog>`-free focus trapping for the popovers (no Linux
+  proof on WebKitGTK 2.52.6); the dock tooltip (no gain); `@scope`, scroll-driven animations, view
+  transitions and `content-visibility` (no hand-built part they would replace, or a behaviour the
+  goal forbids).
 - Revisit when: a first-tier or second-tier engine version change makes a left-out feature safe, or an
   adopted feature's removal (P4–P8) is reverted with the finding that caused it.
 
@@ -2473,6 +2519,10 @@ Entry format:
   bundle side the guarantee is the violation direction — a vendor construct no entry covers is a
   violation), and no new dependency is added for the visuals: the shot comparison is byte equality, not
   an image library. Reversal: change the allowlist and the stylesheets together.
+- Outcome (2026-11-24, P9): the six tokens are the final tree's own (`base.css:8` and `:34-37`;
+  re-run `git grep -oE -- "-webkit-[a-z-]*|-moz-[a-z-]*|-ms-[a-z-]*" bb94a9d -- desktop/web/styles`
+  → 6), and the final tree's gate run 45336617606 reads `all 4 allowlist entries fire on their own
+  side; 6 vendor token(s) in the source, 6 in the bundle` on all three OSes.
 - Revisit when: a baseline engine gains a standard equivalent that preserves the design, or the
   design changes the text weight or the scrollbar.
 

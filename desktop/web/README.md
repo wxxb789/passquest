@@ -18,8 +18,13 @@ policy, not the build:
 | Platform | Engine | Baseline | Where the version is recorded |
 |---|---|---|---|
 | Windows 11+ | WebView2 (Chromium) | Evergreen: current stable Chromium (Chrome/157 at scout time, 2026-11-22; the Evergreen runtime updates to the latest stable, `learn.microsoft.com/…/webview2/concepts/versioning`) | the bench record's `launches.rows[].engine` per launch; run `45045599642` recorded `Edg/157.0.0.0` (Chromium 157) |
-| macOS 26+ | WKWebView (system WebKit) | Safari 26.x WebKit (Safari 26.6 on the `macos-26` runner; macOS 27 is above the floor, not the baseline) | the `macos-26` runner image readme (`actions/runner-images` `images/macos/macos-26-Readme.md`: macOS 26.6.1, Safari 26.6 `21624.4.5.11.5`, plan fact 1, fetched 2026-11-22); the bench record's `launches.rows[].engine` per launch, which run `45045599642` recorded as `AppleWebKit/605.1.15`, Safari's UA component |
+| macOS 26+ | WKWebView (system WebKit) | Safari 26.x WebKit (the final goal-wide run's runner read macOS 26.7.2; macOS 27 is above the floor, not the baseline) | the `macos-26` runner image readme (scout time, fetched 2026-11-22: macOS 26.6.1, Safari 26.6 `21624.4.5.11.5`; plan fact 1) and the final run `45338748380` attempt 2 (its macOS job read 26.7.2; record `runner.ImageOS`/`runner.ImageVersion` = `macos26`/`20261117.0516.1`) — the images move, so each run's build is named, not pinned; the bench record's `launches.rows[].engine` per launch, which run `45045599642` recorded as `AppleWebKit/605.1.15`, Safari's UA component |
 | Linux (second-tier) | WebKitGTK | 2.52.6 on `ubuntu-latest` (the archive's `libwebkit2gtk-4.1-0`; MyGo `dlopen`s it) | `packages.ubuntu.com/{noble,resolute}/libwebkit2gtk-4.1-0` (`2.52.6-0ubuntu0.24.04.1` / `2.52.6-0ubuntu0.26.04.1`, fetched 2026-11-22); run `45045599642`'s `frontend bench (ubuntu-latest render smoke)` job renders every state green on its Xvfb display and records only the engine's user agent, not the WebKitGTK version |
+
+The final goal-wide run `45338748380` re-read the same two UA strings on its Windows and macOS jobs
+(`Edg/157.0.0.0`; `AppleWebKit/605.1.15`), and its `frontend bench (ubuntu-latest render smoke)` job
+renders the six states green in a visible WebKitGTK window (`frontend-bench-smoke.json`: `ok: true`,
+7 launches, `guards 6 checked, 0 failed`); P9's evidence record names every run behind these numbers.
 
 - **JavaScript level.** `desktop/web/tsconfig.json` holds the compiler half of the baseline; the
   `frontend-baseline` gate (`harness/gates/frontend-baseline.ts`) pins these values:
@@ -35,7 +40,9 @@ policy, not the build:
   three engines' gate runs are the runtime proof.
 - **CSS level:** the features today's stylesheets use are supported by all three baseline engines
   (WebKitGTK 2.52 is a later trunk generation than the Safari release each feature landed in; the
-  citations are in the plan's fact 1). The `frontend-baseline` gate fails on any vendor-prefixed
+  citations are in the plan's fact 1), except `scrollbar-color` (Safari 26.2): on the macOS 26.0/26.1
+  floor it is ignored and the `::-webkit-scrollbar*` rules beside it paint the bar
+  (`styles/base.css:34-37`). The `frontend-baseline` gate fails on any vendor-prefixed
   construct not on its allowlist. P3 removed the two dead twins (`-webkit-backdrop-filter` and
   `-webkit-mask-image`, each beside its unprefixed property) and the `:-webkit-any()`/`:-moz-any()`
   selectors the minifier injected from `styles/desktop.css:38`'s `:not(.q, .c)` list, which now reads
