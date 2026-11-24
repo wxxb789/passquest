@@ -899,7 +899,9 @@ const benchTheme = () => document.documentElement.dataset.theme;
 if (benchTheme() !== "dark") {
   q('[data-act="theme"]').click();
   await until("the dark theme", () => benchTheme() === "dark");
-}`,
+}
+document.activeElement?.blur();
+await sleep(250);`,
   "sheet-open": `await today();
 await click('[data-act="sheet"][data-v="pick"]');
 await until("the practice sheet", () => q('#layer [aria-modal="true"]'));`,
@@ -1602,6 +1604,20 @@ export function selfCheckCases(): SelfCheckCase[] {
         return expect(
           missing.length === 0 && inertAt !== -1 && driverAt !== -1 && inertAt < driverAt,
           `the script is missing ${JSON.stringify(missing)} (inert hit-testing at ${inertAt}, the driver at ${driverAt}): a capture that does not settle these shows the runner's cursor, this launch's own measurements and a budget slot the send had not spent yet`,
+        );
+      },
+    },
+    {
+      name: "shot: the today-dark driver blurs the theme toggle and lets the theme settle before the capture",
+      check: () => {
+        const script = shotScript("today-dark");
+        const clickedAt = script.indexOf(`q('[data-act="theme"]').click();`);
+        const captureAt = script.indexOf(`await benchCapture("today-dark")`);
+        const driver = clickedAt === -1 || captureAt === -1 ? "" : script.slice(clickedAt, captureAt);
+        const missing = ["blur()", "await sleep("].filter((token) => !driver.includes(token));
+        return expect(
+          clickedAt !== -1 && captureAt !== -1 && missing.length === 0,
+          `the theme click at ${clickedAt}, the capture at ${captureAt}, missing ${JSON.stringify(missing)}: the theme action focuses the toggle and WebKit's :focus-visible ring after the driver's synthetic click is per-launch luck, so a capture that does not blur it and settle differs from the base by itself`,
         );
       },
     },
