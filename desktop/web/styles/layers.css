@@ -16,7 +16,7 @@ dialog:not([open]) { display: none; }
 }
 /* Entry transitions, not one-shot keyframes: @starting-style is the from-state of the first style update
    (MDN <dialog>). .enter-layer gates what a background rebuild never replayed (the sheet's own slide did replay). */
-.sheet[open] { transition: transform var(--d3) var(--ease); }
+.sheet[open] { transition: transform var(--d3) var(--ease); will-change: transform; }
 @starting-style { .sheet[open] { transform: translate(-50%, 100%); } }
 .sh-h {
   display: flex; align-items: center; gap: 12px; padding: 14px 28px 0 30px; flex: none;
