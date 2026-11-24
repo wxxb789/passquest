@@ -5,7 +5,7 @@
  * package, and proves the new build carried every record forward.
  *
  * - The previous release is PREVIOUS_RELEASE_COMMIT: the commit of the latest
- *   published release tag (v0.15.0). Before any release existed it was the
+ *   published release tag (v0.15.1). Before any release existed it was the
  *   last main commit before goal 0013 (357b4c6, Q-0013-06); each release moves
  *   it to the new tag's commit (docs/release.md). The commit is fetched (`--depth=1`,
  *   one commit, not the checkout depth) only when the checkout does not
@@ -82,12 +82,12 @@ import { launch, textEnv, UNREACHABLE_ENDPOINT } from "../desktop-smoke/scenario
 import type { ScenarioRun } from "../desktop-smoke/scenario.ts";
 
 /**
- * The previous release: the commit of tag v0.15.0, the latest published
+ * The previous release: the commit of tag v0.15.1, the latest published
  * release, which the upgrade check starts from. The full object id, because
  * `git fetch --depth=1 origin <id>` fetches by full id only. After each
  * release, move it to the new tag's commit (docs/release.md).
  */
-export const PREVIOUS_RELEASE_COMMIT = "c9a83a05936de4a5a10aa72999dacaa3418fca3c";
+export const PREVIOUS_RELEASE_COMMIT = "43a09b175a0a8eb954a6210a4cfbf734ac7e1047";
 
 /** One launch site of the installed app: the smoke-hook run and the per-user data root it resolves. */
 export interface UpgradeSite {
