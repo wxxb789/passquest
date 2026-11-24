@@ -2532,3 +2532,156 @@ Entry format:
 - Revisit when: a baseline engine gains a standard equivalent that preserves the design, or the
   design changes the text weight or the scrollbar.
 
+### Q-0022-01 — What is the title area's height, content and drag region?
+- Status: decided(default taken)
+- Context: goal 0022 replaces the system caption with a title area the Stage draws itself. The
+  header `header#top.top` spans the window top, already holds the util group and is the top-most
+  app element; MyGo's room reaches the page only as four `--mygo-titlebar-*` CSS variables, and on
+  Windows the top rows of the page are a separate invisible window's resize band
+  (`internal/windows/topedge.go`: `SM_CYFRAME + SM_CXPADDEDBORDER`, 8 DIP where the system reports
+  none), so a control moved to the strip's own top would lose its top rows to the resize.
+- Options considered: (A) the header itself is the title area, keeps its designed heights (64 px,
+  58 px under the `max-height: 820px` query), reserves the insets inside its own outer columns and
+  carries `--app-region: drag` under a page marker while any room value is above zero; (B) a
+  shorter dedicated band inside the header; (C) leave the header and paint a strip beside it.
+- Default taken: (A). `TitleBarHeight: 40` matches the `.util` group's own height; the brand's
+  leading padding grows by `--mygo-titlebar-inset-left` and the util group's trailing **margin** by
+  `--mygo-titlebar-inset-right` — not `padding-right`, which would grow the capsule's painted glass
+  under the caption buttons while the controls stay clear (the `titlebar-room-paint` check and its
+  must-fail case pin the margin); so the two `1fr` columns stay equal and the middle slot stays
+  centred. The drag marker is set while any of the four values is above zero (a macOS left inset
+  alone still needs its clearance), read at boot and kept from `mygo:title-bar` (no replay for a
+  late subscriber). Disclosed: the header's controls do not share the caption buttons' vertical
+  centre (Windows: group centre y = 29 against the buttons' 20); P3's read and the manual pass judge
+  the look. Reversal: drop the switch and the page rules together.
+- Revisit when: a room value makes a header control clip (the `titlebar-strip-clip` check), or MyGo
+  offers a title-bar layout API the page can use instead of CSS variables.
+
+### Q-0022-02 — Which appearance do the caption buttons follow?
+- Status: decided(default taken)
+- Context: with a hidden title bar, Windows' buttons default to the **system** appearance
+  (`AppsUseLightTheme`) while this app's appearance is its own page theme; macOS's lights and GTK's
+  title buttons keep the app's appearance on their own (`mygo@v0.10.0/window.go:1431-1434`).
+- Options considered: (A) the app tells MyGo which appearance it wants, on Windows, through
+  `Window.SetWindowButtonsTheme`; (B) accept the system appearance; (C) a page-drawn caption (out of
+  scope, Q-0022-09).
+- Default taken: (A). The page's theme lives in `localStorage`, so the page tells Go: one new bound
+  method (bound like `Study`), its regenerated client entry and its `desktop/web/src/api/client.ts`
+  wrapper, called at boot and on the theme toggle. Disclosed: this adds one method to the app's
+  bound surface; `window.mygo.window`'s behaviour does not change. Reversal: drop the call and
+  accept system-appearance buttons, legible only while the system and app appearances agree.
+- Revisit when: MyGo gives the page a way to set the buttons' theme, or the caption stops being
+  MyGo's own drawing.
+
+### Q-0022-03 — Which macOS hidden-title-bar style?
+- Status: decided(default taken)
+- Context: `TitleBarHiddenInset` adds an `NSToolbar` and changes the window's corner radius;
+  `TitleBarHeight` plays no part on macOS, where the room is AppKit's own title-bar band (~28 pt on
+  a standard window — the formula and the full-size content view are the sources, P3 reads the
+  value); a double-click's action is the user's `AppleActionOnDoubleClick` (default: Zoom).
+- Options considered: (A) `TitleBarHidden`, no `TrafficLightPosition`, the page reads
+  `--mygo-titlebar-inset-left`/`--mygo-titlebar-controls-bottom`; (B) `hiddenInset`; (C) move the
+  lights.
+- Default taken: (A): the lights stay where macOS puts them for every app, and Q-0022-01's vertical
+  rule (the header at its own designed height) is what keeps the util group whole under a band
+  shorter than 40 px. The double-click assertion states the zoom path and names the default as its
+  first suspect on failure. Reversal: switch styles and re-read the room.
+- Revisit when: the macOS minimum moves or AppKit's band stops matching the plan's formula.
+
+### Q-0022-04 — What do Linux decorations do?
+- Status: decided(default taken)
+- Context: Linux hides the title bar too (Done-when 1 asks for all three platforms). A Wayland
+  compositor that enforces server-side decorations keeps its own bar with no room for the page
+  (`xdg-decoration`: "The compositor can decide not to use the client's mode"); GNOME/X11 and
+  Mutter's CSD give GTK's buttons in MyGo's overlay. CI has no window manager: `gtk_window_maximize`
+  is the WM's business and its state must not be assumed ("or at all", GTK's own docs).
+- Options considered: (A) hide on Linux and accept the compositor's own bar where one is enforced;
+  (B) keep GTK's bar outside Wayland; (C) assert the maximize state on CI.
+- Default taken: (A). Disclosed: under an enforcing compositor the page's title area sits below a
+  compositor-drawn bar and reserves nothing; the CI case asserts only the press's takeover (what
+  the page can observe) and records the maximize reading; the Ubuntu artifact carries the hidden
+  window's room, and the effect on a real desktop is the manual pass. Reversal: drop the Linux arm
+  if no first-tier Linux appears.
+- Revisit when: a first-tier OS gains a Linux desktop in the matrix, or a compositor starts
+  reporting the room.
+
+### Q-0022-05 — What does the machine own, and what does the manual pass own?
+- Status: decided(default taken)
+- Context: Done-when 1's six cells (three OSes × two appearances, the today view at 1280x800) can be
+  mechanical — `today` and `today-dark` in each of the Windows and macOS bench jobs and the same two
+  states from the Linux render-smoke job — while a page capture cannot show the frame or the native
+  buttons (`Window.CapturePage()` captures the visible page only).
+- Options considered: (A) the six cells are bench shots and the manual pass carries only what a page
+  capture cannot show; (B) manual pass for everything; (C) OS-level captures in CI.
+- Default taken: (A). The manual pass records the OS, the appearance and what was seen: the frame and
+  the buttons' legibility over the drawn title area, Snap layouts, a real pointer's drag and
+  double-click, the resize from the top edge and both sides, the inactive and full-screen looks,
+  and the right-click. On Windows it is a coordinator action; on macOS and Linux an owner action
+  where a machine of that OS is available, recorded with the reason where none is.
+- Revisit when: a gate can capture the frame or drive a real pointer.
+
+### Q-0022-06 — How are per-OS visual differences allowlisted?
+- Status: decided(default taken)
+- Context: the bench compares A's and B's shots byte-for-byte and fails a stale entry; a step that
+  hides the title bar on Windows only changes Windows' page shots, so a shared allowlist entry would
+  read as stale in the macOS job (which compares its own shots).
+- Options considered: (A) entries gain an optional `os` (`"windows" | "macos" | "any"`, default
+  `"any"`; the Linux `--smoke` job compares no numbers); (B) separate allowlists per job; (C) an
+  entry that carries the other OS's name in its reason.
+- Default taken: (A). An entry belongs to one run's A/B pair, never to the tree in general: it is
+  added in the branch whose own run needs it and removed by the next step, so the merged tree's
+  allowlist is empty again. The goal-level comparison runs from a throwaway branch that carries the
+  head plus its own entries (fourteen for the seven states, each with its reason); that branch is
+  never merged. Disclosed cost: between a step's merge and the next step's removal, another branch's
+  bench run reads those entries in its own head and fails as stale — the coordinator serialises the
+  steps so no other branch's bench run starts inside that window.
+- Revisit when: the bench compares shots on Linux too, or the comparison stops failing stale
+  entries.
+
+### Q-0022-07 — What happens to the 0012 contact sheets?
+- Status: decided(default taken)
+- Context: the 17 sheets under `docs/evidence/0012/` are the four-appearance reference shots of the
+  page area (1280x800, downscaled 640x400, MyGo's automation build); nothing in the repository
+  regenerates them, and every sheet shows the page's own top bar, not the frame.
+- Options considered: (A) regenerate them for the final head with their own record's method and list
+  per sheet what changed; (B) leave them and disclose the age; (C) regenerate only if the build
+  reproduces.
+- Default taken: (A), with (C) as the fallback: if that build cannot be reproduced, the evidence
+  record says so and regenerating the sheets becomes an owner action — the six per-OS cells keep
+  their own mechanical artifacts, so the fallback does not narrow Done-when 1; neither the sheets
+  nor their README claim a state they do not show.
+- Revisit when: the automation build stops reproducing, or the sheets' method changes.
+
+### Q-0022-08 — Which framework gaps shape the workarounds?
+- Status: decided(default taken)
+- Context: MyGo offers no page-visible title getter, no replay of `mygo:title-bar` for a subscriber
+  that registers after document start, no room API besides the CSS variables, and `CapturePage()`
+  cannot show the native buttons or the frame; `TitleBarHeight` does nothing on macOS.
+- Options considered: (A) work with the frame's own surface: read computed styles, subscribe for
+  changes, add one smoke-only bound service for the window title, judge the buttons in the manual
+  pass; (B) reach into MyGo internals; (C) widen the framework first.
+- Default taken: (A). The smoke-only `SmokeWindow.Title` reads the OS title on Windows
+  (`GetWindowTextW` through the window's HWND — MyGo's own `Window.Title` returns a cached string)
+  and, on macOS and Linux, MyGo's cached title, the only read without a cgo or Objective-C binding
+  this project does not carry — recorded as a disclosed limit in `docs/harness.md` row 24 and the
+  evidence record. Each workaround is revisited when MyGo offers the missing capability.
+- Revisit when: MyGo adds a title getter, an event replay, a room API beyond the variables, or a
+  frame capture.
+
+### Q-0022-09 — Are the Windows caption buttons still the system's?
+- Status: decided(default taken)
+- Context: the contract keeps the system's own window buttons unless an OS cannot show them legibly
+  over the page, and requires any replacement to behave like the system's, Snap layouts included,
+  disclosed. With `TitleBarHidden`, Windows has no system caption left: MyGo's backend draws
+  minimize, maximize-or-restore and close itself in a layered child window over the page, answers
+  `WM_NCHITTEST` with the buttons' hit-test codes (which is what brings Snap layouts over maximize),
+  and paints Windows 11's state palette in the system appearance unless the app asks otherwise
+  (Q-0022-02).
+- Options considered: (A) accept MyGo's drawing as the disclosed replacement; (B) a page-drawn
+  caption answering its own hit test; (C) keep the system caption on Windows only.
+- Default taken: (A), recorded as the disclosed replacement of Done-when 1's "system buttons".
+  Verification: the manual pass's Snap hover and OS-level captures of the buttons (Q-0022-05), the
+  per-OS room reading, and the guard that the window never sets `HideWindowButtons`. Reversal: none
+  inside MyGo.
+- Revisit when: MyGo draws the caption differently, or Windows 11's Snap rules change.
+

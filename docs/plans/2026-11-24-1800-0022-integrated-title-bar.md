@@ -16,6 +16,9 @@ its cases, the marker's any-value gate, Q-0022-02's `client.ts` call path, the i
 mechanism, the `os` values, and the Snap risk's wording — every finding of the three round-2 reviews
 (`Q:/scratch/omp/runs/2026-11-24/r22-P0-{correct,platform,spec}-r2/answer.md`) is fixed here or
 rejected with evidence, named in the round-3 answer.
+Revised again 2026-11-24 in the P1 round 2: the title read-back fact and row P1's service sentence
+(MyGo's `Window.Title` returns its cached string, so Windows reads the OS title through the window's
+HWND and macOS/Linux keep the cached read as a disclosed limit — docs/harness.md row 24).
 
 ## Goal in one sentence
 
@@ -187,10 +190,17 @@ per-OS screenshots and a recorded manual pass for what no gate can see.
      harness path — the page's own theme control is (`[data-act="theme"]`, the one the ux gate's
      `applyMode` clicks, `desktop-ux.ts:162-165`), and a shot driver that clicks it captures the dark
      appearance of the same state.
-   - **The window title: yes, with one small read-back.** `Window.Title()` is the platform's own
-     read-back — `GetWindowTextW` (`internal/windows/window.go:975-980`), `[NSWindow title]`
-     (`internal/darwin/window.go:821-825`), `gtk_window_get_title`
-     (`internal/linux/window.go:460-461`) — and a smoke-only bound service returns it. Measured in the
+   - **The window title: yes, with one small read-back.** `Window.Title()` returns MyGo's cached
+     `w.title` — the string MyGo pushed to the platform, written at `window.go:677` and in
+     `TitleChanged` (`:2405-2412`) — never a platform read
+     (`mygo@v0.10.0/window.go:1143-1144`); the platform's own reads, `GetWindowTextW`
+     (`internal/windows/window.go:975-980`), `[NSWindow title]`
+     (`internal/darwin/window.go:821-825`) and `gtk_window_get_title`
+     (`internal/linux/window.go:460-461`), are not reachable through it. P1's smoke-only bound
+     service reads the OS title on Windows (`GetWindowTextW` through `NativeHandle()`'s HWND) and
+     keeps the cached read on macOS and Linux, the only read without a cgo or Objective-C binding
+     this project does not carry — a disclosed limit (docs/harness.md row 24, carried into P5's
+     record). Measured in the
      scratch copy with a `SmokeWindow.Title` binding (`Q:/scratch/omp/g22/P0/probe3.js`): it answered
      `Pass Quest — 今日`, `Pass Quest — 测评`, `Pass Quest — 设置` as the route changed and followed a
      direct `document.title = "probe-xyz"`; a call to an unbound service rejects by name
@@ -450,7 +460,9 @@ read first (Q-0019-02, fact 5).
 ### P1 — the checks first (facts 2, 3, 5; no product-visible change)
 
 1. `internal/desktop/smoke.go` gains a `SmokeWindow` service with one method: `Title()`, reading
-   `win.Title()` back from the platform. It binds from `SmokeShot`'s own call site
+   the OS title on Windows (`GetWindowTextW` through the window's HWND, `smoke_title_windows.go`)
+   and MyGo's cached title on macOS and Linux (`smoke_title_cached.go`, the disclosed limit above).
+   It binds from `SmokeShot`'s own call site
    (`desktop.go:120-121`) but on the smoke hook's condition, a scripted launch — **not** `SmokeShot`'s
    `EnvShotDir` (`smoke.go:199-202`), which the boot and `titlebar` scenarios do not set
    (`harness/lib/desktop-page.ts:277-292`): there, `Title()` would be absent exactly in the launches

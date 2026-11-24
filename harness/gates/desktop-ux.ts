@@ -27,7 +27,7 @@ import { seedReviewedSource } from "../lib/reviewed-source.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 import { releaseResponse, startUpdateStub } from "../lib/update-stub.ts";
-import { UX_LIBRARY } from "../lib/ux-page.ts";
+import { TITLEBAR_LIBRARY, UX_LIBRARY } from "../lib/ux-page.ts";
 
 /**
  * The visual and interaction quality budget of the desktop window (goal 0012,
@@ -112,6 +112,7 @@ function viewportGuard(width: number, height: number): string {
   if (innerWidth !== ${width} || innerHeight !== ${height}) return { precondition: { width: innerWidth, height: innerHeight } };
 }
 ${UX_LIBRARY}
+${TITLEBAR_LIBRARY}
 `;
 }
 
@@ -187,9 +188,10 @@ const each = async (state, withPrimary) => {
   for (const [theme, lang] of MODES) {
     await setMode(theme, lang);
     const audit = UX.audit(state);
-    const issues = withPrimary ? audit.issues.concat(UX.primary()) : audit.issues;
+    const titlebar = TITLEBAR.check();
+    const issues = (withPrimary ? audit.issues.concat(UX.primary()) : audit.issues).concat(titlebar.issues);
     const html = document.documentElement;
-    results.push({ state, mode: theme + "-" + lang, shown: html.dataset.theme + "-" + (html.lang === "en" ? "en" : html.lang === "zh-CN" ? "zh" : html.lang), issues, ms: audit.ms });
+    results.push({ state, mode: theme + "-" + lang, shown: html.dataset.theme + "-" + (html.lang === "en" ? "en" : html.lang === "zh-CN" ? "zh" : html.lang), issues, ms: audit.ms, titlebar });
   }
   await setMode("light", "zh");
 };
@@ -629,6 +631,68 @@ function toFinding(issue: unknown, state: string, mode: string, size: string): F
   };
 }
 
+/** One audit's title-area record (harness/lib/ux-page.ts's TITLEBAR.check). */
+interface TitlebarRecord {
+  /** The four room values, "height/left/right/bottom". */
+  key: string;
+  hasRoom: boolean;
+  marker: boolean;
+  counted: number;
+  skipped: Array<[string, number]>;
+  probe: string;
+  why: string;
+}
+
+function titlebarRecordOf(value: unknown): TitlebarRecord | null {
+  const entry = field(value, "titlebar");
+  const room = field(entry, "room");
+  const sizes = ["height", "left", "right", "bottom"].map((key) => numberField(room, key));
+  const marker = field(entry, "marker");
+  if (entry === undefined || typeof marker !== "boolean" || sizes.some((size) => typeof size !== "number")) return null;
+  const [height = 0, left = 0, right = 0, bottom = 0] = sizes as number[];
+  const skipped: Array<[string, number]> = [];
+  const counts = field(entry, "skipped");
+  if (counts !== null && typeof counts === "object" && !Array.isArray(counts)) {
+    for (const [reason, count] of Object.entries(counts)) skipped.push([reason, typeof count === "number" ? count : 0]);
+  }
+  const probe = field(entry, "probe");
+  return {
+    key: [height, left, right, bottom].join("/"),
+    hasRoom: height > 0 || left > 0 || right > 0 || bottom > 0,
+    marker,
+    counted: numberField(entry, "counted") ?? 0,
+    skipped,
+    probe: Array.isArray(probe) && probe.every((value) => typeof value === "number") ? probe.map((value) => Math.round(value as number)).join(",") : "",
+    why: stringField(entry, "why") ?? "",
+  };
+}
+
+/** What every audit's title-area record adds up to: the gate detail's titlebar segment. */
+function titlebarSegment(records: readonly TitlebarRecord[], audits: number): string {
+  const rooms = new Map<string, number>();
+  const whys = new Map<string, number>();
+  const skipped = new Map<string, number>();
+  const probes = new Set<string>();
+  let markers = 0;
+  let counted = 0;
+  for (const record of records) {
+    if (record.hasRoom) rooms.set(record.key, (rooms.get(record.key) ?? 0) + 1);
+    if (record.marker) markers++;
+    if (record.why !== "") whys.set(record.why, (whys.get(record.why) ?? 0) + 1);
+    counted += record.counted;
+    for (const [reason, count] of record.skipped) skipped.set(reason, (skipped.get(reason) ?? 0) + count);
+    if (record.probe !== "") probes.add(record.probe);
+  }
+  const whyText = [...whys].map(([why, count]) => `${count}x ${why}`).join("; ");
+  if (rooms.size === 0) {
+    return `titlebar: no title bar at ${records.length}/${audits} audits (marker ${markers}/${audits}), the four checks run-and-skipped${whyText ? `: ${whyText}` : ""}`;
+  }
+  const roomText = [...rooms].map(([key, count]) => `${key} px x${count}`).join("; ");
+  const audited = [...rooms.values()].reduce((sum, count) => sum + count, 0);
+  const skipText = skipped.size === 0 ? "none" : [...skipped].map(([reason, count]) => `${reason} ${count}`).join(", ");
+  return `titlebar: room ${roomText} at ${audited}/${audits} audits, marker ${markers}/${audits}, drag samples ${counted} counted, skipped ${skipText}, probe ${probes.size === 0 ? "none" : [...probes][0]}${whyText ? `; skipped states: ${whyText}` : ""}`;
+}
+
 /** One line per check and element, with where it was seen. */
 export function findingLines(findings: Finding[]): string[] {
   const groups = new Map<string, Finding[]>();
@@ -661,6 +725,8 @@ export interface UxRun {
   probes: number;
   /** What the motion probe's capability read allows for the backdrop rows, for the gate's own record. */
   backdrop: string;
+  /** The audits' title-area records added up (harness/lib/ux-page.ts's TITLEBAR). */
+  titlebar: string;
   seconds: number;
 }
 
@@ -681,7 +747,7 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
   const started = Date.now();
   const sizes = scope?.sizes ?? UX_SIZES;
   const parts: UxPart[] = scope?.parts ?? ["one", "two", "long", "many"];
-  const out: UxRun = { problems: [], findings: [], allowed: 0, staleEntries: [], audits: 0, auditMs: 0, states: 0, focusChecks: 0, probes: 0, backdrop: "", seconds: 0 };
+  const out: UxRun = { problems: [], findings: [], allowed: 0, staleEntries: [], audits: 0, auditMs: 0, states: 0, focusChecks: 0, probes: 0, backdrop: "", titlebar: "", seconds: 0 };
   const done = () => ({ ...out, seconds: Math.round((Date.now() - started) / 1000) });
   const check: Check = (condition, message) => {
     if (!condition) out.problems.push(message);
@@ -885,6 +951,7 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
 
     const states = new Set<string>();
     const audited: Audited[] = [];
+    const titlebarRecords: TitlebarRecord[] = [];
     const audits = ([["one", PART_ONE, templateData], ["two", PART_TWO, templateData], ["long", PART_LONG, longData], ["many", PART_MANY, manyData]] as const).filter(
       ([part]) => parts.includes(part),
     );
@@ -918,6 +985,9 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
           out.audits++;
           out.auditMs += numberField(result, "ms") ?? 0;
           check(stringField(result, "shown") === mode, `${label}: ${state} was audited as ${String(stringField(result, "shown"))}, not ${mode}`);
+          const titlebar = titlebarRecordOf(result);
+          check(titlebar !== null, `${label}: ${state} ${mode} carried no title-area record (the ux library's TITLEBAR.check)`);
+          if (titlebar) titlebarRecords.push(titlebar);
           for (const issue of arrayField(result, "issues")) out.findings.push(toFinding(issue, state, mode, sizeName));
         }
         for (const issue of arrayField(value, "focus")) {
@@ -927,6 +997,7 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
       }
     }
     out.states = states.size;
+    out.titlebar = titlebarSegment(titlebarRecords, out.audits);
     if (!scope) out.problems.push(...coverageProblems(audited, UX_SIZES.map((size) => `${size[0]}x${size[1]}`)));
 
     const used = new Set<number>();
@@ -970,7 +1041,7 @@ export function makeDesktopUxGate(scope?: UxScope): Gate {
         ...lines,
         ...result.staleEntries.map((entry) => `${ALLOWLIST}: entry matches nothing (remove it): ${entry}`),
       ];
-      const detail = `${result.audits} audits over ${result.states} states × ${MODES.length} modes × ${(scope?.sizes ?? UX_SIZES).length} sizes, ${result.probes} probes, ${result.focusChecks} focus checks, ${result.allowed} allowed, ${result.auditMs} ms in audits, ${result.seconds}s${result.backdrop ? `, backdrop rows ${result.backdrop}` : ""}`;
+      const detail = `${result.audits} audits over ${result.states} states × ${MODES.length} modes × ${(scope?.sizes ?? UX_SIZES).length} sizes, ${result.probes} probes, ${result.focusChecks} focus checks, ${result.allowed} allowed, ${result.auditMs} ms in audits, ${result.seconds}s${result.backdrop ? `, backdrop rows ${result.backdrop}` : ""}${result.titlebar ? `, ${result.titlebar}` : ""}`;
       if (failures.length > 0) return fail(failures, detail);
       return pass(detail);
     },

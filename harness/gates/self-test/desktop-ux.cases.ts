@@ -4,7 +4,7 @@ import { resolve } from "../../lib/repo.ts";
 
 import { desktopUx, makeDesktopUxGate, UX_SIZES } from "../desktop-ux.ts";
 import { copyProduct, DESKTOP_UX_SOURCES, patchCopy } from "./fixture.ts";
-import type { BrokenCase } from "./fixture.ts";
+import type { BrokenCase, PassCase } from "./fixture.ts";
 
 /**
  * The product with a stylesheet appended that removes every focus outline and
@@ -104,6 +104,39 @@ async function ignoreOutsideClicks(root: string): Promise<string | null> {
 async function dropSheetEntryAnimation(root: string): Promise<string | null> {
   if (copyProduct(root, DESKTOP_UX_SOURCES) === 0) return "no product source was copied into the fixture root";
   return patchCopy(root, "desktop/web/styles/layers.css", "  &.in { animation: sheetin var(--d3) var(--ease) both; }\n", "");
+}
+
+/**
+ * The title-area furniture goal 0022's P2 adds to the product, faked in the
+ * fixture: the room MyGo will report on `:root`, the page's `:root[data-titlebar]`
+ * marker, the marker-scoped drag rule and the util group's clearance by
+ * `margin` (Q-0022-01). Each must-fail case breaks exactly one piece.
+ */
+interface TitlebarFurniture {
+  /** false leaves the drag rule out (the neutralised drag region). */
+  drag?: boolean;
+  /** How the util group clears the right inset; "none" leaves it where it is. */
+  clearance?: "none" | "margin" | "padding";
+  /** true pushes the util group above the window's top edge. */
+  raise?: boolean;
+}
+
+async function fakeTitlebarRoom(root: string, furniture: TitlebarFurniture): Promise<string | null> {
+  if (copyProduct(root, DESKTOP_UX_SOURCES) === 0) return "no product source was copied into the fixture root";
+  const rules = [":root { --mygo-titlebar-height: 40px; --mygo-titlebar-inset-right: 138px; }"];
+  if (furniture.drag !== false) rules.push(":root[data-titlebar] header#top { --app-region: drag; }");
+  if (furniture.clearance === "padding") rules.push("header#top .util { padding-right: var(--mygo-titlebar-inset-right); }");
+  else if (furniture.clearance !== "none") rules.push("header#top .util { margin-right: var(--mygo-titlebar-inset-right); }");
+  if (furniture.raise) rules.push("header#top .util { position: relative; top: -20px; }");
+  const file = resolve(root, "desktop/web/styles/index.css");
+  writeFileSync(file, [readFileSync(file, "utf8"), ...rules, ""].join("\n"));
+  return patchCopy(root, "desktop/web/src/main.ts", "installErrorBar();", 'installErrorBar();\ndocument.documentElement.dataset.titlebar = "";');
+}
+
+/** The earlier-stage screen every titlebar case shares. */
+function titlebarEarlierStage(failures: string[]): string | null {
+  const earlier = failures.find((line) => /go build|bun build|viewport precondition|probes:|script failed|seed:/.test(line));
+  return earlier ? `desktop-ux: the faked title area broke an earlier stage: ${earlier}` : null;
 }
 
 export function desktopUxCases(): BrokenCase[] {
@@ -215,6 +248,96 @@ export function desktopUxCases(): BrokenCase[] {
         return failures.some((line) => line.startsWith("entry-transition-missing ") && line.includes("sheet transform"))
           ? null
           : `desktop-ux: did not report the missing sheet entry animation: ${failures.slice(0, 3).join("; ")}`;
+      },
+    },
+    {
+      // Today at the first size: the room is faked with the util group left where it
+      // is, so the page's own controls sit under the caption buttons' rectangle.
+      gate: makeDesktopUxGate({ sizes: [UX_SIZES[0]], parts: ["one"] }),
+      label: "a faked title-bar room whose caption buttons would cover the util group",
+      files: {},
+      prepare: (root) => fakeTitlebarRoom(root, { clearance: "none" }),
+      postFail: (failures) => {
+        const earlier = titlebarEarlierStage(failures);
+        if (earlier) return earlier;
+        return failures.some((line) => line.startsWith("titlebar-room-covered "))
+          ? null
+          : `desktop-ux: did not report titlebar-room-covered: ${failures.slice(0, 3).join("; ")}`;
+      },
+    },
+    {
+      // The same furniture with the drag rule neutralised: the strip exists and
+      // nothing in it computes --app-region: drag.
+      gate: makeDesktopUxGate({ sizes: [UX_SIZES[0]], parts: ["one"] }),
+      label: "a faked title-bar room whose drag region was neutralised",
+      files: {},
+      prepare: (root) => fakeTitlebarRoom(root, { drag: false }),
+      postFail: (failures) => {
+        const earlier = titlebarEarlierStage(failures);
+        if (earlier) return earlier;
+        return failures.some((line) => line.startsWith("titlebar-drag-region "))
+          ? null
+          : `desktop-ux: did not report titlebar-drag-region: ${failures.slice(0, 3).join("; ")}`;
+      },
+    },
+    {
+      // The util group pushed above the window's top edge, which Q-0022-01's
+      // vertical rule forbids: a header control is no longer wholly inside the window.
+      gate: makeDesktopUxGate({ sizes: [UX_SIZES[0]], parts: ["one"] }),
+      label: "a faked title-bar room whose util group is pushed above the window",
+      files: {},
+      prepare: (root) => fakeTitlebarRoom(root, { raise: true }),
+      postFail: (failures) => {
+        const earlier = titlebarEarlierStage(failures);
+        if (earlier) return earlier;
+        return failures.some((line) => line.startsWith("titlebar-strip-clip "))
+          ? null
+          : `desktop-ux: did not report titlebar-strip-clip: ${failures.slice(0, 3).join("; ")}`;
+      },
+    },
+    {
+      // The round-2 defect: the clearance applied as padding grows the util
+      // capsule under the caption buttons while its controls stay clear — the
+      // case that pins `margin`, not `padding` (Q-0022-01).
+      gate: makeDesktopUxGate({ sizes: [UX_SIZES[0]], parts: ["one"] }),
+      label: "a faked title-bar room whose clearance grew the util capsule with padding-right",
+      files: {},
+      prepare: (root) => fakeTitlebarRoom(root, { clearance: "padding" }),
+      postFail: (failures) => {
+        const earlier = titlebarEarlierStage(failures);
+        if (earlier) return earlier;
+        if (!failures.some((line) => line.startsWith("titlebar-room-paint ") && line.includes(".util"))) {
+          return `desktop-ux: did not report titlebar-room-paint on .util: ${failures.slice(0, 3).join("; ")}`;
+        }
+        if (failures.some((line) => line.startsWith("titlebar-room-covered "))) {
+          return `desktop-ux: reported titlebar-room-covered although the controls stay clear of the room: ${failures.find((line) => line.startsWith("titlebar-room-covered "))}`;
+        }
+        return null;
+      },
+    },
+  ];
+}
+
+/**
+ * The title area the plan asks for, as the fixture can state it: the faked room,
+ * the page's marker, the marker-scoped drag rule and the util group's clearance
+ * by margin all present. The whole restricted audit must read no finding — the
+ * modal states' strip samples are skipped with the reason recorded, and without
+ * that skip they would red.
+ */
+export function desktopUxPassCases(): PassCase[] {
+  return [
+    {
+      gate: makeDesktopUxGate({ sizes: [UX_SIZES[0]], parts: ["one"] }),
+      label: "a title area over a faked room with its drag region and clearance in place",
+      files: {},
+      prepare: (root) => fakeTitlebarRoom(root, {}),
+      postPass: (detail) => {
+        const missing = [
+          ...(detail.includes("titlebar: room ") ? [] : ["the room record"]),
+          ...(detail.includes("modal-layer ") ? [] : ["the modal skip record"]),
+        ];
+        return missing.length === 0 ? null : `desktop-ux: the pass detail carries neither ${missing.join(" nor ")}: ${detail}`;
       },
     },
   ];

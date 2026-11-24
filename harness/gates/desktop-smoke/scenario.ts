@@ -71,6 +71,12 @@ export interface ScenarioRun {
   /** Credential-store service of this scenario's launches. */
   service: string;
   check: Check;
+  /**
+   * A line for the gate's pass detail: what this scenario read that the
+   * artifact must carry — the boot and titlebar scenarios record the room a
+   * hidden window reads (Q-0022-01).
+   */
+  detail?: (line: string) => void;
 }
 
 export interface Scenario {

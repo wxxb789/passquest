@@ -18,7 +18,7 @@ import { agentSmokeCases, plainBundleFaultProblem } from "./self-test/agent-smok
 import { assessSmokeCases } from "./self-test/assess-smoke.cases.ts";
 import { baselineCases } from "./self-test/baseline.cases.ts";
 import { desktopSmokeCases } from "./self-test/desktop-smoke.cases.ts";
-import { desktopUxCases } from "./self-test/desktop-ux.cases.ts";
+import { desktopUxCases, desktopUxPassCases } from "./self-test/desktop-ux.cases.ts";
 import { docsLinksCases } from "./self-test/docs-links.cases.ts";
 import { findSmokeCases } from "./self-test/find-smoke.cases.ts";
 import { frontendBaselineCases, frontendBaselineUnitProblem } from "./self-test/frontend-baseline.cases.ts";
@@ -343,7 +343,7 @@ function brokenCases(): BrokenCase[] {
 
 /** Fixtures the gates must accept; a check that always fails is also a defect. */
 function passCases(): PassCase[] {
-  return [...goldenContractPassCases(), ...localOnlyPassCases(), ...packageSmokePassCases(), ...installGuidePassCases()];
+  return [...goldenContractPassCases(), ...localOnlyPassCases(), ...packageSmokePassCases(), ...installGuidePassCases(), ...desktopUxPassCases()];
 }
 
 let fixtures = 0;

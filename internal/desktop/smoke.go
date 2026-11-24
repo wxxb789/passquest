@@ -203,6 +203,33 @@ func (h *smokeHook) bindShots(window func() *mygo.Window) {
 	mygo.BindAs("SmokeShot", &shotService{dir: h.shotDir, window: window})
 }
 
+// bindWindow binds the title read-back for every scripted launch: the boot and
+// titlebar scenarios assert the window title without asking for a shot
+// directory (harness/gates/desktop-smoke).
+func (h *smokeHook) bindWindow(window func() *mygo.Window) {
+	if h == nil {
+		return
+	}
+	mygo.BindAs("SmokeWindow", &windowService{window: window})
+}
+
+// windowService is the smoke hook's title read-back for the boot and titlebar
+// scenarios (harness/gates/desktop-smoke). On Windows it reads the OS title
+// through the window's HWND; macOS and Linux read MyGo's cached title
+// (smoke_title_windows.go / smoke_title_cached.go).
+type windowService struct {
+	window func() *mygo.Window
+}
+
+// Title returns the window's current title.
+func (s *windowService) Title() (string, error) {
+	win := s.window()
+	if win == nil {
+		return "", errors.New("the window does not exist yet")
+	}
+	return windowTitle(win)
+}
+
 // A capture name becomes <name>.png inside EnvShotDir; the frontend bench's
 // state names are lowercase words joined by dashes.
 var shotNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)

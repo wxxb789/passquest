@@ -1,10 +1,12 @@
 import { field, numberField } from "../../lib/json.ts";
+import { TITLEBAR_LIBRARY } from "../../lib/ux-page.ts";
 import { launch } from "./scenario.ts";
 import type { Scenario } from "./scenario.ts";
 
 export const MIN_TODAY_TEXT = 200;
 
 const BOOT_SCRIPT = `
+${TITLEBAR_LIBRARY}
 const stage = () => document.querySelector("#stage");
 const ready = () => window.__pq === undefined || window.__pq.ready === true;
 const content = () => (stage()?.children.length ?? 0) > 0 && document.body.innerText.length > ${MIN_TODAY_TEXT};
@@ -29,7 +31,9 @@ if (window.mygo && typeof window.mygo.call === "function") {
     shotError = String((error && error.message) || error);
   }
 }
-return {
+// The boot state is read here, before the title walk navigates: the checks it feeds
+// describe the first Today, and a re-render after the return must not decide them.
+const bootState = {
   textLength: document.body.innerText.length,
   stageChildren: node ? node.children.length : -1,
   stageTextLength: node ? node.innerText.trim().length : 0,
@@ -41,6 +45,46 @@ return {
   opaqueErrors: diag ? diag.opaque : null,
   shotBound,
   shotError,
+};
+const titleSnap = async () => {
+  let title = null;
+  let titleError = "";
+  if (window.mygo && typeof window.mygo.call === "function") {
+    try {
+      title = String(await window.mygo.call("SmokeWindow.Title"));
+    } catch (error) {
+      titleError = String((error && error.message) || error);
+    }
+  }
+  return { title, titleError, documentTitle: document.title };
+};
+// The window's title follows the page's asynchronously, so each stop waits for the two to
+// agree (a five-second cap: a value that never agrees is what the boot checks then report).
+const titleInSync = async () => {
+  const syncDeadline = Date.now() + 5000;
+  for (;;) {
+    const snap = await titleSnap();
+    if (snap.title === null || snap.title === snap.documentTitle || Date.now() > syncDeadline) return snap;
+    await new Promise((done) => setTimeout(done, 50));
+  }
+};
+const titleAtToday = await titleInSync();
+location.hash = "#/settings";
+{
+  const routeDeadline = Date.now() + 5000;
+  while (document.title === titleAtToday.documentTitle && Date.now() < routeDeadline) await new Promise((done) => setTimeout(done, 50));
+}
+const titleAtSettings = await titleInSync();
+location.hash = "#/today";
+{
+  const routeDeadline = Date.now() + 5000;
+  while (document.title !== titleAtToday.documentTitle && Date.now() < routeDeadline) await new Promise((done) => setTimeout(done, 50));
+}
+const titleBackAtToday = await titleInSync();
+return {
+  ...bootState,
+  titlebar: TITLEBAR.read(),
+  titles: { today: titleAtToday, settings: titleAtSettings, back: titleBackAtToday },
 };
 `;
 
@@ -77,6 +121,46 @@ export const boot: Scenario = {
         shotBound === false && shotError.includes("SmokeShot.Capture"),
         `boot: a call to SmokeShot.Capture without PASSQUEST_DESKTOP_SHOT_DIR answered ${JSON.stringify(shotError)} (bound ${JSON.stringify(shotBound)})`,
       );
+    }
+    const titles = field(value, "titles");
+    if (titles !== undefined) {
+      // Three stops, each read back from the platform and compared with the page's
+      // own document.title: Today, Settings, and Today again.
+      for (const where of ["today", "settings", "back"]) {
+        const stop = field(titles, where);
+        const title = field(stop, "title");
+        const titleError = String(field(stop, "titleError") ?? "");
+        const documentTitle = String(field(stop, "documentTitle") ?? "");
+        // A fixture app without a mygo runtime cannot answer the call; the real
+        // app always has one, and its failure is an assertion failure.
+        if (title === null && titleError === "") continue;
+        if (typeof title !== "string") {
+          s.check(false, `boot: the window title at ${where} reads ${JSON.stringify(title)} (${titleError || "no error"})`);
+          continue;
+        }
+        s.check(
+          title === documentTitle,
+          `boot: the window title at ${where} is ${JSON.stringify(title)}, the page's document.title is ${JSON.stringify(documentTitle)}`,
+        );
+        s.check(title.startsWith("Pass Quest — "), `boot: the window title at ${where} is ${JSON.stringify(title)}, want it to start with "Pass Quest — "`);
+      }
+      const atToday = String(field(field(titles, "today"), "documentTitle") ?? "");
+      const atSettings = String(field(field(titles, "settings"), "documentTitle") ?? "");
+      const backAtToday = String(field(field(titles, "back"), "documentTitle") ?? "");
+      s.check(
+        atToday !== "" && atSettings !== atToday,
+        `boot: document.title stayed ${JSON.stringify(atToday)} from Today to Settings`,
+      );
+      s.check(
+        backAtToday === atToday,
+        `boot: document.title after returning to Today is ${JSON.stringify(backAtToday)}, want ${JSON.stringify(atToday)}`,
+      );
+    }
+    const titlebar = field(value, "titlebar");
+    if (titlebar !== undefined) {
+      const room = field(titlebar, "room");
+      const key = ["height", "left", "right", "bottom"].map((name) => numberField(room, name) ?? "?").join("/");
+      s.detail?.(`boot: room ${key} px, marker ${String(field(titlebar, "marker"))}`);
     }
   },
 };
