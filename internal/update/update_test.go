@@ -77,9 +77,10 @@ func TestCheckStates(t *testing.T) {
 		want    Result
 	}{
 		{
-			name:   "a newer release",
-			status: http.StatusOK,
-			body:   releaseDoc("v0.15.1", "2026-11-18T21:04:05Z"),
+			name:    "a newer release",
+			current: "0.15.0",
+			status:  http.StatusOK,
+			body:    releaseDoc("v0.15.1", "2026-11-18T21:04:05Z"),
 			want: Result{
 				State:       StatusNewer,
 				Version:     "v0.15.1",
@@ -89,10 +90,11 @@ func TestCheckStates(t *testing.T) {
 			},
 		},
 		{
-			name:   "the running version is the latest",
-			status: http.StatusOK,
-			body:   releaseDoc("v0.15.0", "2026-11-01T00:00:00Z"),
-			want:   Result{State: StatusCurrent},
+			name:    "the running version is the latest",
+			current: "0.15.0",
+			status:  http.StatusOK,
+			body:    releaseDoc("v0.15.0", "2026-11-01T00:00:00Z"),
+			want:    Result{State: StatusCurrent},
 		},
 		{
 			name:   "an older tag",
