@@ -777,9 +777,10 @@ const benchPinClocks = () => {
 };
 // The answered-in chip and the reply's latency are this launch's own measurements (views/feedback.ts renders
 // fb.elapsed_ms, views/coach.ts the reply's latency_ms), so two launches of one build render two values:
-// each is pinned to the zero of its own format, like the clock views' initial text.
+// each is pinned to the zero of its own format, like the clock views' initial text. The Updates row's running
+// version is the build's update.Version, which a release bump changes between A and B: it is pinned too.
 const benchPinMeasurements = () => {
-  for (const [selector, text] of [['[data-testid="elapsed"] .num', "0:00"], ['[data-testid="coach-reply"] .rmeta .num', "0.0 s"]]) {
+  for (const [selector, text] of [['[data-testid="elapsed"] .num', "0:00"], ['[data-testid="coach-reply"] .rmeta .num', "0.0 s"], ['[data-testid="update-row"] .model .num', "0.0.0"]]) {
     const el = q(selector);
     if (el) el.textContent = text;
   }
@@ -1498,7 +1499,7 @@ export function selfCheckCases(): SelfCheckCase[] {
       name: "shot: the feedback-coach script settles the pointer, the readouts and the send's re-read",
       check: () => {
         const script = shotScript("feedback-coach");
-        const missing = ["benchInertPointer()", "benchPinMeasurements()", '[data-testid="elapsed"] .num', '[data-testid="coach-reply"] .rmeta .num', "the spent budget slot"].filter((token) => !script.includes(token));
+        const missing = ["benchInertPointer()", "benchPinMeasurements()", '[data-testid="elapsed"] .num', '[data-testid="coach-reply"] .rmeta .num', '[data-testid="update-row"] .model .num', "the spent budget slot"].filter((token) => !script.includes(token));
         const inertAt = script.indexOf("benchInertPointer();");
         const driverAt = script.indexOf('await startFromSheet("start-skill"');
         return expect(
