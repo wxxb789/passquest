@@ -505,9 +505,10 @@ const MOTION = `
 await today();
 const probes = await UX.probes(q('[data-testid="hero"]'));
 UX.emulateNoPreference();
-// Each open must leave its entry motion behind — the sheet's and dialog's transitions and the
-// backdrop's keyframe animation; only with motion allowed is there one to read. Whether the engine
-// reports ::backdrop animations at all (its own reference dialog) decides the backdrop rows.
+// Each open must leave its entry motion behind — the sheet's keyframe animation, the dialog's
+// transitions and the backdrop's keyframe animation; only with motion allowed is there one to read.
+// Whether the engine reports ::backdrop animations at all (its own reference dialog) decides the
+// backdrop rows.
 const entry = { backdropReported: UX.backdropReported() };
 q('[data-act="sheet"][data-v="pick"]').click();
 entry.sheet = UX.entryMotion(q('#layer dialog[open]'));
@@ -818,8 +819,9 @@ export async function runDesktopUx(ctx: GateContext, scope?: UxScope): Promise<U
       ["sheet", "opacity", "::backdrop", "animation"],
       ["dlg", "opacity", "::backdrop", "animation"],
     ];
+    // The sheet's own entry is its keyframe animation (the base's `sheetin`), not a transition (plan Amendment 19).
     const wantedEntry: ReadonlyArray<readonly [string, string, string, string]> = [
-      ["sheet", "transform", "", "transition"],
+      ["sheet", "transform", "", "animation"],
       ["dlg", "opacity", "", "transition"],
       ["dlg", "transform", "", "transition"],
       ...(requireBackdrop ? backdropRows : []),
