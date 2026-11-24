@@ -4,7 +4,7 @@ import { ic, type IconName } from '../icons';
 
 /** `primaryClose`: closing is the sheet's one primary action (a read-only sheet such as annotations). */
 export function sheetWrap(ico: IconName, title: string, sub: Interp, body: Interp, wide = false, primaryClose = false): Html {
-  return html`<dialog class="sheet" role="dialog" aria-modal="true" aria-labelledby="sh-t" ${
+  return html`<dialog class="sheet in" role="dialog" aria-modal="true" aria-labelledby="sh-t" ${
     wide ? html`style="width:min(880px, calc(100vw - 64px))"` : ''
   }>
     <div class="grab"></div>
