@@ -1811,6 +1811,9 @@ Entry format:
     generated notes.
   Only the release job holds `contents: write`. Reverse by dropping `--draft` from the
   `gh release create` call (B).
+- Owner decision (2026-11-24): every completed goal ships as a patch release that learners can
+  download. The workflow still builds a draft; the coordinator publishes it under this standing
+  decision once the tagged run is green, then follows `docs/release.md` step 5.
 - Revisit when: the owner wants tag-to-public releases, signing, or an update channel.
 
 ### Q-0000-07 — Which platforms and system versions does Pass Quest support?

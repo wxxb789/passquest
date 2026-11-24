@@ -25,7 +25,7 @@ import (
 
 // Version is the running app version. A test fails when mygo.json differs;
 // the release check compares it against the latest published tag.
-const Version = "0.15.0"
+const Version = "0.15.1"
 
 // Endpoint is the one URL the app contacts: this repository's latest
 // published release. /releases/latest already excludes drafts and

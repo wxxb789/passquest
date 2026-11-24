@@ -88,7 +88,7 @@ Pass Quest 遵循同一个学习循环：**观察 → 诊断 → 选择 → 辅�
 
 ## 项目状态
 
-当前版本为 **v0.15.0**。目标 0001–0015 已全部完成，从无界面练习一直到带更新检查的桌面安装包。每个目标都要在 Windows、macOS 和 Linux 上通过同一套自动化门禁（`bun run gate`，见 [Harness](docs/harness.md)）后才能合并。编号路线图见 [docs/goals](docs/goals/README.md)，待项目所有者决定的问题见 [OPEN-QUESTIONS](docs/decisions/OPEN-QUESTIONS.md)。
+当前版本为 **v0.15.1**。目标 0001–0017 和 0019 已全部完成，从无界面练习一直到带更新检查、并为所支持的引擎重写前端的桌面安装包。每个目标都要在 Windows、macOS 和 Linux 上通过同一套自动化门禁（`bun run gate`，见 [Harness](docs/harness.md)）后才能合并。编号路线图见 [docs/goals](docs/goals/README.md)，待项目所有者决定的问题见 [OPEN-QUESTIONS](docs/decisions/OPEN-QUESTIONS.md)。
 
 尚未支持：Intel macOS、Windows arm64 和 Linux arm64 安装包；代码签名；任何形式的通过概率。
 
