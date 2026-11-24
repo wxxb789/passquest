@@ -740,7 +740,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
         metrics: METRIC_NOTES,
         shots: {
           states: SHOT_STATES,
-          how: "one visible launch per state and per side, the desktop-ux settle style (desktop/web/styles/responsive.css:9) extended over the runner's cursor and this launch's own measurements: animations, transitions and the caret off, hit-testing inert (no driver step uses the pointer, so a window under the cursor cannot capture the hovered rendering — on Feedback a hovered option lights its own evidence, not the key's), the clock readouts, the answered-in chip's elapsed time and the reply's measured latency pinned, and the send's own budget re-read awaited before the capture; each shot records the page's css size and devicePixelRatio and the PNG's own pixel size (its IHDR), and a page area that is not the audited one fails the shot",
+          how: "one visible launch per state and per side, the desktop-ux settle style (desktop/web/styles/motion.css:12) extended over the runner's cursor and this launch's own measurements: animations, transitions and the caret off, hit-testing inert (no driver step uses the pointer, so a window under the cursor cannot capture the hovered rendering — on Feedback a hovered option lights its own evidence, not the key's), the clock readouts, the answered-in chip's elapsed time and the reply's measured latency pinned, and the send's own budget re-read awaited before the capture; each shot records the page's css size and devicePixelRatio and the PNG's own pixel size (its IHDR), and a page area that is not the audited one fails the shot",
           a: shotState.a,
           b: shotState.b,
           allowlist: VISUAL_ALLOWLIST,

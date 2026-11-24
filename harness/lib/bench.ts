@@ -791,7 +791,7 @@ const benchInertPointer = () => {
   style.textContent = "*,*::before,*::after{pointer-events:none!important}";
   document.head.append(style);
 };
-// Shot mode's own CSS rules (desktop/web/styles/responsive.css:9): ?shot=1 would need a reload, and the smoke hook evaluates the script on the first load only.
+// Shot mode's own CSS rules (desktop/web/styles/motion.css:12): ?shot=1 would need a reload, and the smoke hook evaluates the script on the first load only.
 const benchSettle = () => {
   const style = document.createElement("style");
   style.textContent = "*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}";
