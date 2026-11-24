@@ -2428,8 +2428,11 @@ Entry format:
   86–201 ms and set floors of 23–121 ms on this metric. The owner's remark above (the macOS tests may
   be somewhat more lenient) is about how much weight a macOS reading gets; it does not by itself accept
   this WORSE, so the attempt-1 reading stands as a disclosed, unresolved observation and Done-when 4's
-  macOS `frames.longest` item is open for the owner to accept or have investigated (the P9 evidence
+  macOS `frames.longest` item was open for the owner to accept or have investigated (the P9 evidence
   record carries the per-run table).
+- Owner decision (2026-11-24): the owner accepted the final run's macOS `frames.longest` reading
+  (attempt 1 WORSE, attempt 2 ok) as a disclosed observation, not to be investigated further; goal
+  0019 closes on it.
 - Revisit when: the same-build control pair itself reads "worse", or a metric's spread swamps the
   difference the goal needs (the disclosed limit: a regression below the control pair's IQR cannot
   be detected).
