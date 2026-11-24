@@ -1,6 +1,6 @@
 # 0019 — A modern frontend written for the engines Pass Quest supports: evidence
 
-Contract: [`../goals/0019-modern-frontend.md`](../goals/0019-modern-frontend.md). Plan:
+Contract: [`../goals/archive/0019-modern-frontend.md`](../goals/archive/0019-modern-frontend.md). Plan:
 [`../plans/2026-11-22-1800-0019-modern-frontend.md`](../plans/2026-11-22-1800-0019-modern-frontend.md).
 Decisions: Q-0000-07, Q-0000-09, Q-0011-02, Q-0012-01, Q-0019-01…06 in
 [`../decisions/OPEN-QUESTIONS.md`](../decisions/OPEN-QUESTIONS.md).
@@ -207,14 +207,15 @@ rerun and the log is the record):
 | Windows job | all 13 verdicts ok: `frames.p95 15.7 -> 15.7`, `frames.longest 31.3 -> 31.3` (floor 15.5) |
 | shots, both OSes | `6/6 state(s) byte-identical between A and B`; control `6/6` |
 
-**Disclosed, unresolved macOS observation (owner decision to take; Q-0019-02).** Across the
+**Disclosed macOS observation (accepted by the owner on 2026-11-24; Q-0019-02).** Across the
 goal-wide/bisect dispatch runs, macOS `frames.longest` reads the B median above the A median in 8 of
 the 12 rows below, one of them beyond its floor (attempt 1 above). No cause is claimed: the macOS jobs
 are shared runners, this metric's same-build control pairs read medians of 86–201 ms and set floors of
 23–121 ms (the `control A/B` and `floor` columns), and the owner said the macOS tests may be somewhat
-more lenient (2026-11-22; Q-0019-02) — that remark does not by itself accept the attempt-1 WORSE, so
-Done-when 4's macOS `frames.longest` item stays open: whether it is the P6 cost showing through macOS
-noise, runner state, or a real macOS regression is for the owner to accept or have investigated.
+more lenient (2026-11-22; Q-0019-02) — that remark did not by itself accept the attempt-1 WORSE. The
+owner accepted this reading on 2026-11-24 without further investigation (Q-0019-02), which closes
+Done-when 4's macOS `frames.longest` item; whether it is the P6 cost showing through macOS noise,
+runner state, or a real macOS regression stays unknown.
 Per-run rows
 (`frontend-bench-macos-26/frontend-bench-record.json`; ms):
 
@@ -313,8 +314,8 @@ verdict stays within its 5%-of-base floor (final run above), and P3 returns 960 
 - **The floor rule's cost**: where a metric has control-pair samples, a regression whose median gap is
   below the larger control side's IQR cannot read WORSE (Q-0019-02's disclosed limit) — the macOS
   `frames.longest` floors of 23–121 ms are the sharpest instance of it.
-- **macOS `frames.longest`**: the unresolved observation above; B above A in 8 of 12 dispatch rows, one
-  beyond its floor, no cause claimed (owner decision to take; Q-0019-02).
+- **macOS `frames.longest`**: the observation above; B above A in 8 of 12 dispatch rows, one
+  beyond its floor, no cause claimed (accepted by the owner on 2026-11-24; Q-0019-02).
 - **The final run has two attempts**: attempt 1 failed on macOS `frames.longest` and its artifacts were
   replaced by the rerun; attempt 1's log is the record for it (quoted above). Attempt 2 is what the
   uploaded artifacts carry.
