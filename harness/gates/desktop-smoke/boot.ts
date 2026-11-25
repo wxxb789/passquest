@@ -31,6 +31,19 @@ if (window.mygo && typeof window.mygo.call === "function") {
     shotError = String((error && error.message) || error);
   }
 }
+// Both caption-button sheets the app ships must be accepted where GTK parses them (Linux); the
+// call answers the parse error, and the page's own appearance is left in place.
+let buttonsThemeError = "";
+if (window.mygo && typeof window.mygo.call === "function") {
+  const current = document.documentElement.dataset.theme || "light";
+  for (const theme of ["light", "dark", current]) {
+    try {
+      await window.mygo.call("Study.SetWindowButtonsTheme", theme);
+    } catch (error) {
+      buttonsThemeError = String((error && error.message) || error);
+    }
+  }
+}
 // The boot state is read here, before the title walk navigates: the checks it feeds
 // describe the first Today, and a re-render after the return must not decide them.
 const bootState = {
@@ -45,6 +58,7 @@ const bootState = {
   opaqueErrors: diag ? diag.opaque : null,
   shotBound,
   shotError,
+  buttonsThemeError,
 };
 const titleSnap = async () => {
   let title = null;
@@ -122,6 +136,8 @@ export const boot: Scenario = {
         `boot: a call to SmokeShot.Capture without PASSQUEST_DESKTOP_SHOT_DIR answered ${JSON.stringify(shotError)} (bound ${JSON.stringify(shotBound)})`,
       );
     }
+    const buttonsThemeError = String(field(value, "buttonsThemeError") ?? "");
+    s.check(buttonsThemeError === "", `boot: the title buttons' theme call failed: ${buttonsThemeError}`);
     const titles = field(value, "titles");
     if (titles !== undefined) {
       // Three stops, each read back from the platform and compared with the page's

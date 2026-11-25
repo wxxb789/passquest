@@ -179,6 +179,19 @@ func main() {
           : `desktop-smoke: did not report the smoke hook that answered: ${failures.slice(0, 3).join("; ")}`,
     },
     {
+      gate: desktopSmoke,
+      label: "desktop window whose title buttons' theme call fails",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest-desktop/main.go": `package main\n\nimport "os"\n\nfunc main() {\n\tfailed := \`{"ok":true,"value":{"textLength":900,"stageChildren":3,"stageTextLength":800,"errorBars":0,"ready":true,"probe":"clear","opaqueErrors":0,"buttonsThemeError":"mygo: Theme.SetGTKCSS: 3:1: Not a valid selector"}}\`\n\t_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), []byte(failed), 0o600)\n}\n`,
+        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("boot: the title buttons' theme call failed"))
+          ? null
+          : `desktop-smoke: did not report the failed title button theme call: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
       gate: makeDesktopSmokeGate(["practice"]),
       label: "desktop window whose page has no mygo runtime, whose later scenario still runs",
       files: {

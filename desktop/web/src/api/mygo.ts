@@ -1209,8 +1209,9 @@ export const Study = {
   /**
    * SetWindowButtonsTheme draws the caption buttons of the hidden title bar for
    * the page's own theme (goal 0022, Q-0022-02): Windows would draw them in the
-   * system's appearance, which may differ from the page's, while macOS and Linux
-   * keep the system's own buttons whatever this says.
+   * system's appearance, which may differ from the page's, and GTK's title
+   * buttons follow the desktop's GTK theme, which may differ from it just as
+   * well. macOS's traffic lights keep the system's own look.
    */
   setWindowButtonsTheme: bind<[string], void>("Study.SetWindowButtonsTheme", (theme: string) => [theme]),
   /** Skip records the presented item as skipped and returns its feedback. */
