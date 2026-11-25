@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/wxxb789/passquest/internal/studio"
 	"github.com/wxxb789/passquest/internal/update"
 	"github.com/wxxb789/passquest/internal/workspace"
@@ -51,6 +52,8 @@ type Study struct {
 	// constants, or the smoke-only loopback stub of a scripted launch. It is
 	// set once, before the window exists.
 	target update.Target
+	// window resolves the app window; nil until WhenReady has created it.
+	window func() *mygo.Window
 }
 
 // newStudy returns a service with no workspace yet: calls fail with

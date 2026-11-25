@@ -1,6 +1,75 @@
 import { desktopSmoke, makeDesktopSmokeGate } from "../desktop-smoke.ts";
-import { GO_MOD } from "./fixture.ts";
+import { GO_MOD, patchCopy } from "./fixture.ts";
 import type { BrokenCase } from "./fixture.ts";
+
+/**
+ * The stub desktop app the titlebar cases drive: its 880x600 walk reports a
+ * room, every route and both appearances, and its pointer stage reports the
+ * press taken over with the theme control's press and click intact. Each case
+ * patches one piece of it to fail exactly what it is about.
+ */
+function titlebarStubFiles(): Record<string, string> {
+  return {
+    "go.mod": GO_MOD,
+    "cmd/passquest-desktop/main.go": `package main
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+)
+
+func write(value any) {
+	document, _ := json.Marshal(map[string]any{"ok": true, "value": value})
+	_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), document, 0o600)
+}
+
+func stops() []any {
+	out := []any{}
+	for _, route := range []string{"today", "practice", "feedback", "assess", "report", "anki", "settings"} {
+		for _, want := range []string{"light", "dark"} {
+			issues := []any{}
+			if route == "today" && want == "light" {
+				issues = append(issues, map[string]any{"check": "titlebar-room-covered", "el": "header#top > div.util > button[data-act=theme]", "room": "top-right", "box": []any{1182, 13, 1214, 45}})
+			}
+			out = append(out, map[string]any{
+				"route": route, "want": want, "shown": want,
+				"room": map[string]any{"height": 40, "left": 0, "right": 138, "bottom": 40},
+				"marker": true, "why": "", "counted": 70, "probe": []any{8, 20},
+				"rects":  []any{map[string]any{"name": "top-right", "box": []any{1142, 0, 1280, 40}}},
+				"paint":  []any{}, "skipped": map[string]any{},
+				"issues": issues,
+			})
+		}
+	}
+	return out
+}
+
+func pointer() map[string]any {
+	return map[string]any{
+		"room":   map[string]any{"height": 40, "left": 0, "right": 138, "bottom": 40},
+		"marker": true, "why": "", "issues": []any{}, "probe": []any{8, 20},
+		"takeover":    map[string]any{"prevented": true, "hit": "header"},
+		"maxBefore":   false, "maxAfter": true, "maxBack": false,
+		"themePress":  map[string]any{"prevented": false, "hit": "themebtn"},
+		"themeBefore": "dark", "themeFirst": "light", "themeBack": "dark",
+	}
+}
+
+func main() {
+	script, _ := os.ReadFile(os.Getenv("PASSQUEST_DESKTOP_SCRIPT"))
+	switch {
+	case strings.Contains(string(script), "desktop-smoke: boot/"):
+		write(map[string]any{"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": true, "probe": "clear", "opaqueErrors": 0})
+	case strings.Contains(string(script), "desktop-smoke: titlebar/"):
+		write(map[string]any{"size": map[string]any{"width": 880, "height": 600}, "stops": stops(), "pointer": pointer()})
+	}
+}
+`,
+    "cmd/passquest/main.go": 'package main\n\nfunc main() {}\n',
+    "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+  };
+}
 
 export function desktopSmokeCases(): BrokenCase[] {
   return [
@@ -316,59 +385,24 @@ func main() {
       // and a control under it, so the gate must fail naming that finding.
       gate: makeDesktopSmokeGate(["titlebar"]),
       label: "desktop window whose 880x600 walk reports a control under the caption buttons",
-      files: {
-        "go.mod": GO_MOD,
-        "cmd/passquest-desktop/main.go": `package main
-
-import (
-	"encoding/json"
-	"os"
-	"strings"
-)
-
-func write(value any) {
-	document, _ := json.Marshal(map[string]any{"ok": true, "value": value})
-	_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), document, 0o600)
-}
-
-func stops() []any {
-	out := []any{}
-	for _, route := range []string{"today", "practice", "feedback", "assess", "report", "anki", "settings"} {
-		for _, want := range []string{"light", "dark"} {
-			issues := []any{}
-			if route == "today" && want == "light" {
-				issues = append(issues, map[string]any{"check": "titlebar-room-covered", "el": "header#top > div.util > button[data-act=theme]", "room": "top-right", "box": []any{1182, 13, 1214, 45}})
-			}
-			out = append(out, map[string]any{
-				"route": route, "want": want, "shown": want,
-				"room": map[string]any{"height": 40, "left": 0, "right": 138, "bottom": 40},
-				"marker": true, "why": "", "counted": 70, "probe": []any{8, 20},
-				"rects":  []any{map[string]any{"name": "top-right", "box": []any{1142, 0, 1280, 40}}},
-				"paint":  []any{}, "skipped": map[string]any{},
-				"issues": issues,
-			})
-		}
-	}
-	return out
-}
-
-func main() {
-	script, _ := os.ReadFile(os.Getenv("PASSQUEST_DESKTOP_SCRIPT"))
-	switch {
-	case strings.Contains(string(script), "desktop-smoke: boot/"):
-		write(map[string]any{"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": true, "probe": "clear", "opaqueErrors": 0})
-	case strings.Contains(string(script), "desktop-smoke: titlebar/"):
-		write(map[string]any{"size": map[string]any{"width": 880, "height": 600}, "stops": stops()})
-	}
-}
-`,
-        "cmd/passquest/main.go": 'package main\n\nfunc main() {}\n',
-        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
-      },
+      files: titlebarStubFiles(),
       postFail: (failures) =>
         failures.some((line) => line.startsWith("titlebar: ") && line.includes("titlebar-room-covered"))
           ? null
           : `desktop-smoke: did not report the control under the caption buttons: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      // The pointer stage's own assertion path: the stub reports that the press
+      // at the strip's probe point was not taken over, so the gate must fail
+      // naming the takeover (goal 0022's Done-when 2 evidence).
+      gate: makeDesktopSmokeGate(["titlebar"]),
+      label: "desktop window whose title-strip press was not taken over as a window drag",
+      files: titlebarStubFiles(),
+      prepare: async (root) => patchCopy(root, "cmd/passquest-desktop/main.go", '"prevented": true', '"prevented": false'),
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("titlebar: ") && line.includes("was not taken over"))
+          ? null
+          : `desktop-smoke: did not report the untaken press: ${failures.slice(0, 3).join("; ")}`,
     },
   ];
 }

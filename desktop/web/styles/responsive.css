@@ -2,6 +2,8 @@
 /* compact heights */
 @media (max-height: 820px) {
   .app { grid-template-rows: 58px minmax(0, 1fr); }
+  /* goal 0022: the title area's own row keeps the room the window reports, shorter or taller. */
+  :root[data-titlebar] .app { grid-template-rows: max(58px, var(--mygo-titlebar-height, 0px)) minmax(0, 1fr); }
   .stage { padding-bottom: 92px; }
   .orbit > .facts { margin-bottom: 20px; }
   .rail { gap: 44px; }
