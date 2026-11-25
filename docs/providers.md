@@ -17,6 +17,7 @@ passquest model use openai/gpt-4o-mini   # one local setting; practice state is 
 passquest model test openai/gpt-4o-mini  # one minimal call; records verified or failed:<type>
 passquest model budget                   # per-provider counters, their sum and the ceiling
 passquest model use custom/MODEL --endpoint https://host/v1/chat/completions
+passquest model use custom/MODEL --endpoint https://host/v1/responses   # Responses wire format
 ```
 
 `model use` writes the `tutor_config` row (`provider`, `model`, `endpoint`). A hand-edited
@@ -82,7 +83,7 @@ A provider failure is typed and names one action:
 | `rate_limited` | wait for the provider quota window |
 | `model_missing` | choose a model from `model list`, or update the registry |
 | `endpoint_unreachable` | check the endpoint URL and this machine's network |
-| `invalid_response` | point the endpoint at an OpenAI-compatible `/chat/completions` API |
+| `invalid_response` | point the endpoint at an OpenAI-compatible `/chat/completions` or `/responses` API |
 | `provider_error` | retry later; the provider reported a server error |
 | `agent_unavailable` | install Node and the agent dependencies |
 | `config_error` | check the endpoint and the Pass Quest build |

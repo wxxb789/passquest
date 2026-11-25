@@ -41,6 +41,47 @@ func TestEmbeddedRegistryIsValidAndCoversRequiredProviders(t *testing.T) {
 	if !custom.Custom {
 		t.Fatalf("custom provider is not marked custom: %+v", custom)
 	}
+	if custom.EndpointShape != EndpointShape {
+		t.Fatalf("endpoint-less custom row lost its declared shape: %+v", custom)
+	}
+}
+
+func TestResponsesProviderIsAccepted(t *testing.T) {
+	registry := Registry{Version: RegistryVersion, Providers: []Provider{validProvider("alpha")}}
+	registry.Providers[0].Endpoint = "https://api.example.com/v1/responses"
+	registry.Providers[0].EndpointShape = ShapeResponses
+	if err := registry.Validate(); err != nil {
+		t.Fatalf("responses provider rejected: %v", err)
+	}
+	p, m, ok := registry.Find("alpha", "alpha-small")
+	if !ok || p.EndpointShape != ShapeResponses || !m.Has(CapTextChat) {
+		t.Fatalf("responses provider not findable: %+v %+v %v", p, m, ok)
+	}
+}
+
+func TestFormatOfReadsThePathsFinalSegment(t *testing.T) {
+	tests := []struct {
+		endpoint string
+		want     Format
+		ok       bool
+	}{
+		{"https://api.example.com/v1/chat/completions", FormatChatCompletions, true},
+		{"https://api.example.com/v1/chat/completions/", FormatChatCompletions, true},
+		{"https://api.example.com/v1/responses", FormatResponses, true},
+		{"https://api.example.com/v1/responses/", FormatResponses, true},
+		{"https://api.example.com/responses-proxy/v1/chat/completions", FormatChatCompletions, true},
+		{"https://api.example.com/v1/embeddings", "", false},
+		{"not a url", "", false},
+	}
+	for _, test := range tests {
+		format, ok := FormatOf(test.endpoint)
+		if ok != test.ok || format != test.want {
+			t.Errorf("FormatOf(%q) = %q, %v; want %q, %v", test.endpoint, format, ok, test.want, test.ok)
+		}
+	}
+	if FormatChatCompletions.Shape() != EndpointShape || FormatResponses.Shape() != ShapeResponses {
+		t.Fatalf("format shapes = %q, %q", FormatChatCompletions.Shape(), FormatResponses.Shape())
+	}
 }
 
 func TestAddingAnEntryAppearsInTheRegistry(t *testing.T) {
@@ -86,9 +127,18 @@ func TestRegistryValidationRejectsUnsafeData(t *testing.T) {
 		{"query in endpoint", func(r *Registry) {
 			r.Providers[0].Endpoint = "https://api.example.com/v1/chat/completions?key=x"
 		}, "query string"},
-		{"wrong path", func(r *Registry) {
+		{"third endpoint form", func(r *Registry) {
+			r.Providers[0].Endpoint = "https://api.example.com/v1/embeddings"
+		}, "must end in /chat/completions or /responses"},
+		{"chat shape with a responses endpoint", func(r *Registry) {
 			r.Providers[0].Endpoint = "https://api.example.com/v1/responses"
-		}, "/chat/completions"},
+		}, `endpoint_shape "openai-chat-completions" does not match its endpoint's shape "openai-responses"`},
+		{"responses shape with a chat endpoint", func(r *Registry) {
+			r.Providers[0].EndpointShape = ShapeResponses
+		}, `endpoint_shape "openai-responses" does not match its endpoint's shape "openai-chat-completions"`},
+		{"unknown shape", func(r *Registry) {
+			r.Providers[0].EndpointShape = "openai-magic"
+		}, "endpoint_shape \"openai-magic\" is not supported"},
 		{"bad env", func(r *Registry) { r.Providers[0].CredentialEnv = "lower-case" }, "environment variable"},
 		{"credential env not the provider variable", func(r *Registry) {
 			r.Providers[0].CredentialEnv = "MY_ALPHA_KEY"

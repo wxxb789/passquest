@@ -107,7 +107,7 @@ func runModelUse(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
 	args = reorderArgs(args, map[string]bool{"endpoint": true, "db": true})
 	fs := newFlagSet("model use", opt, wantJSON)
-	endpointFlag := fs.String("endpoint", "", "custom provider endpoint ending in /chat/completions")
+	endpointFlag := fs.String("endpoint", "", "custom provider endpoint ending in /chat/completions or /responses")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
 	if code := parseArgs(fs, args, opt, wantJSON, 1, "model use requires <provider>/<model>"); code != 0 {
@@ -158,7 +158,7 @@ func runModelTest(args []string, opt Options) int {
 	wantJSON := jsonFlagRequested(args)
 	args = reorderArgs(args, map[string]bool{"endpoint": true, "db": true})
 	fs := newFlagSet("model test", opt, wantJSON)
-	endpointFlag := fs.String("endpoint", "", "custom provider endpoint ending in /chat/completions")
+	endpointFlag := fs.String("endpoint", "", "custom provider endpoint ending in /chat/completions or /responses")
 	dbFlag := fs.String("db", "", "SQLite database path")
 	jsonFlag := fs.Bool("json", false, "emit JSON instead of human-readable text")
 	if code := parseArgs(fs, args, opt, wantJSON, 1, "model test requires <provider>/<model>"); code != 0 {

@@ -17,7 +17,7 @@ func runTutorConfig(args []string, opt Options) int {
 		"max-output-tokens": true, "daily-calls": true, "db": true,
 	})
 	fs := newFlagSet("tutor config", opt, wantJSON)
-	endpointFlag := fs.String("endpoint", "", "OpenAI-compatible chat-completions endpoint URL")
+	endpointFlag := fs.String("endpoint", "", "OpenAI-compatible chat-completions or responses endpoint URL")
 	modelFlag := fs.String("model", "", "provider model name")
 	timeoutFlag := fs.Int("timeout-seconds", 0, "provider timeout in seconds (1-120)")
 	maxTokensFlag := fs.Int("max-output-tokens", 0, "provider max_tokens (64-2048)")
@@ -108,8 +108,9 @@ func writeTutorConfig(w io.Writer, doc tutorConfigDoc) {
 	fmt.Fprintln(w, "Pass Quest — tutor configuration")
 	if !doc.Configured {
 		fmt.Fprintln(w, "Provider: not configured")
-		fmt.Fprintln(w, "Set one OpenAI-compatible endpoint and model:")
+		fmt.Fprintln(w, "Set one OpenAI-compatible endpoint (/chat/completions or /responses) and model:")
 		fmt.Fprintln(w, `  passquest tutor config --endpoint https://api.example.com/v1/chat/completions --model MODEL`)
+		fmt.Fprintln(w, `  (the same with --endpoint https://api.example.com/v1/responses)`)
 	} else {
 		if doc.Config.Provider != "" {
 			fmt.Fprintf(w, "Provider: %s\n", doc.Config.Provider)

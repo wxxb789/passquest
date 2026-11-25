@@ -75,9 +75,9 @@ environment. See [providers.md](providers.md#credentials).
   that cannot run outside this checkout. Development from `agent/` is unchanged.
 - The provider is the goal-0005 `tutor_config`: one OpenAI-compatible endpoint, model, timeout and
   output bound. A registry-selected provider supplies its endpoint; a custom provider keeps the
-  learner's endpoint. The endpoint must end in `/chat/completions`; `https` is required except on
-  loopback (`localhost`, `127.0.0.1` or `[::1]`, which the Go validator and the Node host both
-  accept).
+  learner's endpoint. The endpoint must end in `/chat/completions` or `/responses`; `https` is
+  required except on loopback (`localhost`, `127.0.0.1` or `[::1]`, which the Go validator and the
+  Node host both accept).
 - `agent start` requires `text.chat = verified` for a registry-selected model (`passquest model test
   <provider>/<model>`); the legacy hand-configured path is unchanged. A run records the provider and
   the model. `resume` uses that recorded pair with the current timeout and credential; switching
