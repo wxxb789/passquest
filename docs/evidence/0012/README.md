@@ -12,6 +12,12 @@ AnkiConnect stub stood in for the real services, so no external network calls we
 The sheets show what the gates checked, but they do not replace the gates. Acceptance still rests
 on `desktop-ux` and the other gates in [`docs/harness.md`](../../harness.md).
 
+2026-11-25, goal 0022 P5: the sheets still show commit `354f08c` and therefore predate the integrated
+title bar, so they no longer show the current head's top bar; regenerating them for the final head is
+an owner action (Q-0022-07 in [`../../decisions/OPEN-QUESTIONS.md`](../../decisions/OPEN-QUESTIONS.md)).
+The current per-OS reference shots are the bench's `today`/`today-dark` cells in
+[`../0022-integrated-title-bar.md`](../0022-integrated-title-bar.md).
+
 | Sheet | State |
 | --- | --- |
 | [today](today.webp) | Today stage before any attempt: the next-step hero and the surrounding status satellites. |

@@ -2578,6 +2578,13 @@ Entry format:
   late subscriber). Disclosed: the header's controls do not share the caption buttons' vertical
   centre (Windows: group centre y = 29 against the buttons' 20); P3's read and the manual pass judge
   the look. Reversal: drop the switch and the page rules together.
+  P5 outcome (2026-11-25): the design held on all three OSes, read from run 45599616722's `desktop`
+  jobs (the evidence record's Done-when 1 and 2 sections): no title-area finding and no clipped
+  control at 880x600, 1280x800 or 1440x844, and the disclosed vertical-centre consequence stands
+  (Windows: the util group's centre y = 29 against the buttons' 20; macOS: the AppKit band is the
+  32 px run 45599616722 reads, and the group keeps its own 9..49 band — the plan's measured
+  util-group box at 1280x800, header 58 px and group 40 px with its top y = 9; plan lines 154 and
+  217-223).
 - Revisit when: a room value makes a header control clip (the `titlebar-strip-clip` check), or MyGo
   offers a title-bar layout API the page can use instead of CSS variables.
 
@@ -2603,11 +2610,21 @@ Entry format:
   `desktop/web/styles/tokens.css`'s two themes, with hover and active wells of the same ink — so a
   desktop theme of the other appearance cannot make a button invisible; the boot scenario calls it
   on Ubuntu, where a sheet GTK rejects fails the gate.
+  P5 outcome (2026-11-25): shipped and read from artifacts — the boot scenario's button-sheet call is
+  green in all three `desktop` jobs of run 45599616722 (GTK parsed both sheets on Ubuntu), and the
+  manual pass's OS-level captures read dark glyphs on the light page and light glyphs on the dark
+  page, with the two-square restore glyph after a maximize. The inactive-window palette is an owner
+  action (no input desktop on this machine; the evidence record's manual-pass section).
 - Revisit when: MyGo gives the page a way to set the buttons' theme, or the caption stops being
   MyGo's own drawing.
 
 ### Q-0022-03 — Which macOS hidden-title-bar style?
-- Status: decided(default taken)
+- Status: resolved
+- Resolution: (owner, 2026-11-25) option (A) confirmed by the owner: the traffic lights stay at the
+  top left where macOS puts them for every app; no `TrafficLightPosition` and no `hiddenInset`. P5's
+  outcome: the macOS `desktop` job of run 45599616722 reads the hidden room `32/69/0/23` with the
+  marker true (the shown `32/69/0/23` is run 45596813256's shot rows), and the evidence record
+  carries the owner actions for the Mac-only manual items.
 - Context: `TitleBarHiddenInset` adds an `NSToolbar` and changes the window's corner radius;
   `TitleBarHeight` plays no part on macOS, where the room is AppKit's own title-bar band (~28 pt on
   a standard window — the formula and the full-size content view are the sources, P3 reads the
@@ -2639,6 +2656,11 @@ Entry format:
   `TitleBarHeight` (mygo `internal/linux/titlebar.go:123`), so whether GTK keeps buttons is read
   from `left`/`right` above zero, not from a zero height, which no non-fullscreen Linux window
   reports; the two Ubuntu jobs log the effective `gtk-decoration-layout` beside the readings.
+  P5 outcome (2026-11-25): the two Ubuntu jobs — run 45599616722's `desktop` job (the hidden room
+  `40/0/207/40`, marker true) and run 45596813256's `linux-smoke` job (the shown room) — read the
+  same value and both log the runner's GNOME key `'appmenu:close'`; the `desktop` job recorded the
+  maximize reading `false -> true -> false` without asserting it. The Wayland/SSD disclosure stands,
+  and the real-desktop behaviour is an owner action (the evidence record).
 - Revisit when: a first-tier OS gains a Linux desktop in the matrix, or a compositor starts
   reporting the room.
 
@@ -2655,6 +2677,12 @@ Entry format:
   double-click, the resize from the top edge and both sides, the inactive and full-screen looks,
   and the right-click. On Windows it is a coordinator action; on macOS and Linux an owner action
   where a machine of that OS is available, recorded with the reason where none is.
+  P5 outcome (2026-11-25): the six cells are closed from run 45596813256's artifacts (paths and
+  sha256 in the evidence record), and the manual pass on this machine produced OS-level captures of
+  the light, dark, maximized, full-screen and restored window but could not drive the real pointer
+  (`SendInput` returns 0 with `ERROR_ACCESS_DENIED` and no `mousedown` reaches the page; the record
+  carries the evidence) — the Snap hover, the real double-click/drag/top-edge resize,
+  minimize/restore, the inactive look and the right-click are owner actions, listed there.
 - Revisit when: a gate can capture the frame or drive a real pointer.
 
 ### Q-0022-06 — How are per-OS visual differences allowlisted?
@@ -2672,6 +2700,13 @@ Entry format:
   never merged. Disclosed cost: between a step's merge and the next step's removal, another branch's
   bench run reads those entries in its own head and fails as stale — the coordinator serialises the
   steps so no other branch's bench run starts inside that window.
+  P5 outcome (2026-11-25): the runs behaved as designed — P2's seven `os: "windows"` entries, P3's
+  seven `os: "macos"` entries scoped to `branch: "goal/0022-p3"`, and P4's tree carrying only 0021
+  P2's branch-scoped entry (read from the branch heads and the runs' own `shots.allowed` rows). The
+  goal-level comparison ran from a throwaway branch carrying the final head plus fourteen entries
+  without `branch` (`A = 4913932` → `B = 0a5b688`, run 45610151815): both OSes' seven states differ
+  and are allowed, control 7/7, every metric `worse=false`, guards 68/0/1 — the recipe and numbers
+  are in the evidence record.
 - Revisit when: the bench compares shots on Linux too, or the comparison stops failing stale
   entries.
 
@@ -2687,6 +2722,13 @@ Entry format:
   record says so and regenerating the sheets becomes an owner action — the six per-OS cells keep
   their own mechanical artifacts, so the fallback does not narrow Done-when 1; neither the sheets
   nor their README claim a state they do not show.
+  P5 outcome (2026-11-25): the fallback is invoked — the sheets' method is MyGo's automation (e2e)
+  build plus the state walk and 2x2 composer that goal 0012's record documents and this repository
+  does not carry (`design/` holds prototypes only and was not touched), so the record says so and
+  regenerating the 17 sheets for the final head is an owner/coordinator action; the six mechanical
+  cells keep Done-when 1, and the sheets' README carries a dated note (added 2026-11-25) that they
+  still show `354f08c`. `README.md` and `README.zh-CN.md` embed the same pre-0022
+  `feedback-coach.webp`, stale with the sheets, and are replaced when the sheets are regenerated.
 - Revisit when: the automation build stops reproducing, or the sheets' method changes.
 
 ### Q-0022-08 — Which framework gaps shape the workarounds?
@@ -2702,6 +2744,10 @@ Entry format:
   and, on macOS and Linux, MyGo's cached title, the only read without a cgo or Objective-C binding
   this project does not carry — recorded as a disclosed limit in `docs/harness.md` row 24 and the
   evidence record. Each workaround is revisited when MyGo offers the missing capability.
+  P5 outcome (2026-11-25): every workaround held on the final tree — the room is read from computed
+  styles at boot (the checks' 192/192 audits per OS in run 45599616722), one bound method remains the
+  only new surface, and the macOS/Linux cached-title read-back is carried in `docs/harness.md` row 24
+  and the evidence record.
 - Revisit when: MyGo adds a title getter, an event replay, a room API beyond the variables, or a
   frame capture.
 
@@ -2720,6 +2766,10 @@ Entry format:
   Verification: the manual pass's Snap hover and OS-level captures of the buttons (Q-0022-05), the
   per-OS room reading, and the guard that the window never sets `HideWindowButtons`. Reversal: none
   inside MyGo.
+  P5 outcome (2026-11-25): the room and the OS-level captures confirm MyGo's drawing (light/dark
+  glyphs, the restore glyph maximized, the caption strip's `inset-right` 138 px); the Snap flyout
+  hover itself could not be driven on this machine (no input desktop) and is an owner action — the
+  assumption stays unverified until the owner hovers the button.
 - Revisit when: MyGo draws the caption differently, or Windows 11's Snap rules change.
 
 ### Q-0020-01 — One resolution, shared by both entry points

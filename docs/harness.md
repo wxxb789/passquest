@@ -130,6 +130,18 @@ passes. Round 2 also makes the host trim the endpoint's trailing slashes the way
 and the tutor host do, and the Responses passes configure that form, so the trim cannot regress
 silently.
 
+P5's re-quote (2026-11-25, goal 0022): the final merged tree's own gate run 45599616722 (`main` at
+`63803a1`, green on all three OSes; the P4 pull-request run 45596813363 reads the same lines) carries
+row 24's counts `PASS  desktop smoke (584 assertions over 15 scenarios)` on Windows, `583` on macOS and
+`581` on Linux — the 15 scenarios are the 0019 tree's 13 plus P1's `titlebar` walk at 880x600 and
+0020 P3's `default-data`, and the counts include the boot scenario's three-stop title read-back and
+the buttons' theme call — row 25's `PASS  desktop ux (192
+audits over 24 states × 4 modes × 2 sizes, 19 probes, 84 focus checks, 0 allowed …)` with its titlebar
+segment (192/192 audits with the platform's room, the drag samples, the modal-layer skips and the
+probe point), and row 27's `PASS  harness self-test (176 cases (16 must pass), 26/26 gates)` on the
+three self-test jobs. The per-OS rooms, checks, shots and bench verdicts are in
+`docs/evidence/0022-integrated-title-bar.md`.
+
 The package group's build (row 26) is `bun run package`'s own sequence, staging included, and staging
 enforces its own checks before an installer or a launch runs: the staged `agent/` tree is lean
 (`assertLeanAgentTree`, `harness/lib/package.ts`), and — when the target is the host's own platform,
