@@ -213,11 +213,11 @@ func TestCallError(t *testing.T) {
 // passes MyGo's resources directory so the packaged hosts and runtime win.
 func TestResourceDirFollowsBuildMode(t *testing.T) {
 	t.Setenv("MYGO_ENV", "")
-	if got := resourceDir(); got != "" {
-		t.Fatalf("resourceDir in development = %q; want none", got)
+	if got := ResourceDir(); got != "" {
+		t.Fatalf("ResourceDir in development = %q; want none", got)
 	}
 	t.Setenv("MYGO_ENV", "production")
-	if got := resourceDir(); got == "" {
+	if got := ResourceDir(); got == "" {
 		t.Fatal("a production build passed no resources directory")
 	}
 }

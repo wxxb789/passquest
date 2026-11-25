@@ -237,7 +237,7 @@ func openStudy(study *Study, getenv func(string) string) {
 		err = study.open(workspace.Options{
 			DBPath:      where.Database,
 			Credentials: newCredentialStore(mygo.Secrets.Service(secretService(getenv))),
-			Resources:   resourceDir(),
+			Resources:   ResourceDir(),
 		})
 	}
 	if err != nil {
@@ -248,10 +248,10 @@ func openStudy(study *Study, getenv func(string) string) {
 	}
 }
 
-// resourceDir is the directory the packaged app carries its files in
+// ResourceDir is the directory the packaged app carries its files in
 // (mygo.PathResources): the bundled agent hosts and Node runtime live there.
 // A development build keeps the source checkout's lookups, so it passes none.
-func resourceDir() string {
+func ResourceDir() string {
 	if mygo.IsDev() {
 		return ""
 	}

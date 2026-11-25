@@ -73,6 +73,14 @@ environment. See [providers.md](providers.md#credentials).
   gains an import is bundled by that same rule: staging refuses a specifier it cannot resolve, a
   module it could only resolve at run time, or a non-JavaScript asset, instead of shipping a host
   that cannot run outside this checkout. Development from `agent/` is unchanged.
+- The installed binary is the command line when started with arguments
+  (`cmd/passquest-desktop`). It passes the directory it resolved for its own packaged files
+  (`Contents/Resources` in a macOS bundle, the executable's directory elsewhere) into the CLI's
+  composition root, so the commands that need a host — `tutor`, `agent`, `note push`, `find`,
+  `model test` — run the `agent/*.mjs` scripts and the `node/` runtime the package carries, exactly
+  as the window resolves them. `PASSQUEST_NODE` and the four `PASSQUEST_*_HOST` variables still win
+  over everything, and a source checkout's `passquest` and `passquest-desktop` keep the checkout's
+  own lookups.
 - The provider is the goal-0005 `tutor_config`: one OpenAI-compatible endpoint, model, timeout and
   output bound. A registry-selected provider supplies its endpoint; a custom provider keeps the
   learner's endpoint. The endpoint must end in `/chat/completions` or `/responses`; `https` is

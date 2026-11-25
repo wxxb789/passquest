@@ -1,6 +1,8 @@
 package main
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestRunDispatch(t *testing.T) {
 	windows := 0
@@ -16,5 +18,16 @@ func TestRunDispatch(t *testing.T) {
 	}
 	if code := run(nil, window); code != 7 || windows != 1 {
 		t.Fatalf("no arguments: exit %d, window opened %d times", code, windows)
+	}
+}
+
+func TestCLIOptionsCarryTheBuildsResources(t *testing.T) {
+	t.Setenv("MYGO_ENV", "")
+	if source := cliOptions(); source.Resources != "" {
+		t.Fatalf("a development build's CLI options carry %q; want none", source.Resources)
+	}
+	t.Setenv("MYGO_ENV", "production")
+	if packaged := cliOptions(); packaged.Resources == "" {
+		t.Fatal("a production build's CLI options carry no resources directory")
 	}
 }

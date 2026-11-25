@@ -138,6 +138,32 @@ export function cleanEnv(): Record<string, string | undefined> {
   return env;
 }
 
+/** The app's data directory for a temp per-user root, as the platform resolves it. */
+export function dataRootFor(home: string, appName: string): string {
+  if (process.platform === "win32") return path.join(home, "AppData", appName);
+  if (process.platform === "darwin") return path.join(home, "Library", "Application Support", appName);
+  return path.join(home, ".config", appName); // os.UserConfigDir reads XDG_CONFIG_HOME
+}
+
+/**
+ * The environment variables that point os.UserConfigDir (and on Windows
+ * os.UserCacheDir: MyGo creates its WebView2 folder under %LOCALAPPDATA%) at
+ * a temp root. They are spelled as the inherited environment spells them: a
+ * launch whose block carries both `APPDATA` and `AppData` can have the app
+ * read the inherited one, so a caller replaces the entry that is already
+ * there.
+ */
+export function homeEnv(home: string): Record<string, string> {
+  // USERPROFILE is what os.UserHomeDir reads: the app refuses a default data
+  // directory inside its own files, and a root that holds the home is the
+  // learner's, not the app's (internal/desktop/paths.go, insideInstall).
+  if (process.platform === "win32") {
+    return { APPDATA: path.join(home, "AppData"), LOCALAPPDATA: path.join(home, "LocalAppData"), USERPROFILE: home };
+  }
+  if (process.platform === "darwin") return { HOME: home };
+  return { HOME: home, XDG_CONFIG_HOME: path.join(home, ".config") };
+}
+
 export interface ProviderRequest {
   authorization: string;
   path: string;

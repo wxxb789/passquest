@@ -100,6 +100,49 @@ export function desktopSmokeCases(): BrokenCase[] {
           : `desktop-smoke: did not report the blank window: ${failures.slice(0, 3).join("; ")}`,
     },
     {
+      // The default-data scenario's own assertion path: this app keeps its
+      // database beside its executable instead of the per-user root, so the
+      // both-directions check must fail naming the missing per-user path.
+      gate: makeDesktopSmokeGate(["default-data"]),
+      label: "desktop window that keeps its database outside the per-user root",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest-desktop/main.go": `package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+func write(value any) {
+	document, _ := json.Marshal(map[string]any{"ok": true, "value": value})
+	_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), document, 0o600)
+}
+
+func main() {
+	exe, _ := os.Executable()
+	dir := filepath.Join(filepath.Dir(exe), "Pass Quest")
+	_ = os.MkdirAll(dir, 0o700)
+	_ = os.WriteFile(filepath.Join(dir, "passquest.sqlite"), []byte("fixture"), 0o600)
+	script, _ := os.ReadFile(os.Getenv("PASSQUEST_DESKTOP_SCRIPT"))
+	if strings.Contains(string(script), "desktop-smoke: boot/") {
+		write(map[string]any{"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": true, "probe": "clear", "opaqueErrors": 0})
+		return
+	}
+	write(map[string]any{})
+}
+`,
+        "cmd/passquest/main.go": 'package main\n\nfunc main() {}\n',
+        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("default-data: the window left") && line.includes("passquest.sqlite"))
+          ? null
+          : `desktop-smoke: did not report the database outside the per-user root: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
       gate: desktopSmoke,
       label: "desktop window whose boot probe never reaches window.onerror",
       files: {

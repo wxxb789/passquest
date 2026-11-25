@@ -36,6 +36,10 @@ type Options struct {
 	// directory lives under. Tests inject a temp root; production uses
 	// os.UserConfigDir, the same read the window's own resolution makes.
 	ConfigDir func() (string, error)
+	// Resources is the directory an installed copy carries its files in
+	// (mygo.PathResources): the bundled agent hosts and Node runtime live
+	// there. Empty in a source checkout, which keeps the fallback lookups.
+	Resources string
 	// TutorTransport isolates the CLI from the Node host. Tests inject a fake;
 	// production defaults to the stdin/stdout host process.
 	TutorTransport tutor.Transport
@@ -92,16 +96,16 @@ func (o Options) withDefaults() Options {
 		o.notice = &noticeState{}
 	}
 	if o.TutorTransport == nil {
-		o.TutorTransport = tutor.HostTransport{Getenv: o.Getenv, Environ: os.Environ}
+		o.TutorTransport = tutor.HostTransport{Getenv: o.Getenv, Environ: os.Environ, Resources: o.Resources}
 	}
 	if o.AnkiTransport == nil {
-		o.AnkiTransport = anki.HostTransport{Getenv: o.Getenv, Environ: os.Environ}
+		o.AnkiTransport = anki.HostTransport{Getenv: o.Getenv, Environ: os.Environ, Resources: o.Resources}
 	}
 	if o.SearchTransport == nil {
-		o.SearchTransport = search.HostTransport{Getenv: o.Getenv, Environ: os.Environ}
+		o.SearchTransport = search.HostTransport{Getenv: o.Getenv, Environ: os.Environ, Resources: o.Resources}
 	}
 	if o.AgentRunner == nil {
-		o.AgentRunner = agent.HostRunner{Getenv: o.Getenv, Environ: os.Environ}
+		o.AgentRunner = agent.HostRunner{Getenv: o.Getenv, Environ: os.Environ, Resources: o.Resources}
 	}
 	if o.NewRunID == nil {
 		o.NewRunID = func() (string, error) { return agent.NewRunID(o.Now()) }

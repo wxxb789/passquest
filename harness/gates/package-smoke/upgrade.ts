@@ -42,11 +42,11 @@
  *   note (`Study.OpenNoteDraft` restores only a pending draft and refuses an
  *   accepted one, workspace.OpenNoteDraft, and the notes list has no edit
  *   action), so the packaged binary accepts revision 2 of the pushed note's
- *   draft and pushes it against the same stub, with the packaged Node runtime
- *   and Anki host pinned through `PASSQUEST_NODE` and `PASSQUEST_ANKI_HOST`:
- *   the CLI's composition root resolves no resources directory (only the
- *   window does, internal/desktop/desktop.go) and this launch's PATH carries
- *   no node. The stub must show one `updateNoteFields` for the note id the
+ *   draft and pushes it against the same stub, on the packaged Node runtime
+ *   and Anki host the binary resolves for itself: it passes its own resources
+ *   directory into the CLI's composition root (cmd/passquest-desktop), and
+ *   this launch's PATH carries no node, so no PASSQUEST_* resolution override
+ *   is set or needed. The stub must show one `updateNoteFields` for the note id the
  *   old build's push created — never a second `addNote` for it — with the
  *   revision's edit in its fields.
  * - A copy of the upgraded database with its schema version set above the
@@ -769,11 +769,9 @@ export async function upgradeCase(inputs: UpgradeInputs): Promise<string> {
       // database. The window cannot revise the pushed note (its draft is
       // accepted, and OpenNoteDraft refuses an accepted draft), so the accept
       // and the push go through that binary, launched with the app's own
-      // environment. The CLI's composition root resolves no resources
-      // directory — only the window does — and this launch's PATH carries no
-      // node, so the packaged copy's Node runtime and Anki host are pinned
-      // through the two documented overrides: the same files the window would
-      // find.
+      // environment. The binary passes its own resources directory into the
+      // CLI's composition root, and this launch's PATH carries no node, so the
+      // packaged copy's Node runtime and Anki host are the ones that run.
       const ankiHost = inputs.app.hosts.find((host) => path.basename(host) === "anki-host.mjs");
       if (ankiHost === undefined) {
         check(false, "upgrade: the installed app carries no agent/anki-host.mjs; the revision cannot run through it");
@@ -781,8 +779,6 @@ export async function upgradeCase(inputs: UpgradeInputs): Promise<string> {
       }
       const revisionEnv = {
         ...textEnv(data.run.shared.launchEnv ?? {}),
-        PASSQUEST_NODE: inputs.app.runtime,
-        PASSQUEST_ANKI_HOST: ankiHost,
       };
       const revisionCwd = data.run.shared.cwd ?? root;
       const revision = await run(

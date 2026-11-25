@@ -1148,6 +1148,54 @@ func main() {
           : `package-smoke: did not report data inside the install directory: ${failures.slice(0, 3).join("; ")}`,
     },
     {
+      gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["cli-runtime"] }),
+      label: "installed CLI whose data root is not the app's per-user directory",
+      files: {
+        ...FIXTURE_FILES,
+        // The installed binary in CLI mode keeps its database in its own
+        // directory and says so in the notice's own words: the case must fail
+        // the both-directions check, naming the directory it resolved beside
+        // the per-user root the app's resolution produces.
+        "cmd/passquest-desktop/main.go": `package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		return
+	}
+	exe, _ := os.Executable()
+	dir := filepath.Join(filepath.Dir(exe), "data")
+	_ = os.MkdirAll(dir, 0o700)
+	target := filepath.Join(dir, "passquest.sqlite")
+	_ = os.WriteFile(target, []byte("fixture"), 0o600)
+	fmt.Fprintf(os.Stderr, "passquest: a database from the old default location exists at %s; the command line now uses %s. Pass Quest will not move it; move or merge it yourself.\\n",
+		filepath.Join(filepath.Dir(exe), ".passquest", "passquest.sqlite"), target)
+	fmt.Println(\`{"state":"verified","result":"verified","provider":"stub"}\`)
+}
+`,
+      },
+      prepare: async (root) => {
+        const runtime = fixtureRuntime(root);
+        mkdirSync(path.dirname(runtime), { recursive: true });
+        writeFileSync(runtime, Buffer.from([...runtimeMagic(), 0, 0, 0, 0]));
+        const binary = fixtureBinary(root);
+        mkdirSync(path.dirname(binary), { recursive: true });
+        const build = await run(executable("go"), ["build", "-o", binary, "./cmd/passquest-desktop"], { cwd: root });
+        return build.code === 0 ? null : `the fixture app did not build: ${build.stderr || build.stdout}`;
+      },
+      postFail: (failures) =>
+        failures.some(
+          (line) => line.startsWith("cli-runtime: the installed CLI resolved its database elsewhere") && line.includes("the app's per-user root holds"),
+        )
+          ? null
+          : `package-smoke: did not report the CLI's own data root: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
       gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["layout"] }),
       label: "installed tree whose bundled Node runtime is missing",
       files: FIXTURE_FILES,
@@ -1231,9 +1279,10 @@ func main() {
         "cmd/passquest/main.go": "package main\n\nfunc main() {}\n",
       },
       prepare: async (root) => {
-        // A copy that lost agent/durable-host.mjs: PASSQUEST_AGENT_HOST would
-        // fall back to the cwd's and the exe's neighbours, so the case must
-        // name the missing file itself (goal 0016 P3's guard, reached here).
+        // A copy that lost agent/durable-host.mjs: the case must name the
+        // missing file itself (goal 0016 P3's guard, reached here) instead of
+        // leaving it to a resolution error that would list the cwd's and the
+        // exe's neighbours.
         rmSync(path.join(root, "build", "fixture", "agent", "durable-host.mjs"), { force: true });
         const runtime = fixtureRuntime(root);
         mkdirSync(path.dirname(runtime), { recursive: true });
