@@ -117,27 +117,48 @@ func (f Failure) NeedsAction() bool {
 	}
 }
 
+// providerErrorStatus is the HTTP status a provider error names: pi-ai's
+// chat-completions adapter writes the bare "<status>: …" form, its Responses
+// adapter "passquest API error (<status>): …". The leading form wins, so a
+// chat body that quotes a parenthesized status cannot reclassify its error.
+var (
+	leadingProviderStatus       = regexp.MustCompile(`^([0-9]{3}):`)
+	parenthesizedProviderStatus = regexp.MustCompile(`\(([0-9]{3})\):`)
+)
+
+func providerStatus(text string) string {
+	if match := leadingProviderStatus.FindStringSubmatch(text); match != nil {
+		return match[1]
+	}
+	if match := parenthesizedProviderStatus.FindStringSubmatch(text); match != nil {
+		return match[1]
+	}
+	return ""
+}
+
 // ClassifyFailure maps a provider/task failure to the stable code and action.
 // detail is the Pi run failure detail or a host error message; only the prefix
 // and well-known diagnostics are used, never the whole text as a code.
 func ClassifyFailure(detail string) Failure {
 	text := strings.TrimSpace(detail)
 	lower := strings.ToLower(text)
+	status := providerStatus(text)
 	code := ""
 	switch {
 	case strings.Contains(lower, "missing credential"), strings.Contains(lower, "no api key"):
 		code = CodeMissingCredential
-	case strings.HasPrefix(text, "401:"), strings.HasPrefix(text, "403:"),
+	case strings.HasPrefix(text, "401:"), strings.HasPrefix(text, "403:"), status == "401", status == "403",
 		strings.Contains(lower, "invalid api key"), strings.Contains(lower, "unauthorized"),
 		strings.Contains(lower, "authentication"):
 		code = CodeAuthFailed
-	case strings.HasPrefix(text, "429:"), strings.Contains(lower, "rate limit"):
+	case strings.HasPrefix(text, "429:"), status == "429", strings.Contains(lower, "rate limit"):
 		code = CodeRateLimited
-	case strings.HasPrefix(text, "400:"), strings.HasPrefix(text, "404:"),
+	case strings.HasPrefix(text, "400:"), strings.HasPrefix(text, "404:"), status == "400", status == "404",
 		strings.Contains(lower, "model not found"), strings.Contains(lower, "no model"):
 		code = CodeConfigError
 	case strings.HasPrefix(text, "500:"), strings.HasPrefix(text, "502:"), strings.HasPrefix(text, "503:"),
-		strings.HasPrefix(text, "504:"), strings.Contains(lower, "provider is not configured"):
+		strings.HasPrefix(text, "504:"), status == "500", status == "502", status == "503", status == "504",
+		strings.Contains(lower, "provider is not configured"):
 		code = CodeProviderError
 	case strings.Contains(lower, "timeout"), strings.Contains(lower, "timed out"), strings.Contains(lower, "deadline exceeded"):
 		code = CodeTimeout

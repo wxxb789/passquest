@@ -6,8 +6,19 @@ import { buildCLI } from "../../lib/go.ts";
 import { executable, run } from "../../lib/process.ts";
 import type { GateContext } from "../../lib/types.ts";
 import { agentSmoke, durableMatrix } from "../agent-smoke.ts";
-import { GO_MOD } from "./fixture.ts";
+import { copyProduct, GO_MOD, linkStore, NOTE_SMOKE_SOURCES, patchCopy } from "./fixture.ts";
 import type { BrokenCase } from "./fixture.ts";
+
+async function streamEveryEndpointThroughTheChatAdapter(root: string): Promise<string | null> {
+  if (copyProduct(root, [...NOTE_SMOKE_SOURCES, "bun.lock"]) === 0) return "no product source was copied into the fixture root";
+  linkStore(root);
+  return patchCopy(
+    root,
+    "agent/durable-host.mjs",
+    '    api: {\n      "openai-completions": openAICompletionsApi(),\n      "openai-responses": openAIResponsesApi(),\n    },',
+    "    api: openAICompletionsApi(),",
+  );
+}
 
 export function agentSmokeCases(): BrokenCase[] {
   return [
@@ -28,6 +39,16 @@ export function agentSmokeCases(): BrokenCase[] {
         "agent/node_modules/tiny-fixture/package.json": '{"name": "tiny-fixture", "version": "0.0.0", "main": "index.mjs"}\n',
         "agent/node_modules/tiny-fixture/index.mjs": "export const marker = 1;\n",
       },
+    },
+    {
+      gate: agentSmoke,
+      label: "durable host that streams every endpoint through the chat adapter",
+      files: {},
+      prepare: streamEveryEndpointThroughTheChatAdapter,
+      postFail: (failures) =>
+        failures.some((line) => /^(source host|staged bundle), responses: /.test(line))
+          ? null
+          : `agent-smoke: did not report the responses pass: ${failures.slice(0, 3).join("; ")}`,
     },
   ];
 }
@@ -58,7 +79,7 @@ export async function plainBundleFaultProblem(ctx: GateContext): Promise<string 
       { cwd: ctx.root },
     );
     if (built.code !== 0) return `the plain bundle case: bun build exited ${built.code}: ${built.stdout}${built.stderr}`;
-    const result = await durableMatrix(ctx, build.binary, { label: "plain bundle", host: bundle, node });
+    const result = await durableMatrix(ctx, build.binary, { label: "plain bundle", host: bundle, node, format: "chat" });
     const fault = result.failures.find((line) => line.startsWith("plain bundle: ") && line.includes("task_faulted"));
     if (!fault) {
       const first = result.failures.slice(0, 3).map((line) => line.split("\n")[0]).join("; ");

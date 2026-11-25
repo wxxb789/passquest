@@ -41,7 +41,7 @@
  */
 import { BASELINE, BASELINE_PARTIAL } from "../../lib/baseline.ts";
 import { Database } from "bun:sqlite";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -68,7 +68,7 @@ import {
 } from "../../lib/package.ts";
 import type { NoticeFs } from "../../lib/package.ts";
 import { executable, run } from "../../lib/process.ts";
-import { GO_MOD } from "./fixture.ts";
+import { copyProduct, GO_MOD, linkStore, NOTE_SMOKE_SOURCES, patchCopy } from "./fixture.ts";
 import type { BrokenCase, PassCase } from "./fixture.ts";
 
 /** The four host files a package-shaped fixture tree carries. */
@@ -1112,6 +1112,49 @@ function pinSourceTexts(version: string): Record<string, string> {
   };
 }
 
+/**
+ * The responses brief over a copied product whose durable host drops the
+ * responses branch: the tree is the installed copy — the repository CLI at the
+ * app's path, the repository's own hosts and package store, and a real Node
+ * runtime — so the case's seed configures the responses model through the real
+ * CLI, and the patched host refuses the endpoint the installed run is carrying.
+ */
+async function dropTheResponsesBranch(root: string): Promise<string | null> {
+  if (copyProduct(root, [...NOTE_SMOKE_SOURCES, "bun.lock", "mygo.json"]) === 0) {
+    return "no product source was copied into the fixture root";
+  }
+  linkStore(root);
+  const patch = patchCopy(root, "agent/durable-host.mjs", '  if (path.endsWith("/responses")) return "responses";\n', "");
+  if (patch) return patch;
+  // The installed entry passes its resources directory into cli.Run; a fixture
+  // build is a dev build, so the fixture wires the tree itself (no PASSQUEST_* pin).
+  writeFileSync(
+    path.join(root, "cmd", "passquest-desktop", "main.go"),
+    `package main
+
+import (
+	"os"
+	"path/filepath"
+
+	"github.com/wxxb789/passquest/internal/cli"
+)
+
+func main() {
+	exe, _ := os.Executable()
+	os.Exit(cli.Run(os.Args[1:], cli.Options{Resources: filepath.Dir(exe)}))
+}
+`,
+  );
+  const node = Bun.which("node");
+  if (node === null) return "node is not on PATH";
+  const runtime = path.join(root, "node", process.platform === "win32" ? "node.exe" : path.join("bin", "node"));
+  mkdirSync(path.dirname(runtime), { recursive: true });
+  copyFileSync(node, runtime);
+  if (process.platform !== "win32") chmodSync(runtime, 0o755);
+  const build = await run(executable("go"), ["build", "-o", path.join(root, executable("passquest-desktop")), "./cmd/passquest-desktop"], { cwd: root });
+  return build.code === 0 ? null : `the fixture CLI did not build: ${build.stderr || build.stdout}`;
+}
+
 export function packageSmokeCases(): BrokenCase[] {
   return [
     {
@@ -1331,6 +1374,20 @@ func main() {
         failures.some((line) => line.startsWith("brief: the installed app carries no agent/durable-host.mjs"))
           ? null
           : `package-smoke: did not report the missing durable host by name: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      gate: makePackageSmokeGate({ installedTree: ".", only: ["brief-responses"] }),
+      label: "installed Responses brief whose durable host drops the responses branch",
+      files: {},
+      prepare: dropTheResponsesBranch,
+      postFail: (failures) =>
+        failures.some(
+          (line) =>
+            line.startsWith("brief-responses: the installed run did not pause") &&
+            line.includes("model endpoint must end in /chat/completions or /responses"),
+        )
+          ? null
+          : `package-smoke: did not report the Responses refusal by name: ${failures.slice(0, 3).join("; ")}`,
     },
     {
       gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"] }),

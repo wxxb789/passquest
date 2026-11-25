@@ -2,13 +2,16 @@
  * What a self-test case is, and the fixture helpers more than one gate's cases share. Each gate's cases live
  * beside this file in <gate module>.cases.ts; self-test.ts runs them in a fixed order.
  */
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { resolve } from "../../lib/repo.ts";
 import type { Gate } from "../../lib/types.ts";
 
 export const GO_MOD = "module example.com/selftest\n\ngo 1.27.3\n";
+
+/** The repository root a fixture copies product files from and links its package store out of. */
+export const REPO_ROOT = path.resolve(import.meta.dir, "..", "..", "..");
 
 export interface BrokenCase {
   gate: Gate;
@@ -56,10 +59,9 @@ function copyTree(from: string, to: string): number {
 
 /** Copies working-tree product paths into the fixture root; returns the number of files. */
 export function copyProduct(root: string, relatives: string[]): number {
-  const repo = path.resolve(import.meta.dir, "..", "..", "..");
   let copied = 0;
   for (const relative of relatives) {
-    const source = resolve(repo, relative);
+    const source = resolve(REPO_ROOT, relative);
     const target = resolve(root, relative);
     if (statSync(source).isDirectory()) {
       mkdirSync(target, { recursive: true });
@@ -71,6 +73,22 @@ export function copyProduct(root: string, relatives: string[]): number {
     copied++;
   }
   return copied;
+}
+
+/**
+ * Links the repository's installed package store into a fixture root that
+ * copied the product: `copyProduct` copies regular files only, so a copied
+ * host would resolve no package. Both levels are linked because the store's
+ * `@earendil-works` entries are relative symlinks into the root store, which
+ * from the agent-level link would resolve under the fixture instead.
+ */
+export function linkStore(root: string): void {
+  for (const relative of ["agent/node_modules", "node_modules"]) {
+    const link = resolve(root, relative);
+    rmSync(link, { recursive: true, force: true });
+    mkdirSync(path.dirname(link), { recursive: true });
+    symlinkSync(path.join(REPO_ROOT, relative), link, process.platform === "win32" ? "junction" : "dir");
+  }
 }
 
 /** Replaces the one occurrence of `anchor` in a copied product file. */

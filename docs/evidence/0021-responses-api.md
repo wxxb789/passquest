@@ -333,3 +333,123 @@ CI's; the durable half of item 2 and the `brief-responses` case are P3's; the Pi
 feed-blocked record is P5's. The plan's per-step `frontend-bench.yml` run is the coordinator's
 dispatch; this branch carries the `settings-row` allowlist entry (`os: "any"`) the P2 page change
 needs, and P3's row removes it. No real provider endpoint was contacted (Q-0021-08).
+
+## P3 (2026-11-25) — the durable host speaks Responses through pi-ai's own adapter (branch `goal/0021-p3`, stacked on P2's `d71a922`)
+
+**The step's changes.** `agent/durable-host.mjs` derives the endpoint's form once
+(`endpointFormat`, the same rule the Go validator and the tutor host apply, trailing slashes
+included — round 2) and both of its sites use
+it: `validateRequest` accepts either suffix and refuses anything else with `model endpoint must end
+in /chat/completions or /responses`, and `buildModels` strips the endpoint's own suffix for
+`baseUrl`, sets the model's `api` to `openai-responses` or `openai-completions`, and declares the
+provider's `api` as the map form (Q-0021-03), so `createProvider` dispatches on `model.api`
+(`dist/models.js:576`) to pi-ai's own Responses adapter; the compat block is unchanged, and its
+`supportsDeveloperRole: false` keeps the system text at role `system`. `harness/lib/sse.ts` gains
+the Responses twin of the brief handshake (`sseResponsesText`, `sseResponsesTool`,
+`briefResponsesAnswer`, `stubResponsesInput`/`stubResponsesText`/`stubResponsesToolResults`) over
+the event set the library's parser requires — `response.created`, the item's added/delta/done
+events and a terminal `response.completed` carrying `usage.input_tokens`/`output_tokens` — with the
+chat builders byte-identical. `harness/gates/agent-smoke.ts` gains
+`DurableMatrixOptions.format`, the stub answers the configured path, the matrix asserts every
+provider request's path and the format's own threading (chat: a `role: tool` message; responses: a
+`function_call_output` item, and neither shape carrying the other form's message field), and
+`agentSmoke` runs four passes (source host and staged bundle × both forms).
+`harness/gates/package-smoke/brief.ts` is parameterized by endpoint form — `brief` and
+`brief-responses`, the latter seeding the stub's responses provider (which
+`harness/lib/desktop-page.ts`'s `stubResponsesProvider` now also builds for the settings scenario)
+and asserting the resume's path and its `function_call_output` threading — and a start that does not
+pause reports the CLI's own error code and message, so a refusal is readable from the failure line.
+Two self-test cases are added (`harness/gates/self-test/agent-smoke.cases.ts`,
+`package-smoke.cases.ts`) with `linkStore` in `fixture.ts`: a copied product whose provider streams
+every model through the chat adapter (the responses passes must fail, the chat passes stay green),
+and an installed Responses brief whose durable host drops the responses branch (scoped to
+`brief-responses`, which must name the host's endpoint rule). `internal/agent/agent.go`'s
+`ClassifyFailure` learns the parenthesized status pi-ai's Responses adapter composes
+(`passquest API error (401): …`), with rows in `TestClassifyFailure` and `TestClassifyRunFailure`;
+without it the agent smoke's auth scenario reported `provider_error` in both responses passes (probe
+`Q:/scratch/omp/g21/P3/probe-auth.ts`: chat `auth_failed`, responses `provider_error` on the
+pre-fix tree) while the chat path's classification is untouched (round 2 pins that precedence with
+its own rows, below). P2's `settings-row` allowlist entry
+is removed, as P3's row says; `seedStudyTrail` takes the model to test and use
+(`harness/gates/desktop-smoke/scenario.ts`, default `STUB_MODEL`, so the coach case's call is
+unchanged).
+
+**The capture (item 4).** `Q:/scratch/omp/g21/P3/capture-bodies-r3.mjs` →
+`Q:/scratch/omp/g21/P3/bodies-r3.json` (comparison `…/compare-r3.ts`). The three durable
+chat-completions bodies are length-identical to P1's base capture (8488/8874/9236 bytes) and equal
+after run-id normalisation — the 22 differing bytes all lie inside the two run-id tokens, the first
+at 0-based offset 1543 — so the chat path
+did not move; the tutor halves reproduce P2's hashes (`942be11e…` chat, `7fc9e43c…` responses). The
+three responses bodies (8568/8922/9252 bytes) all reach `/v1/responses`, carry
+`function_call_output` items for the recorded steps, the system text as an `input` item with role
+`system`, flat function tools, no `messages` field, `store: false`, `stream: true`,
+`max_output_tokens: 600` — and `prompt_cache_key`, a per-conversation uuidv7 (see the correction
+below).
+
+**Correction to the plan.** Q-0021-03 discloses that `prompt_cache_key` is *not* in the posted body
+because "the host passes no session id". The artifact refutes that: pi-durable's harness owns a
+per-conversation `ProviderDoc.sessionId` (`dist/harness/provider.js:10`, passed with the generation
+at `generation.js:152`), and pi-ai's Responses adapter sends it (`dist/api/openai-responses.js:263`
+with `openai-prompt-cache.js`), so the durable responses body carries
+`"prompt_cache_key":"01a2122f-…"`. The difference table in this record names it as the library's own
+field; the reversal statement is unchanged. The `ClassifyFailure` change is not named in the plan's
+P3 row; it is required by the plan's own four-pass matrix (the auth scenario) and leaves the chat
+path's classification untouched: round 2 made the leading bare `<status>:` outrank the
+parenthesized status, so a chat body that quotes a gateway's `(429)` keeps its own class.
+
+**Readings, all on this tree.** `mise exec -- bun Q:/scratch/pq-harness-run/run-0021.ts
+agent-smoke.ts agentSmoke` → `STATUS pass 488 assertions, 11 scenarios x 4 passes (source host,
+chat, source host, responses, staged bundle, chat, staged bundle, responses), 100 provider
+requests, permissions skipped on Windows, bundle 1598993 bytes with 7 inlined packages` (round 2,
+ELAPSED 141s; round 1 read the same assertions and requests in 175s with a 1598913-byte bundle,
+and the provider-request count includes retries and read 98 on the platform review's loaded runs.
+The first run of the step failed with `source host, responses: auth code provider_error` and
+`staged bundle, responses: auth code provider_error` and nothing else).
+The package smoke (`… package-smoke.ts packageSmoke`, the step's one local package run) →
+`STATUS pass 612 assertions over contents, layout, study, agents, brief, brief-responses, anki,
+upgrade, credential, broken; …` (ELAPSED 625s; round 2's re-run after the host trim read the same
+612 in 375s under this machine's load) — the new `brief-responses` case's paused run, its
+window resume and its installed-binary read-back all pass beside the chat `brief` case. The two
+self-test cases, each run individually through
+`Q:/scratch/omp/g21/P3/run-case.ts` (the full self-test is CI's): the package case failed as
+designed in both rounds (`status fail in 22s` / round 2 `12s`), its failure line
+`brief-responses: the installed run did not pause (exit 3: config_error: model endpoint must end in
+/chat/completions or /responses)`, accepted by its `postFail`; the agent-smoke case failed as
+designed (`status fail in 318s`; round 2 `93s` with the full list,
+`Q:/scratch/omp/g21/P3/fix-r1/self-test-agent-r2.log`): 96 failure lines — 48 prefixed `source
+host, responses:` and 48 `staged bundle, responses:`, none from a chat pass (the chat adapter
+posted the responses pass's requests to `/v1/chat/completions` and the run then failed
+`provider_error: Stream ended without finish_reason`) — accepted by its `postFail`. The step's other
+checks: `gofmt -l internal cmd` empty, `go vet ./...` and
+`go build ./...` exit 0, `go test ./internal/... -count=1` ok, `typecheck` 0 type errors,
+`docs-links` 368 checked / 0 broken, `secrets` 811 files / 0 findings, and the self-test's case
+total 175 (159 broken + 16 must pass) over 26/26 gates counted from the per-gate arrays.
+
+**Round-2 fix (2026-11-25).** The reviews' blocker: `endpointFormat` matched the raw string while
+`wire.FormatOf` and the tutor host trim trailing slashes, so a learner's `https://…/v1/responses/`
+was accepted by the Go validator and the window and then refused by the durable host
+(`config_error`, exit 3). The probe `Q:/scratch/omp/g21/P3/fix-r1/trim-probe.ts` over the real
+host: with the trim removed, `/v1/responses/` reports `model endpoint must end in
+/chat/completions or /responses` while `/v1/responses` advances to `missing_credential`; with the
+fix, both advance, and so does `/v1/chat/completions/`. `agent-smoke`'s Responses passes now
+configure the trailing-slash endpoint, so the gate itself fails when the trim is removed
+(`Q:/scratch/omp/g21/P3/fix-r1/gate-red.ts` over a copy whose trim is gone: `status fail in 243s`,
+the responses passes' first lines `start exit 3: … model endpoint must end in /chat/completions or
+/responses`, the chat passes green). `ClassifyFailure` now tries the leading bare `<status>:`
+before the parenthesized status, so a chat detail that quotes a gateway's `(429)` keeps its class
+(`502: upstream failed (429): retry later` → `provider_error`/`resume` and `400: quota (429): slow
+down` → `config_error`/`check_endpoint`, both red before the precedence in `TestClassifyFailure`);
+the Responses form still classifies (`passquest API error (401): …` → `auth_failed`).
+`docs/harness.md`'s row 26 body now names `brief-responses` in its case order. The self-test
+fixture sets the executable bit on the Node runtime it copies on POSIX (the install paths' own
+rule), and the package case's patch anchor follows the new line. Re-run checks: `gofmt -l internal
+cmd` empty, `go vet ./...` and `go build ./...` exit 0, `go test ./internal/... -count=1` ok,
+`typecheck` 0 type errors, `docs-links` and `secrets` as above.
+
+**What this note does not claim.** The package smoke's and the agent smoke's window halves on
+macOS and Linux, the full self-test, and the `frontend-bench.yml` A/B run (the coordinator's
+dispatch) are CI's or the coordinator's; this machine proves the Windows source and bundle passes
+above. The durable responses request's acceptance by a real provider, and whether a gateway that
+claims `/v1/responses` accepts `store`/`instructions`, remain the owner's probe (Q-0021-08) — the
+stub's refusals are the fake's, not a real provider's. P4 completes the record's Done-when map and
+the difference table; P5 owns item 5, still pending its feed check.
