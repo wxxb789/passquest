@@ -40,6 +40,7 @@
     {
       "state": "settings-row",
       "os": "any",
+      "branch": "goal/0021-p2",
       "reason": "the settings line naming both endpoint formats (0021 P2)"
     },
     {
