@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study"
 )
 
@@ -26,6 +27,10 @@ func usageError(opt Options, jsonMode bool, code, message string) int {
 }
 
 func internalError(opt Options, jsonMode bool, err error) int {
+	if store.IsBusy(err) {
+		return usageError(opt, jsonMode, "database_busy",
+			"database is busy: the Pass Quest window (or another command) has it open; close the window or retry")
+	}
 	if jsonMode {
 		_ = writeJSONTo(opt.Stderr, errorDoc{
 			SchemaVersion: ProtocolVersion,

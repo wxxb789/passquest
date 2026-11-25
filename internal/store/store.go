@@ -17,7 +17,8 @@ import (
 
 	"github.com/wxxb789/passquest/internal/attempt"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // SchemaVersion is the persisted schema this build understands.
@@ -256,6 +257,22 @@ func (s *Store) Path() string { return s.path }
 
 // Close releases the database handle.
 func (s *Store) Close() error { return s.db.Close() }
+
+// IsBusy reports whether err is SQLite's refusal to write because another
+// connection holds the write lock. The driver's typed code decides
+// (SQLITE_BUSY or SQLITE_LOCKED as its primary value, the low byte of an
+// extended code); the driver's message text is not a contract.
+func IsBusy(err error) bool {
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	switch sqliteErr.Code() & 0xff {
+	case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED:
+		return true
+	}
+	return false
+}
 
 // Append stores one graded attempt and returns it with its row id, prior count
 // and content-scoped question attempt number filled in.
