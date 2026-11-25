@@ -2903,6 +2903,18 @@ Entry format:
   `internal/hostpaths` is not changed: no new heuristic, no install sniffing. The standalone
   `cmd/passquest` binary keeps its source-checkout behaviour (it never had resources). Reverse: pass
   `""` again and restore the harness's `PASSQUEST_NODE`/`PASSQUEST_*_HOST` pins in the package smoke.
+- Outcome (2026-11-25, P3; written into this entry by P5's record pass): as planned.
+  `internal/desktop.ResourceDir()` is the old `resourceDir()` body (`""` under `mygo.IsDev()`, else
+  `mygo.App.Path(mygo.PathResources)`), `cmd/passquest-desktop`'s `run` passes it into
+  `cli.Options{Resources: …}` on the argument path only, and `withDefaults` threads it into the four
+  default host transports; `internal/hostpaths` is unchanged. Pinned by
+  `cmd/passquest-desktop`'s `main_test.go` (a development build passes `""`, the argument path still
+  dispatches) and `internal/cli/resources_test.go` (the four default transports carry
+  `Options.Resources`, and the absent search host is reported with the tree's own candidate
+  `<tree>/agent/search-host.mjs`). The package smoke's `cli-runtime` case proves the pin-free
+  resolution per OS — no `PASSQUEST_NODE`, no `PASSQUEST_*_HOST`, no `node` on `PATH`, one
+  host-backed command `verified` — and the `upgrade` and `brief` cases dropped their pins (runs
+  45589197958 and 45610985768).
 - Revisit when: a third entry point ships without a resources directory, or MyGo moves the resources
   path.
 
@@ -2991,6 +3003,13 @@ Entry format:
   broken fixture; both run on all three OSes in CI. Locally this machine proves the Go tests and the
   two gates' cheap paths only: window cases are advisory here and CI's run is the authority. The
   package gate runs once, at the end of the step that changes the package.
+- Outcome (2026-11-25, P5): as planned. The two per-OS checks are the `default-data` desktop-smoke
+  scenario and the package smoke's `cli-runtime` case, each with its self-test case (a window and an
+  installed CLI that keep their database outside the per-user root must fail by name), and both ran
+  on all three OSes in the goal's P3 and P4 runs (45589197958 and 45610985768 — the evidence
+  record's P5 section reads every number from those runs and their `package-<os>` artifacts). The
+  package gate ran locally once at the end of P3/P4 as the plan said; this step proves the Go tests
+  and the four document gates locally, and CI's three-OS matrix is the authority for the rest.
 - Revisit when: a Linux or macOS machine is available to the owner, or the package gate's cost drops.
 
 ### Q-0020-08 — What this goal does not do

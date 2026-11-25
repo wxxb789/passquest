@@ -129,6 +129,10 @@ CI 自己就是这样运行 AppImage 的，从不使用 FUSE 挂载。
 
 数据库是该目录里的 `passquest.sqlite`。`PASSQUEST_DESKTOP_DATA` 覆盖目录，`PASSQUEST_DB` 覆盖数据库文件。这个目录刻意不在安装位置里：升级会替换安装，卸载会删掉安装，而你的学习证据必须在这两件事之后仍然存在。（放在主目录里的单个二进制文件不算安装，不会被拒绝。）
 
+**命令行读写的是同一个数据库。** `passquest` 命令行解析的是同一个按用户划分的目录，所以窗口写入的数据库就是命令行默认读写的那一个：`--db <文件>` 和 `PASSQUEST_DB` 依旧像以前一样覆盖数据库文件，而 `PASSQUEST_DESKTOP_DATA` 会把两个入口一起移动。已安装应用自己的可执行文件在带参数启动时就是这个命令行：Windows 上是 `"%LOCALAPPDATA%\Programs\Pass Quest\Pass Quest.exe"`，macOS 上是 `"/Applications/Pass Quest.app/Contents/MacOS/Pass Quest"`，Linux 上就是 AppImage 文件本身。这样启动时，它会使用包内自带的 Node 运行时和 `agent/` host 脚本——不需要安装 Node，也不需要设置任何 `PASSQUEST_*` 变量；你自己设置的 `PASSQUEST_NODE` 和 `PASSQUEST_*_HOST` 仍然优先。在 Windows 上，这个可执行文件是窗口程序：PowerShell 不会等它结束，用 `>` 或 `2>` 重定向只会得到空文件，也没有退出码；而管道会用 `[Console]::OutputEncoding`（默认机器上不是 UTF-8）解码它的输出、再重新编码写入文件，所以落盘的不是程序自己的字节——非 ASCII 的标题和笔记会变成乱码。请改用 `cmd /c` 承接重定向：`cmd /c --% ""%LOCALAPPDATA%\Programs\Pass Quest\Pass Quest.exe" report --json > out.json"`（`--%` 把它后面的部分原样交给 `cmd`）。它会等程序结束、原样写入程序自己的字节，并把退出码留在 `$LASTEXITCODE` 里。
+
+如果在你运行命令的目录里、命令行旧默认位置 `./.passquest/passquest.sqlite` 还留有数据库，而你没有传 `--db`、也没有设置 `PASSQUEST_DB`，命令会在 stderr 打印一条同时点名两个路径的警告。Pass Quest 不会替你移动、复制或合并它：按用户划分的数据库还不存在、且能识别出你所在的 shell 家族时，警告会附带一条按该 shell 的引用格式生成、可直接粘贴的移动命令——只有 shell 家族是 `cmd.exe` 且两个路径中有任一个含 `%` 时例外，因为 `cmd.exe` 即使在引号内也会展开它，此时警告只点名两个路径、不给命令；两个文件都存在时，警告会说明这一点，并让你合并而不是覆盖。
+
 **卸载会保留数据。** Windows 上，卸载程序会删除安装目录、快捷方式和注册表项，保留 `%APPDATA%\Pass Quest`；macOS 上把应用移到废纸篓；Linux 上删除 AppImage 文件。要彻底删除数据，请自己删除上面那个目录。系统 WebView 还会在它之外保留一小份自己的配置，里面有你的主题和语言选择以及缓存，没有学习记录：Windows 上是 `%LOCALAPPDATA%\Pass Quest\WebView2`，macOS 上是 `~/Library` 下该应用的 WebKit 数据与缓存目录，Linux 上是 `~/.local/share` 和 `~/.cache` 下 WebKitGTK 的数据与缓存目录。想要干净删除，这些也要一并删掉。
 
 **密钥不在这些文件里。** 在设置里填写的模型密钥会存进操作系统凭据库——Windows 凭据管理器、macOS 钥匙串、Linux 的 Secret Service——服务名是 `com.github.wxxb789.passquest`，每个服务商一条，命名为 `api-key:<provider>`。窗口里每个服务商那一行都有删除密钥的操作；也可以直接用系统工具删除：
@@ -156,7 +160,7 @@ CI 自己就是这样运行 AppImage 的，从不使用 FUSE 挂载。
 
 CI（[`.github/workflows/gate.yml`](../.github/workflows/gate.yml)）每个操作系统跑一次 `package` 任务：
 `gate (windows-latest, package)`、`gate (macos-latest, package)` 和 `gate (ubuntu-latest, package)`。
-每个任务从仓库构建该操作系统的安装包，安装或挂载它（Windows 用 NSIS `/S`，macOS 挂载 `.dmg` 并用 `ditto` 把 `.app` 拷出来，Linux 就地运行 AppImage），然后在 `PATH` 中没有 `go`、`bun` 和 `node`（已断言）的情况下启动已安装的应用，并驱动学习闭环、agent 功能——包括一个由已安装应用在自带的运行时和 host 上独立完成的学习简报——Anki、前向升级、密钥用例和运行时损坏用例（`package smoke` 门禁，用例为 `contents, layout, study, agents, brief, anki, upgrade, credential, broken`）。macOS 任务还会检查所构建 `.app` 的 `Info.plist` 最低版本：安装包声明 macOS 26。每次运行都把安装包保留为 `package-windows-latest`、`package-macos-latest` 或 `package-ubuntu-latest` 工件，保存 7 天。在版本 tag 上的运行会把这些工件交给发布流程，只有负责人审阅草稿后才会发布（[发布流程](release.md)）。
+每个任务从仓库构建该操作系统的安装包，安装或挂载它（Windows 用 NSIS `/S`，macOS 挂载 `.dmg` 并用 `ditto` 把 `.app` 拷出来，Linux 就地运行 AppImage），然后在 `PATH` 中没有 `go`、`bun` 和 `node`（已断言）的情况下启动已安装的应用，并驱动学习闭环、agent 功能——包括一个由已安装应用在自带的运行时和 host 上独立完成的学习简报——Anki、前向升级、密钥用例和运行时损坏用例（`package smoke` 门禁，用例为 `contents, layout, study, cli-runtime, agents, brief, brief-responses, anki, upgrade, credential, broken`）。macOS 任务还会检查所构建 `.app` 的 `Info.plist` 最低版本：安装包声明 macOS 26。每次运行都把安装包保留为 `package-windows-latest`、`package-macos-latest` 或 `package-ubuntu-latest` 工件，保存 7 天。在版本 tag 上的运行会把这些工件交给发布流程，只有负责人审阅草稿后才会发布（[发布流程](release.md)）。
 
 Homebrew 路径有自己的工作流（[`.github/workflows/cask.yml`](../.github/workflows/cask.yml)）：
 在 macOS 运行器上它从 tap 安装已发布的版本（`brew install --cask wxxb789/tap/pass-quest`），
@@ -185,5 +189,5 @@ Homebrew 路径有自己的工作流（[`.github/workflows/cask.yml`](../.github
 - **代码签名与公证。** 都没有。上面的 SmartScreen 和 Gatekeeper 步骤是学习者手动越过警告的方式，CI 也无法触发 Gatekeeper 提示：在运行器上构建的 `.dmg` 不带隔离属性。
 - **Linux 上的 FUSE 与显示服务器。** CI 只用解包运行（`APPIMAGE_EXTRACT_AND_RUN=1`）跑 AppImage，直接 FUSE 挂载没有覆盖；冒烟测试在 xvfb（X11）下运行，Wayland 特有的行为也没有覆盖。
 - **Anki 与 AnkiConnect。** 不在包内。能连上 AnkiConnect 端点时报告存在，否则报告不存在；没有它学习功能照常可用。
-- **自带运行时下的搜索。** 包里带着搜索 host，同一个解析器也能找到它，但没有任何 package 用例驱动它：`package smoke` 的用例是 `contents, layout, study, agents, brief, anki, upgrade, credential, broken`，搜索 host 的成功路径只由源码树的 `find smoke` 覆盖。持久化 host 的成功路径则在已安装的应用里验证（上面的 `brief` 用例）。
+- **自带运行时下的搜索。** 包里带着搜索 host，同一个解析器也能找到它，但没有任何 package 用例驱动它：`package smoke` 的用例是 `contents, layout, study, cli-runtime, agents, brief, brief-responses, anki, upgrade, credential, broken`，搜索 host 的成功路径只由源码树的 `find smoke` 覆盖。持久化 host 的成功路径则在已安装的应用里验证（上面的 `brief` 用例）。
 - **更新。** package smoke 不驱动更新检查及其浏览器跳转；它们由源码检出下的 `desktop smoke` 的 `update` 场景覆盖，而不是由已安装的包覆盖。

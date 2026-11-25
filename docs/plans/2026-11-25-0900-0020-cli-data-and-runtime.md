@@ -1,6 +1,6 @@
 # 0020 — The command line keeps the learner's data where the window does, and the package runs on Node 26: increment plan
 
-Contract: [`../goals/0020-cli-data-and-runtime.md`](../goals/0020-cli-data-and-runtime.md).
+Contract: [`../goals/archive/0020-cli-data-and-runtime.md`](../goals/archive/0020-cli-data-and-runtime.md).
 Conventions: [`../conventions.md`](../conventions.md). Harness: [`../harness.md`](../harness.md).
 Cross-platform rules: [`../cross-platform.md`](../cross-platform.md).
 Install guides: [`../install.md`](../install.md), [`../install.zh-CN.md`](../install.zh-CN.md).
