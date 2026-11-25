@@ -671,7 +671,7 @@ const SELF_CASES: readonly SelfCase[] = [
   {
     name: "a read is classified from what happened, and only a SecurityAgent sample makes it blocked",
     run: () => {
-      const provider: ProviderStub = { endpoint: "", received: [], respond: () => new Response("{}"), stop: () => {} };
+      const provider: ProviderStub = { endpoint: "", responsesEndpoint: "", received: [], respond: () => new Response("{}"), stop: () => {} };
       const scan = (matches: number): AgentScan => ({
         probes: 3,
         error: null,

@@ -37,6 +37,9 @@ export const STUB_PROVIDER = "stub";
 export const STUB_MODEL = `${STUB_PROVIDER}/stub-model`;
 /** The registry requires PASSQUEST_<PROVIDER>_API_KEY. */
 export const STUB_CREDENTIAL_ENV = "PASSQUEST_STUB_API_KEY";
+export const STUB_RESPONSES_PROVIDER = "stub-responses";
+export const STUB_RESPONSES_MODEL = `${STUB_RESPONSES_PROVIDER}/stub-responses-model`;
+export const STUB_RESPONSES_CREDENTIAL_ENV = "PASSQUEST_STUB_RESPONSES_API_KEY";
 /** The scoring skill a fresh database recommends; its tactic has a guided and an independent stage. */
 export const SKILL = "not-except-polarity";
 
@@ -148,6 +151,8 @@ export interface ProviderRequest {
 /** A loopback OpenAI-compatible endpoint; `respond` is set per scenario. */
 export interface ProviderStub {
   endpoint: string;
+  /** The same loopback stub with a Responses path, for a second registry provider. */
+  responsesEndpoint: string;
   received: ProviderRequest[];
   respond: (request: ProviderRequest) => Response | Promise<Response>;
   stop: () => void;
@@ -155,6 +160,19 @@ export interface ProviderStub {
 
 export function chatReply(text: string): Response {
   return Response.json({ choices: [{ message: { content: text } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
+}
+
+export function responsesReply(text: string): Response {
+  return Response.json({
+    status: "completed",
+    output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }],
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+  });
+}
+
+/** The stub's default answer for whichever endpoint path the request used; a scenario that overrides `respond` restores this. */
+export function defaultStubReply(request: ProviderRequest): Response {
+  return request.path.endsWith("/responses") ? responsesReply("OK") : chatReply("OK");
 }
 
 /**
@@ -169,8 +187,9 @@ export const STUB_IDLE_SECONDS = 120;
 export function startProviderStub(): ProviderStub {
   const stub: ProviderStub = {
     endpoint: "",
+    responsesEndpoint: "",
     received: [],
-    respond: () => chatReply("OK"),
+    respond: defaultStubReply,
     stop: () => server.stop(true),
   };
   const server = Bun.serve({
@@ -190,11 +209,22 @@ export function startProviderStub(): ProviderStub {
     },
   });
   stub.endpoint = `http://127.0.0.1:${server.port}/v1/chat/completions`;
+  stub.responsesEndpoint = `http://127.0.0.1:${server.port}/v1/responses`;
   return stub;
 }
 
+/** One extra registry provider `writeStubRegistry` writes beside the stub. */
+export interface StubRegistryProvider {
+  id: string;
+  name: string;
+  endpoint: string;
+  endpointShape: string;
+  credentialEnv: string;
+  model: string;
+}
+
 /** A provider registry with the one stub provider and its one text.chat model. */
-export function writeStubRegistry(file: string, endpoint: string): void {
+export function writeStubRegistry(file: string, endpoint: string, extra: StubRegistryProvider[] = []): void {
   writeFileSync(
     file,
     JSON.stringify({
@@ -208,6 +238,14 @@ export function writeStubRegistry(file: string, endpoint: string): void {
           credential_env: STUB_CREDENTIAL_ENV,
           models: [{ id: STUB_MODEL.split("/")[1], default: true, capabilities: ["text.chat"] }],
         },
+        ...extra.map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          endpoint: provider.endpoint,
+          endpoint_shape: provider.endpointShape,
+          credential_env: provider.credentialEnv,
+          models: [{ id: provider.model, default: true, capabilities: ["text.chat"] }],
+        })),
       ],
     }),
   );

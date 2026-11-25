@@ -335,6 +335,18 @@ func TestTutorGoldenDocuments(t *testing.T) {
 		checkGolden(t, filepath.Join("testdata", "tutor-preview-private.golden.json"), []byte(raw))
 	})
 
+	t.Run("responses preview", func(t *testing.T) {
+		db := newDB(t)
+		clock := &stepClock{base: goldenBase}
+		transport := &fakeTutorTransport{}
+		practiceSample(t, db, clock)
+		mustTutorRun(t, db, clock, transport, true,
+			"tutor", "config", "--endpoint", "https://api.example.com/v1/responses",
+			"--model", "example-model", "--json")
+		raw := mustTutorRun(t, db, clock, transport, true, "tutor", "preview", "--attempt", "1", "--json")
+		checkGolden(t, filepath.Join("testdata", "tutor-preview-responses.golden.json"), []byte(raw))
+	})
+
 	t.Run("advisory", func(t *testing.T) {
 		db := newDB(t)
 		clock := &stepClock{base: goldenBase}

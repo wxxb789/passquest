@@ -18,6 +18,7 @@ import (
 
 	"github.com/wxxb789/passquest/internal/attempt"
 	"github.com/wxxb789/passquest/internal/hostpaths"
+	"github.com/wxxb789/passquest/internal/wire"
 )
 
 // ProtocolVersion is the host stdin/stdout protocol this build speaks.
@@ -184,22 +185,110 @@ type Chat struct {
 	Stream      bool      `json:"stream"`
 }
 
-// HostRequest is one versioned stdin document for the Node host. The endpoint
-// and bounds are transport configuration; Chat is the request content, and
-// Body is its exact serialization. The host validates Body against Chat and
-// posts those bytes without re-encoding them, so RequestSHA and RequestBytes
-// identify the bytes that left the machine.
+// ResponsesText is one content part of a Responses input item.
+type ResponsesText struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// ResponsesMessage is one item of the Responses input list.
+type ResponsesMessage struct {
+	Role    string          `json:"role"`
+	Content []ResponsesText `json:"content"`
+}
+
+// Responses is the provider request content in the OpenAI Responses wire
+// format: the system text is the instructions value, every other message is an
+// input item, and store is always false because the app has never opted into
+// provider-side response storage.
+type Responses struct {
+	Model           string             `json:"model"`
+	Instructions    string             `json:"instructions"`
+	Input           []ResponsesMessage `json:"input"`
+	MaxOutputTokens int                `json:"max_output_tokens"`
+	Temperature     float64            `json:"temperature"`
+	Stream          bool               `json:"stream"`
+	Store           bool               `json:"store"`
+}
+
+// HostRequest is one versioned stdin document for the Node host. Exactly one
+// of Chat and Responses is set: the endpoint's path selects the wire format,
+// and Body is that document's exact serialization. The host validates Body
+// against the same document and posts those bytes without re-encoding them, so
+// RequestSHA and RequestBytes identify the bytes that left the machine.
 type HostRequest struct {
-	ProtocolVersion  int    `json:"protocol_version"`
-	Endpoint         string `json:"endpoint"`
-	TimeoutMS        int64  `json:"timeout_ms"`
-	MaxResponseChars int    `json:"max_response_chars"`
-	Chat             Chat   `json:"chat"`
-	Body             string `json:"body"`
+	ProtocolVersion  int        `json:"protocol_version"`
+	Endpoint         string     `json:"endpoint"`
+	TimeoutMS        int64      `json:"timeout_ms"`
+	MaxResponseChars int        `json:"max_response_chars"`
+	Chat             *Chat      `json:"chat,omitempty"`
+	Responses        *Responses `json:"responses,omitempty"`
+	Body             string     `json:"body"`
 	// CredentialEnv selects the environment variable the transport copies into
 	// the host's documented credential slot. It is transport metadata, never
 	// part of the provider request document.
 	CredentialEnv string `json:"-"`
+}
+
+// WireFormat reports which wire document this request carries.
+func (r HostRequest) WireFormat() (wire.Format, error) {
+	switch {
+	case r.Chat != nil && r.Responses != nil:
+		return "", errors.New("tutor: host request carries both a chat and a responses document")
+	case r.Chat != nil:
+		return wire.FormatChatCompletions, nil
+	case r.Responses != nil:
+		return wire.FormatResponses, nil
+	default:
+		return "", errors.New("tutor: host request carries no wire document")
+	}
+}
+
+// WireModel returns the model of the request's wire document.
+func (r HostRequest) WireModel() string {
+	if r.Chat != nil {
+		return r.Chat.Model
+	}
+	if r.Responses != nil {
+		return r.Responses.Model
+	}
+	return ""
+}
+
+// WireMaxTokens returns the wire document's output bound in that format's own
+// field.
+func (r HostRequest) WireMaxTokens() int {
+	if r.Chat != nil {
+		return r.Chat.MaxTokens
+	}
+	if r.Responses != nil {
+		return r.Responses.MaxOutputTokens
+	}
+	return 0
+}
+
+// WireMessages returns the wire document's logical role/content pairs: the
+// chat messages, or the responses instructions as the leading system message
+// followed by its input items.
+func (r HostRequest) WireMessages() []Message {
+	if r.Chat != nil {
+		return r.Chat.Messages
+	}
+	if r.Responses == nil {
+		return nil
+	}
+	messages := make([]Message, 0, len(r.Responses.Input)+1)
+	if r.Responses.Instructions != "" {
+		messages = append(messages, Message{Role: "system", Content: r.Responses.Instructions})
+	}
+	for _, item := range r.Responses.Input {
+		var text strings.Builder
+		for _, part := range item.Content {
+			text.WriteString(part.Text)
+		}
+		messages = append(messages, Message{Role: item.Role, Content: text.String()})
+	}
+	return messages
 }
 
 // Usage is provider-reported token accounting. It is optional because a
@@ -517,7 +606,7 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 		Temperature: 0,
 		Stream:      false,
 	}
-	request, requestSHA, requestBytes, err := hostRequestFor(cfg.Endpoint, cfg.TimeoutMS, chat)
+	request, requestSHA, requestBytes, err := HostRequestFor(cfg.Endpoint, cfg.TimeoutMS, chat)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -545,28 +634,70 @@ func Build(cfg Config, mode Mode, target Target) (Preview, error) {
 	}, nil
 }
 
-// hostRequestFor serializes one chat document once and derives the host
-// request and its identity from those same bytes.
-func hostRequestFor(endpoint string, timeoutMS int64, chat Chat) (HostRequest, string, int, error) {
-	encoded, err := json.Marshal(chat)
-	if err != nil {
-		return HostRequest{}, "", 0, fmt.Errorf("tutor: encode chat: %w", err)
+// ResponsesFor maps a chat document to the OpenAI Responses wire format: the
+// system text becomes instructions and every other message becomes an input
+// item in order.
+func ResponsesFor(chat Chat) Responses {
+	var instructions []string
+	input := make([]ResponsesMessage, 0, len(chat.Messages))
+	for _, message := range chat.Messages {
+		if message.Role == "system" {
+			instructions = append(instructions, message.Content)
+			continue
+		}
+		input = append(input, ResponsesMessage{
+			Role:    message.Role,
+			Content: []ResponsesText{{Type: "input_text", Text: message.Content}},
+		})
 	}
-	sum := sha256.Sum256(encoded)
+	return Responses{
+		Model:           chat.Model,
+		Instructions:    strings.Join(instructions, "\n\n"),
+		Input:           input,
+		MaxOutputTokens: chat.MaxTokens,
+		Temperature:     chat.Temperature,
+		Stream:          chat.Stream,
+		Store:           false,
+	}
+}
+
+// HostRequestFor builds the host request for the endpoint's wire format and
+// derives its identity from the same serialized document. The endpoint's path
+// is the only selector of the format.
+func HostRequestFor(endpoint string, timeoutMS int64, chat Chat) (HostRequest, string, int, error) {
+	trimmed := strings.TrimSpace(endpoint)
+	format, ok := wire.FormatOf(trimmed)
+	if !ok {
+		return HostRequest{}, "", 0, errors.New("tutor: endpoint must end in /chat/completions or /responses")
+	}
 	request := HostRequest{
 		ProtocolVersion:  ProtocolVersion,
-		Endpoint:         strings.TrimSpace(endpoint),
+		Endpoint:         trimmed,
 		TimeoutMS:        timeoutMS,
 		MaxResponseChars: MaxResponseChars,
-		Chat:             chat,
-		Body:             string(encoded),
 	}
+	var document any
+	if format == wire.FormatResponses {
+		responses := ResponsesFor(chat)
+		request.Responses = &responses
+		document = responses
+	} else {
+		request.Chat = &chat
+		document = chat
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return HostRequest{}, "", 0, fmt.Errorf("tutor: encode host request: %w", err)
+	}
+	request.Body = string(encoded)
+	sum := sha256.Sum256(encoded)
 	return request, hex.EncodeToString(sum[:]), len(encoded), nil
 }
 
-// ProbeRequest builds one minimal non-streaming chat request for a capability
-// check. It is the same host document tutor ask uses, with the smallest
-// authored prompt and output bound the host accepts.
+// ProbeRequest builds one minimal non-streaming request for a capability
+// check, in the format the endpoint's path selects. It is the same host
+// document tutor ask uses, with the smallest authored prompt and output bound
+// the host accepts.
 func ProbeRequest(endpoint, model string, timeoutMS int64) (HostRequest, string, int, error) {
 	cfg := Config{
 		Endpoint:        endpoint,
@@ -588,7 +719,7 @@ func ProbeRequest(endpoint, model string, timeoutMS int64) (HostRequest, string,
 		Temperature: 0,
 		Stream:      false,
 	}
-	return hostRequestFor(endpoint, cfg.TimeoutMS, chat)
+	return HostRequestFor(endpoint, cfg.TimeoutMS, chat)
 }
 
 func attemptLine(target Target) string {

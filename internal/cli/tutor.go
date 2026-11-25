@@ -84,6 +84,7 @@ func runTutorPreview(args []string, opt Options) int {
 		Provider:      tutorProviderViewOf(prepared.Config, opt),
 		Context:       tutorContextViewOf(prepared.Preview.Context),
 		Chat:          prepared.Preview.Request.Chat,
+		Responses:     prepared.Preview.Request.Responses,
 		RequestSHA256: prepared.Preview.RequestSHA,
 		RequestBytes:  prepared.Preview.RequestBytes,
 		Limits:        coach.Limits(),
@@ -128,11 +129,24 @@ func writeTutorPreview(w io.Writer, doc tutorPreviewDoc) {
 		fmt.Fprintf(w, "Truncated fields: %s\n", strings.Join(doc.Context.TruncatedFields, ", "))
 	}
 	fmt.Fprintf(w, "Provider request: %d bytes, sha256 %s\n", doc.RequestBytes, doc.RequestSHA256)
-	fmt.Fprintln(w, "\n--- provider chat content (what would be sent) ---")
-	for _, message := range doc.Chat.Messages {
-		fmt.Fprintf(w, "[%s]\n%s\n\n", message.Role, message.Content)
+	if doc.Responses != nil {
+		fmt.Fprintln(w, "\n--- provider responses content (what would be sent) ---")
+		fmt.Fprintf(w, "[instructions]\n%s\n\n", doc.Responses.Instructions)
+		for _, item := range doc.Responses.Input {
+			fmt.Fprintf(w, "[%s]\n", item.Role)
+			for _, part := range item.Content {
+				fmt.Fprintln(w, part.Text)
+			}
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintln(w, "--- end provider responses content ---")
+	} else {
+		fmt.Fprintln(w, "\n--- provider chat content (what would be sent) ---")
+		for _, message := range doc.Chat.Messages {
+			fmt.Fprintf(w, "[%s]\n%s\n\n", message.Role, message.Content)
+		}
+		fmt.Fprintln(w, "--- end provider chat content ---")
 	}
-	fmt.Fprintln(w, "--- end provider chat content ---")
 	if doc.Context.PrivateSource && !doc.Context.ConsentGranted && doc.Context.SourceID != "" {
 		fmt.Fprintf(w, "\nPrivate source text is withheld. Inspect this preview, then authorize with:\n")
 		fmt.Fprintf(w, "  passquest tutor consent %s --reviewer NAME --db PATH\n", doc.Context.SourceID)

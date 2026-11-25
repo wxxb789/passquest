@@ -135,3 +135,201 @@ was added. CI's three-OS `core` job is the authority for `go test ./...`.
 Done-when 2 and the settings line are P2/P3/P4's, the golden and the responses smoke cases are P2's,
 and the Pi bump or its feed-blocked record is P5's. No real provider endpoint was contacted
 (Q-0021-08).
+
+## P2 (2026-11-25) — the tutor host speaks Responses; the settings line (branch `goal/0021-p2`, stacked on `d477655`)
+
+**What changed.** One Go wire document per request: `internal/tutor` gains `Responses` /
+`ResponsesMessage` / `ResponsesText` and `HostRequestFor`, which derives the format from the
+endpoint's path (`internal/wire`'s shared `FormatOf`, which `provider.FormatOf` re-exports) and
+builds exactly one of `chat` / `responses`, with `Body` the serialization of that same document and
+`ResponsesFor` (`internal/tutor/tutor.go:640`) mapping the system text to `instructions` and every
+other message to an `input` item in order;
+`transport.validateRequest` checks the document the request carries against the endpoint's own
+format, the per-format bounds (temperature 0, `stream: false`, `store: false`, one `input_text`
+part per item, the 20,000-code-point total) and the `Body` invariant;
+`internal/note/refine.go` builds its refinement document through the same builder;
+`internal/study/notes/refine.go`, `internal/workspace/workspace_coach.go` and the CLI's preview
+read the non-nil document through `WireMessages()`/`WireMaxTokens()`; `internal/cli/tutor_views.go`
+carries `chat` or `responses` (omitempty) and `writeTutorPreview` prints the document it sends.
+`agent/tutor-host.mjs` derives the format from `request.endpoint`, refuses a document for the other
+format or a third form, validates the responses document's exact key set and values, posts the same
+bytes, and maps text (`output[].content[].type == "output_text"` across message items), usage
+(`input_tokens`/`output_tokens` → `prompt_tokens`/`completion_tokens`), `status != "completed"`
+(with `incomplete_details.reason`), a `refusal` part, and a 200 that carries `error` to
+`invalid_response`. `desktop/web/src/views/settings.ts` gains the `endpoint-formats` line.
+
+**Deviation from the plan's Q-0021-01 wording (one derivation's home).** The plan names `provider`
+as the format derivation's home, but `internal/provider` imports `internal/tutor`
+(`provider.ClassifyResponse(tutor.HostResponse)`, `internal/provider/failure.go:67`), so `tutor`
+cannot import `provider` without a cycle. The derivation therefore lives in the new leaf package
+`internal/wire` (`Format`, `FormatChatCompletions`, `FormatResponses`, `FormatOf`, `FormatOfPath`,
+`Shape`, `ValidShape`, the two shape values), and `internal/provider` re-exports every P1 name as
+an alias or one-line wrapper (`registry.go:26-45`), so the registry's behaviour, its tests and
+`internal/study/models/providers.go` are unchanged. One implementation, read by both packages;
+P1's `provider.FormatOf` test table still passes verbatim.
+
+**The tutor chat bodies are unchanged, and the responses body is new (item 4's tutor half).** The
+capture ran twice in round 1 with P1's script
+(`mise exec -- bun Q:/scratch/omp/g21/P1/capture-bodies.mjs Q:/scratch/omp/g21/P2/bodies.json` →
+`Q:/scratch/omp/g21/P2/bodies.json`, the chat half) and once in round 2 with
+`Q:/scratch/omp/g21/P2/capture-bodies-r2.mjs`, which adds one tutor host request over a
+`/v1/responses` endpoint carrying the Q-0021-02 document (→ `Q:/scratch/omp/g21/P2/bodies-r2.json`).
+The chat tutor body is byte-identical to `Q:/scratch/omp/g21/P1/base/bodies.json` (same SHA-256
+`942be11ee6699878549ebc7c3cbb0e4de8519c38bf1a9c2212b07ac9065a459a`, same 215 bytes, posted
+verbatim); the new responses body went to `/v1/responses` verbatim (SHA-256
+`7fc9e43c046388c14353c66bdb14faccd1f3ef0f498ab2c8062b31a0e662d629`, 251 bytes):
+
+```json
+{"model":"capture-model","instructions":"You are a concise exam coach.","input":[{"role":"user","content":[{"type":"input_text","text":"Explain why 'an' precedes a vowel sound."}]}],"max_output_tokens":350,"temperature":0,"stream":false,"store":false}
+```
+
+and the stub's `usage.input_tokens`/`output_tokens` came back as `prompt_tokens`/`completion_tokens`
+in the host's reply. The three durable chat requests are identical in length (8488/8874/9236 bytes)
+and differ only in the run id the capture mints
+(`run-20261125T031603Z-d54219a1` → `run-20261125T074041Z-bce53e0a`): a byte-by-byte comparison of the
+two `raw` fields puts the first difference at 0-based byte 1544, the run id's `3`→`6`-style digit
+(`Q:/scratch/omp/g21/P2/compare-r2.ts`); the durable host stamps it. The durable half stays chat
+until P3.
+
+**New golden, declared here for `golden-contract`.**
+`internal/cli/testdata/tutor-preview-responses.golden.json` is a `tutor preview --json` against
+`https://api.example.com/v1/responses`; `TestTutorGoldenDocuments`'s new `responses preview` subtest
+compares it (`internal/cli/tutor_test.go:338`), and the six existing chat goldens are unchanged —
+a changed chat golden would be a failure, not an update. The preview document carries `responses`
+and no `chat` key; the human renderer prints `[instructions]` and the input items.
+
+**Local audits (this machine; the commands of the brief's check list, each run on this tree and re-run on the round-2 tree with the same readings).**
+
+| command | result |
+|---|---|
+| `mise exec -- gofmt -l internal cmd` | no output |
+| `mise exec -- go vet ./...` | exit 0 |
+| `mise exec -- go build ./...` | exit 0 |
+| `go test ./internal/... -count=1` | all packages pass (see P1's note for the `internal/desktop` window-test class; it passed here) |
+| `run-0021.ts tutor-smoke.ts tutorSmoke` | pass — 359 assertions, both formats (was 156) |
+| `run-0021.ts provider-smoke.ts providerSmoke` | pass — 115 assertions (was 92) |
+| `run-0021.ts golden-contract.ts goldenContract` | pass — 1 golden declared by 2 contract document(s) |
+| `run-0021.ts typecheck.ts typecheck` | pass — 0 type errors |
+| `run-0021.ts local-only.ts localOnly` | pass — 38 first-party packages, 1 allowed network package |
+| `run-0021.ts docs-links.ts docsLinks` | pass — 358 checked, 0 broken |
+| `run-0021.ts secrets.ts secrets` | pass — 802 files, 0 findings |
+| `run-0021.ts frontend-baseline.ts frontendBaseline` | pass — all 4 allowlist entries fire, 6 vendor tokens in source and bundle |
+| `run-0021.ts note-smoke.ts noteSmoke` | pass — 1367 assertions (its `note propose` seed and host path are unchanged) |
+| `run-0021.ts agent-smoke.ts agentSmoke` | pass — 238 assertions, 11 scenarios × 2 hosts, 50 provider requests, bundle 1,557,656 B with 7 inlined packages (the durable path is untouched until P3) |
+
+**The settings scenario, run once on this machine (advisory; CI's three OSes are the authority).**
+`Q:/scratch/omp/g21/P2/settings-run.ts` runs `makeDesktopSmokeGate(["settings"])` against this tree:
+`STATUS pass 35 assertions over 3 scenarios; boot: room 40/0/138/40 px, marker true`. Inside it, the
+second registry provider (`stub-responses`, `endpoint_shape: openai-responses`) had its key saved
+through the window and its `model-test` read `[data-capability="verified"]` after the stub received
+the probe at `/v1/responses` carrying the OS-store `Bearer` key, the page's
+`[data-testid="endpoint-formats"]` line named both `/chat/completions` and `/responses`, and both
+keys were cleared again (the chat provider's row and the clearing half are the P1/P2 scenario's
+own). This is P2 → P3/P4's handed-over reading: probe path `/v1/responses`, key path the OS secret
+store (`api-key:stub-responses`), page hook `endpoint-formats`, both suffixes inside
+`<code translate="no">`.
+
+**Must-fail self-test cases (one per changed gate, in the repository's own case files).** P2 adds
+`harness/gates/self-test/tutor-smoke.cases.ts`'s case over a copied `agent/tutor-host.mjs` whose
+responses branch validates the chat key set and values, and `provider-smoke.cases.ts`'s case over a
+copied `internal/provider/registry.go` whose endpoint rule is chat-only again, beside the
+desktop-smoke case in `desktop-smoke.cases.ts` — the three case objects the `self-test` gate itself
+runs on all three OSes. Run here from those definitions with the self-test's own fixture logic
+(`Q:/scratch/omp/g21/P2/must-fail-r2.ts`): the tutor case `FAILED AS DESIGNED` at
+`responses: tutor ask exit = 3`, the provider case at `delta: model test exit = 2` (the declared
+responses provider is refused), and the desktop-smoke case through a real window at
+`settings: script failed: mygo: javascript error: timed out waiting for the endpoint formats line
+[route #/settings]` (advisory as above). The same gates on the *unpatched* copy stop failing where
+the patch is the fixture's only change: tutor-smoke reads `PASS 359 assertions`. The unpatched
+provider copy is not a clean pass fixture here — `copyProduct` does not follow
+`agent/node_modules`'s symlinks (`@earendil-works/*`), so that copy's agent section fails on its own
+(`agent start did not pause (exit 3)`); provider-smoke's pass proof is its real-tree run above.
+
+**Round-2 fixes (2026-11-25, after the three reviews of the first round).** Each finding was
+verified against the tree before it was fixed or answered:
+
+- *The missing must-fail cases (all three reviews, the round's blocker).* Fixed: the tutor and
+  provider cases now live in the repository's case files (above), which is what the `self-test` gate
+  runs on three OSes. Round 1 had proven them only through a scratch runner while this note and
+  `docs/harness.md` said they were in the tree; the claim is true now, and `docs/harness.md`'s P2
+  re-quote carries the counted total (173 cases: 157 broken + 16 must pass).
+- *Stale names in this note.* Fixed: `ResponsesFor` (`internal/tutor/tutor.go:640`), and the
+  derivation is named where it lives (`internal/wire`), with `provider.FormatOf` as its re-export.
+- *The duplicated stub replies.* Fixed: the tutor smoke and the provider smoke import
+  `chatReply`/`responsesReply` from `harness/lib/desktop-page.ts`; the provider smoke's own third
+  copy is gone.
+- *provider-smoke could not fail on most of its checks (found while fixing the above).* Its pass path
+  lacked the `if (checks.length > 0) return fail(checks)` guard its sibling gates carry. Measured on
+  this tree, two checks were failing silently: the `next`/`report` comparison never matched a Windows
+  path written escaped in JSON, and the human failover call passed `--db` before its subcommand
+  (`exit = 2`, no line). Both are fixed, the guard is in place, and the gate reads 115 assertions
+  with zero accumulated failures — the same measurement read 2 before the fix.
+- *Evidence numbers.* The capture's first-differing-byte claim was re-measured byte by byte against
+  the artifacts this note names: 0-based 1544 (the run id's digit) and three durable bodies equal in
+  length; the review's 1546 does not reproduce against them. `agent-smoke`'s provider-request count
+  read 50 in round 2 where P1's note read 49: it is printed, not asserted, CI's goal-0016 record
+  (`docs/evidence/0016-lean-package.md`) reads 50 too, and no P2 file is on that gate's path
+  (`git diff --stat HEAD -- internal/study/brief internal/agent agent/durable-host.mjs
+  harness/lib/sse.ts harness/gates/agent-smoke.ts` is empty) — not attributed to this step, cause
+  unknown.
+- *The allowlist entry's overlap with 0022 P2's `settings-row` entry.* Accepted, not a defect: the
+  settings line moves `settings-row` on both comparison OSes, so the entry must apply to both;
+  `bench.ts`'s lookup is last-entry-wins by state, so on Windows the printed reason is this step's,
+  and the pass/fail decision is unaffected; P3's row removes the entry.
+- *Comment-policy items.* Fixed: `agent/tutor-host.mjs`'s "validated against the chat content" now
+  names the wire document, and the desktop case's helper docstring that duplicated its case comment
+  is gone.
+
+Round 2 re-ran the settings scenario (`Q:/scratch/omp/g21/P2/settings-run-r2.log` → `STATUS pass 35
+assertions over 3 scenarios; boot: room 40/0/138/40 px, marker true`) and the desktop-smoke must-fail
+case (`must-fail-desktop-r2.log` → `settings: script failed: … timed out waiting for the endpoint
+formats line [route #/settings]`), both through a real window and both advisory, and the whole audit
+list above on the fixed tree.
+
+**Round-3 fix (2026-11-25): the settings scenario inside the full gate.** The correct-lens round-2
+review's blocker was real and is fixed. In the full `desktop-smoke` (and in `package-smoke`, which
+runs the same scenario modules on one shared stub) the `settings` scenario timed out waiting for the
+verified responses model: `coach` and `anki` end by restoring the shared stub's `respond` with a
+chat-only closure (`() => chatReply("OK")`), so the settings scenario's responses provider probe
+reached `/v1/responses` and was answered with a chat-completions body — the host refused it
+(`invalid_response`) and `[data-capability="verified"]` never appeared. Reproduced on this machine on
+the pre-fix tree with `makeDesktopSmokeGate(["coach", "settings"])`
+(`Q:/scratch/omp/g21/P2/fix-r3/slice.ts`): `STATUS fail` /
+`settings: script failed: mygo: javascript error: timed out waiting for the verified responses model
+[route #/settings]`, ELAPSED 236s — the round-2 settings reading came from `only: ["settings"]`,
+which skipped this ordering interaction. The same cold slice run also printed
+`coach: no listening-socket probe completed while the app ran`, the launch probe loop's own
+machine-timing artifact; it did not recur in the warm slice run or in the full run below.
+
+Fix: `harness/lib/desktop-page.ts` exports the stub's default answer as `defaultStubReply` (the
+path-dispatched reply `startProviderStub` now uses), and every scenario that overrides `respond`
+restores that default: `harness/gates/desktop-smoke/coach.ts:79`, `anki.ts:336` and
+`harness/gates/package-smoke/brief.ts:261` (the package smoke's `credential` case is the settings
+module, so its stub state is the same one). `agent/tutor-host.mjs` also validates the endpoint before
+dispatching on its format (`:143-146`), so an unparseable endpoint carrying a responses document
+reports the true `endpoint is not a URL` instead of `endpoint ends in /chat/completions but the
+request carries a responses document`; the chat path's message precedence is the pre-P2 host's
+again (probe `Q:/scratch/omp/g21/P2/fix-r3/f3-probe.ts`: `before: config_error — endpoint ends in
+/chat/completions but the request carries a responses document` / `after : config_error — endpoint is
+not a URL`).
+
+Readings after the fix, all on this tree: the slice `STATUS pass 79 assertions over 4 scenarios`
+(ELAPSED 38s, `Q:/scratch/omp/g21/P2/fix-r3/slice.log`), and the **full** gate in the foreground
+`mise exec -- bun Q:/scratch/pq-harness-run/run-0021.ts desktop-smoke.ts desktopSmoke` →
+`STATUS pass 566 assertions over 14 scenarios; boot: room 40/0/138/40 px, marker true; titlebar:
+880x600 room 40/0/138/40 px x14 at 14 stops, marker 14/14` (ELAPSED 157s,
+`Q:/scratch/omp/g21/P2/fix-r3/full-desktop-smoke.log`) — the P2 row's own proof, advisory, with CI's
+three-OS run as the authority. Re-run checks: `gofmt -l internal cmd` empty, `go vet ./...` and
+`go build ./...` exit 0, `typecheck` 0 type errors, `tutor-smoke` 359 assertions, `provider-smoke`
+115 assertions, `go test ./internal/... -count=1` clean, `golden-contract` 1 golden declared by 2
+contract documents, `docs-links` and `secrets` as below, the three must-fail self-test cases
+`FAILED AS DESIGNED` again (`must-fail-r3.log`), and the capture re-run
+(`Q:/scratch/omp/g21/P2/fix-r3/bodies-r3.json`): the tutor chat body is byte-identical to the P1
+base artifact (`942be11e…`, 215 bytes), the responses body is unchanged (`7fc9e43c…`, 251 bytes), and
+the three durable chat bodies keep their 8488/8874/9236 lengths with new run ids.
+
+**What this note does not claim.** The window halves of the settings scenario and the bench run are
+CI's; the durable half of item 2 and the `brief-responses` case are P3's; the Pi bump or its
+feed-blocked record is P5's. The plan's per-step `frontend-bench.yml` run is the coordinator's
+dispatch; this branch carries the `settings-row` allowlist entry (`os: "any"`) the P2 page change
+needs, and P3's row removes it. No real provider endpoint was contacted (Q-0021-08).

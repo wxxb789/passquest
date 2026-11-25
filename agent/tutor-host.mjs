@@ -2,11 +2,11 @@
 // Pass Quest tutor host.
 //
 // Reads one versioned JSON request from stdin, posts the exact request body it
-// carries to one OpenAI-compatible non-streaming chat endpoint, and writes one
-// versioned JSON result to stdout. This file is the product's only network
-// egress. It never logs, never writes the credential anywhere except the
-// Authorization header, and never follows a redirect. See docs/tutor.md and
-// agent/README.md.
+// carries to one OpenAI-compatible non-streaming endpoint (chat completions or
+// Responses, selected by the endpoint's path), and writes one versioned JSON
+// result to stdout. This file is the product's only network egress. It never
+// logs, never writes the credential anywhere except the Authorization header,
+// and never follows a redirect. See docs/tutor.md and agent/README.md.
 
 const PROTOCOL_VERSION = 1;
 const CREDENTIAL_ENV = "PASSQUEST_TUTOR_API_KEY";
@@ -65,7 +65,25 @@ function validateEndpoint(raw) {
   return { url };
 }
 
-const BODY_KEYS = ["max_tokens", "messages", "model", "stream", "temperature"];
+// endpointFormat returns "chat-completions" or "responses" for an endpoint
+// whose path names one of the two wire forms, "" for a parsable path that
+// names neither, and null for an endpoint validateEndpoint refuses.
+function endpointFormat(raw) {
+  if (typeof raw !== "string") return null;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  const trimmed = url.pathname.replace(/\/+$/, "");
+  if (trimmed.endsWith("/chat/completions")) return "chat-completions";
+  if (trimmed.endsWith("/responses")) return "responses";
+  return "";
+}
+
+const CHAT_BODY_KEYS = ["max_tokens", "messages", "model", "stream", "temperature"];
+const RESPONSES_BODY_KEYS = ["instructions", "input", "max_output_tokens", "model", "store", "stream", "temperature"];
 
 // canonicalBody reduces a request body to its five meaningful fields so the Go
 // client's serialization and the parsed body can be compared as values.
@@ -82,12 +100,34 @@ function canonicalBody(value) {
   });
 }
 
-// sameBody reports whether the posted body carries exactly the validated chat
-// content. The host rejects a mismatch instead of guessing which one to send.
-function sameBody(posted, chat) {
+// canonicalResponses reduces a Responses document to its meaningful fields so
+// the Go client's serialization and the parsed body can be compared as values.
+function canonicalResponses(value) {
+  const input = Array.isArray(value && value.input)
+    ? value.input.map((item) => ({
+        role: item && item.role,
+        content: Array.isArray(item && item.content)
+          ? item.content.map((part) => ({ type: part && part.type, text: part && part.text }))
+          : null,
+      }))
+    : null;
+  return JSON.stringify({
+    model: value && value.model,
+    instructions: value && value.instructions,
+    input,
+    max_output_tokens: value && value.max_output_tokens,
+    temperature: value && value.temperature,
+    stream: value && value.stream,
+    store: value && value.store,
+  });
+}
+
+// sameBody reports whether the posted body carries exactly the validated wire
+// document. The host rejects a mismatch instead of guessing which one to send.
+function sameBody(posted, wire, keys, canonical) {
   if (!posted || typeof posted !== "object" || Array.isArray(posted)) return false;
-  if (Object.keys(posted).sort().join(",") !== BODY_KEYS.join(",")) return false;
-  return canonicalBody(posted) === canonicalBody(chat);
+  if (Object.keys(posted).sort().join(",") !== [...keys].sort().join(",")) return false;
+  return canonical(posted) === canonical(wire);
 }
 
 function validateRequest(request) {
@@ -100,6 +140,18 @@ function validateRequest(request) {
   if (!Number.isInteger(request.max_response_chars) || request.max_response_chars < 1 || request.max_response_chars > 12000) {
     return "max_response_chars must be an integer in 1..12000";
   }
+  const endpoint = validateEndpoint(request.endpoint);
+  if (endpoint.error) return endpoint.error;
+  const format = endpointFormat(request.endpoint);
+  if (format === "") return "endpoint must end in /chat/completions or /responses";
+  const hasChat = request.chat !== undefined;
+  const hasResponses = request.responses !== undefined;
+  if (hasChat && hasResponses) return "request must carry exactly one of chat or responses";
+  if (format === "responses") {
+    if (!hasResponses) return "endpoint ends in /responses but the request carries a chat document";
+    return validateResponsesRequest(request);
+  }
+  if (!hasChat) return "endpoint ends in /chat/completions but the request carries a responses document";
   const chat = request.chat;
   if (!chat || typeof chat !== "object" || Array.isArray(chat)) return "chat is required";
   if (typeof chat.model !== "string" || chat.model.trim() === "") return "chat.model is required";
@@ -125,7 +177,46 @@ function validateRequest(request) {
   } catch {
     return "body is not valid JSON";
   }
-  if (!sameBody(posted, chat)) return "body does not match chat";
+  if (!sameBody(posted, chat, CHAT_BODY_KEYS, canonicalBody)) return "body does not match chat";
+  return null;
+}
+
+function validateResponsesRequest(request) {
+  const responses = request.responses;
+  if (!responses || typeof responses !== "object" || Array.isArray(responses)) return "responses is required";
+  if (typeof responses.model !== "string" || responses.model.trim() === "") return "responses.model is required";
+  if (typeof responses.instructions !== "string" || responses.instructions.trim() === "") {
+    return "responses.instructions is required";
+  }
+  if (!Array.isArray(responses.input) || responses.input.length < 1) return "responses.input must have at least one item";
+  let total = Array.from(responses.instructions).length;
+  for (const item of responses.input) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return "every responses input item must be an object";
+    if (typeof item.role !== "string" || item.role.trim() === "") return "every responses input item needs a role";
+    if (!Array.isArray(item.content) || item.content.length < 1) return "every responses input item needs content";
+    for (const part of item.content) {
+      if (!part || typeof part !== "object" || Array.isArray(part)) return "every responses content part must be an object";
+      if (part.type !== "input_text") return "every responses content part must be input_text";
+      if (typeof part.text !== "string" || part.text.trim() === "") return "every responses content part needs text";
+      total += Array.from(part.text).length;
+    }
+  }
+  if (total > 20000) return "responses content exceeds the local size bound";
+  if (!Number.isInteger(responses.max_output_tokens) || responses.max_output_tokens < 64 || responses.max_output_tokens > 2048) {
+    return "responses.max_output_tokens is invalid";
+  }
+  if (responses.temperature !== 0) return "responses.temperature must be 0";
+  if (responses.stream !== false) return "responses.stream must be false";
+  if (responses.store !== false) return "responses.store must be false";
+  if (typeof request.body !== "string" || request.body.trim() === "") return "body is required";
+  if (Buffer.byteLength(request.body) > MAX_STDIN_BYTES) return "body exceeds 1 MiB";
+  let posted;
+  try {
+    posted = JSON.parse(request.body);
+  } catch {
+    return "body is not valid JSON";
+  }
+  if (!sameBody(posted, responses, RESPONSES_BODY_KEYS, canonicalResponses)) return "body does not match responses";
   return null;
 }
 
@@ -165,6 +256,29 @@ function providerMessage(body) {
   }
 }
 
+function responsesOutputText(data) {
+  const output = Array.isArray(data && data.output) ? data.output : [];
+  const parts = [];
+  for (const item of output) {
+    if (!item || item.type !== "message" || !Array.isArray(item.content)) continue;
+    for (const part of item.content) {
+      if (part && part.type === "output_text" && typeof part.text === "string") parts.push(part.text);
+    }
+  }
+  return parts.join("");
+}
+
+function responsesRefused(data) {
+  const output = Array.isArray(data && data.output) ? data.output : [];
+  for (const item of output) {
+    if (!item || item.type !== "message" || !Array.isArray(item.content)) continue;
+    for (const part of item.content) {
+      if (part && part.type === "refusal") return true;
+    }
+  }
+  return false;
+}
+
 async function main() {
   const started = Date.now();
   const raw = await readStdin();
@@ -176,12 +290,13 @@ async function main() {
   }
   const invalid = validateRequest(request);
   if (invalid) return failure("config_error", invalid, { latency_ms: Date.now() - started });
+  const format = endpointFormat(request.endpoint);
 
   const endpoint = validateEndpoint(request.endpoint);
   if (endpoint.error) return failure("config_error", endpoint.error, { latency_ms: Date.now() - started });
   if (!credential) return failure("missing_credential", `${CREDENTIAL_ENV} is not set`, { latency_ms: Date.now() - started });
 
-  // The body was validated against the chat content above; posting these
+  // The body was validated against its wire document above; posting these
   // exact bytes keeps the client's recorded SHA-256 and size truthful.
   const body = request.body;
 
@@ -261,9 +376,40 @@ async function main() {
       request_sent: true,
     });
   }
-  const content = data && data.choices && data.choices[0] && data.choices[0].message
-    ? data.choices[0].message.content
-    : undefined;
+  let content;
+  if (format === "responses") {
+    const state = data && typeof data.status === "string" ? data.status : "unknown";
+    if (state !== "completed") {
+      const reason = data && data.incomplete_details && typeof data.incomplete_details.reason === "string"
+        ? ` (${data.incomplete_details.reason})`
+        : "";
+      return failure("invalid_response", `provider response status is ${state}${reason}`, {
+        http_status: status,
+        latency_ms: latency,
+        request_sent: true,
+      });
+    }
+    const providerIssue = data && data.error && typeof data.error.message === "string" ? data.error.message.trim() : "";
+    if (providerIssue !== "") {
+      return failure("invalid_response", `provider response carried an error: ${providerIssue}`, {
+        http_status: status,
+        latency_ms: latency,
+        request_sent: true,
+      });
+    }
+    if (responsesRefused(data)) {
+      return failure("invalid_response", "provider response refused to answer", {
+        http_status: status,
+        latency_ms: latency,
+        request_sent: true,
+      });
+    }
+    content = responsesOutputText(data);
+  } else {
+    content = data && data.choices && data.choices[0] && data.choices[0].message
+      ? data.choices[0].message.content
+      : undefined;
+  }
   if (typeof content !== "string" || content.trim() === "") {
     return failure("invalid_response", "provider response has no text content", {
       http_status: status,
@@ -296,7 +442,17 @@ async function main() {
     request_sent: true,
   };
   const usage = data.usage;
-  if (
+  if (format === "responses") {
+    if (
+      usage &&
+      Number.isInteger(usage.input_tokens) &&
+      Number.isInteger(usage.output_tokens) &&
+      usage.input_tokens >= 0 &&
+      usage.output_tokens >= 0
+    ) {
+      result.usage = { prompt_tokens: usage.input_tokens, completion_tokens: usage.output_tokens };
+    }
+  } else if (
     usage &&
     Number.isInteger(usage.prompt_tokens) &&
     Number.isInteger(usage.completion_tokens) &&

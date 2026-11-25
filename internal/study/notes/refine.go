@@ -128,7 +128,7 @@ func RefinePreview(ctx context.Context, s *study.Service, draftID int64) (Previe
 		CredentialEnv:     env,
 		CredentialPresent: present,
 		Unanswered:        built.Unanswered,
-		MaxTokens:         request.Chat.MaxTokens,
+		MaxTokens:         request.WireMaxTokens(),
 	}
 	if providerID != "" {
 		index, err := kernel.LoadVerificationIndex(s)
@@ -157,7 +157,7 @@ func RefinePreview(ctx context.Context, s *study.Service, draftID int64) (Previe
 	}
 	if consent.Granted {
 		consent.SourceTextShared = consent.Private
-		preview.Messages = request.Chat.Messages
+		preview.Messages = request.WireMessages()
 		preview.RequestSHA256, preview.RequestBytes = note.RequestIdentity(request.Body)
 	} else {
 		for _, field := range []string{"front", "back", "passage", "question_stem", "evidence"} {

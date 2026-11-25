@@ -254,6 +254,7 @@ export function vSettings(d: SettingsData, u: SettingsUi): Html {
         <span>${ic('seal', 'xs')}${T(`只有「${capName('text.chat')}」能力会被验证`, `Only ${capName('text.chat')} is ever verified`)}</span>
         <span>${ic('adv', 'xs')}${T('已声明 · 未验证：提供方声称支持，未经测试', 'Declared, not tested: claimed by the provider')}</span>
         <span>${ic('minus', 'xs')}${T('不支持', 'Unsupported')}</span>
+        <span data-testid="endpoint-formats">${ic('route', 'xs')}${T('端点以 ', 'Endpoints ending in ')}<code translate="no">/chat/completions</code>${T(' 或 ', ' or ')}<code translate="no">/responses</code>${T(' 结尾都可使用；由路径决定线格式。', ' both work; the path picks the wire format.')}</span>
       </div>
     </section>
     <div class="rail r">

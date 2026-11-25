@@ -145,7 +145,8 @@ type tutorPreviewDoc struct {
 	Mode          string            `json:"mode"`
 	Provider      tutorProviderView `json:"provider"`
 	Context       tutorContextView  `json:"context"`
-	Chat          tutor.Chat        `json:"chat"`
+	Chat          *tutor.Chat       `json:"chat,omitempty"`
+	Responses     *tutor.Responses  `json:"responses,omitempty"`
 	RequestSHA256 string            `json:"request_sha256"`
 	RequestBytes  int               `json:"request_bytes"`
 	Limits        []string          `json:"limits"`

@@ -1,6 +1,16 @@
 import { desktopSmoke, makeDesktopSmokeGate } from "../desktop-smoke.ts";
-import { GO_MOD, patchCopy } from "./fixture.ts";
+import { copyProduct, DESKTOP_SMOKE_SOURCES, GO_MOD, patchCopy } from "./fixture.ts";
 import type { BrokenCase } from "./fixture.ts";
+
+async function renameEndpointFormatsLine(root: string): Promise<string | null> {
+  if (copyProduct(root, DESKTOP_SMOKE_SOURCES) === 0) return "no product source was copied into the fixture root";
+  return patchCopy(
+    root,
+    "desktop/web/src/views/settings.ts",
+    'data-testid="endpoint-formats"',
+    'data-testid="endpoint-formats-missing"',
+  );
+}
 
 /**
  * The stub desktop app the titlebar cases drive: its 880x600 walk reports a
@@ -390,6 +400,19 @@ func main() {
         failures.some((line) => line.startsWith("titlebar: ") && line.includes("titlebar-room-covered"))
           ? null
           : `desktop-smoke: did not report the control under the caption buttons: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      // The settings scenario's own assertion path: the page line naming both
+      // endpoint suffixes is read from the DOM, so the real page without that
+      // hook must fail by the line's name.
+      gate: makeDesktopSmokeGate(["settings"]),
+      label: "a settings page whose endpoint formats line is missing",
+      files: {},
+      prepare: renameEndpointFormatsLine,
+      postFail: (failures) =>
+        failures.some((line) => line.includes("timed out waiting for the endpoint formats line"))
+          ? null
+          : `desktop-smoke: did not report the missing endpoint formats line: ${failures.slice(0, 3).join("; ")}`,
     },
     {
       // The pointer stage's own assertion path: the stub reports that the press

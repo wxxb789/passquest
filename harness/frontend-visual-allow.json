@@ -38,6 +38,11 @@
       "reason": "the title area the page draws under the hidden title bar (0022 P3)"
     },
     {
+      "state": "settings-row",
+      "os": "any",
+      "reason": "the settings line naming both endpoint formats (0021 P2)"
+    },
+    {
       "state": "report",
       "os": "macos",
       "branch": "goal/0022-p3",

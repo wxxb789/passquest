@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { chatReply, pageScript, STUB_CREDENTIAL_ENV } from "../../lib/desktop-page.ts";
+import { chatReply, defaultStubReply, pageScript, STUB_CREDENTIAL_ENV } from "../../lib/desktop-page.ts";
 import { arrayField, field, numberField, stringField } from "../../lib/json.ts";
 import { cli, HOSTILE_MARKUP, launch, seedStudyTrail } from "./scenario.ts";
 import type { Scenario } from "./scenario.ts";
@@ -76,7 +76,7 @@ const history = {
 return { answered, withheld, reply: shown, granted, failure: failed, retried, retrySentAt, retry: { failed: after.dataset.testid !== "coach-reply", code: after.dataset.code ?? null, text: after.textContent }, history };
 `),
     });
-    provider.respond = () => chatReply("OK");
+    provider.respond = defaultStubReply;
     if (!launched) return;
     const value = launched.value;
     const question = stringField(field(field(value, "answered"), "item"), "question");
