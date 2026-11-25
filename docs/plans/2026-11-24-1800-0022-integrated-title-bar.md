@@ -19,6 +19,11 @@ rejected with evidence, named in the round-3 answer.
 Revised again 2026-11-24 in the P1 round 2: the title read-back fact and row P1's service sentence
 (MyGo's `Window.Title` returns its cached string, so Windows reads the OS title through the window's
 HWND and macOS/Linux keep the cached read as a disclosed limit — docs/harness.md row 24).
+Revised again 2026-11-25 in the P4 round 2: Q-0022-02's Linux premise (GTK's title buttons follow
+the desktop's theme and `SetWindowButtonsTheme` is a no-op on Linux, so the app draws them from the
+page's appearance through `Theme.SetGTKCSS`), the boot scenario's parse check for both sheets, the
+`gtk-decoration-layout` probe the two Ubuntu jobs log, and Linux's `room.height` being the app's own
+request rather than a reading.
 
 ## Goal in one sentence
 
@@ -350,8 +355,12 @@ per-OS screenshots and a recorded manual pass for what no gate can see.
    behaves as today, which is why the macOS and Linux columns of P2's bench run must read
    byte-identical shots.
 2. **Q-0022-02 — Which appearance the caption buttons follow.** The app's own theme, on Windows, by
-   calling `Window.SetWindowButtonsTheme` when the page's theme changes; macOS and Linux keep the
-   system's own appearance (guard: `mygo@v0.10.0/window.go:1431-1434`). The theme lives in the page's
+   calling `Window.SetWindowButtonsTheme` when the page's theme changes; macOS's traffic lights keep
+   the system's own look, and Linux's GTK buttons are drawn from the page's own ink through
+   `Theme.SetGTKCSS`, the API for the buttons of a hidden title bar, because they otherwise follow
+   the desktop's GTK theme and `SetWindowButtonsTheme` is a no-op there (P4 round 2: the guard this
+   plan first quoted, `mygo@v0.10.0/window.go:1431-1434`, holds only while the app's GTK appearance
+   is the desktop's own, which this app's page theme need not be). The theme lives in the page's
    `localStorage` (`desktop/web/src/core/prefs.ts:23-38`), so the page tells Go: one new bound method,
    bound like `Study` is (`internal/desktop/desktop.go:109`), the generated client regenerated with
    it (`desktop/web/src/api/mygo.ts`, which `desktop-smoke`'s client-fresh scenario compares against a
@@ -664,11 +673,19 @@ appearances checked by eye against the macOS HIG (the lights' colour is the syst
   compositors that decorate windows themselves. The page reserves the room GTK reports, if any: the
   backend is GTK 3 (fact 1), its height is `TitleBarHeight` when the bars have one, and the widths
   come from the desktop's `gtk-decoration-layout`.
+- The title buttons are drawn from the page's appearance (P4 round 2, Q-0022-02): GTK's follow the
+  desktop's GTK theme and `SetWindowButtonsTheme` is a no-op on Linux, so `Study.SetWindowButtonsTheme`
+  applies a `Theme.SetGTKCSS` sheet whose colours are the page's `--ink` for the two appearances
+  (light glyphs on the dark page, dark on the light one, with the ink's own hover wells), and the boot
+  scenario calls it on Ubuntu — a sheet GTK rejects fails the gate there.
 - The reading: the hidden window's room from `desktop-smoke`'s boot and `titlebar` results and the
   *shown* window's from the bench's `linux-smoke` job (`--smoke`, visible WebKitGTK windows under
   Xvfb, `.github/workflows/frontend-bench.yml:213-257`) — the shot rows carry the room from P1, so
-  the shown value is in this run's own artifact. A hidden window that reads zero while the shown one
-  reads a room is written down as a coverage limit of the hidden gates, not smoothed over.
+  the shown value is in this run's own artifact. On Linux `height` is the app's own `TitleBarHeight`
+  request (mygo `internal/linux/titlebar.go`), so whether GTK built a bar is read from `left`/`right`
+  above zero, not from the height; a hidden window whose `left`/`right` read zero while the shown one
+  reads a bar is written down as a coverage limit of the hidden gates, not smoothed over. Both
+  Ubuntu jobs log the runner's `gtk-decoration-layout` beside these readings.
 - The double-click is split as Q-0022-04 says: the takeover assertion is real on Ubuntu's bare Xvfb
   (no window manager to act on `gtk_window_maximize`), the `isMaximized()` reading is recorded beside
   it and **not** asserted, and the effect on a real desktop is the manual pass.
@@ -683,8 +700,9 @@ comparison jobs (Linux takes no part in the shot comparison; its two `today` cel
 
 *Proof:* the P4 run and the Ubuntu desktop jobs: the room readings per launch kind, the four ux
 checks green (or the recorded difference with its reason), `desktop-smoke` green on Ubuntu with the
-takeover assertion and the recorded maximize reading, the AppImage-built window checked by the
-package smoke's study case.
+takeover assertion, the recorded maximize reading and the boot scenario's two button sheets
+answering without error (GTK parsed them), the AppImage-built window checked by the package smoke's
+study case.
 
 ### P5 — evidence, decisions, shots and the manual pass (Done-when 1, 2, 4, 5)
 
@@ -733,7 +751,9 @@ the coordinator; the sheets' diff reviewed per sheet; the coordinator commits an
 ## Risks (each with how it is detected)
 
 - **A hidden window reports no room on macOS or Linux** (MyGo reads AppKit frames and, on Linux, GTK
-  allocations) → the checks' conditional form reports "no title bar" while the shown window has one.
+  allocations — where `height` is the app's own `TitleBarHeight` request, so a bar's presence is
+  `left`/`right` above zero) → the checks' conditional form reports "no title bar" while the shown
+  window has one.
   Detected by the room reading in the boot result per OS; the ux audits and the 880x600 walk are
   hidden launches too (`harness/lib/desktop-page.ts:285-287`), so their checks then read
   run-and-skipped and the record carries the hidden/shown pair instead of a green claim; the fix is a
@@ -741,10 +761,11 @@ the coordinator; the sheets' diff reviewed per sheet; the coordinator commits an
   Q-0022-04 disclosure.
 - **The page's change is not room-driven after all** → P2's macOS shot column (or P3's Windows column)
   shows a difference; it is a finding, because only the step's own OS is allowlisted (Q-0022-06).
-- **The caption buttons' colours do not follow the app's theme** (the Windows default is the system
-  appearance) → the manual pass sees light glyphs on a light title area; the Go test on the new bound
-  method and the page's call site are the mechanical half. Detection: the manual pass's captures in
-  both appearances while the system is in the other one.
+- **The caption buttons' colours do not follow the app's theme** (Windows' default is the system
+  appearance; GTK's buttons follow the desktop's GTK theme — P4 round 2) → the manual pass sees light
+  glyphs on a light title area; the Go test on the new bound method, the page's call site and the
+  boot scenario's parse check of both Linux sheets are the mechanical half. Detection: the manual
+  pass's captures in both appearances while the system is in the other one.
 - **A control or a painted capsule sits under the buttons at some state or size** →
   `titlebar-room-covered` names the control and `titlebar-room-paint` the painted box (the `.util`
   capsule is the round-2 `padding-right` case, pinned by the self-test); the contract's own sizes
@@ -818,8 +839,10 @@ its runner has no window manager (Q-0022-04); the hidden gates on Linux read wha
   and the allowlist entries P2 added.
 - **P3 → P4, P5:** macOS's room values, whether a hidden macOS window reports them, its title
   read-back, and the `hiddenInset` question settled (Q-0022-03).
-- **P4 → P5:** Linux's two readings (hidden and shown), the `gtk-decoration-layout` in effect on the
-  runner, and the SSD disclosure if it applies.
+- **P4 → P5:** Linux's two readings (hidden and shown; a bar is `left`/`right` above zero, because
+  `height` is the app's own `TitleBarHeight` request there), the `gtk-decoration-layout` the two
+  Ubuntu jobs now log, the button sheets' parse result from the boot scenario, and the SSD
+  disclosure if it applies.
 - **Any step that has to show a window or fall back → P5:** the finding quoted from the run, so the
   evidence record's limits are evidence, not opinion.
 

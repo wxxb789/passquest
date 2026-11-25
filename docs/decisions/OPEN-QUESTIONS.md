@@ -2571,8 +2571,12 @@ Entry format:
 ### Q-0022-02 — Which appearance do the caption buttons follow?
 - Status: decided(default taken)
 - Context: with a hidden title bar, Windows' buttons default to the **system** appearance
-  (`AppsUseLightTheme`) while this app's appearance is its own page theme; macOS's lights and GTK's
-  title buttons keep the app's appearance on their own (`mygo@v0.10.0/window.go:1431-1434`).
+  (`AppsUseLightTheme`) while this app's appearance is its own page theme; macOS's lights keep the
+  app's appearance on their own (`mygo@v0.10.0/window.go:1431-1434`), while GTK's title buttons
+  follow the **desktop's** GTK theme — `Window.SetWindowButtonsTheme` is a no-op on Linux
+  (`mygo@v0.10.0/internal/linux/window.go:947-949`) and the app never set `Theme.SetSource`, the
+  other way GTK's appearance follows the app's — so a light desktop theme would put dark glyphs on
+  the app's dark page (found in the P4 round 2 review, 2026-11-25).
 - Options considered: (A) the app tells MyGo which appearance it wants, on Windows, through
   `Window.SetWindowButtonsTheme`; (B) accept the system appearance; (C) a page-drawn caption (out of
   scope, Q-0022-09).
@@ -2581,6 +2585,11 @@ Entry format:
   wrapper, called at boot and on the theme toggle. Disclosed: this adds one method to the app's
   bound surface; `window.mygo.window`'s behaviour does not change. Reversal: drop the call and
   accept system-appearance buttons, legible only while the system and app appearances agree.
+  Amended 2026-11-25 in the P4 round 2: on Linux the same bound method also applies a
+  `Theme.SetGTKCSS` sheet that draws the GTK title buttons from the page's appearance — the ink of
+  `desktop/web/styles/tokens.css`'s two themes, with hover and active wells of the same ink — so a
+  desktop theme of the other appearance cannot make a button invisible; the boot scenario calls it
+  on Ubuntu, where a sheet GTK rejects fails the gate.
 - Revisit when: MyGo gives the page a way to set the buttons' theme, or the caption stops being
   MyGo's own drawing.
 
@@ -2613,6 +2622,10 @@ Entry format:
   the page can observe) and records the maximize reading; the Ubuntu artifact carries the hidden
   window's room, and the effect on a real desktop is the manual pass. Reversal: drop the Linux arm
   if no first-tier Linux appears.
+  Amended 2026-11-25 in the P4 round 2: on Linux that room's `height` is the app's requested
+  `TitleBarHeight` (mygo `internal/linux/titlebar.go:123`), so whether GTK keeps buttons is read
+  from `left`/`right` above zero, not from a zero height, which no non-fullscreen Linux window
+  reports; the two Ubuntu jobs log the effective `gtk-decoration-layout` beside the readings.
 - Revisit when: a first-tier OS gains a Linux desktop in the matrix, or a compositor starts
   reporting the room.
 

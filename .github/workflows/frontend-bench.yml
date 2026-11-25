@@ -255,6 +255,13 @@ jobs:
       - name: Check the tool's parsers and the noise decision
         run: bun harness/tools/frontend-bench.ts --self-check
 
+      # Beside the rooms line the smoke prints, for P5: what the GTK title buttons' layout comes
+      # from. The runner has no GNOME session, so an unset key is GTK 3's own compiled default.
+      - name: The title button layout of this runner
+        run: >-
+          gsettings get org.gnome.desktop.wm.preferences button-layout ||
+          echo "unset (GTK 3's compiled default: menu:minimize,maximize,close)"
+
       - name: Render smoke (a visible window on the virtual display)
         shell: bash
         # The window is measured visibly, so the display is Xvfb's, with the screen size stated

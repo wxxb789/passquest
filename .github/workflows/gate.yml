@@ -87,6 +87,15 @@ jobs:
         shell: bash
         run: bun run gate --group "$GATE_GROUP" 2>&1 | tee "$RUNNER_TEMP/gate-output.log"
 
+      # P5 reads the rooms the Linux title-area checks report against the layout the GTK title
+      # buttons then come from; the runner has no GNOME session, so an unset key is GTK 3's own
+      # compiled default.
+      - name: The title button layout of this runner
+        if: runner.os == 'Linux' && matrix.group == 'desktop'
+        run: >-
+          gsettings get org.gnome.desktop.wm.preferences button-layout ||
+          echo "unset (GTK 3's compiled default: menu:minimize,maximize,close)"
+
       # A private session bus with a keyring unlocked by a throwaway password, so
       # libsecret never prompts and nothing outlives the job.
       - name: Gate (D-Bus session with an unlocked keyring)

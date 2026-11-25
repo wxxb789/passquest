@@ -41,13 +41,28 @@ func TestSetWindowButtonsThemeWithoutAWindow(t *testing.T) {
 	}
 }
 
+// Each appearance's GTK sheet carries that page's ink, never the other's: a swap
+// would draw the buttons invisible on exactly the appearance this exists for.
+func TestGtkTitleButtonsCSS(t *testing.T) {
+	light, dark := gtkTitleButtonsCSS("light"), gtkTitleButtonsCSS("dark")
+	if light == dark {
+		t.Fatal("the light and the dark sheet are the same")
+	}
+	if !strings.Contains(light, "#151c28") || strings.Contains(light, "#ebeff4") {
+		t.Fatalf("the light sheet does not carry the light page's ink: %q", light)
+	}
+	if !strings.Contains(dark, "#ebeff4") || strings.Contains(dark, "#151c28") {
+		t.Fatalf("the dark sheet does not carry the dark page's ink: %q", dark)
+	}
+}
+
 func TestApplyTitleBarPerOS(t *testing.T) {
 	options := mygo.WindowOptions{}
 	applyTitleBar(&options)
 	switch runtime.GOOS {
-	case "windows":
+	case "windows", "linux":
 		if options.TitleBarStyle != mygo.TitleBarHidden || options.TitleBarHeight != 40 {
-			t.Fatalf("Windows title bar = %q, %d, want hidden with height 40", options.TitleBarStyle, options.TitleBarHeight)
+			t.Fatalf("%s title bar = %q, %d, want hidden with height 40", runtime.GOOS, options.TitleBarStyle, options.TitleBarHeight)
 		}
 	case "darwin":
 		if options.TitleBarStyle != mygo.TitleBarHidden || options.TitleBarHeight != 0 {

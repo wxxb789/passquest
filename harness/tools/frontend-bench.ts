@@ -909,6 +909,11 @@ async function runSmoke(options: BenchOptions): Promise<number> {
     say(`launches ${run.launches}; guards checked ${guards.checked}, failed ${guards.failed}, not measured ${guards.notMeasured}`);
     say(`readyMs ${SHOT_STATES.map((state) => `${state}=${ready[state] ?? "-"}`).join(" ")}`);
     say(`shots ${SHOT_STATES.filter((state) => shots[state]).length}/${SHOT_STATES.length} written`);
+    const rooms = run.rows.flatMap((row) => {
+      const titlebar = row.titlebar;
+      return titlebar === null ? [] : [`${row.label} ${titlebar.room.height}/${titlebar.room.left}/${titlebar.room.right}/${titlebar.room.bottom}${titlebar.marker ? " marker" : ""}`];
+    });
+    say(`titlebar rooms ${rooms.join("; ")}`);
   } catch (error) {
     fail(run, error instanceof Error ? error.message : String(error));
   } finally {
