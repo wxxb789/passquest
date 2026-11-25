@@ -1,8 +1,8 @@
 # BYOK text tutor
 
 Goal 0005 adds one user-supplied text-model path for concise, post-attempt coaching. It is deliberately
-narrow: one OpenAI-compatible chat-completions endpoint, one recorded attempt per request, and no
-authority over grades, answer keys or historical attempts.
+narrow: one OpenAI-compatible chat-completions or Responses endpoint, one recorded attempt per
+request, and no authority over grades, answer keys or historical attempts.
 
 Model text is **advisory**. The verified key and deterministic grade remain the application's truth.
 Nothing the provider returns is written into `attempts`, `source_questions`, a report or a
@@ -14,6 +14,7 @@ recommendation. A failed or malformed response is recorded as a failure and cann
 # Inspect; then save one endpoint and model. The key is never stored.
 passquest tutor config
 passquest tutor config --endpoint https://api.example.com/v1/chat/completions --model MODEL
+# or a Responses endpoint: --endpoint https://api.example.com/v1/responses
 passquest tutor config --timeout-seconds 30 --max-output-tokens 350 --daily-calls 20
 
 # See the exact provider payload first. Nothing is sent.
@@ -37,8 +38,9 @@ the same database the window opens ([install.md](install.md)).
 
 ## One supported endpoint
 
-- A full URL to an OpenAI-compatible `chat/completions` endpoint. `https` is required except for
-  loopback addresses (`localhost`, `127.0.0.1`, `::1`) where a local model server may use `http`.
+- A full URL to an OpenAI-compatible `chat/completions` or `responses` endpoint. `https` is
+  required except for loopback addresses (`localhost`, `127.0.0.1`, `::1`) where a local model
+  server may use `http`.
 - URLs with userinfo, a query string or a fragment are rejected, so a credential cannot be smuggled
   into stored configuration.
 - The request body is exactly `{model, messages, max_tokens, temperature: 0, stream: false}`.

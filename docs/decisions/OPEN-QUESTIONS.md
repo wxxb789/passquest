@@ -2913,4 +2913,164 @@ Entry format:
   notice only reads the filesystem, and P1's diff changes no window behaviour beyond the default seam's
   computation.
 - Revisit when: a later goal needs one of the excluded behaviours; it starts its own entry.
+||||||| parent of 5852feb (provider: accept OpenAI Responses endpoints beside chat completions (0021 P1))
+
+### Q-0021-01 — Which endpoint paths select which wire format?
+- Status: decided(default taken)
+- Context: the app speaks one wire format today (OpenAI-compatible chat completions) and the owner
+  made Responses support a must; the learner brings one endpoint URL, and a second setting would be
+  one more fact to keep consistent with the stored path.
+- Options considered: (A) the endpoint path selects the format, with no separate setting;
+  (B) an explicit `--format`/settings toggle; (C) a provider-registry field per provider.
+- Default taken: (A), the goal's own expected default. One Go derivation
+  (`internal/provider`: `FormatChatCompletions`/`FormatResponses`, from the path's final segment
+  after `TrimRight("/")`) is the only place the choice is made; it feeds `validateEndpoint`, the
+  registry shape check, `tutor.ProbeRequest`/`hostRequestFor`, and the legacy/custom row's reported
+  shape. The Node hosts derive the same value from `request.endpoint` (the tutor host, which
+  validates the Go document) and from the model endpoint (the durable host, which has no Go-built
+  body). A path that is neither form is refused with a message naming both, in the Go validator,
+  both host validators and the CLI flag help. Reversal: one line per site back to the single
+  suffix. Disclosed: no separate setting exists to disagree with the path.
+- Revisit when: a provider needs a format the path cannot name, or a gateway's path stops matching
+  the API it serves.
+
+### Q-0021-02 — What is the tutor's Responses body, field by field?
+- Status: decided(default taken)
+- Context: the tutor host posts exactly one non-streaming body the Go side builds and validates;
+  the Responses API renames the token-limit field, moves the system text and defaults `store` to
+  `true` (>= 30 days retention), so every field needs a decision.
+- Options considered: (A) the mapping below; (B) keep `messages` and add `instructions` only;
+  (C) hand-roll a Responses body in the host instead of validating Go's.
+- Default taken: (A): `{"model":…, "instructions":<the leading system text>,
+  "input":[{"role":"user","content":[{"type":"input_text","text":…}]}], "max_output_tokens":<the
+  configured bound>, "temperature":0, "stream":false, "store":false}` — `instructions` per the
+  reference's own words, `input` as an item list (`role` `user`/`assistant` for every non-system
+  message, in order; one leading system message today), `max_output_tokens` for `max_tokens`,
+  `temperature: 0` and `stream: false` unchanged, and `store: false` because the app has never
+  opted into provider-side storage (both hosts agree). The host validates the posted bytes against
+  the same mapping, so a Go/host disagreement fails closed before anything is posted. Reversal:
+  drop the format branch; a learner then gets the host's `invalid_response` on a responses
+  endpoint, never a silent wrong-shaped post. The refine path builds the same two documents from
+  its own messages, and the preview readers (`internal/study/notes/refine.go`,
+  `internal/workspace/workspace_coach.go`) read the non-nil wire doc, so a responses learner sees
+  the content the host validates.
+- Revisit when: the API reference changes the field names or the `store` default, or a gateway the
+  owner probes rejects one of these fields (Q-0021-08).
+
+### Q-0021-03 — Does the durable path hand-roll a Responses body?
+- Status: decided(default taken)
+- Context: pi-ai 1.5.2 already ships an OpenAI Responses adapter
+  (`openAIResponsesApi()`), and the durable host declares its provider with one streams value
+  today; the Responses adapter would otherwise need a hand-written streaming/tool body.
+- Options considered: (A) the library's own adapter, selected by `model.api`; (B) hand-roll the
+  Responses body; (C) refuse Responses on the durable path until the library offers it.
+- Default taken: (A): the host declares the provider `api` as a map
+  (`{"openai-completions": openAICompletionsApi(), "openai-responses": openAIResponsesApi()}`) and
+  sets `model.api` from the endpoint's path, so the library keeps owning streaming and tool
+  plumbing. Disclosed: the durable request therefore differs from the tutor's in *where* the
+  system text goes (an `input` item) and in carrying `stream: true`, plus the library's own
+  defaults — `store: false`, and no `prompt_cache_key` because the host passes no session id
+  (`clampOpenAIPromptCacheKey(undefined)` returns `undefined` and the encoder drops it). The
+  recorded bodies are the authority for every field. Reversal: one `api:` line back to the single
+  completions adapter.
+- Revisit when: the library changes the adapter's request shape, or a hosted gateway rejects the
+  library's own fields.
+
+### Q-0021-04 — One registry shape or two, and what must an entry declare?
+- Status: decided(default taken)
+- Context: `endpoint_shape` is an authored registry field (`EndpointShape =
+  "openai-chat-completions"` today) and reaches `model list` and the settings JSON; a build that
+  speaks two shapes must decide what a wrong declaration means.
+- Options considered: (A) add `openai-responses` and require an entry's declared shape to agree
+  with its endpoint's derived format; (B) accept both shapes without the agreement rule; (C) derive
+  the shape everywhere and drop the field.
+- Default taken: (A). An entry **with** a non-empty `endpoint` must declare the shape that
+  endpoint derives; a mismatch is a registry error naming both shapes. An entry **without** an
+  endpoint — the built-in `custom` row — keeps its declared value: there is no path to disagree
+  with, and the embedded registry must stay valid. The learner-visible shape of a custom or legacy
+  selection is derived from the active endpoint (`internal/study/models`), so `model list` and the
+  settings document cannot report `openai-chat-completions` for a `/responses` endpoint. No
+  previously-valid registry with an endpoint changes meaning: today's validator refuses a
+  `/responses` endpoint outright. Reversal: accept both shapes without the agreement rule (a
+  one-condition delete). The plan chooses agreement because the field is authored and a wrong value
+  shows in `model list` and the settings JSON.
+- Revisit when: the registry gains a shape whose endpoint cannot derive it, or the field stops
+  being authored.
+
+### Q-0021-05 — How does the tutor read a Responses reply?
+- Status: decided(default taken)
+- Context: the two formats report text, completion state and usage differently; the tutor host
+  must keep one error class and one non-negative usage rule for both.
+- Options considered: (A) concatenate every `output_text` part and refuse a non-`completed`
+  status; (B) read only `output[0]` and accept text with any status; (C) treat every Responses
+  reply as `invalid_response` until the owner probes a real endpoint.
+- Default taken: (A). Text = the concatenation of `text` from every `output[].content[]` part of
+  type `output_text` across `output[]` items of type `message`, in order; a response whose `status`
+  is not `"completed"` (or that yields no text, or has a `refusal` part where text was expected) is
+  `invalid_response` with a message naming the state and `incomplete_details.reason` when present
+  — the same error class a chat response with no content gets today. Disclosed strictness: a chat
+  reply a provider cut off is accepted whenever `choices[0].message.content` is non-empty, while a
+  Responses reply whose `status` is not `completed` is refused even when it carries text — the
+  Responses API reports the reason, the chat form does not, and the record's difference table
+  states the asymmetry. Usage maps `input_tokens` → `prompt_tokens` and `output_tokens` →
+  `completion_tokens`, reported only when both are integers >= 0. The 1 MiB body cap, credential
+  redaction, `request_sent` and the HTTP-status classes are unchanged. Reversal: fall back to
+  `invalid_response` for every responses reply, which loses text the API does return.
+- Revisit when: the reference changes the status vocabulary or usage fields, or the owner's probe
+  shows a provider whose completed reply carries no `output_text` part.
+
+### Q-0021-06 — What does "the settings text" mean, and what does the page change cost?
+- Status: decided(default taken)
+- Context: Done-when 6 asks the learner to be told how the app picks a format, the window's
+  settings are where a learner configures providers, and the ux language audit fires on bare
+  ASCII words inside a Chinese line (`zh-ascii-words`, `harness/lib/ux-page.ts`).
+- Options considered: (A) one bilingual line in the Models & providers section;
+  (B) only the CLI help and the docs; (C) a settings control per endpoint.
+- Default taken: (A), one line in `desktop/web/src/views/settings.ts`
+  (`data-testid="endpoint-formats"`): English "Endpoints ending in `/chat/completions` or
+  `/responses` both work; the path picks the wire format." and the same fact in Chinese, with both
+  suffixes inside `<code translate="no">…</code>` (the `zh-ascii-words` rule). It changes the
+  `settings-row` shot, so the adding step's bench run allowlists `settings-row` with its reason on
+  both comparison OSes and the next step removes the entry (the 0022 P1 allowlist rule).
+  `docs/evidence/0012/settings.webp` is the commit-`354f08c` sheet its README names; regenerating
+  it is a coordinator action ordered after 0022's own regeneration so one pass covers both goals'
+  page changes. Reversal: delete the line; the CLI help and the docs still tell the truth.
+- Revisit when: the settings page is redesigned, or a second page needs the same statement.
+
+### Q-0021-07 — When do the Pi packages move, and what happens while the feed lags?
+- Status: decided(default taken)
+- Context: upstream 1.6.0 exists (undici security updates; a system-role change for
+  OpenAI-compatible non-OpenAI providers) but the corporate feed served 1.5.2 for all four direct
+  pins on 2026-11-25, and the goal's own rule says a feed that does not serve 1.6.0 is evidence,
+  not a blocker for items 1-4 and 6.
+- Options considered: (A) do the Responses work on the pinned 1.5.2 and make the bump its own
+  last, feed-gated step; (B) wait for the feed before any Responses work; (C) vendor 1.6.0 by
+  hand.
+- Default taken: (A): P1-P3 land on 1.5.2 (its Responses adapter is present), P5 re-runs the feed
+  check first, over all six `@earendil-works` entries `bun.lock` holds (the four direct pins plus
+  `pi-codemode`/`pi-telemetry`), and if the feed serves >= 1.6.0 for all six, moves the four
+  direct pins together and re-resolves the lock from the feed (a mixed set is reported as blocked,
+  not shipped). While the feed serves 1.5.2, the disclosed default is **item 5 blocked**: no
+  package file changes, the feed's version listing and the 404 recorded as the blocked evidence,
+  the owner action named (ask the feed owner to publish 1.6.0), and the check left re-runnable.
+  Reversal: none needed — the check is a command.
+- Revisit when: the feed serves >= 1.6.0 for all six entries, or the feed owner reports it will
+  not.
+
+### Q-0021-08 — What do the fakes prove, and what only the owner can?
+- Status: decided(default taken)
+- Context: every model feature must be shown working over Responses, but a gate may not contact a
+  real provider, and a gateway that claims `/v1/responses` can still differ from the reference.
+- Options considered: (A) loopback fakes that reproduce each format's request shape, response
+  shape and refusals, plus an owner probe for the real-endpoint questions; (B) one fake that
+  answers both shapes permissively; (C) skip the probe and claim reference compliance.
+- Default taken: (A). Each fake reproduces its format's request shape (the strict key set and
+  value mapping the app sends), its response shape (chat: `choices[0].message.content`; responses:
+  `output[]` message items and `usage.input_tokens/output_tokens`, plus the SSE event set the
+  durable path's library requires) and its refusals (401/403, 429, 400-with-`error.message`,
+  200-with-no-text, non-JSON). A real OpenAI or Azure Responses endpoint, and a gateway that
+  claims `/v1/responses`, are **not** contacted: a credentials-and-budget probe against one is an
+  owner action, first-party text only, and its result is recorded as the owner's evidence or as an
+  untested limit. Reversal: none — contacting real providers from a gate is forbidden.
+- Revisit when: the owner's probe runs, or a fake's shape stops matching the reference.
 

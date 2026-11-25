@@ -23,8 +23,53 @@ const RegistryVersion = 1
 // deliberately local operator edit; it is never a learner setting.
 const RegistryEnv = "PASSQUEST_PROVIDER_REGISTRY"
 
-// EndpointShape is the one transport shape this build speaks.
+// EndpointShape is the chat-completions transport shape.
 const EndpointShape = "openai-chat-completions"
+
+// ShapeResponses is the OpenAI Responses transport shape.
+const ShapeResponses = "openai-responses"
+
+// Format is the wire format an endpoint path selects.
+type Format string
+
+const (
+	FormatChatCompletions Format = "chat-completions"
+	FormatResponses       Format = "responses"
+)
+
+// Shape returns the registry shape value of this format.
+func (f Format) Shape() string {
+	if f == FormatResponses {
+		return ShapeResponses
+	}
+	return EndpointShape
+}
+
+// FormatOf reports the wire format the endpoint's path ends in. It reads the
+// path only; the rest of the URL is validateEndpoint's business.
+func FormatOf(raw string) (Format, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", false
+	}
+	return formatOfPath(u.Path)
+}
+
+func formatOfPath(path string) (Format, bool) {
+	trimmed := strings.TrimRight(path, "/")
+	switch {
+	case strings.HasSuffix(trimmed, "/chat/completions"):
+		return FormatChatCompletions, true
+	case strings.HasSuffix(trimmed, "/responses"):
+		return FormatResponses, true
+	default:
+		return "", false
+	}
+}
+
+func validShape(shape string) bool {
+	return shape == EndpointShape || shape == ShapeResponses
+}
 
 // CustomProvider is the provider id that accepts a learner-supplied endpoint
 // and model id instead of a registry-declared pair.
@@ -87,8 +132,9 @@ func (m Model) Has(c Capability) bool {
 	return false
 }
 
-// Provider is one registry entry. EndpointShape names the transport contract;
-// a non-custom provider must carry a full chat-completions endpoint.
+// Provider is one registry entry. An entry with a non-empty endpoint must
+// declare the shape that endpoint's path derives; a non-custom provider must
+// carry a full endpoint.
 type Provider struct {
 	ID            string  `json:"id"`
 	Name          string  `json:"name"`
@@ -289,8 +335,13 @@ func (r Registry) Validate() error {
 		if strings.TrimSpace(p.Name) == "" {
 			add("provider %q: name is required", label)
 		}
-		if p.EndpointShape != EndpointShape {
+		if !validShape(p.EndpointShape) {
 			add("provider %q: endpoint_shape %q is not supported", label, p.EndpointShape)
+		} else if p.Endpoint != "" {
+			if derived, ok := FormatOf(p.Endpoint); ok && derived.Shape() != p.EndpointShape {
+				add("provider %q: endpoint_shape %q does not match its endpoint's shape %q",
+					label, p.EndpointShape, derived.Shape())
+			}
 		}
 		if !envPattern.MatchString(p.CredentialEnv) {
 			add("provider %q: credential_env %q is not an environment variable name", label, p.CredentialEnv)
@@ -390,8 +441,9 @@ func validateEndpoint(raw string) error {
 		return fmt.Errorf("endpoint scheme %q is not http or https", u.Scheme)
 	case u.Scheme == "http" && !isLoopback(u.Hostname()):
 		return errors.New("endpoint uses http off-loopback; use https")
-	case !strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/chat/completions"):
-		return errors.New("endpoint must end in /chat/completions")
+	}
+	if _, ok := formatOfPath(u.Path); !ok {
+		return errors.New("endpoint must end in /chat/completions or /responses")
 	}
 	return nil
 }

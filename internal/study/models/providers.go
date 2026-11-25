@@ -65,19 +65,21 @@ func ProvidersOf(listing Listing) []Provider {
 	var rows []Provider
 	for _, p := range listing.Registry.Providers {
 		modelRows := modelRowsOf(listing, p.ID, p.Models, activeID == p.ID)
+		shape := p.EndpointShape
 		if p.Custom && activeID == p.ID {
 			selected := provider.Model{ID: listing.Active.Model, Capabilities: []provider.Capability{provider.CapTextChat}}
 			modelRows = modelRowsOf(listing, p.ID, []provider.Model{selected}, true)
+			shape = shapeOfEndpoint(listing.Active.Endpoint, shape)
 		}
 		rows = append(rows, Provider{
-			ID: p.ID, CredentialID: p.ID, Name: p.Name, EndpointShape: p.EndpointShape,
+			ID: p.ID, CredentialID: p.ID, Name: p.Name, EndpointShape: shape,
 			Custom: p.Custom, Active: activeID == p.ID, Models: modelRows,
 		})
 	}
 	if listing.Configured && activeID == "" {
 		rows = append(rows, Provider{
 			ID: "legacy", CredentialID: "", Name: "Manual tutor configuration",
-			EndpointShape: provider.EndpointShape, Active: true,
+			EndpointShape: shapeOfEndpoint(listing.Active.Endpoint, provider.EndpointShape), Active: true,
 			Models: []Model{{
 				ID: listing.Active.Model, Label: "hand-configured endpoint", Active: true,
 				Capabilities: []CapabilityState{{ID: string(provider.CapTextChat), Declared: true, State: "legacy"}},
@@ -85,6 +87,13 @@ func ProvidersOf(listing Listing) []Provider {
 		})
 	}
 	return rows
+}
+
+func shapeOfEndpoint(endpoint, declared string) string {
+	if format, ok := provider.FormatOf(endpoint); ok {
+		return format.Shape()
+	}
+	return declared
 }
 
 // modelRowsOf renders one provider's models with their capability evidence,

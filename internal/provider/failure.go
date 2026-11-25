@@ -134,7 +134,7 @@ func actionFor(kind string) string {
 	case FailureEndpointUnreach:
 		return "check the endpoint URL and this machine's network connection"
 	case FailureInvalidResponse:
-		return "point the endpoint at an OpenAI-compatible /chat/completions API"
+		return "point the endpoint at an OpenAI-compatible /chat/completions or /responses API"
 	case FailureProviderError:
 		return "retry later; the provider reported a server error"
 	case FailureAgentUnavailable:

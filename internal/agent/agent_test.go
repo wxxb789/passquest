@@ -93,11 +93,13 @@ func TestValidateEndpoint(t *testing.T) {
 		{"http://[::1]:8080/v1/chat/completions", true},
 		{"http://[0:0:0:0:0:0:0:1]:8080/v1/chat/completions", true},
 		{"https://api.example.com/v1/chat/completions/", true},
+		{"https://api.example.com/v1/responses", true},
+		{"https://api.example.com/v1/responses/", true},
 		{"http://api.example.com/v1/chat/completions", false},
 		{"https://user:pass@api.example.com/v1/chat/completions", false},
 		{"https://api.example.com/v1/chat/completions?x=1", false},
 		{"https://api.example.com/v1/chat/completions#frag", false},
-		{"https://api.example.com/v1/responses", false},
+		{"https://api.example.com/v1/embeddings", false},
 		{"ftp://api.example.com/chat/completions", false},
 	}
 	for _, test := range tests {
@@ -107,6 +109,15 @@ func TestValidateEndpoint(t *testing.T) {
 		}
 		if !test.ok && err == nil {
 			t.Errorf("%s accepted", test.endpoint)
+		}
+	}
+	err := ValidateEndpoint("https://api.example.com/v1/embeddings")
+	if err == nil {
+		t.Fatal("a third endpoint form was accepted")
+	}
+	for _, want := range []string{"/chat/completions", "/responses"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("refusal %q does not name %q", err, want)
 		}
 	}
 }

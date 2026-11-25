@@ -354,10 +354,10 @@ func ValidateModelConfig(model ModelConfig) error {
 	return nil
 }
 
-// ValidateEndpoint accepts one OpenAI-compatible chat-completions URL. It
-// delegates to the registry validator so a stored endpoint cannot pass one
-// surface and fail another; https is required except on loopback and the
-// endpoint must end in /chat/completions.
+// ValidateEndpoint accepts one OpenAI-compatible URL: chat completions or
+// Responses. It delegates to the registry validator so a stored endpoint
+// cannot pass one surface and fail another; https is required except on
+// loopback and the endpoint must end in /chat/completions or /responses.
 func ValidateEndpoint(raw string) error {
 	return provider.ValidateEndpoint(raw)
 }
