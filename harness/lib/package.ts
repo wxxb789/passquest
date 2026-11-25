@@ -1,6 +1,6 @@
 /**
  * Stages the resources a package carries (goal 0013 P2; goal 0016 P1): the
- * agent hosts, the pinned Node 22 LTS runtime and the app icon. A host that
+ * agent hosts, the pinned Node 26.13.1 LTS runtime and the app icon. A host that
  * imports a package is staged as one self-contained ESM bundle built from a
  * generated entry; a host that imports nothing but `node:` built-ins is
  * copied byte-identically. No package carries node_modules: what the app does
@@ -63,7 +63,7 @@ export const AGENT_DIR = "agent";
 const CACHE_DIR = "build/package-cache";
 
 /** The Node runtime every package carries. */
-export const NODE_VERSION = "22.23.5";
+export const NODE_VERSION = "26.13.1";
 
 const PLATFORMS = ["win32", "darwin", "linux"] as const;
 const ARCHS = ["x64", "arm64"] as const;
@@ -136,33 +136,33 @@ export const NODE_PINS: readonly NodePin[] = [
   {
     platform: "win32",
     arch: "x64",
-    archive: "node-v22.23.5-win-x64.zip",
-    sha256: "4a191082e9706866830379d577d2cc8a50c776fcd9436a8d061b063ed0d9a0e3",
-    member: "node-v22.23.5-win-x64/node.exe",
+    archive: "node-v26.13.1-win-x64.zip",
+    sha256: "e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f1f7",
+    member: "node-v26.13.1-win-x64/node.exe",
     path: "node/node.exe",
   },
   {
     platform: "darwin",
     arch: "arm64",
-    archive: "node-v22.23.5-darwin-arm64.tar.gz",
-    sha256: "e7131995759b61a0170b646010d2ad35a5d37b4cb0d471f3e8317eac6f742f3d",
-    member: "node-v22.23.5-darwin-arm64/bin/node",
+    archive: "node-v26.13.1-darwin-arm64.tar.gz",
+    sha256: "aec2514ea1ceb2ba52455e9ec65986f6749a06dd759e5db2a72e6889668c9735",
+    member: "node-v26.13.1-darwin-arm64/bin/node",
     path: "node/bin/node",
   },
   {
     platform: "darwin",
     arch: "x64",
-    archive: "node-v22.23.5-darwin-x64.tar.gz",
-    sha256: "c53383238206b9ae4db23c5d8a63645e2e753bec8ab51a49cc81939aa64e9422",
-    member: "node-v22.23.5-darwin-x64/bin/node",
+    archive: "node-v26.13.1-darwin-x64.tar.gz",
+    sha256: "82bb96078a24ca50b9c9a38f2379e6be6d87171fcd400fc14c8934b3bce96e2f",
+    member: "node-v26.13.1-darwin-x64/bin/node",
     path: "node/bin/node",
   },
   {
     platform: "linux",
     arch: "x64",
-    archive: "node-v22.23.5-linux-x64.tar.xz",
-    sha256: "cdeb8670a0c81f51b4dc4ac61919f9b1ad917b304bf8221eb939570663d240f8",
-    member: "node-v22.23.5-linux-x64/bin/node",
+    archive: "node-v26.13.1-linux-x64.tar.xz",
+    sha256: "5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864",
+    member: "node-v26.13.1-linux-x64/bin/node",
     path: "node/bin/node",
   },
 ];
@@ -173,6 +173,45 @@ export function nodePin(platform: string = process.platform, arch: string = proc
   if (pin) return pin;
   const known = NODE_PINS.map((candidate) => `${candidate.platform}/${candidate.arch}`).join(", ");
   throw new Error(`no Node ${NODE_VERSION} runtime is pinned for ${platform}/${arch}; pinned: ${known}`);
+}
+
+/**
+ * Every source outside this file that carries the pinned runtime's version,
+ * with the token it prints the version as. The package gate compares them all
+ * with NODE_VERSION before its first case: no gate parses these lines, so a
+ * `mise.toml`, workflow or guide sentence left behind by a half-done bump
+ * would otherwise ship beside the new runtime.
+ */
+export const NODE_PIN_SOURCES: Readonly<Record<string, RegExp>> = {
+  "mise.toml": /^node\s*=\s*"([^"]+)"/m,
+  ".github/workflows/gate.yml": /^\s*node-version:\s*"([^"]+)"/m,
+  "docs/install.md": /pinned Node ([0-9][0-9.]*) runtime/,
+  "docs/install.zh-CN.md": /Node ([0-9][0-9.]*) 运行时/,
+  "harness/lib/package.ts": /the pinned Node ([0-9][0-9.]*) LTS runtime/,
+};
+
+/** Reads every pin source under a root; a file that cannot be read stays undefined, which nodePinProblems reports. */
+export function readNodePinSources(root: string): Record<string, string | undefined> {
+  const texts: Record<string, string | undefined> = {};
+  for (const label of Object.keys(NODE_PIN_SOURCES)) {
+    try {
+      texts[label] = readFileSync(path.join(root, ...label.split("/")), "utf8");
+    } catch {
+      texts[label] = undefined;
+    }
+  }
+  return texts;
+}
+
+/** One named failure per source that disagrees with NODE_VERSION, or carries no version token at all. */
+export function nodePinProblems(texts: Readonly<Record<string, string | undefined>>): string[] {
+  const problems: string[] = [];
+  for (const [label, pattern] of Object.entries(NODE_PIN_SOURCES)) {
+    const found = pattern.exec(texts[label] ?? "")?.[1];
+    if (found === undefined) problems.push(`${label}: no pinned Node version found`);
+    else if (found !== NODE_VERSION) problems.push(`${label}: pinned Node reads ${found}, want ${NODE_VERSION}`);
+  }
+  return problems;
 }
 
 /** One entry of the staged tree: a file, or a directory as one line. */

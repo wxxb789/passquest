@@ -4,7 +4,7 @@
 
 Pass Quest ships as an unsigned package for Windows, macOS and Linux: an NSIS installer, a `.dmg`
 and an AppImage. Each package carries the desktop app, the four agent host scripts, the third-party
-notices the inlined code requires and a pinned Node 22 runtime, so the agent features run on the
+notices the inlined code requires and a pinned Node 26.13.1 runtime, so the agent features run on the
 package's own Node with no Node installed (CI proves this for the coach, Anki and the study brief;
 see [What CI proves](#what-ci-proves-and-what-is-untested)). A host that loads npm packages ships as
 one self-contained file and the rest as byte-identical copies, so a package carries no

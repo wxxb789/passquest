@@ -98,7 +98,7 @@ import { buildCLI } from "../lib/go.ts";
 import { stringField } from "../lib/json.ts";
 import { buildPackage, packageNaming, size } from "../lib/package-build.ts";
 import type { PackageNaming } from "../lib/package-build.ts";
-import { assertPlatformExecutable, DURABLE_HOST } from "../lib/package.ts";
+import { assertPlatformExecutable, DURABLE_HOST, NODE_PIN_SOURCES, NODE_VERSION, nodePinProblems, readNodePinSources } from "../lib/package.ts";
 import type { StagedNotices } from "../lib/notices.ts";
 import { run, tail } from "../lib/process.ts";
 import { fail, pass, skip } from "../lib/types.ts";
@@ -146,6 +146,12 @@ export interface PackageSmokeOptions {
    * `installedTree` only.
    */
   notices?: StagedNotices;
+  /**
+   * The texts the pin check reads (label → text, `harness/lib/package.ts`
+   * NODE_PIN_SOURCES), for a self-test case that hands the gate a disagreeing
+   * set; a real run, and every fixture case, reads the repository's own files.
+   */
+  nodePinSources?: Readonly<Record<string, string | undefined>>;
   /** The cases to run, in their usual order; all by default. */
   only?: readonly string[];
 }
@@ -164,6 +170,13 @@ export const packageSmoke = makePackageSmokeGate();
 
 /** The developer tools no launch may find on its PATH. */
 const DEVELOPER_TOOLS = ["go", "bun", "node"];
+
+/**
+ * This gate's own repository root: the pin check reads the repository's files
+ * (`mise.toml`, `gate.yml`, the guides), never `ctx.root`, which a self-test
+ * fixture points at a tree that carries none of them.
+ */
+const REPOSITORY_ROOT = path.resolve(import.meta.dir, "..", "..");
 
 /**
  * The system directories only: the WebView2 loader and the OS tools live there.
@@ -256,6 +269,9 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
   if (cases.length === 0) return fail(["no package-smoke case was selected"]);
   const surface = desktopSurface(ctx);
   if (surface) return surface;
+  const pinProblems = nodePinProblems(options.nodePinSources ?? readNodePinSources(REPOSITORY_ROOT));
+  if (pinProblems.length > 0) return fail(pinProblems);
+  const pinLine = `node pin: ${Object.keys(NODE_PIN_SOURCES).length} sources agree on Node ${NODE_VERSION}`;
   let raw: string;
   try {
     raw = readFileSync(path.resolve(ctx.root, "mygo.json"), "utf8");
@@ -574,6 +590,6 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
   return pass(
     `${assertions} assertions over ${cases.join(", ")}; ${packageLine}${scanLine === "" ? "" : `; ${scanLine}`}${
       cliLine === "" ? "" : `; ${cliLine}`
-    }${upgradeLine === "" ? "" : `; ${upgradeLine}`}`,
+    }${upgradeLine === "" ? "" : `; ${upgradeLine}`}; ${pinLine}`,
   );
 }

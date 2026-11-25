@@ -4,7 +4,7 @@
 
 Pass Quest 以未签名安装包的形式发布，覆盖 Windows、macOS 和 Linux：NSIS 安装程序、`.dmg` 与
 AppImage。每个包都自带桌面应用、四个 agent host 脚本、内联代码所需的第三方声明，以及固定版本的
-Node 22 运行时，所以 agent 功能用包内自带的 Node 运行，不需要你安装 Node（CI 对导师、Anki 和学习
+Node 26.13.1 运行时，所以 agent 功能用包内自带的 Node 运行，不需要你安装 Node（CI 对导师、Anki 和学习
 简报都证明了这一点，见本指南末尾的「CI 证明了什么，什么还没有测过」）。需要加载 npm 包的 host 以单个
 自包含文件发布，其余 host 是逐字节相同的副本，因此包里没有 `node_modules`，也不含 host 用不到的东西
 （[`agent/README.md`](../agent/README.md)）。Anki、AnkiConnect 和任何模型都**不**在包内；使用导师

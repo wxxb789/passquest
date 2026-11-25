@@ -51,7 +51,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "26.13.1"
 
       # The desktop smoke launches a hidden MyGo window: WebKitGTK 4.1 (which pulls
       # in GTK 3) is loaded at window creation, and the runner has no display.
