@@ -1206,6 +1206,13 @@ export const Study = {
   setCredential: bind<[string, string], CredentialStatus>("Study.SetCredential", (providerID: string, key: string) => [providerID, key]),
   /** SetLearnerSettings stores the display-only exam date and daily minutes; empty values clear them. */
   setLearnerSettings: bind<[LearnerSettings], void>("Study.SetLearnerSettings", (settings: LearnerSettings) => [settings]),
+  /**
+   * SetWindowButtonsTheme draws the caption buttons of the hidden title bar for
+   * the page's own theme (goal 0022, Q-0022-02): Windows would draw them in the
+   * system's appearance, which may differ from the page's, while macOS and Linux
+   * keep the system's own buttons whatever this says.
+   */
+  setWindowButtonsTheme: bind<[string], void>("Study.SetWindowButtonsTheme", (theme: string) => [theme]),
   /** Skip records the presented item as skipped and returns its feedback. */
   skip: bind<[string], Feedback>("Study.Skip", (token: string) => [token]),
   /** SkipNote discards the draft. */

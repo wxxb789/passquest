@@ -54,6 +54,7 @@ const METHODS = [
   'services',
   'setCredential',
   'setLearnerSettings',
+  'setWindowButtonsTheme',
   'skip',
   'skipNote',
   'startAssessment',

@@ -106,6 +106,8 @@ func start(deps appDeps) int {
 	// A scripted launch may point the update check at its loopback stub; a
 	// packaged run reads neither override variable (goal 0015).
 	study.target = update.TargetFor(getenv, smoke != nil)
+	var win *mygo.Window
+	study.window = func() *mygo.Window { return win }
 	mygo.BindAs("Study", study)
 
 	if !generating {
@@ -117,7 +119,6 @@ func start(deps appDeps) int {
 		}
 	}
 
-	var win *mygo.Window
 	smoke.bindShots(func() *mygo.Window { return win })
 	smoke.bindWindow(func() *mygo.Window { return win })
 	mygo.App.OnSecondInstance(func([]string, string) {
@@ -161,6 +162,7 @@ func start(deps appDeps) int {
 			Hidden:    strings.TrimSpace(getenv(EnvHidden)) == "1",
 			StateKey:  "main",
 		}
+		applyTitleBar(&options)
 		if options.Hidden {
 			// A hidden window's page runs as a shown one's: web views
 			// throttle the timers of a page that can't be seen to once a

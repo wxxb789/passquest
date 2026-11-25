@@ -123,7 +123,9 @@ interface TitlebarFurniture {
 
 async function fakeTitlebarRoom(root: string, furniture: TitlebarFurniture): Promise<string | null> {
   if (copyProduct(root, DESKTOP_UX_SOURCES) === 0) return "no product source was copied into the fixture root";
-  const rules = [":root { --mygo-titlebar-height: 40px; --mygo-titlebar-inset-right: 138px; }"];
+  // The product's own room-driven rules (P2) are cancelled first: the fixture states the furniture
+  // itself, and its appended rules are unlayered, so they win over the product's cascade layers.
+  const rules = [":root { --mygo-titlebar-height: 40px; --mygo-titlebar-inset-right: 138px; }", "header#top { --app-region: none; }", "header#top .util { margin-right: 0; }"];
   if (furniture.drag !== false) rules.push(":root[data-titlebar] header#top { --app-region: drag; }");
   if (furniture.clearance === "padding") rules.push("header#top .util { padding-right: var(--mygo-titlebar-inset-right); }");
   else if (furniture.clearance !== "none") rules.push("header#top .util { margin-right: var(--mygo-titlebar-inset-right); }");

@@ -5,6 +5,7 @@
 // This module is the registry and the routing glue: the window-wide actions, the ACT table composed
 // from each room's controller (src/controllers/), route loading and route changes, boot recovery, and
 // the keyboard bindings. Each room's state transitions live in its controller.
+import { applyWindowButtonsTheme } from './chrome/titlebar';
 import { labelForKey } from './components/options';
 import { hideMarkPop } from './components/passage';
 import { COACH_MODES, T } from './core/i18n';
@@ -136,6 +137,7 @@ const shellActs: Record<string, Act> = {
   theme() {
     ui.theme = ui.theme === 'light' ? 'dark' : 'light';
     savePref('theme', ui.theme);
+    applyWindowButtonsTheme(ui.theme);
     render(false, false);
     $('#themebtn')?.focus({ preventScroll: true });
     if (ui.route === 'anki') {

@@ -7,6 +7,7 @@
 import '../styles/index.css';
 import { bindApi, connectStudy } from './api/client';
 import { ACT, doMark, keyActions, onDeadline, onFieldInput, onRoute, recoverOnBoot, setEv, watchBrief } from './actions';
+import { applyWindowButtonsTheme, watchTitleBar } from './chrome/titlebar';
 import { checkSelection, hideMarkPop, onMark } from './components/passage';
 import { fitCardFrame, watchCardFrame } from './views/anki';
 import { startClock } from './core/clock';
@@ -133,6 +134,8 @@ function bindStudy(): void {
 
 function boot(): void {
   bindStudy();
+  watchTitleBar();
+  applyWindowButtonsTheme(ui.theme);
   setScreens(screens);
   delegate();
   installKeyboard({ ...keyActions, hideMarkPop });
