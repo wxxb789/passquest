@@ -2,8 +2,16 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
-import { pageScript, STUB_MODEL, STUB_PROVIDER } from "../../lib/desktop-page.ts";
-import { arrayField } from "../../lib/json.ts";
+import {
+  pageScript,
+  STUB_MODEL,
+  STUB_PROVIDER,
+  STUB_RESPONSES_CREDENTIAL_ENV,
+  STUB_RESPONSES_MODEL,
+  STUB_RESPONSES_PROVIDER,
+  writeStubRegistry,
+} from "../../lib/desktop-page.ts";
+import { arrayField, stringField } from "../../lib/json.ts";
 import { executable, run } from "../../lib/process.ts";
 import { launch } from "./scenario.ts";
 import type { Scenario } from "./scenario.ts";
@@ -38,19 +46,34 @@ export const settings: Scenario = {
     const { provider } = s.shared;
     const key = `pq-smoke-${randomBytes(16).toString("hex")}`;
     const account = `api-key:${STUB_PROVIDER}`;
+    const responsesAccount = `api-key:${STUB_RESPONSES_PROVIDER}`;
+    const registry = path.join(s.dir, "registry.json");
+    writeStubRegistry(registry, provider.endpoint, [
+      {
+        id: STUB_RESPONSES_PROVIDER,
+        name: "Smoke stub (Responses)",
+        endpoint: provider.responsesEndpoint,
+        endpointShape: "openai-responses",
+        credentialEnv: STUB_RESPONSES_CREDENTIAL_ENV,
+        model: STUB_RESPONSES_MODEL.split("/")[1],
+      },
+    ]);
     provider.received.length = 0;
     try {
       const launched = await launch(s, {
         label: "settings",
+        env: { PASSQUEST_PROVIDER_REGISTRY: registry },
         script: pageScript(`
 const KEY = ${JSON.stringify(key)};
 const row = '.rrow[data-provider="${STUB_PROVIDER}"]';
+const responsesRow = '.rrow[data-provider="${STUB_RESPONSES_PROVIDER}"]';
 const leaks = [];
 const look = (when) => {
   if (document.documentElement.outerHTML.includes(KEY) || document.body.innerText.includes(KEY)) leaks.push(when);
 };
 location.hash = "#/settings";
 await until("the stub provider row", () => q(row + ' [data-credential="missing"]'));
+await until("the responses provider row", () => q(responsesRow + ' [data-credential="missing"]'));
 await click('[data-act="cred"][data-v="${STUB_PROVIDER}"]');
 const input = await until("the key field", () => q('#credform input[name="key"]'));
 input.value = KEY;
@@ -65,17 +88,41 @@ await until("the remove-key button", () => q('[data-act="cred-clear"][data-v="${
 await click('[data-act="cred-clear"][data-v="${STUB_PROVIDER}"]');
 await until("the cleared key", () => q(row + ' [data-credential="missing"]'), 20000);
 look("after clearing");
-return { leaks };
+await click('[data-act="cred"][data-v="${STUB_RESPONSES_PROVIDER}"]');
+const responsesInput = await until("the responses key field", () => q('#credform input[name="key"]'));
+responsesInput.value = KEY;
+await click('[data-act="credential-save"]');
+await until("the stored responses key", () => q(responsesRow + ' [data-credential="present"]'), 20000);
+look("after saving the responses key");
+await click('[data-act="model-test"][data-v="${STUB_RESPONSES_MODEL}"]');
+await until("the verified responses model", () => q(responsesRow + ' [data-capability="verified"]'), 30000);
+look("after the responses model test");
+if (!q('[data-act="cred-clear"][data-v="${STUB_RESPONSES_PROVIDER}"]')) await click('[data-act="row"][data-v="${STUB_RESPONSES_PROVIDER}"]');
+await until("the responses remove-key button", () => q('[data-act="cred-clear"][data-v="${STUB_RESPONSES_PROVIDER}"]'));
+await click('[data-act="cred-clear"][data-v="${STUB_RESPONSES_PROVIDER}"]');
+await until("the cleared responses key", () => q(responsesRow + ' [data-credential="missing"]'), 20000);
+look("after clearing the responses key");
+const endpointFormats = await until("the endpoint formats line", () => q('[data-testid="endpoint-formats"]'));
+return { leaks, endpointFormats: (endpointFormats && endpointFormats.textContent) || "" };
 `),
       });
       if (!launched) return;
       const leaks = arrayField(launched.value, "leaks");
       s.check(leaks.length === 0, `settings: the key is in the DOM ${leaks.join(", ")}`);
+      const formats = stringField(launched.value, "endpointFormats") ?? "";
+      s.check(
+        formats.includes("/chat/completions") && formats.includes("/responses"),
+        `settings: the endpoint formats line does not name both suffixes: ${JSON.stringify(formats)}`,
+      );
       // The launch environment carries no key, so the provider can only have
       // received it from the OS credential store.
       s.check(
         provider.received.some((request) => request.authorization === `Bearer ${key}`),
         "settings: the provider call after entering the key did not carry it (OS store path)",
+      );
+      s.check(
+        provider.received.some((request) => request.path === "/v1/responses" && request.authorization === `Bearer ${key}`),
+        "settings: the responses endpoint was not verified through the OS store path at /v1/responses",
       );
       // The data directory, the launch's result and, for the package smoke,
       // the installed tree: no credential may reach any of them.
@@ -98,6 +145,7 @@ return { leaks };
       }
     } finally {
       await forgetCredential(s.service, account);
+      await forgetCredential(s.service, responsesAccount);
     }
   },
 };

@@ -367,3 +367,29 @@ func TestTutorHumanOutputStatesAuthorityAndScope(t *testing.T) {
 		t.Errorf("revoked ask does not state withheld source text:\n%s", human)
 	}
 }
+
+func TestTutorHumanPreviewShowsTheResponsesDocument(t *testing.T) {
+	t.Parallel()
+	db := newDB(t)
+	clock := &stepClock{base: goldenBase}
+	transport := &fakeTutorTransport{}
+	practiceSample(t, db, clock)
+	mustTutorRun(t, db, clock, transport, true,
+		"tutor", "config", "--endpoint", "https://api.example.com/v1/responses",
+		"--model", "example-model", "--json")
+
+	human := mustTutorRun(t, db, clock, transport, true, "tutor", "preview", "--attempt", "1")
+	for _, want := range []string{
+		"--- provider responses content (what would be sent) ---",
+		"[instructions]\nYou are Pass Quest's text study coach",
+		"[user]\nMode: explain",
+		"--- end provider responses content ---",
+	} {
+		if !strings.Contains(human, want) {
+			t.Errorf("responses preview is missing %q\n%s", want, human)
+		}
+	}
+	if strings.Contains(human, "provider chat content") {
+		t.Errorf("responses preview prints a chat section\n%s", human)
+	}
+}

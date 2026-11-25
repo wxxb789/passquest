@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/wxxb789/passquest/internal/wire"
 )
 
 // RegistryVersion is the in-repo registry shape this build understands.
@@ -24,52 +26,25 @@ const RegistryVersion = 1
 const RegistryEnv = "PASSQUEST_PROVIDER_REGISTRY"
 
 // EndpointShape is the chat-completions transport shape.
-const EndpointShape = "openai-chat-completions"
+const EndpointShape = wire.ShapeChatCompletions
 
 // ShapeResponses is the OpenAI Responses transport shape.
-const ShapeResponses = "openai-responses"
+const ShapeResponses = wire.ShapeResponses
 
-// Format is the wire format an endpoint path selects.
-type Format string
+// Format and FormatOf are the shared endpoint-path derivation the registry,
+// the tutor host and the agent hosts all read.
+type Format = wire.Format
 
 const (
-	FormatChatCompletions Format = "chat-completions"
-	FormatResponses       Format = "responses"
+	FormatChatCompletions = wire.FormatChatCompletions
+	FormatResponses       = wire.FormatResponses
 )
-
-// Shape returns the registry shape value of this format.
-func (f Format) Shape() string {
-	if f == FormatResponses {
-		return ShapeResponses
-	}
-	return EndpointShape
-}
 
 // FormatOf reports the wire format the endpoint's path ends in. It reads the
 // path only; the rest of the URL is validateEndpoint's business.
-func FormatOf(raw string) (Format, bool) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return "", false
-	}
-	return formatOfPath(u.Path)
-}
+func FormatOf(raw string) (Format, bool) { return wire.FormatOf(raw) }
 
-func formatOfPath(path string) (Format, bool) {
-	trimmed := strings.TrimRight(path, "/")
-	switch {
-	case strings.HasSuffix(trimmed, "/chat/completions"):
-		return FormatChatCompletions, true
-	case strings.HasSuffix(trimmed, "/responses"):
-		return FormatResponses, true
-	default:
-		return "", false
-	}
-}
-
-func validShape(shape string) bool {
-	return shape == EndpointShape || shape == ShapeResponses
-}
+func validShape(shape string) bool { return wire.ValidShape(shape) }
 
 // CustomProvider is the provider id that accepts a learner-supplied endpoint
 // and model id instead of a registry-declared pair.
@@ -442,7 +417,7 @@ func validateEndpoint(raw string) error {
 	case u.Scheme == "http" && !isLoopback(u.Hostname()):
 		return errors.New("endpoint uses http off-loopback; use https")
 	}
-	if _, ok := formatOfPath(u.Path); !ok {
+	if _, ok := wire.FormatOfPath(u.Path); !ok {
 		return errors.New("endpoint must end in /chat/completions or /responses")
 	}
 	return nil

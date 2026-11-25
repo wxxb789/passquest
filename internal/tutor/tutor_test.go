@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/wxxb789/passquest/internal/wire"
 )
 
 func validConfig() Config {
@@ -502,12 +504,22 @@ func TestBuildRequestHashIsStable(t *testing.T) {
 // and that Body is the exact serialization of the typed chat the preview shows.
 func assertExactBody(t *testing.T, preview Preview) {
 	t.Helper()
-	encoded, err := json.Marshal(preview.Request.Chat)
+	format, err := preview.Request.WireFormat()
 	if err != nil {
-		t.Fatalf("marshal chat: %v", err)
+		t.Fatalf("wire format: %v", err)
+	}
+	var document any
+	if format == wire.FormatResponses {
+		document = *preview.Request.Responses
+	} else {
+		document = *preview.Request.Chat
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatalf("marshal wire document: %v", err)
 	}
 	if preview.Request.Body != string(encoded) {
-		t.Fatalf("request body is not the serialized chat:\n%s", preview.Request.Body)
+		t.Fatalf("request body is not the serialized %s document:\n%s", format, preview.Request.Body)
 	}
 	sum := sha256.Sum256([]byte(preview.Request.Body))
 	if preview.RequestSHA != hex.EncodeToString(sum[:]) {
@@ -707,7 +719,7 @@ func TestHostTransportRejectsBadRequestBeforeSpawn(t *testing.T) {
 			return filepath.Join(t.TempDir(), "passquest"), nil
 		},
 	}
-	req := HostRequest{ProtocolVersion: ProtocolVersion, Endpoint: "https://example.com/v1", TimeoutMS: 30000, MaxResponseChars: 100, Chat: Chat{Model: "m", Messages: []Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u"}}, MaxTokens: 10}}
+	req := HostRequest{ProtocolVersion: ProtocolVersion, Endpoint: "https://example.com/v1/chat/completions", TimeoutMS: 30000, MaxResponseChars: 100, Chat: &Chat{Model: "m", Messages: []Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u"}}, MaxTokens: 10}}
 	if _, err := transport.Call(context.Background(), req); err == nil {
 		t.Fatal("invalid max_tokens was accepted")
 	}
@@ -734,10 +746,10 @@ func TestHostTransportRejectsBodyThatIsNotTheChat(t *testing.T) {
 	}
 	req := HostRequest{
 		ProtocolVersion:  ProtocolVersion,
-		Endpoint:         "https://example.com/v1",
+		Endpoint:         "https://example.com/v1/chat/completions",
 		TimeoutMS:        30000,
 		MaxResponseChars: 100,
-		Chat:             chat,
+		Chat:             &chat,
 	}
 	for _, body := range []string{"", strings.Replace(string(encoded), `"u"`, `"u!"`, 1)} {
 		req.Body = body
@@ -776,10 +788,10 @@ func TestHostTransportLooksInPackagedResources(t *testing.T) {
 	}
 	req := HostRequest{
 		ProtocolVersion:  ProtocolVersion,
-		Endpoint:         "https://example.com/v1",
+		Endpoint:         "https://example.com/v1/chat/completions",
 		TimeoutMS:        30000,
 		MaxResponseChars: 100,
-		Chat:             chat,
+		Chat:             &chat,
 		Body:             string(encoded),
 	}
 	_, err = transport.Call(context.Background(), req)
@@ -882,4 +894,245 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func responsesConfig() Config {
+	cfg := validConfig()
+	cfg.Endpoint = "https://api.example.com/v1/responses"
+	return cfg
+}
+
+func TestBuildSelectsTheWireFormatFromTheEndpointPath(t *testing.T) {
+	preview, err := Build(responsesConfig(), ModeExplain, firstPartyTarget())
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if preview.Request.Chat != nil || preview.Request.Responses == nil {
+		t.Fatalf("responses endpoint built %+v", preview.Request)
+	}
+	responses := preview.Request.Responses
+	if responses.Model != "example-model" || responses.MaxOutputTokens != DefaultMaxTokens {
+		t.Fatalf("responses request = %+v", responses)
+	}
+	if responses.Temperature != 0 || responses.Stream || responses.Store {
+		t.Fatalf("responses request is not a non-streaming zero-temperature request with store false: %+v", responses)
+	}
+	if len(responses.Input) != 1 || responses.Input[0].Role != "user" {
+		t.Fatalf("responses input = %+v", responses.Input)
+	}
+	content := responses.Input[0].Content
+	if len(content) != 1 || content[0].Type != "input_text" {
+		t.Fatalf("responses input content = %+v", content)
+	}
+	for _, want := range []string{
+		"The Westbridge Community Library closes at 4 p.m.",
+		"Verified key: B — At 4 p.m.",
+		"elapsed_ms=2400",
+	} {
+		if !strings.Contains(content[0].Text, want) {
+			t.Errorf("input text is missing %q\n%s", want, content[0].Text)
+		}
+	}
+	if responses.Instructions != systemPrompt() {
+		t.Fatalf("instructions = %q, want the system prompt", responses.Instructions)
+	}
+	if strings.Contains(content[0].Text, systemPrompt()) {
+		t.Fatal("the input text repeats the system prompt")
+	}
+	if preview.Request.WireModel() != "example-model" || preview.Request.WireMaxTokens() != DefaultMaxTokens {
+		t.Fatalf("wire model/bound = %q/%d", preview.Request.WireModel(), preview.Request.WireMaxTokens())
+	}
+	messages := preview.Request.WireMessages()
+	if len(messages) != 2 || messages[0].Role != "system" || messages[0].Content != systemPrompt() || messages[1].Role != "user" {
+		t.Fatalf("wire messages = %+v", messages)
+	}
+	assertExactBody(t, preview)
+}
+
+func TestResponsesForJoinsSystemsAndKeepsOrder(t *testing.T) {
+	chat := Chat{
+		Model: "m",
+		Messages: []Message{
+			{Role: "system", Content: "first"},
+			{Role: "system", Content: "second"},
+			{Role: "user", Content: "u1"},
+			{Role: "assistant", Content: "a1"},
+			{Role: "user", Content: "u2"},
+		},
+		MaxTokens: 128,
+	}
+	responses := ResponsesFor(chat)
+	if responses.Instructions != "first\n\nsecond" {
+		t.Fatalf("instructions = %q", responses.Instructions)
+	}
+	want := []struct{ role, text string }{{"user", "u1"}, {"assistant", "a1"}, {"user", "u2"}}
+	if len(responses.Input) != len(want) {
+		t.Fatalf("input = %+v", responses.Input)
+	}
+	for i, item := range responses.Input {
+		if item.Role != want[i].role || len(item.Content) != 1 ||
+			item.Content[0].Type != "input_text" || item.Content[0].Text != want[i].text {
+			t.Fatalf("input item %d = %+v", i, item)
+		}
+	}
+	if responses.MaxOutputTokens != 128 || responses.Store {
+		t.Fatalf("responses bounds = %+v", responses)
+	}
+}
+
+func TestHostRequestForBuildsOneDocumentForThePath(t *testing.T) {
+	chat := Chat{
+		Model:       "m",
+		Messages:    []Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u"}},
+		MaxTokens:   MinMaxTokens,
+		Temperature: 0,
+	}
+	for _, test := range []struct {
+		endpoint string
+		format   wire.Format
+	}{
+		{"https://api.example.com/v1/chat/completions", wire.FormatChatCompletions},
+		{"https://api.example.com/v1/chat/completions/", wire.FormatChatCompletions},
+		{"https://api.example.com/v1/responses", wire.FormatResponses},
+		{"https://api.example.com/v1/responses/", wire.FormatResponses},
+	} {
+		request, sha, size, err := HostRequestFor(test.endpoint, DefaultTimeoutMS, chat)
+		if err != nil {
+			t.Fatalf("HostRequestFor(%s): %v", test.endpoint, err)
+		}
+		format, err := request.WireFormat()
+		if err != nil || format != test.format {
+			t.Fatalf("HostRequestFor(%s) format = %q, %v", test.endpoint, format, err)
+		}
+		if test.format == wire.FormatResponses {
+			if request.Chat != nil || request.Responses.Model != "m" {
+				t.Fatalf("responses request = %+v", request)
+			}
+		} else if request.Responses != nil || request.Chat.Model != "m" {
+			t.Fatalf("chat request = %+v", request)
+		}
+		sum := sha256.Sum256([]byte(request.Body))
+		if sha != hex.EncodeToString(sum[:]) || size != len(request.Body) {
+			t.Fatalf("identity = %q/%d for %d bytes", sha, size, len(request.Body))
+		}
+	}
+	if _, _, _, err := HostRequestFor("https://api.example.com/v1", DefaultTimeoutMS, chat); err == nil ||
+		!strings.Contains(err.Error(), "/chat/completions or /responses") {
+		t.Fatalf("third-form endpoint error = %v", err)
+	}
+}
+
+func TestProbeRequestFollowsTheEndpointPath(t *testing.T) {
+	probe, _, _, err := ProbeRequest(responsesConfig().Endpoint, "example-model", DefaultTimeoutMS)
+	if err != nil {
+		t.Fatalf("ProbeRequest: %v", err)
+	}
+	if probe.Chat != nil || probe.Responses == nil {
+		t.Fatalf("responses probe = %+v", probe)
+	}
+	if probe.Responses.Instructions == "" || len(probe.Responses.Input) != 1 ||
+		len(probe.Responses.Input[0].Content) != 1 || probe.Responses.Input[0].Content[0].Type != "input_text" {
+		t.Fatalf("responses probe document = %+v", probe.Responses)
+	}
+	if probe.Responses.MaxOutputTokens != MinMaxTokens || probe.Responses.Store || probe.Responses.Temperature != 0 || probe.Responses.Stream {
+		t.Fatalf("responses probe bounds = %+v", probe.Responses)
+	}
+	chatProbe, _, _, err := ProbeRequest(validConfig().Endpoint, "example-model", DefaultTimeoutMS)
+	if err != nil {
+		t.Fatalf("ProbeRequest: %v", err)
+	}
+	if chatProbe.Responses != nil || chatProbe.Chat == nil {
+		t.Fatalf("chat probe = %+v", chatProbe)
+	}
+}
+
+func TestValidateRequestChecksBothFormats(t *testing.T) {
+	chat := Chat{
+		Model:       "m",
+		Messages:    []Message{{Role: "system", Content: "s"}, {Role: "user", Content: "u"}},
+		MaxTokens:   MinMaxTokens,
+		Temperature: 0,
+	}
+	chatBody, err := json.Marshal(chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responses := ResponsesFor(chat)
+	responsesBody, err := json.Marshal(responses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*HostRequest)
+		want   string
+	}{
+		{"chat document", func(r *HostRequest) { r.Chat = &chat; r.Body = string(chatBody) }, ""},
+		{"responses document", func(r *HostRequest) {
+			r.Endpoint = responsesConfig().Endpoint
+			r.Responses = &responses
+			r.Body = string(responsesBody)
+		}, ""},
+		{"neither document", func(r *HostRequest) { r.Body = "{}" }, "no wire document"},
+		{"both documents", func(r *HostRequest) { r.Chat = &chat; r.Responses = &responses; r.Body = string(chatBody) }, "both a chat and a responses document"},
+		{"third form", func(r *HostRequest) {
+			r.Endpoint = "https://api.example.com/v1"
+			r.Chat = &chat
+			r.Body = string(chatBody)
+		}, "must end in /chat/completions or /responses"},
+		{"chat document on a responses endpoint", func(r *HostRequest) {
+			r.Endpoint = "https://api.example.com/v1/responses"
+			r.Chat = &chat
+			r.Body = string(chatBody)
+		}, "carries a chat-completions document for a responses endpoint"},
+		{"responses document on a chat endpoint", func(r *HostRequest) { r.Responses = &responses; r.Body = string(responsesBody) }, "carries a responses document for a chat-completions endpoint"},
+		{"responses body mismatch", func(r *HostRequest) {
+			r.Endpoint = responsesConfig().Endpoint
+			r.Responses = &responses
+			r.Body = strings.Replace(string(responsesBody), `"u"`, `"u!"`, 1)
+		}, "not the serialized responses document"},
+		{"responses with store true", func(r *HostRequest) {
+			r.Endpoint = responsesConfig().Endpoint
+			stored := responses
+			stored.Store = true
+			body, err := json.Marshal(stored)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Responses = &stored
+			r.Body = string(body)
+		}, "store false"},
+		{"responses without instructions", func(r *HostRequest) {
+			r.Endpoint = responsesConfig().Endpoint
+			bare := responses
+			bare.Instructions = ""
+			body, err := json.Marshal(bare)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Responses = &bare
+			r.Body = string(body)
+		}, "needs instructions"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := HostRequest{
+				ProtocolVersion:  ProtocolVersion,
+				Endpoint:         validConfig().Endpoint,
+				TimeoutMS:        DefaultTimeoutMS,
+				MaxResponseChars: MaxResponseChars,
+			}
+			test.mutate(&req)
+			err := validateRequest(req)
+			if test.want == "" {
+				if err != nil {
+					t.Fatalf("validateRequest: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("validateRequest error = %v, want %q", err, test.want)
+			}
+		})
+	}
 }

@@ -53,6 +53,7 @@ func (w *Workspace) CoachPreview(attemptID int64, mode string) (studio.CoachPrev
 // shimmed `tutor preview` document decoded: same fields, same rendering of the
 // text.chat evidence, and an empty message list stays an empty list.
 func studioCoachPreviewOf(prepared coach.Prepared) studio.CoachPreview {
+	messages := prepared.Preview.Request.WireMessages()
 	preview := studio.CoachPreview{
 		AttemptID:     prepared.Attempt.ID,
 		Mode:          string(prepared.Mode),
@@ -62,13 +63,13 @@ func studioCoachPreviewOf(prepared coach.Prepared) studio.CoachPreview {
 		External:      !loopbackEndpoint(prepared.Config.Endpoint),
 		Credential:    studio.Credential{Env: prepared.CredentialEnv, Present: prepared.CredentialPresent},
 		Consent:       coachConsentOf(prepared.Preview.Context),
-		Messages:      make([]studio.CoachMessage, 0, len(prepared.Preview.Request.Chat.Messages)),
-		MaxTokens:     prepared.Preview.Request.Chat.MaxTokens,
+		Messages:      make([]studio.CoachMessage, 0, len(messages)),
+		MaxTokens:     prepared.Preview.Request.WireMaxTokens(),
 		RequestSHA256: prepared.Preview.RequestSHA,
 		RequestBytes:  prepared.Preview.RequestBytes,
 		Limits:        coach.Limits(),
 	}
-	for _, message := range prepared.Preview.Request.Chat.Messages {
+	for _, message := range messages {
 		preview.Messages = append(preview.Messages, studio.CoachMessage{Role: message.Role, Content: message.Content})
 	}
 	if prepared.TextChat != nil {

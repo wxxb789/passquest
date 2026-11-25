@@ -28,9 +28,9 @@ type RefineMaterial struct {
 	Evidence     string
 }
 
-// BuildRefineRequest prepares one exact provider chat body. It is deterministic
-// for the same draft and material, so the recorded SHA-256 identifies what left
-// the machine.
+// BuildRefineRequest prepares one exact provider body for the endpoint's wire
+// format. It is deterministic for the same draft and material, so the recorded
+// SHA-256 identifies what left the machine.
 func BuildRefineRequest(cfg tutor.Config, draft Draft, material RefineMaterial) (tutor.HostRequest, error) {
 	if err := cfg.Validate(); err != nil {
 		return tutor.HostRequest{}, err
@@ -46,18 +46,11 @@ func BuildRefineRequest(cfg tutor.Config, draft Draft, material RefineMaterial) 
 		Temperature: 0,
 		Stream:      false,
 	}
-	body, err := json.Marshal(chat)
+	request, _, _, err := tutor.HostRequestFor(cfg.Endpoint, cfg.TimeoutMS, chat)
 	if err != nil {
-		return tutor.HostRequest{}, fmt.Errorf("note: encode refinement request: %w", err)
+		return tutor.HostRequest{}, fmt.Errorf("note: build refinement request: %w", err)
 	}
-	return tutor.HostRequest{
-		ProtocolVersion:  tutor.ProtocolVersion,
-		Endpoint:         cfg.Endpoint,
-		TimeoutMS:        cfg.TimeoutMS,
-		MaxResponseChars: tutor.MaxResponseChars,
-		Chat:             chat,
-		Body:             string(body),
-	}, nil
+	return request, nil
 }
 
 // RequestIdentity returns the SHA-256 and byte length of the exact body.

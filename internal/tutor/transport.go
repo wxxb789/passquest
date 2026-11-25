@@ -15,6 +15,7 @@ import (
 
 	"github.com/wxxb789/passquest/internal/hostpaths"
 	"github.com/wxxb789/passquest/internal/hostproc"
+	"github.com/wxxb789/passquest/internal/wire"
 )
 
 // HostTransport runs the Node host as a child process and exchanges one JSON
@@ -170,11 +171,22 @@ func validateRequest(req HostRequest) error {
 	if req.ProtocolVersion != ProtocolVersion {
 		return fmt.Errorf("tutor: host protocol %d is not supported", req.ProtocolVersion)
 	}
+	format, err := req.WireFormat()
+	if err != nil {
+		return err
+	}
+	derived, ok := wire.FormatOf(req.Endpoint)
+	if !ok {
+		return errors.New("tutor: endpoint must end in /chat/completions or /responses")
+	}
+	if derived != format {
+		return fmt.Errorf("tutor: host request carries a %s document for a %s endpoint", format, derived)
+	}
 	if err := (Config{
 		Endpoint:        req.Endpoint,
-		Model:           req.Chat.Model,
+		Model:           req.WireModel(),
 		TimeoutMS:       req.TimeoutMS,
-		MaxOutputTokens: req.Chat.MaxTokens,
+		MaxOutputTokens: req.WireMaxTokens(),
 		DailyCalls:      DefaultDailyCalls,
 	}).Validate(); err != nil {
 		return err
@@ -182,31 +194,72 @@ func validateRequest(req HostRequest) error {
 	if req.MaxResponseChars <= 0 || req.MaxResponseChars > MaxResponseChars {
 		return fmt.Errorf("tutor: max response chars %d is invalid", req.MaxResponseChars)
 	}
-	if req.Chat.Temperature != 0 || req.Chat.Stream {
-		return errors.New("tutor: chat request must be a non-streaming zero-temperature request")
+	var document any
+	if format == wire.FormatResponses {
+		responses := *req.Responses
+		if responses.Temperature != 0 || responses.Stream || responses.Store {
+			return errors.New("tutor: responses request must be a non-streaming zero-temperature request with store false")
+		}
+		if strings.TrimSpace(responses.Instructions) == "" {
+			return errors.New("tutor: responses request needs instructions")
+		}
+		if len(responses.Input) == 0 {
+			return errors.New("tutor: responses request needs an input item")
+		}
+		total := utf8.RuneCountInString(responses.Instructions)
+		for i, item := range responses.Input {
+			if strings.TrimSpace(item.Role) == "" {
+				return fmt.Errorf("tutor: input item %d has no role", i)
+			}
+			if len(item.Content) == 0 {
+				return fmt.Errorf("tutor: input item %d has no content", i)
+			}
+			for j, part := range item.Content {
+				if part.Type != "input_text" {
+					return fmt.Errorf("tutor: input item %d part %d type %q is not input_text", i, j, part.Type)
+				}
+				if strings.TrimSpace(part.Text) == "" {
+					return fmt.Errorf("tutor: input item %d part %d has no text", i, j)
+				}
+				total += utf8.RuneCountInString(part.Text)
+			}
+		}
+		if total > MaxMessagesChars {
+			return fmt.Errorf("tutor: messages are %d characters, limit is %d", total, MaxMessagesChars)
+		}
+		document = responses
+	} else {
+		chat := *req.Chat
+		if chat.Temperature != 0 || chat.Stream {
+			return errors.New("tutor: chat request must be a non-streaming zero-temperature request")
+		}
+		if len(chat.Messages) < 2 {
+			return errors.New("tutor: chat request needs system and user messages")
+		}
+		total := 0
+		for i, message := range chat.Messages {
+			if strings.TrimSpace(message.Role) == "" {
+				return fmt.Errorf("tutor: message %d has no role", i)
+			}
+			if strings.TrimSpace(message.Content) == "" {
+				return fmt.Errorf("tutor: message %d has no content", i)
+			}
+			total += utf8.RuneCountInString(message.Content)
+		}
+		if total > MaxMessagesChars {
+			return fmt.Errorf("tutor: messages are %d characters, limit is %d", total, MaxMessagesChars)
+		}
+		document = chat
 	}
-	body, err := json.Marshal(req.Chat)
+	body, err := json.Marshal(document)
 	if err != nil {
-		return fmt.Errorf("tutor: encode chat: %w", err)
+		return fmt.Errorf("tutor: encode host request: %w", err)
 	}
 	if req.Body != string(body) {
+		if format == wire.FormatResponses {
+			return errors.New("tutor: host request body is not the serialized responses document")
+		}
 		return errors.New("tutor: host request body is not the serialized chat")
-	}
-	if len(req.Chat.Messages) < 2 {
-		return errors.New("tutor: chat request needs system and user messages")
-	}
-	total := 0
-	for i, message := range req.Chat.Messages {
-		if strings.TrimSpace(message.Role) == "" {
-			return fmt.Errorf("tutor: message %d has no role", i)
-		}
-		if strings.TrimSpace(message.Content) == "" {
-			return fmt.Errorf("tutor: message %d has no content", i)
-		}
-		total += utf8.RuneCountInString(message.Content)
-	}
-	if total > MaxMessagesChars {
-		return fmt.Errorf("tutor: messages are %d characters, limit is %d", total, MaxMessagesChars)
 	}
 	return nil
 }

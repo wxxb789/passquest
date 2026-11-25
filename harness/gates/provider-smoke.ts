@@ -2,6 +2,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { responsesReply } from "../lib/desktop-page.ts";
 import { buildCLI } from "../lib/go.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { executable, run } from "../lib/process.ts";
@@ -71,11 +72,15 @@ function agentSse(body: unknown, model: string): Response {
 }
 
 function providerDoc(id: string, endpoint: string, models: Array<Record<string, unknown>>) {
+  return providerDocWithShape(id, endpoint, models, "openai-chat-completions");
+}
+
+function providerDocWithShape(id: string, endpoint: string, models: Array<Record<string, unknown>>, shape: string) {
   return {
     id,
     name: id.toUpperCase(),
     endpoint,
-    endpoint_shape: "openai-chat-completions",
+    endpoint_shape: shape,
     credential_env: `PASSQUEST_${id.toUpperCase()}_API_KEY`,
     models,
   };
@@ -144,6 +149,7 @@ export const providerSmoke: Gate = {
     let alphaAgent: "delay" | "tools" = "tools";
     const alphaCalls: ReceivedCall[] = [];
     const betaCalls: ReceivedCall[] = [];
+    const deltaCalls: ReceivedCall[] = [];
 
     const server = Bun.serve({
       hostname: "127.0.0.1",
@@ -169,6 +175,10 @@ export const providerSmoke: Gate = {
         if (url.pathname.startsWith("/beta/")) {
           betaCalls.push(call);
           return chatResponse(betaChat, "beta-text");
+        }
+        if (url.pathname.startsWith("/delta/")) {
+          deltaCalls.push(call);
+          return responsesReply("OK");
         }
         return new Response("not found", { status: 404 });
       },
@@ -264,6 +274,114 @@ export const providerSmoke: Gate = {
         "an added registry entry did not appear",
       );
 
+      // 1b. The endpoint path picks the wire format: a declared responses
+      // provider and a custom endpoint both verify at /v1/responses, and the
+      // custom row reports the shape its endpoint derives.
+      const formatRegistry = path.join(temp, "format-registry.json");
+      const delta = providerDocWithShape("delta", `${base}/delta/responses`,
+        [{ id: "delta-text", default: true, capabilities: ["text.chat"] }], "openai-responses");
+      writeRegistry(formatRegistry, [alpha, delta, customProvider]);
+      const formatEnv = {
+        PASSQUEST_PROVIDER_REGISTRY: formatRegistry,
+        PASSQUEST_CUSTOM_API_KEY: KEY,
+        PASSQUEST_ALPHA_API_KEY: KEY,
+        PASSQUEST_DELTA_API_KEY: KEY,
+      };
+      const formatDB = path.join(temp, "format.sqlite");
+      const declaredGive = deltaCalls.length;
+      const declaredTest = await callJSON(formatDB, ["model", "test", "delta/delta-text"], formatEnv);
+      if (!check(declaredTest.code === 0, `delta: model test exit = ${declaredTest.code}: ${declaredTest.stderr}`)) {
+        return fail(checks);
+      }
+      check(stringField(declaredTest.doc, "result") === "verified", "delta: responses provider did not verify");
+      const declaredProbe = deltaCalls[declaredGive];
+      check(declaredProbe !== undefined && declaredProbe.path === "/delta/responses", `delta: probe path = ${declaredProbe?.path}`);
+      check(
+        asRecord(declaredProbe?.body).instructions !== undefined && asRecord(declaredProbe?.body).messages === undefined,
+        "delta: probe body is not the responses document",
+      );
+      const declaredUse = await callJSON(formatDB, ["model", "use", "delta/delta-text"], formatEnv);
+      check(declaredUse.code === 0 && stringField(field(declaredUse.doc, "active"), "provider") === "delta",
+        `delta: model use exit = ${declaredUse.code}: ${declaredUse.stderr}`);
+      const declaredList = await callJSON(formatDB, ["model", "list"], formatEnv);
+      const declaredRow = asRecord(arrayField(declaredList.doc, "providers").find((item) => stringField(item, "id") === "delta"));
+      check(
+        stringField(declaredRow, "endpoint_shape") === "openai-responses",
+        `delta: registry row shape = ${stringField(declaredRow, "endpoint_shape")}`,
+      );
+      const useResponses = await callJSON(
+        formatDB,
+        ["model", "use", "custom/probe-model", "--endpoint", `${base}/delta/responses`],
+        formatEnv,
+      );
+      if (!check(useResponses.code === 0, `model use custom responses exit = ${useResponses.code}: ${useResponses.stderr}`)) {
+        return fail(checks);
+      }
+      const formatList = await callJSON(formatDB, ["model", "list"], formatEnv);
+      const customRow = asRecord(arrayField(formatList.doc, "providers").find((item) => stringField(item, "id") === "custom"));
+      check(
+        stringField(customRow, "endpoint_shape") === "openai-responses",
+        `custom row shape = ${stringField(customRow, "endpoint_shape")}`,
+      );
+      const beforeDeltaProbe = deltaCalls.length;
+      const responsesTest = await callJSON(formatDB, ["model", "test", "custom/probe-model"], formatEnv);
+      if (!check(responsesTest.code === 0, `responses model test exit = ${responsesTest.code}: ${responsesTest.stderr}`)) {
+        return fail(checks);
+      }
+      check(stringField(responsesTest.doc, "result") === "verified", "responses probe did not record verified");
+      const responsesProbe = deltaCalls[beforeDeltaProbe];
+      check(responsesProbe !== undefined && responsesProbe.path === "/delta/responses", `responses probe path = ${responsesProbe?.path}`);
+      const responsesBody = asRecord(responsesProbe?.body);
+      check(typeof responsesBody.instructions === "string" && responsesBody.instructions !== "", "responses probe has no instructions");
+      check(Array.isArray(responsesBody.input) && (responsesBody.input as unknown[]).length === 1, "responses probe input is not one item");
+      check(responsesBody.messages === undefined, "responses probe carries chat messages");
+      check(
+        responsesBody.max_output_tokens !== undefined &&
+          responsesBody.store === false &&
+          responsesBody.stream === false &&
+          responsesBody.temperature === 0,
+        `responses probe bounds = ${JSON.stringify(responsesBody)}`,
+      );
+      const responsesFlagTest = await callJSON(
+        formatDB,
+        ["model", "test", "custom/probe-model", "--endpoint", `${base}/delta/responses`],
+        formatEnv,
+      );
+      check(responsesFlagTest.code === 0 && stringField(responsesFlagTest.doc, "result") === "verified",
+        `model test --endpoint responses exit = ${responsesFlagTest.code}: ${responsesFlagTest.stderr}`);
+      const useChat = await callJSON(
+        formatDB,
+        ["model", "use", "custom/chat-model", "--endpoint", `${base}/alpha/chat/completions`],
+        formatEnv,
+      );
+      if (!check(useChat.code === 0, `model use custom chat exit = ${useChat.code}: ${useChat.stderr}`)) return fail(checks);
+      const beforeChatProbe = alphaCalls.length;
+      const chatTest = await callJSON(formatDB, ["model", "test", "custom/chat-model"], formatEnv);
+      if (!check(chatTest.code === 0, `chat model test exit = ${chatTest.code}: ${chatTest.stderr}`)) return fail(checks);
+      const chatProbe = alphaCalls[beforeChatProbe];
+      const chatBody = asRecord(chatProbe?.body);
+      check(chatProbe !== undefined && chatProbe.path === "/alpha/chat/completions", `chat probe path = ${chatProbe?.path}`);
+      check(Array.isArray(chatBody.messages) && (chatBody.messages as unknown[]).length === 2, "chat probe messages are not two");
+      check(chatBody.instructions === undefined && chatBody.max_output_tokens === undefined, "chat probe carries responses fields");
+
+      // 1c. A declared shape that disagrees with its endpoint is refused,
+      // naming both shapes.
+      const mismatchRegistry = path.join(temp, "mismatch-registry.json");
+      writeRegistry(mismatchRegistry, [
+        providerDocWithShape("delta-bad", `${base}/delta/responses`,
+          [{ id: "delta-bad-text", default: true, capabilities: ["text.chat"] }], "openai-chat-completions"),
+      ]);
+      const mismatch = await callJSON(
+        path.join(temp, "mismatch.sqlite"),
+        ["model", "list"],
+        { PASSQUEST_PROVIDER_REGISTRY: mismatchRegistry },
+      );
+      check(mismatch.code !== 0, `mismatched registry exit = ${mismatch.code}`);
+      check(
+        mismatch.stderr.includes("openai-chat-completions") && mismatch.stderr.includes("openai-responses"),
+        `mismatched registry error does not name both shapes: ${mismatch.stderr}`,
+      );
+
       // 2. Switching leaves practice state identical.
       const seeded = await callJSON(db, ["practice", "--answer", "B"]);
       if (!check(seeded.code === 0, `seed practice exit = ${seeded.code}: ${seeded.stderr}`)) return fail(checks);
@@ -277,8 +395,11 @@ export const providerSmoke: Gate = {
       check(field(field(use.doc, "active"), "model") === "alpha-text", "model use did not report alpha-text");
       const nextAfter = await callJSON(afterDB, ["next"]);
       const reportAfter = await callJSON(afterDB, ["report"]);
+      // The documents carry the database path as JSON text, where a Windows
+      // backslash is written twice, so the compared form is the escaped one.
+      const escaped = (dbPath: string): string => JSON.stringify(dbPath).slice(1, -1);
       const normalized = (raw: unknown): string =>
-        JSON.stringify(raw).split(beforeDB).join("<db>").split(afterDB).join("<db>");
+        JSON.stringify(raw).split(escaped(beforeDB)).join("<db>").split(escaped(afterDB)).join("<db>");
       check(normalized(nextBefore.doc) === normalized(nextAfter.doc), "model use changed next output");
       check(normalized(reportBefore.doc) === normalized(reportAfter.doc), "model use changed report output");
       const listActive = await callJSON(afterDB, ["model", "list"]);
@@ -366,7 +487,7 @@ export const providerSmoke: Gate = {
       check(stringField(field(failover.doc, "call"), "provider") === "beta", "the retried call is not on beta");
       check(stringField(field(failover.doc, "call"), "failover_from") === "alpha", "the retried call lost its failover origin");
       check(betaCalls.length === beforeBetaCalls + 1, "beta was not called exactly once");
-      const failoverHuman = await call(["--db", failoverDB, "tutor", "ask"], { ...alphaEnv, PASSQUEST_BETA_API_KEY: KEY });
+      const failoverHuman = await call(["tutor", "ask", "--db", failoverDB], { ...alphaEnv, PASSQUEST_BETA_API_KEY: KEY });
       check(failoverHuman.stdout.includes("failover: alpha → beta (reason: rate_limited)"), "human failover line is missing");
 
       const history = await callJSON(failoverDB, ["tutor", "history"]);
@@ -462,6 +583,7 @@ export const providerSmoke: Gate = {
       check(counters.some((item) => stringField(item, "provider") === "beta" && numberField(item, "calls") === 1), "beta counter missing");
 
       check(!seenOutputs.some((output) => output.includes(KEY)), "a command echoed the credential");
+      if (checks.length > 0) return fail(checks);
       return pass(`${assertions} assertions`);
     } catch (error) {
       return fail([...checks, `provider smoke threw: ${error instanceof Error ? error.message : String(error)}`]);

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import { startAnkiStub } from "../../lib/anki-stub.ts";
-import { chatReply, pageScript, parse, STUB_CREDENTIAL_ENV, STUB_MODEL } from "../../lib/desktop-page.ts";
+import { chatReply, defaultStubReply, pageScript, parse, STUB_CREDENTIAL_ENV, STUB_MODEL } from "../../lib/desktop-page.ts";
 import { arrayField, field, numberField, stringField } from "../../lib/json.ts";
 import { run } from "../../lib/process.ts";
 import { cli, HOSTILE_MARKUP, launch, setup } from "./scenario.ts";
@@ -333,7 +333,7 @@ return { restored, proposed, edited, pushed, queued: data('[data-testid="sync-co
       );
       s.check(fronts.length === 1 && fronts[0].includes(REFINED_FRONT), "anki: the pushed note does not carry the used suggestion");
     } finally {
-      provider.respond = () => chatReply("OK");
+      provider.respond = defaultStubReply;
       stub.stop();
     }
   },

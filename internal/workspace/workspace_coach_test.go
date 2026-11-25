@@ -128,3 +128,40 @@ func TestWorkspaceCoachHistory(t *testing.T) {
 		t.Fatalf("unknown attempt = %v", err)
 	}
 }
+
+// TestWorkspaceCoachPreviewReadsTheResponsesDocument pins the window's preview
+// against a responses endpoint: its messages come from the document the host
+// validates, not from a nil chat field.
+func TestWorkspaceCoachPreviewReadsTheResponsesDocument(t *testing.T) {
+	t.Parallel()
+	transport := &fakeTutorTransport{response: fixedTutorResponse("OK")}
+	f := newWSFixture(t, func(o *Options) { o.TutorTransport = transport })
+	responsesProvider := modelProvider("alpha", "http://127.0.0.1:9/v1/responses")
+	responsesProvider["endpoint_shape"] = provider.ShapeResponses
+	registry := modelRegistryFile(t, responsesProvider)
+	f.env[provider.RegistryEnv] = registry
+	f.env[provider.CredentialEnvFor("alpha")] = fakeTutorKey
+	f.reopen(t)
+	item, err := f.w.StartPractice(studio.PracticeRequest{Kind: studio.PracticeSample})
+	mustNoErr(t, err)
+	feedback, err := f.w.Answer(item.Token, "A")
+	mustNoErr(t, err)
+	_, err = f.w.UseModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	_, err = f.w.TestModel("alpha/alpha-text", "")
+	mustNoErr(t, err)
+	if len(transport.requests) != 1 || transport.requests[0].Responses == nil || transport.requests[0].Chat != nil {
+		t.Fatalf("model test request = %+v", transport.requests)
+	}
+	preview, err := f.w.CoachPreview(feedback.AttemptID, studio.CoachExplain)
+	mustNoErr(t, err)
+	if len(preview.Messages) != 2 || preview.Messages[0].Role != "system" || preview.Messages[1].Role != "user" {
+		t.Fatalf("preview messages = %+v", preview.Messages)
+	}
+	if !strings.Contains(preview.Messages[0].Content, "text study coach") {
+		t.Fatalf("preview system message = %q", preview.Messages[0].Content)
+	}
+	if preview.MaxTokens == 0 || preview.RequestSHA256 == "" || preview.RequestBytes == 0 {
+		t.Fatalf("preview identity = %+v", preview)
+	}
+}
