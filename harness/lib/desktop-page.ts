@@ -249,6 +249,18 @@ export interface StubRegistryProvider {
   model: string;
 }
 
+/** The second stub provider: the same loopback stub's Responses path, for a scenario that drives both forms. */
+export function stubResponsesProvider(stub: ProviderStub): StubRegistryProvider {
+  return {
+    id: STUB_RESPONSES_PROVIDER,
+    name: "Smoke stub (Responses)",
+    endpoint: stub.responsesEndpoint,
+    endpointShape: "openai-responses",
+    credentialEnv: STUB_RESPONSES_CREDENTIAL_ENV,
+    model: STUB_RESPONSES_MODEL.split("/")[1],
+  };
+}
+
 /** A provider registry with the one stub provider and its one text.chat model. */
 export function writeStubRegistry(file: string, endpoint: string, extra: StubRegistryProvider[] = []): void {
   writeFileSync(

@@ -12,6 +12,7 @@ import { spawn } from "node:child_process";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels, createProvider, envApiKeyAuth } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import {
   Harness,
   LiveDoc,
@@ -181,6 +182,17 @@ function failureResult(reason, detail) {
   };
 }
 
+// endpointFormat reports the wire format the endpoint's path names — the rule
+// wire.FormatOf and the tutor host share, trailing slashes included. "" names
+// neither form.
+function endpointFormat(endpoint) {
+  if (typeof endpoint !== "string") return "";
+  const path = endpoint.replace(/\/+$/, "");
+  if (path.endsWith("/chat/completions")) return "chat-completions";
+  if (path.endsWith("/responses")) return "responses";
+  return "";
+}
+
 function validateRequest(doc) {
   if (!doc || typeof doc !== "object") throw new Error("request must be a JSON object");
   if (doc.protocol_version !== PROTOCOL_VERSION) throw new Error(`protocol ${doc.protocol_version} is not supported`);
@@ -211,8 +223,8 @@ function validateRequest(doc) {
   if (!Number.isFinite(doc.deadline_ms) || doc.deadline_ms <= 0) throw new Error("deadline_ms is invalid");
   const model = doc.model;
   if (!model || typeof model !== "object") throw new Error("model is required");
-  if (typeof model.endpoint !== "string" || !model.endpoint.endsWith("/chat/completions")) {
-    throw new Error("model endpoint must end in /chat/completions");
+  if (endpointFormat(model.endpoint) === "") {
+    throw new Error("model endpoint must end in /chat/completions or /responses");
   }
   let endpoint;
   try {
@@ -237,11 +249,14 @@ function validateRequest(doc) {
 }
 
 function buildModels(model) {
-  const baseUrl = model.endpoint.slice(0, -"/chat/completions".length);
+  const endpoint = model.endpoint.replace(/\/+$/, "");
+  const responses = endpointFormat(endpoint) === "responses";
+  const suffix = responses ? "/responses" : "/chat/completions";
+  const baseUrl = endpoint.slice(0, -suffix.length);
   const chatModel = {
     id: model.model,
     name: `Pass Quest ${model.model}`,
-    api: "openai-completions",
+    api: responses ? "openai-responses" : "openai-completions",
     provider: "passquest",
     baseUrl,
     reasoning: false,
@@ -262,7 +277,10 @@ function buildModels(model) {
     baseUrl,
     auth: { apiKey: envApiKeyAuth("Pass Quest provider key", [request.credential_env]) },
     models: [chatModel],
-    api: openAICompletionsApi(),
+    api: {
+      "openai-completions": openAICompletionsApi(),
+      "openai-responses": openAIResponsesApi(),
+    },
   });
   const models = createModels();
   models.setProvider(provider);

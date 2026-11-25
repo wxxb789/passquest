@@ -236,6 +236,15 @@ func TestClassifyFailure(t *testing.T) {
 		{"429: rate limit", CodeRateLimited, "resume"},
 		{"500: upstream failed", CodeProviderError, "resume"},
 		{"404: model not found", CodeConfigError, "check_endpoint"},
+		{"passquest API error (401): {\"message\":\"invalid stub key\"}", CodeAuthFailed, "fix_credential"},
+		{"passquest API error (403): forbidden", CodeAuthFailed, "fix_credential"},
+		{"passquest API error (429): slow down", CodeRateLimited, "resume"},
+		{"passquest API error (404): no such endpoint", CodeConfigError, "check_endpoint"},
+		{"passquest API error (500): upstream failed", CodeProviderError, "resume"},
+		{"task faulted (2): retry", CodeTaskFaulted, "inspect"},
+		{"502: upstream failed (429): retry later", CodeProviderError, "resume"},
+		{"400: quota (429): slow down", CodeConfigError, "check_endpoint"},
+		{"passquest API error (401): gate says (429): slow down", CodeAuthFailed, "fix_credential"},
 		{"context deadline exceeded", CodeTimeout, "resume"},
 		{"network connection reset", CodeNetworkError, "resume"},
 		{"Error reading response: malformed server-sent event JSON.", CodeInvalidResponse, "inspect"},
@@ -272,6 +281,7 @@ func TestClassifyRunFailure(t *testing.T) {
 		{"nothing_to_answer", "", CodeInvalidResponse},
 		{"model_error", "429: rate limit", CodeRateLimited},
 		{"model_error", "401: invalid api key", CodeAuthFailed},
+		{"model_error", "passquest API error (401): invalid stub key", CodeAuthFailed},
 	}
 	for _, test := range tests {
 		failure := ClassifyRunFailure(test.reason, test.detail)

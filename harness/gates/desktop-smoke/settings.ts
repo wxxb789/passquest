@@ -6,9 +6,9 @@ import {
   pageScript,
   STUB_MODEL,
   STUB_PROVIDER,
-  STUB_RESPONSES_CREDENTIAL_ENV,
   STUB_RESPONSES_MODEL,
   STUB_RESPONSES_PROVIDER,
+  stubResponsesProvider,
   writeStubRegistry,
 } from "../../lib/desktop-page.ts";
 import { arrayField, stringField } from "../../lib/json.ts";
@@ -48,16 +48,7 @@ export const settings: Scenario = {
     const account = `api-key:${STUB_PROVIDER}`;
     const responsesAccount = `api-key:${STUB_RESPONSES_PROVIDER}`;
     const registry = path.join(s.dir, "registry.json");
-    writeStubRegistry(registry, provider.endpoint, [
-      {
-        id: STUB_RESPONSES_PROVIDER,
-        name: "Smoke stub (Responses)",
-        endpoint: provider.responsesEndpoint,
-        endpointShape: "openai-responses",
-        credentialEnv: STUB_RESPONSES_CREDENTIAL_ENV,
-        model: STUB_RESPONSES_MODEL.split("/")[1],
-      },
-    ]);
+    writeStubRegistry(registry, provider.endpoint, [stubResponsesProvider(provider)]);
     provider.received.length = 0;
     try {
       const launched = await launch(s, {

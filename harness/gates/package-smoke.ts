@@ -90,6 +90,7 @@ import {
   startProviderStub,
   STUB_CREDENTIAL_ENV,
   STUB_MODEL,
+  stubResponsesProvider,
   writeStubRegistry,
 } from "../lib/desktop-page.ts";
 import type { Check, ProviderStub } from "../lib/desktop-page.ts";
@@ -108,7 +109,7 @@ import { installPackage, hostPackageArtifact, HOSTS } from "./package-smoke/inst
 import type { InstalledApp } from "./package-smoke/install.ts";
 import { scanPackageContents } from "./package-smoke/contents.ts";
 import type { PackageIdentity } from "./package-smoke/contents.ts";
-import { brief } from "./package-smoke/brief.ts";
+import { brief, briefResponses } from "./package-smoke/brief.ts";
 import { unavailable } from "./package-smoke/unavailable.ts";
 import { upgradeCase } from "./package-smoke/upgrade.ts";
 import { anki } from "./desktop-smoke/anki.ts";
@@ -126,7 +127,7 @@ import { settings } from "./desktop-smoke/settings.ts";
  * earlier ones proved. The content scan runs first, before any launch, when
  * the tree still holds exactly what the package shipped.
  */
-const CASES = ["contents", "layout", "study", "cli-runtime", "agents", "brief", "anki", "upgrade", "credential", "broken"] as const;
+const CASES = ["contents", "layout", "study", "cli-runtime", "agents", "brief", "brief-responses", "anki", "upgrade", "credential", "broken"] as const;
 
 export interface PackageSmokeOptions {
   /**
@@ -308,7 +309,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
   };
   const provider: ProviderStub = startProviderStub();
   const registry = path.join(scratch, "registry.json");
-  writeStubRegistry(registry, provider.endpoint);
+  writeStubRegistry(registry, provider.endpoint, [stubResponsesProvider(provider)]);
   let app: InstalledApp | undefined;
   let identity: PackageIdentity | undefined;
   /** What a fixture install tree stands in for: the notices set its file must carry (PackageSmokeOptions.notices). */
@@ -378,8 +379,8 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       return true;
     };
     const needsCli =
-      cases.includes("study") || cases.includes("agents") || cases.includes("brief") || cases.includes("anki") ||
-      cases.includes("credential") || cases.includes("broken");
+      cases.includes("study") || cases.includes("agents") || cases.includes("brief") || cases.includes("brief-responses") ||
+      cases.includes("anki") || cases.includes("credential") || cases.includes("broken");
     const ready = app !== undefined && (!needsCli || (await ensureCli()));
 
     /** One case's launch site: its own temp cwd, per-user root and credential service. */
@@ -515,6 +516,9 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       },
       brief: async () => {
         await brief.run(siteOf("brief", app!.binary, app!.launchEnv).run);
+      },
+      "brief-responses": async () => {
+        await briefResponses.run(siteOf("brief-responses", app!.binary, app!.launchEnv).run);
       },
       anki: async () => {
         await anki.run(siteOf("anki", app!.binary, app!.launchEnv).run);

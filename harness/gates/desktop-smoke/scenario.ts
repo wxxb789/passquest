@@ -165,7 +165,7 @@ const IMPORT_FIXTURE = "internal/cli/testdata/import";
  * chosen. False after the first failed step; every failure line is prefixed
  * with `${s.id}`.
  */
-export async function seedStudyTrail(s: ScenarioRun, env: Record<string, string>): Promise<boolean> {
+export async function seedStudyTrail(s: ScenarioRun, env: Record<string, string>, model: string = STUB_MODEL): Promise<boolean> {
   const imported = await cli(s, ["import", "--path", resolve(s.shared.ctx.root, IMPORT_FIXTURE)]);
   const sourceID = stringField(field(imported.doc, "source"), "id");
   if (
@@ -179,8 +179,8 @@ export async function seedStudyTrail(s: ScenarioRun, env: Record<string, string>
     ["question", "review", sourceID!, "q2", "--answer", "C", "--reviewer", "smoke"],
     ["tactic", "practice", SKILL, "--stage", "guided", "--answer", "A"],
     ["skill", "practice", SKILL, "--answer", "A"],
-    ["model", "test", STUB_MODEL],
-    ["model", "use", STUB_MODEL],
+    ["model", "test", model],
+    ["model", "use", model],
   ];
   return setup(s, steps, env);
 }

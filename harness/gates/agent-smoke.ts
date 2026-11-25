@@ -8,7 +8,7 @@ import { PAUSE_DEADLINE_SECONDS, startPausedRun } from "../lib/host-control.ts";
 import { arrayField, field, numberField, stringField } from "../lib/json.ts";
 import { bundleHost, DURABLE_HOST } from "../lib/package.ts";
 import { executable, run } from "../lib/process.ts";
-import { briefAnswer, sseText, stubMessages } from "../lib/sse.ts";
+import { briefAnswer, briefResponsesAnswer, sseResponsesText, sseText, stubMessages, stubResponsesInput, stubResponsesText } from "../lib/sse.ts";
 import { fail, pass } from "../lib/types.ts";
 import type { Gate, GateContext } from "../lib/types.ts";
 
@@ -32,12 +32,14 @@ function parse(raw: string): unknown {
 
 /** One host the durable matrix drives, and how to reach it. */
 interface DurableMatrixOptions {
-  /** Names the host in every failure line and in the gate's summary, e.g. `source host`. */
+  /** Names the host and its endpoint form in every failure line and in the gate's summary, e.g. `source host, responses`. */
   label: string;
   /** The host script the CLI must run: agent/durable-host.mjs, or the bundle staging builds from it. */
   host: string;
   /** The Node executable the matrix runs the host with outside the CLI (scenario 11). */
   node: string;
+  /** The endpoint form the pass configures and the stub answers. */
+  format: "chat" | "responses";
   /** Extra environment for every CLI call; the bundle pass pins PASSQUEST_NODE here. */
   env?: Record<string, string>;
 }
@@ -56,12 +58,13 @@ interface DurableMatrixResult {
 
 /**
  * The durable matrix — the eleven scenarios a durable host must survive — over
- * one host. The gate runs it over the source host and over the bundle staging
- * builds from it (goal 0016 P2), so a bundle that loses a module
- * initialization, a tree-shaken export or a dynamic import fails the same
- * assertions the source host passes. Each pass gets its own database
- * directory, stub server and counters; every failure line carries the host
- * label, so a reader can tell which host broke.
+ * one host in one endpoint form. The gate runs it over the source host and over
+ * the bundle staging builds from it (goal 0016 P2), each over a chat-completions
+ * endpoint and a Responses endpoint (goal 0021 P3), so a bundle that loses a
+ * module initialization, a tree-shaken export or a dynamic import fails the
+ * same assertions the source host passes, in either wire shape. Each pass gets
+ * its own database directory, stub server and counters; every failure line
+ * carries the pass's label, so a reader can tell which one broke.
  */
 export async function durableMatrix(
   ctx: GateContext,
@@ -81,6 +84,7 @@ export async function durableMatrix(
     return condition;
   };
 
+  const responses = options.format === "responses";
   let mode: StubMode = "tools";
   let slowTools = false;
   const received: ReceivedRequest[] = [];
@@ -109,7 +113,7 @@ export async function durableMatrix(
       }
       if (mode === "delay") {
         await Bun.sleep(15000);
-        return sseText("late stub answer", MODEL);
+        return responses ? sseResponsesText("late stub answer", MODEL) : sseText("late stub answer", MODEL);
       }
       if (mode === "hold") {
         // An answer that never comes: the run can leave this state only
@@ -120,18 +124,23 @@ export async function durableMatrix(
         });
       }
       if (mode === "text") {
-        return sseText("plain stub answer", MODEL);
+        return responses ? sseResponsesText("plain stub answer", MODEL) : sseText("plain stub answer", MODEL);
       }
       const messages = stubMessages(body);
       if (slowTools) await Bun.sleep(300);
-      const promptText = messages.map((message) => String(message.content ?? "")).join("\n");
+      const promptText = responses
+        ? stubResponsesText(body)
+        : messages.map((message) => String(message.content ?? "")).join("\n");
       const runMatch = promptText.match(/run-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}/);
       const label = runMatch ? runMatch[0].slice(-8) : "unknown";
-      return briefAnswer(messages, label, MODEL);
+      return responses ? briefResponsesAnswer(body, label, MODEL) : briefAnswer(messages, label, MODEL);
     },
   });
 
-  const endpoint = `http://127.0.0.1:${server.port}/v1/chat/completions`;
+  const suffix = responses ? "/v1/responses" : "/v1/chat/completions";
+  // The Responses pass exercises the trailing slash the Go validator and the
+  // tutor host tolerate; the stub still answers the one path.
+  const endpoint = `http://127.0.0.1:${server.port}${suffix}${responses ? "/" : ""}`;
   const baseEnv = {
     PASSQUEST_TUTOR_API_KEY: KEY,
     PASSQUEST_AGENT_HOST: options.host,
@@ -187,6 +196,22 @@ export async function durableMatrix(
       const startDoc = documentOf(started);
       check(started.code === 0, `start exit ${started.code}: ${started.stderr}`);
       check(received.length - requestsBefore === 3, `start made ${received.length - requestsBefore} provider requests, want 3`);
+      const startRequests = received.slice(requestsBefore);
+      check(
+        startRequests.every((request) => request.path === suffix),
+        `provider paths are ${startRequests.map((request) => request.path).join(", ")}`,
+      );
+      const lastRequest = startRequests[startRequests.length - 1];
+      check(
+        responses
+          ? stubResponsesInput(lastRequest?.body).some((item) => item.type === "function_call_output")
+          : stubMessages(lastRequest?.body).some((message) => message.role === "tool"),
+        `the run's last request carries no ${responses ? "function_call_output item" : "tool message"}`,
+      );
+      check(
+        field(lastRequest?.body, responses ? "messages" : "input") === undefined,
+        "the run's last request carries the other form's message field",
+      );
       check(stringField(startDoc, "state") === "completed", "start state is not completed");
       check(arrayField(startDoc, "steps").length === 2, "start did not commit two steps");
       const steps = arrayField(startDoc, "steps");
@@ -572,7 +597,7 @@ export async function durableMatrix(
           db_path: db,
           credential_env: "PASSQUEST_AGENT_SMOKE_UNSET",
           model: {
-            endpoint: "http://[::1]:8080/v1/chat/completions",
+            endpoint: `http://[::1]:8080${suffix}`,
             model: MODEL,
             timeout_ms: 30000,
             max_output_tokens: 600,
@@ -609,9 +634,10 @@ export const agentSmoke: Gate = {
   title: "agent smoke",
   /**
    * The durable matrix over the source host and, in the same run, over the
-   * bundle staging builds from it (bundleHost, goal 0016 P2). The bundle pass
-   * is what fails when a bundle loses a module initialization — the plain
-   * `bun build agent/durable-host.mjs` form faults at scenario 1 with
+   * bundle staging builds from it (bundleHost, goal 0016 P2), each over a
+   * chat-completions endpoint and a Responses endpoint (goal 0021 P3). The
+   * bundle pass is what fails when a bundle loses a module initialization — the
+   * plain `bun build agent/durable-host.mjs` form faults at scenario 1 with
    * `task_faulted` — or a tree-shaken export, and the source pass proves the
    * same assertions are not unconditionally red. The bundle is built into this
    * gate's own temp directory, never the staged tree; the bundle pass pins
@@ -628,26 +654,34 @@ export const agentSmoke: Gate = {
     if ("failure" in build) return fail(["go build ./cmd/passquest failed", build.failure]);
     const temp = mkdtempSync(path.join(tmpdir(), "passquest-agent-smoke-"));
     try {
-      const results: DurableMatrixResult[] = [
-        await durableMatrix(ctx, build.binary, {
-          label: "source host",
-          host: path.join(ctx.root, "agent", DURABLE_HOST),
-          node,
-        }),
-      ];
+      const formats = ["chat", "responses"] as const;
+      const results: DurableMatrixResult[] = [];
+      for (const format of formats) {
+        results.push(
+          await durableMatrix(ctx, build.binary, {
+            label: `source host, ${format}`,
+            host: path.join(ctx.root, "agent", DURABLE_HOST),
+            node,
+            format,
+          }),
+        );
+      }
       const bundleDir = path.join(temp, "bundle");
       mkdirSync(bundleDir, { recursive: true });
       const bundle = await bundleHost(ctx.root, DURABLE_HOST, bundleDir, {
         metafile: path.join(temp, "bundles", `${DURABLE_HOST}.json`),
       });
-      results.push(
-        await durableMatrix(ctx, build.binary, {
-          label: "staged bundle",
-          host: bundle.file,
-          node,
-          env: { PASSQUEST_NODE: node },
-        }),
-      );
+      for (const format of formats) {
+        results.push(
+          await durableMatrix(ctx, build.binary, {
+            label: `staged bundle, ${format}`,
+            host: bundle.file,
+            node,
+            format,
+            env: { PASSQUEST_NODE: node },
+          }),
+        );
+      }
       const failures = results.flatMap((result) => result.failures);
       if (failures.length > 0) return fail(failures);
       const assertions = results.reduce((sum, result) => sum + result.assertions, 0);
@@ -657,7 +691,7 @@ export const agentSmoke: Gate = {
         ? "permissions skipped on Windows"
         : `${permissionChecks} permission checks`;
       return pass(
-        `${assertions} assertions, 11 scenarios x ${results.length} hosts (${results.map((result) => result.label).join(", ")}), ` +
+        `${assertions} assertions, 11 scenarios x ${results.length} passes (${results.map((result) => result.label).join(", ")}), ` +
           `${requests} provider requests, ${permissionNote}, bundle ${bundle.bytes} bytes with ${bundle.packages.length} inlined packages`,
       );
     } finally {
