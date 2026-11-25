@@ -23,6 +23,7 @@ import { assess } from "./desktop-smoke/assess.ts";
 import { boot } from "./desktop-smoke/boot.ts";
 import { clientFresh } from "./desktop-smoke/client-fresh.ts";
 import { coach } from "./desktop-smoke/coach.ts";
+import { defaultData } from "./desktop-smoke/default-data.ts";
 import { feedback } from "./desktop-smoke/feedback.ts";
 import { hint } from "./desktop-smoke/hint.ts";
 import { lifecycle } from "./desktop-smoke/lifecycle.ts";
@@ -35,7 +36,23 @@ import { titlebar } from "./desktop-smoke/titlebar.ts";
 import { update } from "./desktop-smoke/update.ts";
 
 /** client-fresh and boot run first; the rest need a window that boots. */
-const SCENARIOS: Scenario[] = [clientFresh, boot, lifecycle, practice, hint, feedback, coach, manual, assess, anki, settings, update, resume, titlebar];
+const SCENARIOS: Scenario[] = [
+  clientFresh,
+  boot,
+  lifecycle,
+  practice,
+  defaultData,
+  hint,
+  feedback,
+  coach,
+  manual,
+  assess,
+  anki,
+  settings,
+  update,
+  resume,
+  titlebar,
+];
 
 /**
  * The desktop smoke over every scenario, or, for a self-test case whose failure is decided by one

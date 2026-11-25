@@ -52,11 +52,12 @@ export interface Shared {
   secretScanRoots?: readonly string[];
   /**
    * The Node runtime and the durable host an installed copy carries. A
-   * scenario that runs the installed binary as its own CLI pins them through
-   * PASSQUEST_NODE and PASSQUEST_AGENT_HOST: the CLI composition root
-   * resolves no resources directory (only the window does, see
-   * docs/harness.md), so unlike the window it cannot find packaged files on
-   * its own. Undefined in the source tree, where both resolve normally.
+   * scenario that runs the installed binary as its own CLI keeps them only to
+   * check the copy is complete before a launch: the binary passes the
+   * directory it resolved for its own packaged files into the CLI's
+   * composition root (cmd/passquest-desktop), so the CLI finds the packaged
+   * runtime and hosts without a PASSQUEST_* override. Undefined in the source
+   * tree, where both resolve normally.
    */
   runtime?: string;
   durableHost?: string;

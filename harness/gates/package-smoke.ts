@@ -77,18 +77,30 @@
  * verified by CI's runners.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { desktopSurface, startProviderStub, writeStubRegistry } from "../lib/desktop-page.ts";
+import {
+  cleanEnv,
+  dataRootFor,
+  desktopSurface,
+  homeEnv,
+  parse,
+  startProviderStub,
+  STUB_CREDENTIAL_ENV,
+  STUB_MODEL,
+  writeStubRegistry,
+} from "../lib/desktop-page.ts";
 import type { Check, ProviderStub } from "../lib/desktop-page.ts";
 import { removeTree } from "../lib/desktop.ts";
 import { buildCLI } from "../lib/go.ts";
+import { stringField } from "../lib/json.ts";
 import { buildPackage, packageNaming, size } from "../lib/package-build.ts";
 import type { PackageNaming } from "../lib/package-build.ts";
 import { assertPlatformExecutable, DURABLE_HOST } from "../lib/package.ts";
 import type { StagedNotices } from "../lib/notices.ts";
+import { run, tail } from "../lib/process.ts";
 import { fail, pass, skip } from "../lib/types.ts";
 import type { Gate, GateContext, GateResult } from "../lib/types.ts";
 
@@ -105,7 +117,7 @@ import { boot } from "./desktop-smoke/boot.ts";
 import { coach } from "./desktop-smoke/coach.ts";
 import { feedback } from "./desktop-smoke/feedback.ts";
 import { practice } from "./desktop-smoke/practice.ts";
-import { cli } from "./desktop-smoke/scenario.ts";
+import { cli, textEnv } from "./desktop-smoke/scenario.ts";
 import type { ScenarioRun, Shared } from "./desktop-smoke/scenario.ts";
 import { settings } from "./desktop-smoke/settings.ts";
 
@@ -114,7 +126,7 @@ import { settings } from "./desktop-smoke/settings.ts";
  * earlier ones proved. The content scan runs first, before any launch, when
  * the tree still holds exactly what the package shipped.
  */
-const CASES = ["contents", "layout", "study", "agents", "brief", "anki", "upgrade", "credential", "broken"] as const;
+const CASES = ["contents", "layout", "study", "cli-runtime", "agents", "brief", "anki", "upgrade", "credential", "broken"] as const;
 
 export interface PackageSmokeOptions {
   /**
@@ -149,27 +161,6 @@ export function makePackageSmokeGate(options: PackageSmokeOptions = {}): Gate {
 }
 
 export const packageSmoke = makePackageSmokeGate();
-
-/** The app's data directory for a temp per-user root, as the platform resolves it. */
-function dataRootFor(home: string, appName: string): string {
-  if (process.platform === "win32") return path.join(home, "AppData", appName);
-  if (process.platform === "darwin") return path.join(home, "Library", "Application Support", appName);
-  return path.join(home, ".config", appName); // os.UserConfigDir reads XDG_CONFIG_HOME
-}
-
-/**
- * The environment variables that point os.UserConfigDir (and on Windows
- * os.UserCacheDir: MyGo creates its WebView2 folder under %LOCALAPPDATA%) at
- * a temp root. They are spelled as the inherited environment spells them: a
- * launch whose block carries both `APPDATA` and `AppData` can have the app
- * read the inherited one, so the gate replaces the entry that is already
- * there.
- */
-function homeEnv(home: string): Record<string, string> {
-  if (process.platform === "win32") return { APPDATA: path.join(home, "AppData"), LOCALAPPDATA: path.join(home, "LocalAppData") };
-  if (process.platform === "darwin") return { HOME: home };
-  return { HOME: home, XDG_CONFIG_HOME: path.join(home, ".config") };
-}
 
 /** The developer tools no launch may find on its PATH. */
 const DEVELOPER_TOOLS = ["go", "bun", "node"];
@@ -310,6 +301,8 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
   let fixtureMinimumSystemVersion = "";
   let packageLine = "";
   let studyData = "";
+  let studyHome = "";
+  let cliLine = "";
   let scanLine = "";
   let upgradeLine = "";
   try {
@@ -378,9 +371,9 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       id: string,
       binary: string,
       extraEnv: Record<string, string> = {},
-      site: { keepHome?: boolean; setData?: boolean } = {},
-    ): { run: ScenarioRun; dataRoot: string } => {
-      const home = path.join(scratch, `home-${id}`);
+      site: { keepHome?: boolean; setData?: boolean; home?: string } = {},
+    ): { run: ScenarioRun; dataRoot: string; home: string } => {
+      const home = site.home ?? path.join(scratch, `home-${id}`);
       mkdirSync(home, { recursive: true });
       const dir = path.join(scratch, `case-${id}`);
       mkdirSync(dir, { recursive: true });
@@ -403,6 +396,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       };
       return {
         dataRoot,
+        home,
         run: {
           shared,
           id,
@@ -434,6 +428,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
       study: async () => {
         const site = siteOf("study", app!.binary, app!.launchEnv);
         studyData = site.dataRoot;
+        studyHome = site.home;
         await boot.run(site.run);
         const inside = app!.installDirs.flatMap((dir) => databasesUnder(dir));
         const database = existsSync(site.run.database);
@@ -449,6 +444,55 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
         check(treeDigest(site.dataRoot) === digest, "study: reinstalling the same version changed the learner's data");
         await boot.run(site.run);
         check((await cli(site.run, ["report"])).stdout === before, "study: the attempt report changed across the reinstall");
+      },
+      "cli-runtime": async () => {
+        // The study case's per-user root, so the database the CLI opens is the
+        // one the window wrote; PATH carries no node and no resolution
+        // override is set, so a host-backed success is the packaged runtime's.
+        const site = siteOf("cli-runtime", app!.binary, app!.launchEnv, { home: studyHome === "" ? undefined : studyHome });
+        const env: Record<string, string> = {
+          ...textEnv(cleanEnv()),
+          ...textEnv(site.run.shared.launchEnv ?? {}),
+          PASSQUEST_PROVIDER_REGISTRY: registry,
+          [STUB_CREDENTIAL_ENV]: `sk-smoke-${Date.now().toString(16)}`,
+        };
+        const pinned = Object.keys(env).filter((name) => name === "PASSQUEST_NODE" || /^PASSQUEST_.*_HOST$/.test(name));
+        check(pinned.length === 0, `cli-runtime: the installation's CLI environment pins ${pinned.join(", ")}`);
+        const cwd = site.run.shared.cwd ?? site.run.dir;
+        mkdirSync(path.join(cwd, ".passquest"), { recursive: true });
+        writeFileSync(path.join(cwd, ".passquest", "passquest.sqlite"), "not a database\n");
+        const runCLI = (args: string[]) => run(app!.binary, args, { cwd, env, replaceEnv: true });
+
+        // The CLI's own notice names the database it resolved; the app's own
+        // resolution for the same per-user root is the file below it.
+        const report = await runCLI(["report", "--json"]);
+        const notice = report.stderr.split(/\r?\n/).find((line) => line.includes("the command line now uses")) ?? "";
+        check(
+          notice.includes(site.run.database),
+          `cli-runtime: the installed CLI resolved its database elsewhere (${notice === "" ? "no notice line" : notice}), the app's per-user root holds ${site.run.database}`,
+        );
+        check(report.code === 0, `cli-runtime: report exit = ${report.code}: ${tail(report.stderr, 4)}`);
+
+        const before = provider.received.length;
+        const tested = await runCLI(["model", "test", STUB_MODEL, "--json"]);
+        const doc = parse(tested.stdout) as Record<string, unknown>;
+        check(tested.code === 0, `cli-runtime: model test exit = ${tested.code}: ${tail(tested.stderr, 6)}`);
+        check(stringField(doc, "state") === "verified", `cli-runtime: model test state = ${String(stringField(doc, "state"))} (${String(stringField(doc, "result"))})`);
+        check(stringField(doc, "provider") === "stub", `cli-runtime: model test provider = ${String(stringField(doc, "provider"))}`);
+        check(
+          stringField(doc, "credential_env") === STUB_CREDENTIAL_ENV,
+          `cli-runtime: model test credential_env = ${String(stringField(doc, "credential_env"))}, want the registry's own ${STUB_CREDENTIAL_ENV}`,
+        );
+        check(
+          provider.received.length - before === 1,
+          `cli-runtime: the loopback stub answered ${provider.received.length - before} request(s) for the installed CLI's probe, want 1`,
+        );
+        const databases = databasesUnder(site.home);
+        check(
+          databases.length === 1 && path.resolve(databases[0]!) === path.resolve(site.run.database),
+          `cli-runtime: ${databases.length} database(s) under ${site.home}: ${databases.join(", ") || "none"}, want the per-user ${site.run.database}`,
+        );
+        cliLine = `cli-runtime: ${site.run.database} opened by the installed binary with no node on PATH; ${STUB_MODEL} verified`;
       },
       agents: async () => {
         await coach.run(siteOf("agents", app!.binary, app!.launchEnv).run);
@@ -529,7 +573,7 @@ async function runPackageSmoke(ctx: GateContext, options: PackageSmokeOptions, c
   if (checks.length > 0) return fail(checks);
   return pass(
     `${assertions} assertions over ${cases.join(", ")}; ${packageLine}${scanLine === "" ? "" : `; ${scanLine}`}${
-      upgradeLine === "" ? "" : `; ${upgradeLine}`
-    }`,
+      cliLine === "" ? "" : `; ${cliLine}`
+    }${upgradeLine === "" ? "" : `; ${upgradeLine}`}`,
   );
 }

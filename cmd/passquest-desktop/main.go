@@ -14,9 +14,13 @@ func main() {
 	os.Exit(run(os.Args[1:], desktop.Run))
 }
 
+func cliOptions() cli.Options {
+	return cli.Options{Resources: desktop.ResourceDir()}
+}
+
 func run(args []string, window func() int) int {
 	if len(args) > 0 {
-		return cli.Run(args, cli.Options{})
+		return cli.Run(args, cliOptions())
 	}
 	return window()
 }

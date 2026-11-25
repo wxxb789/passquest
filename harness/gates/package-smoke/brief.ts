@@ -8,12 +8,11 @@
  * provider requests.
  *
  * The paused start is deliberate. The installed binary's own CLI starts the
- * run with the repository's PATH (no node on it) and the runtime and durable
- * host pinned to the installed copy's own files: a CLI composition root
- * resolves no resources directory (only the window does, docs/harness.md), so
- * the pin is the documented way to run an installed package's CLI, and the
- * window half below — no pins at all — proves the resolution the app itself
- * must do. The stub never answers that run, so only a pause request or the
+ * run with a PATH that carries no node and with no PASSQUEST_* override set:
+ * the binary passes the directory it resolved for its own packaged files into
+ * the CLI's composition root (cmd/passquest-desktop), so the durable host runs
+ * on the packaged runtime, and the window half below resolves the same files
+ * for itself. The stub never answers that run, so only a pause request or the
  * deadline ends it; the pause request is written once the stub has recorded
  * the run's own first provider request (lib/host-control.ts), which is what
  * makes "the pause found durable work" true by construction — the plan's
@@ -38,20 +37,15 @@ import type { Scenario, ScenarioRun } from "../desktop-smoke/scenario.ts";
  * The environment the installed binary gets when this case runs its CLI: the
  * launch environment the window gets (no PASSQUEST_* variable of this shell,
  * the stripped PATH, the site's home), plus the stub registry and credential
- * and the packaged runtime and host. `cliJson` replaces rather than layers the
- * environment, so no PASSQUEST_* variable can leak in behind the pins.
+ * only. `cliJson` replaces rather than layers the environment, so no
+ * PASSQUEST_* variable can leak in: the packaged runtime and hosts are what
+ * the binary resolves for itself.
  */
-function installedEnv(
-  s: ScenarioRun,
-  keyEnv: Record<string, string>,
-  pins: { runtime: string; durableHost: string },
-): Record<string, string> {
+function installedEnv(s: ScenarioRun, keyEnv: Record<string, string>): Record<string, string> {
   return {
     ...textEnv(cleanEnv()),
     ...textEnv(s.shared.launchEnv ?? {}),
     PASSQUEST_PROVIDER_REGISTRY: s.shared.registry,
-    PASSQUEST_NODE: pins.runtime,
-    PASSQUEST_AGENT_HOST: pins.durableHost,
     ...keyEnv,
   };
 }
@@ -64,14 +58,9 @@ export const brief: Scenario = {
     const keyEnv = { [STUB_CREDENTIAL_ENV]: key };
     // siteOf in the package smoke — this case's only caller — names both from
     // the installed tree, whose copy always carries the runtime and
-    // agent/durable-host.mjs. A copy that lost either is a broken package, so
-    // it fails by name here instead of letting the missing file reach the
-    // binary: PASSQUEST_AGENT_HOST would fall back to the cwd's and the exe's
-    // neighbours, and PASSQUEST_NODE to a PATH this launch strips, so the real
-    // cause would surface as "node not found" instead of itself. Reachable
-    // the moment a tree lacks one of the two — a fixture that omits the host,
-    // or a package whose agent/ lost it — and the case returns before any
-    // launch, so the failure names the missing file.
+    // agent/durable-host.mjs. A copy that lost either is a broken package, and
+    // the case names the file instead of leaving it to a resolution error that
+    // would list every candidate directory.
     const runtime = s.shared.runtime ?? "";
     const durableHost = s.shared.durableHost ?? "";
     const absent = !existsSync(runtime) ? "no Node runtime" : !existsSync(durableHost) ? "no agent/durable-host.mjs" : "";
@@ -79,7 +68,7 @@ export const brief: Scenario = {
       s.check(false, `brief: the installed app carries ${absent}, so its own CLI cannot run the brief`);
       return;
     }
-    const env = installedEnv(s, keyEnv, { runtime, durableHost });
+    const env = installedEnv(s, keyEnv);
     const installed = (args: string[]): Promise<{ code: number; stdout: string; stderr: string; doc: unknown }> =>
       cliJson(s.shared.binary, s.database, s.shared.cwd ?? s.shared.ctx.root, args, env, { replaceEnv: true });
 
