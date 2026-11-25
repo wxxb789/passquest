@@ -115,8 +115,9 @@ the outbound calls (model, search, AnkiConnect) and run the
 
 ## Project status
 
-The current release is **v0.15.1**. Goals 0001–0017 and 0019 are done, from headless practice to the
-packaged desktop app with an update check and a frontend written for the supported engines. Every goal is merged only after one mechanical gate passes on
+The current release is **v0.15.2**. Goals 0001–0017, 0019 and 0020 are done, from headless practice to the
+packaged desktop app with an update check, a frontend written for the supported engines and a command line that shares the window's data;
+0022's integrated title bar ships in this release and awaits the owner's manual pass. Every goal is merged only after one mechanical gate passes on
 Windows, macOS and Linux (`bun run gate`, see [Harness](docs/harness.md)). The numbered roadmap is in
 [docs/goals](docs/goals/README.md), and open owner decisions are in
 [OPEN-QUESTIONS](docs/decisions/OPEN-QUESTIONS.md).
