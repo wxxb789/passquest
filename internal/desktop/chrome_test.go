@@ -41,8 +41,6 @@ func TestSetWindowButtonsThemeWithoutAWindow(t *testing.T) {
 	}
 }
 
-// The title bar is the page's own on the OSes whose step has landed (goal
-// 0022); the others keep the system's.
 func TestApplyTitleBarPerOS(t *testing.T) {
 	options := mygo.WindowOptions{}
 	applyTitleBar(&options)
@@ -54,6 +52,9 @@ func TestApplyTitleBarPerOS(t *testing.T) {
 	case "darwin":
 		if options.TitleBarStyle != mygo.TitleBarHidden || options.TitleBarHeight != 0 {
 			t.Fatalf("macOS title bar = %q, %d, want hidden with no TitleBarHeight (AppKit's own band, Q-0022-03)", options.TitleBarStyle, options.TitleBarHeight)
+		}
+		if options.TrafficLightPosition != nil {
+			t.Fatalf("macOS traffic lights = %+v, want the default place (Q-0022-03)", options.TrafficLightPosition)
 		}
 	default:
 		if options.TitleBarStyle != "" || options.TitleBarHeight != 0 {
