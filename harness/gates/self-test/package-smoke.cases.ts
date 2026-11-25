@@ -922,6 +922,20 @@ export function bundlePackagesProblem(): string | null {
       if (message === "") return `the bundle's packages accept ${what}`;
       if (!message.includes(expected)) return `the refusal of ${what} does not say ${JSON.stringify(expected)}: ${message}`;
     }
+    if (process.platform === "win32") {
+      // Bun writes `<ups>/C:/path` for a module reached through a junction onto
+      // another drive; only the drive-qualified tail names the real file.
+      const drive = dir.slice(0, 2);
+      const tail = `${drive}/${dir.slice(2).split(path.sep).join("/")}`;
+      const crossDrive = read(JSON.stringify({ inputs: { [`${"../".repeat(20)}${tail}/node_modules/fixture-pkg/index.mjs`]: {} } }));
+      if (crossDrive.message !== "" || crossDrive.packages.length !== 1 || crossDrive.packages[0]?.root !== root) {
+        return `a bun metafile key crossing drives is not read back to its package: ${crossDrive.message || JSON.stringify(crossDrive.packages)}`;
+      }
+      const absentTail = read(JSON.stringify({ inputs: { [`${"../".repeat(20)}${drive}/no-such-tree/node_modules/fixture-pkg/index.mjs`]: {} } }));
+      if (!absentTail.message.includes("a bundle inlined a package the tree does not carry")) {
+        return `a drive-qualified key naming no file is not refused as missing: ${absentTail.message || "it was accepted"}`;
+      }
+    }
     return null;
   } finally {
     rmSync(dir, { recursive: true, force: true });
