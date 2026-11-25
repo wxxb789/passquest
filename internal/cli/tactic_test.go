@@ -15,6 +15,9 @@ import (
 func runNoDB(t *testing.T, clock *stepClock, stdin string, args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
+	// The per-user default must never be the one of the machine running the
+	// tests: the run resolves it under this test's own config root.
+	configDir := t.TempDir()
 	opt := Options{
 		Stdin:      strings.NewReader(stdin),
 		Stdout:     &stdout,
@@ -22,6 +25,7 @@ func runNoDB(t *testing.T, clock *stepClock, stdin string, args ...string) (int,
 		Now:        clock.Now,
 		NewSession: func() string { return "sess-test" },
 		Getenv:     func(string) string { return "" },
+		ConfigDir:  func() (string, error) { return configDir, nil },
 	}
 	code := Run(args, opt)
 	return code, stdout.String(), stderr.String()

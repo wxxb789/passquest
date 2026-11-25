@@ -69,7 +69,11 @@ func runNotePropose(args []string, opt Options) int {
 			"a question without a stored attempt needs --mark naming the word or pattern worth keeping")
 	}
 
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -133,7 +137,11 @@ func runNotePreview(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -189,7 +197,11 @@ func runNoteAccept(args []string, opt Options) int {
 	})
 	edited := frontSet || backSet || tacticSet
 
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -261,7 +273,11 @@ func runNoteSkip(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -307,7 +323,11 @@ func runNoteShow(args []string, opt Options) int {
 	if fs.NArg() == 1 {
 		noteID = fs.Arg(0)
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}

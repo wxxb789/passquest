@@ -63,7 +63,11 @@ func runTutorPreview(args []string, opt Options) int {
 	if err != nil {
 		return fail(opt, *jsonFlag, err)
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -193,7 +197,11 @@ func runTutorAsk(args []string, opt Options) int {
 	if err != nil {
 		return fail(opt, *jsonFlag, err)
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -293,7 +301,11 @@ func runTutorHistory(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -408,7 +420,11 @@ func runTutorShow(args []string, opt Options) int {
 	if err != nil {
 		return usageError(opt, *jsonFlag, "invalid_input", fmt.Sprintf("invalid call id %q", fs.Arg(0)))
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -471,7 +487,11 @@ func runTutorConsentCommand(args []string, opt Options, command string, granted 
 		return usageError(opt, *jsonFlag, "invalid_input", "--reviewer is required")
 	}
 	providerID := strings.TrimSpace(*providerFlag)
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -526,7 +546,11 @@ func runTutorConsents(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}

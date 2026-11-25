@@ -150,6 +150,11 @@ Entry format:
   `--db` or `PASSQUEST_DB` is left to the user. Windows has no POSIX mode and `os.Chmod(0o600)` does
   not create an ACL, so the import smoke reports its database-mode assertion as skipped there. The
   `0600` database file remains the private-data boundary on POSIX.
+- Platform limit extended (2026-11-25, goal 0020 P1): the app-owned default directory is the per-user
+  one both entry points resolve (Q-0020-01, `internal/userdata`), and the `0700` tightening follows
+  it; the `.passquest/` path named above is the historical command-line default, now only the subject
+  of the notice (Q-0020-02). The exempt choices are three — `--db`, `PASSQUEST_DB` and
+  `PASSQUEST_DESKTOP_DATA` — each the learner's own selection, left as given, not modified.
 - Revisit when: the desktop workspace (0011) stores multiple learners, or private source material
   needs at-rest encryption.
 
@@ -1213,6 +1218,12 @@ Entry format:
   `PASSQUEST_DESKTOP_DATA` override, and a default directory that lands inside the app's own files is
   now refused before anything is written; moving an existing CLI database stays out of scope (the
   plan's out-of-scope list). See Q-0013-04.
+- Revisited (2026-11-25): goal 0020 moved the command line's default to that same per-user directory
+  through one shared resolution (`internal/userdata`, Q-0020-01), so the window and the command line
+  read one database by default. `--db` and `PASSQUEST_DB` still decide first; the window's own
+  location, `PASSQUEST_DESKTOP_DATA`'s meaning for it, and its refusal rule are unchanged. Moving an
+  existing `.passquest` database stays out of scope — the command line only tells the learner
+  (Q-0020-02).
 
 ### Q-0011-05 — What is a "hint" in ordinary practice?
 - Status: decided(default taken)
@@ -2684,4 +2695,222 @@ Entry format:
   per-OS room reading, and the guard that the window never sets `HideWindowButtons`. Reversal: none
   inside MyGo.
 - Revisit when: MyGo draws the caption differently, or Windows 11's Snap rules change.
+
+### Q-0020-01 — One resolution, shared by both entry points
+- Status: decided(default taken)
+- Context: the command line resolves its default database as the relative `.passquest/passquest.sqlite`
+  under the working directory (`internal/study.DatabasePath`), while the window resolves the per-user
+  data directory (`%APPDATA%\Pass Quest`, `~/Library/Application Support/Pass Quest`,
+  `$XDG_CONFIG_HOME/Pass Quest`) in `internal/desktop.resolveStorage`. Done-when 1 requires one
+  computation both entry points share; `--db` and `PASSQUEST_DB` keep winning exactly as today, and the
+  window's location must not move.
+- Options considered: (A) a new `internal/userdata` package owns the directory and the path, and both
+  roots call it; (B) `internal/desktop` exports the resolution and the CLI imports it; (C) each keeps
+  its own spelling with a parity test between them.
+- Default taken: (A). `internal/userdata` owns `AppName = "Pass Quest"`, `DataEnv =
+  "PASSQUEST_DESKTOP_DATA"`, `DatabaseEnv = "PASSQUEST_DB"`, `DatabaseFile = "passquest.sqlite"`,
+  `LegacyDatabasePath = .passquest/passquest.sqlite`, `Dir(configDir, getenv) (string, error)` (the
+  `DataEnv` override — whitespace-trimmed and taken only when non-empty, the rule the window applies —
+  else `configDir()` joined with `AppName`) and `DatabasePath(flag, configDir, getenv) (string, error)`
+  (the flag as given when it is not whitespace-only → the trimmed `DatabaseEnv`, exactly
+  `study.DatabasePath`'s rule today → `DatabaseFile` inside `Dir`). Both reads trim whitespace and the
+  flag is returned untrimmed, so a whitespace-only `PASSQUEST_DESKTOP_DATA` still resolves the
+  app-owned per-user default — never a directory named from a space, as the window ignores the blank
+  value today. `internal/study.DatabasePath` and the window's default seam both call it;
+  `internal/desktop` keeps its own literals for the four names the package shares (its `AppName` is
+  where packaging's identity lives and what the install-guide gate reads) with a parity test pinning
+  all four against `internal/userdata`'s values, so a drift in any of them fails before a run.
+  `configDir` is a seam, not a second implementation: both roots pass `os.UserConfigDir`, so the
+  directory stays `os.UserConfigDir()`'s own answer and the window's location cannot move. The CLI
+  honors `PASSQUEST_DESKTOP_DATA` for the same reason the window does — it *is* the window's
+  data-directory override, and the smoke gates isolate runs with it — with `--db` and `PASSQUEST_DB`
+  still deciding first. A `PASSQUEST_DESKTOP_DATA` directory is the learner's explicit choice, taken as
+  given exactly as the window takes it (only the app-owned default is tightened to 0700), so the CLI
+  leaves it alone too; only the app-owned per-user default keeps `store.OpenPrivate`'s 0700 tightening.
+  When no config directory can be resolved and no override is set, the command fails with one clear
+  message naming `PASSQUEST_DB`/`--db` rather than falling back anywhere.
+- Outcome (2026-11-25, P1): as planned. `internal/userdata` holds the names and the two functions;
+  `internal/cli` resolves through `Options.resolveDatabase` (one helper `ports` and `openDatabase`
+  share) and renders an unresolvable config directory as the refusal `config_dir_unavailable`
+  (`exit 2`) naming `--db`/`PASSQUEST_DB`; the desktop's `openStudy` seam calls `userdata.Dir` with
+  `os.UserConfigDir`. The one exception is `agent record-step`, which keeps its own stdout error
+  document (`config_dir_unavailable`, exit 1) because that document is the durable host's protocol.
+  The parity test is `TestUserdataParity` (`internal/desktop/paths_test.go`).
+- Outcome (2026-11-25, P1 fix round): `study.DefaultDatabasePath` takes only the config-directory
+  seam in the final shape — it returns the clean app-owned default (no `PASSQUEST_DB`, no
+  `PASSQUEST_DESKTOP_DATA`), the path a copied command with no overrides resolves, and that is what
+  the generated-command comparison reads (Q-0020-06) — and the two `config_dir_unavailable` messages
+  are built by one shared `study.ConfigDirUnavailableMessage`.
+- Revisit when: a third entry point needs the directory, or `os.UserConfigDir` stops naming the
+  per-user root the guides print.
+
+### Q-0020-02 — The notice about the old default
+- Status: decided(default taken)
+- Context: goal 0020 moves the command line's default database to the per-user directory. A learner
+  whose data still sits in `./.passquest/passquest.sqlite` must not silently lose sight of it, and the
+  contract forbids moving, copying or merging it (Done-when 2).
+- Options considered: (A) one stderr notice per run naming both paths and a move command quoted for the
+  detected shell family; (B) print no notice and let the guides carry the fact; (C) offer an interactive
+  move prompt.
+- Default taken: (A). On a run that resolves the default location (no `--db`, no `PASSQUEST_DB`), when a
+  database file exists at `filepath.Join(workdir, ".passquest", "passquest.sqlite")`, the CLI writes
+  **one** line to stderr, before the command's own work, naming the old path, the new path and the
+  promise `Pass Quest will not move it; move or merge it yourself`, whose move command names the
+  resolved **absolute** paths (the working directory's old file and the per-user database — the same
+  pair the prose prints, never a `%APPDATA%`/`$env:` spelling) with each argument rendered through
+  `cmdline`'s shared `CommandQuoter.Quote` for the family `cmdline.DetectShell` reports — the family,
+  its source and the override hint printed beside it, exactly as `next` does, through one helper both
+  callers share. When detection fails (an unknown `PASSQUEST_SHELL`) the notice prints the paths and
+  the prose without a command and the run continues: an unrelated command must not fail because of the
+  notice. Nothing is copied, moved, merged or deleted — the notice is a read of the filesystem plus a
+  line on stderr, so `--json` stdout stays byte-identical. It shows whether or not the per-user
+  database exists: with both files the learner must still be told which one the command reads, and the
+  wording names both paths either way. Reverse: condition it on the per-user database being absent (the
+  contract's literal case) and drop the other branch.
+- Outcome (2026-11-25, P1): as planned, with two implementation details the notice's tests pin: the
+  move verb follows the family (`mv` for sh, `move` for cmd, `Move-Item` for powershell), so the pasted
+  command exists in the detected shell; and the notice is suppressed when the old file *is* the
+  resolved database (an absolutes compare, case-insensitive on Windows), which would otherwise print a
+  command moving a file onto itself.
+- Outcome (2026-11-25, P1 fix round): the move command is now printed only when the per-user database
+  does not exist yet. In the steady state — both files present — a POSIX `mv` would replace the
+  database the window is writing, so with both files the notice names both paths, says no move command
+  is printed and to merge instead, and offers no command
+  (`TestOldDefaultNoticeWithBothDatabasesPrintsNoMoveCommand`). The command is also omitted when the
+  detected family is `cmd` and either path contains `%`, which cmd.exe expands inside the quotes
+  (`TestOldDefaultNoticeDropsCmdCommandOnPercentPath`).
+- Revisit when: the notice's wording proves confusing in the owner's use, or a later goal migrates the
+  old data itself.
+
+### Q-0020-03 — Failing clearly when the wait runs out
+- Status: decided(default taken)
+- Context: the window opens its store per call and the command line is one process per command, so
+  SQLite's own write lock plus `busy_timeout(5000)` is the whole concurrency guarantee (Done-when 3).
+  What the learner reads when the wait runs out is undecided.
+- Options considered: (A) map the driver's busy error to a typed refusal in one place; (B) let the
+  driver's text through; (C) add WAL, a lock file or a retry loop.
+- Default taken: (A). No locking change: the window opens per call, the CLI is one process per command,
+  and SQLite's write lock plus `busy_timeout(5000)` is the guarantee. `internal/store` gains
+  `IsBusy(err) bool` (the driver's `Error.Code()` with `code&0xff` 5 or 6), and `internal/cli`'s
+  `internalError` maps a busy error to a usage refusal (exit 2, code `database_busy`) whose message says
+  the window has the database open and gives one action (close the window, or retry). One mapping
+  point, so a busy error from the open *or* from a later write reads the same. No WAL, no lock file, no
+  retry loop, no process-level lock: each would be a piece of state this goal does not need. Reverse:
+  drop `IsBusy` and let the driver's text through again.
+- Revisit when: a busy refusal is seen in the owner's own use, or the store grows a second writer.
+
+### Q-0020-04 — How the package is recognised when a binary runs as the CLI
+- Status: decided(default taken)
+- Context: the window passes `resourceDir()` (MyGo's `PathResources`) to the host resolution; the CLI's
+  composition root passes nothing, so an installed binary started with arguments finds `node` only on
+  `PATH` and, on macOS, cannot reach `Contents/Resources/agent` at all (Done-when 4).
+- Options considered: (A) the CLI path takes the resources directory from the same computation the
+  window uses, exposed by `internal/desktop`; (B) a new heuristic in `internal/hostpaths` sniffing an
+  install; (C) keep the harness's `PASSQUEST_NODE`/`PASSQUEST_*_HOST` pins.
+- Default taken: (A). The CLI path takes its resources directory from the **same** computation the
+  window uses — `mygo.App.Path(mygo.PathResources)`, already in `resourceDir()` — exposed to
+  `cmd/passquest-desktop` as `desktop.ResourceDir()` and carried into `cli.Options` as `Resources`,
+  which `withDefaults` puts into every default host transport. A development build (`mygo.IsDev()`)
+  passes `""`, so a source checkout's CLI keeps today's lookups; an installed binary passes the
+  packaged directory on all three platforms, so the resolution's own rules (explicit `PASSQUEST_*`
+  first, packaged directory second) decide, and macOS's `Contents/Resources` is reachable.
+  `internal/hostpaths` is not changed: no new heuristic, no install sniffing. The standalone
+  `cmd/passquest` binary keeps its source-checkout behaviour (it never had resources). Reverse: pass
+  `""` again and restore the harness's `PASSQUEST_NODE`/`PASSQUEST_*_HOST` pins in the package smoke.
+- Revisit when: a third entry point ships without a resources directory, or MyGo moves the resources
+  path.
+
+### Q-0020-05 — The Node 26 pin
+- Status: decided(default taken)
+- Context: the package bundles Node 22.23.5 (`harness/lib/package.ts` `NODE_VERSION`), `mise.toml`
+  pins `node = "22"` and CI's `gate.yml` `node-version: "22"`; Node 22 is in maintenance and reaches
+  end of life on 2027-04-30, and the owner's decision (2026-11-22) is Node 26. Measured 2026-11-25
+  (`https://nodejs.org/dist/index.json`): the newest 26 LTS is **v26.13.1** (2026-11-10,
+  `"lts": "Lithium"`, `"security": true`); 26.13.0 was the first `Lithium` tag (2026-10-28); v27 is
+  still alpha. `https://nodejs.org/dist/v26.13.1/SHASUMS256.txt` carries
+  `e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f1f7  node-v26.13.1-win-x64.zip`,
+  `aec2514ea1ceb2ba52455e9ec65986f6749a06dd759e5db2a72e6889668c9735  node-v26.13.1-darwin-arm64.tar.gz`,
+  `82bb96078a24ca50b9c9a38f2379e6be6d87171fcd400fc14c8934b3bce96e2f  node-v26.13.1-darwin-x64.tar.gz`,
+  `5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864  node-v26.13.1-linux-x64.tar.xz`;
+  all four targets the pins cover exist for 26.13.1.
+- Options considered: (A) 26.13.1 as above; (B) the newest 26.x whatever it is at implementation time;
+  (C) stay on 22 until it leaves maintenance.
+- Default taken: (A). **26.13.1** with the four SHA-256s above, in `harness/lib/package.ts`
+  `NODE_VERSION`/`NODE_PINS`; `mise.toml` and `.github/workflows/gate.yml` pin the *same exact
+  version*, so the development toolchain, the source-host runs in CI and the shipped runtime agree and
+  a patch difference cannot hide a defect. The step that lands the pin re-reads
+  `https://nodejs.org/dist/index.json` and that version's `SHASUMS256.txt` at implementation time: if
+  26 has a newer LTS release by then, it takes that release and records the version and the reason in
+  the evidence record instead of copying the four values above. Reversal: any later step may bump every
+  version-carrying place together — the pins, `mise.toml`, `gate.yml` and the three pinned sentences
+  the agreement check reads; the archive and member names, the download URL's `v<NODE_VERSION>` prefix
+  and the staged `node --version` comparison all carry the version too, so a half-done bump fails the
+  download, the agreement check or a `node --version` comparison rather than shipping.
+- Revisit when: Node 26 leaves maintenance, a new target OS appears, or the packages' own engine
+  requirement rises above 26.
+
+### Q-0020-06 — What the learner reads
+- Status: decided(default taken)
+- Context: the CLI's usage line names the literal old default, and the two install guides describe the
+  window's data directory but not the command line's. Done-when 6 requires the command line's default,
+  the installed binary's CLI use and the old-file advice to be stated and consistent.
+- Options considered: (A) the usage line names the rule, the guides gain the sentences inside their
+  existing data section; (B) the usage line keeps a literal path (wrong on two platforms); (C) a new
+  guide section for the command line.
+- Default taken: (A). The CLI's usage line names the rule, not a literal path: `Default database:
+  $PASSQUEST_DB or passquest.sqlite in the per-user data directory (docs/install.md)`, because the
+  literal path differs per platform and the guides already name it. `docs/install.md` and
+  `docs/install.zh-CN.md` gain, inside their existing data section, what the command line and the
+  installed binary do: where the command line keeps its database by default, that
+  `PASSQUEST_DESKTOP_DATA` moves both entry points together, that the installed app's own binary is
+  the command line when given arguments (with the per-platform way to reach it), and what to do with
+  an old `./.passquest`. `docs/agent.md` states the same resolution for the host lookups. Disclosed
+  consequence of one shared resolution: the window's Today command now omits `--db` when the generated
+  command resolves the same store (it always printed one before), because the window's own path *is*
+  the default now — a copied command still opens the same database, and nothing below the header
+  changes. Reverse: restore the literal usage line and the guides' old sentences; the command text
+  follows the resolution again if the comparison is dropped.
+- Outcome (2026-11-25, P1): the rule sentence and the five product documents landed with P1
+  (`docs/find.md`, `docs/notes.md`, `docs/tutor.md`, `docs/source-import.md`, `docs/desktop.md`); the
+  guides' data sections and `docs/agent.md` are P3/P5's, as planned. The Today-command consequence is
+  pinned by `TestNextCommandOmitsDefaultDatabase` in its new per-user shape.
+- Outcome (2026-11-25, P1 fix round): the omission rule the first cut over-applied is corrected — the
+  comparison resolves the clean app-owned default (no `--db`, no `PASSQUEST_DB`, no
+  `PASSQUEST_DESKTOP_DATA`), so a store selected through any override is repeated in the generated
+  command again and a copy pasted without the override cannot silently open another store; the
+  omission happens exactly when the selected path *is* that app-owned default — the disclosed change.
+  Pinned by `TestNextCommandRepeatsOverrideSelectedDatabase` (command line) and
+  `TestWorkspaceTodayDatabaseArgumentFollowsTheSelectedStore` (window).
+- Revisit when: the guides' data section moves, or a platform's per-user directory changes.
+
+### Q-0020-07 — What the machine owns now, CI the rest
+- Status: decided(default taken)
+- Context: macOS and Linux window behaviour cannot be run on this Windows machine, and its window gates
+  fail spuriously under load; the package gate costs about eight minutes per run and the self-test
+  about twenty-five.
+- Options considered: (A) the two new per-OS checks plus cheap local paths here, CI's three-OS matrix
+  as the authority; (B) run the full package gate and window gates locally per step; (C) only CI.
+- Default taken: (A). The two new per-OS checks are a `desktop-smoke` scenario (`default-data`) and a
+  `package-smoke` case (`cli-runtime`), each with a self-test case proving it fails on a deliberately
+  broken fixture; both run on all three OSes in CI. Locally this machine proves the Go tests and the
+  two gates' cheap paths only: window cases are advisory here and CI's run is the authority. The
+  package gate runs once, at the end of the step that changes the package.
+- Revisit when: a Linux or macOS machine is available to the owner, or the package gate's cost drops.
+
+### Q-0020-08 — What this goal does not do
+- Status: decided(default taken)
+- Context: goal 0020 changes where the command line's default database lives and where the installed
+  binary finds its runtime. Several adjacent behaviours look related but stay out of scope.
+- Options considered: (A) record the exclusions and let a later goal opt in; (B) migrate existing data;
+  (C) change the window's own location or the store's locking model with the same PR.
+- Default taken: (A). No migration of existing data, no WAL change, no lock file, no change to where
+  the window keeps data, no change to `PASSQUEST_DESKTOP_DATA`'s meaning for the window, no change to
+  the database schema, the bound window API, the host protocols, scoring, consent or any golden.
+  `PASSQUEST_NODE` and the four `PASSQUEST_*_HOST` variables keep winning over everything. Reverse:
+  none needed — this entry records what was left alone; a later goal that wants any of these starts
+  its own decision.
+- Outcome (2026-11-25, P1): held. No schema, consent, bound-API, host-protocol or golden change; the
+  notice only reads the filesystem, and P1's diff changes no window behaviour beyond the default seam's
+  computation.
+- Revisit when: a later goal needs one of the excluded behaviours; it starts its own entry.
 

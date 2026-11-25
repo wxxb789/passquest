@@ -374,6 +374,51 @@ func TestNextCommandOmitsDefaultDatabase(t *testing.T) {
 	}
 }
 
+// A store selected through an override is repeated in generated commands: a
+// copy pasted into an environment without the override would otherwise open a
+// different store than the one the command was generated for.
+func TestNextCommandRepeatsOverrideSelectedDatabase(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "moved")
+	tests := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"PASSQUEST_DB", map[string]string{"PASSQUEST_DB": filepath.Join(root, "environment.sqlite")}, filepath.Join(root, "environment.sqlite")},
+		{"PASSQUEST_DESKTOP_DATA", map[string]string{"PASSQUEST_DESKTOP_DATA": dataDir}, filepath.Join(dataDir, "passquest.sqlite")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			opt := Options{
+				Stdout:    &stdout,
+				Stderr:    &stderr,
+				Now:       (&stepClock{base: goldenBase}).Now,
+				Getenv:    func(key string) string { return tt.env[key] },
+				ConfigDir: func() (string, error) { return root, nil },
+			}
+			if code := Run([]string{"next", "--json"}, opt); code != 0 {
+				t.Fatalf("next = %d, stderr %s", code, stderr.String())
+			}
+			doc := decodeNext(t, stdout.String())
+			if doc.Recommendation == nil {
+				t.Fatal("no recommendation")
+			}
+			want := "--db " + testQuoter.quote(tt.want)
+			for name, command := range map[string]string{
+				"command":   doc.Recommendation.Command,
+				"follow-up": doc.Recommendation.FollowUpCommand,
+			} {
+				if !strings.Contains(command, want) {
+					t.Fatalf("%s does not repeat the override-selected database: %q", name, command)
+				}
+			}
+		})
+	}
+}
+
 func TestNextRevisitsAndSkips(t *testing.T) {
 	t.Parallel()
 	db := newDB(t)

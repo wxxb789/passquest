@@ -57,7 +57,7 @@ func runPageEdit(args []string, opt Options) int {
 
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	corrected, err := st.CorrectPage(sourceID, page, string(text), *note, *reviewer, opt.Now())
@@ -97,7 +97,7 @@ func runPageReview(args []string, opt Options) int {
 	}
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	reviewed, err := st.ReviewPage(sourceID, page, *reviewer, *note, opt.Now())
@@ -161,7 +161,7 @@ func runQuestionAdd(args []string, opt Options) int {
 
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	if _, err := st.Question(sourceID, q.ID); err == nil {
@@ -208,7 +208,7 @@ func runQuestionEdit(args []string, opt Options) int {
 	}
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	existing, err := st.Question(sourceID, questionID)
@@ -259,7 +259,7 @@ func runQuestionReview(args []string, opt Options) int {
 	sourceID, questionID := fs.Arg(0), fs.Arg(1)
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	existing, err := st.Question(sourceID, questionID)

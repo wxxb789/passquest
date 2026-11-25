@@ -56,6 +56,8 @@ Binding project conventions. Read this before writing code for any goal.
 cmd/passquest/          CLI entry point
 cmd/passquest-desktop/  desktop app entry point (the CLI when given arguments)
 internal/<domain>/      Go packages by domain truth, not by layer
+internal/userdata/      the per-user data directory and default database path both entry points
+                        resolve
 internal/study/         orchestration per learner workflow (practice, recommend, models, coach, notes,
                         outbox, assessment, brief and the shared kernel), imported by both adapters
 internal/cli/           Go adapter for the CLI surface

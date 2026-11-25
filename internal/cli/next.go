@@ -34,7 +34,11 @@ func runNext(args []string, opt Options) int {
 	if shellErr != nil {
 		spend = recommend.SpendNone
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	db, err := opt.resolveDatabase(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(opt.portsOf(db))
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -49,8 +53,12 @@ func runNext(args []string, opt Options) int {
 	if shellErr != nil {
 		return usageError(opt, *jsonFlag, "invalid_input", shellErr.Error())
 	}
+	defaultDB, err := study.DefaultDatabasePath(opt.ConfigDir)
+	if err != nil {
+		defaultDB = ""
+	}
 	doc := nextDocOf(result.Adaptive, result.Unclassified, *sourceFlag, result.Catalog.SourceTaggedQuestions,
-		cmdline.NextDatabaseArgument(databasePath(*dbFlag, opt.Getenv), study.DefaultDatabasePath), commandQuoter{shell: shell})
+		cmdline.NextDatabaseArgument(db.Path, defaultDB), commandQuoter{shell: shell})
 	if *jsonFlag {
 		return writeJSON(opt, doc)
 	}
@@ -241,15 +249,7 @@ func writeShellDisclosure(w io.Writer, doc nextDoc) {
 	if doc.Shell == nil {
 		return
 	}
-	from := "no shell detected, defaulted"
-	switch doc.Shell.DetectedFrom {
-	case cmdline.ShellOverrideEnv:
-		from = "from " + cmdline.ShellOverrideEnv
-	case "PSModulePath":
-		from = "from PSModulePath"
-	case "SHELL", "ComSpec":
-		from = fmt.Sprintf("from %s=%s", doc.Shell.DetectedFrom, doc.Shell.Detail)
-	}
+	from := shellSourceDetail(doc.Shell.DetectedFrom, doc.Shell.Detail)
 	fmt.Fprintf(w, "Quoted for %s (%s); override with %s.\n", doc.Shell.Family, from, doc.Shell.Override)
 	if doc.Shell.Family == string(cmdline.ShellCmd) && recommendationExpandsPercent(doc) {
 		fmt.Fprintln(w, "Warning: cmd.exe expands %NAME% even inside double quotes, so this command is not copy-safe with that path; set PASSQUEST_SHELL=powershell or pass the path another way.")

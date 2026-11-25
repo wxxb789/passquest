@@ -56,7 +56,7 @@ func runFindQuery(args []string, opt Options) int {
 
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 
@@ -266,7 +266,7 @@ func runFindHistory(args []string, opt Options) int {
 	}
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	queries, err := st.FindQueries(*limitFlag)
@@ -306,7 +306,7 @@ func runFindShow(args []string, opt Options) int {
 	}
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	query, candidates, found, err := st.FindQuery(id)

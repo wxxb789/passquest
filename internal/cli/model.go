@@ -40,7 +40,11 @@ func runModelList(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -114,7 +118,11 @@ func runModelUse(args []string, opt Options) int {
 	if _, _, err := provider.ParseRef(fs.Arg(0)); err != nil {
 		return usageError(opt, *jsonFlag, "invalid_input", err.Error())
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -159,7 +167,11 @@ func runModelTest(args []string, opt Options) int {
 	if _, _, err := provider.ParseRef(fs.Arg(0)); err != nil {
 		return usageError(opt, *jsonFlag, "invalid_input", err.Error())
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}
@@ -217,7 +229,11 @@ func runModelBudget(args []string, opt Options) int {
 	if code := parseArgs(fs, args, opt, wantJSON, 0, ""); code != 0 {
 		return code
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}

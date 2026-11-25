@@ -32,7 +32,8 @@ passquest tutor revoke SOURCE --reviewer NAME [--provider ID]
 ```
 
 `--attempt` defaults to the latest recorded attempt. `report` shows attempt ids. Every command accepts
-`--db PATH`; the default is `$PASSQUEST_DB` or `./.passquest/passquest.sqlite`.
+`--db PATH`; the default is `$PASSQUEST_DB` or `passquest.sqlite` in the per-user data directory,
+the same database the window opens ([install.md](install.md)).
 
 ## One supported endpoint
 

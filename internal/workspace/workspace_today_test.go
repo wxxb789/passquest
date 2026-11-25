@@ -1,6 +1,9 @@
 package workspace
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,5 +146,59 @@ func TestWorkspaceCanCountAgreesWithAdaptiveEvidence(t *testing.T) {
 	mustNoErr(t, err)
 	if feedback.Counted || feedback.Condition != studio.ConditionReExposure {
 		t.Fatalf("seen-passage feedback = %s counted=%v", feedback.Condition, feedback.Counted)
+	}
+}
+
+// The window's generated command repeats a store selected through an override
+// and omits --db only when its selected path is the app-owned default a
+// command with no overrides resolves.
+func TestWorkspaceTodayDatabaseArgumentFollowsTheSelectedStore(t *testing.T) {
+	t.Parallel()
+	config := t.TempDir()
+	dataDir := filepath.Join(config, "moved")
+	envDB := filepath.Join(config, "environment.sqlite")
+	if err := os.MkdirAll(filepath.Join(config, "Pass Quest"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"app-owned default", nil, ""},
+		{"PASSQUEST_DB", map[string]string{"PASSQUEST_DB": envDB}, envDB},
+		{"PASSQUEST_DESKTOP_DATA", map[string]string{"PASSQUEST_DESKTOP_DATA": dataDir}, filepath.Join(dataDir, "passquest.sqlite")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := tt.env
+			if env == nil {
+				env = map[string]string{}
+			}
+			f := newWSFixture(t, func(o *Options) {
+				o.DBPath = ""
+				o.ConfigDir = func() (string, error) { return config, nil }
+				o.Getenv = func(key string) string { return env[key] }
+				o.Environ = func() []string { return envList(env) }
+			})
+			today, err := f.w.Today()
+			mustNoErr(t, err)
+			if today.Recommendation == nil {
+				t.Fatal("no recommendation")
+			}
+			command := today.Recommendation.Command
+			if tt.want == "" {
+				if strings.Contains(command, "--db") {
+					t.Fatalf("command repeats the app-owned default: %q", command)
+				}
+				return
+			}
+			if !strings.Contains(command, "--db") || !strings.Contains(command, tt.want) {
+				t.Fatalf("command does not repeat the override-selected database %q: %q", tt.want, command)
+			}
+		})
 	}
 }

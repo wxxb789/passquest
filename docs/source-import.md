@@ -5,10 +5,11 @@ local** working context. Nothing is uploaded, no OCR is run automatically, and i
 never treated as an answer key until a user reviews it.
 
 The private boundary is the SQLite database: sources, page revisions and question reviews
-are stored under `$PASSQUEST_DB` (default `.passquest/passquest.sqlite`). On POSIX the default
-`.passquest/` directory is tightened to `0700` and the database file is `0600`. A directory chosen
-with `--db` or `$PASSQUEST_DB` is left to the user, and Windows has no POSIX mode (see Known limits).
-No source text is copied into the repository or `testdata/`.
+are stored under `$PASSQUEST_DB` (default `passquest.sqlite` in the per-user data directory; see
+[install.md](install.md)). On POSIX the app-owned default directory is tightened to `0700` and the
+database file is `0600`. A location chosen with `--db`, `$PASSQUEST_DB` or `$PASSQUEST_DESKTOP_DATA`
+is left to the user, and Windows has no POSIX mode (see Known limits). No source text is copied into
+the repository or `testdata/`.
 
 ## Accepted inputs
 
@@ -147,7 +148,7 @@ source title, path and full page are never included in the provider payload. See
   covers them; each would need its own goal.
 - POSIX modes only: Windows has no `0600`/`0700` equivalent, and `os.Chmod(0o600)` does not create a
   restrictive ACL there. The import smoke reports its database-mode assertion as skipped on Windows
-  rather than counting it. The directory mode is enforced only for the app-owned default path; a
-  directory chosen with `--db` or `$PASSQUEST_DB` is not modified.
+  rather than counting it. The directory mode is enforced only for the app-owned per-user default; a
+  location chosen with `--db`, `$PASSQUEST_DB` or `$PASSQUEST_DESKTOP_DATA` is not modified.
 
 Measured behaviour and limitations: [`evidence/0002-local-text-baseline.md`](evidence/0002-local-text-baseline.md).

@@ -40,6 +40,10 @@ type Options struct {
 	// DBPath is the database the workspace opens per call. Empty selects
 	// PASSQUEST_DB or the CLI default, exactly as the CLI does.
 	DBPath string
+	// ConfigDir resolves the per-user configuration root the default data
+	// directory lives under. It is read only when DBPath is empty; nil means
+	// os.UserConfigDir, the same read the CLI makes.
+	ConfigDir func() (string, error)
 	// Getenv and Environ read the process environment; nil means os.Getenv
 	// and os.Environ. Credentials from Credentials are layered under them:
 	// a non-empty variable always wins (Q-0011-03).
@@ -75,6 +79,7 @@ type Options struct {
 type Workspace struct {
 	mu             sync.Mutex
 	dbPath         string
+	configDir      func() (string, error)
 	resources      string
 	baseGetenv     func(string) string
 	baseEnviron    func() []string
@@ -129,9 +134,18 @@ func Open(options Options) (*Workspace, error) {
 	for _, p := range registry.Providers {
 		w.credentialEnvs[provider.CredentialEnvFor(p.ID)] = p.ID
 	}
+	w.configDir = options.ConfigDir
+	if w.configDir == nil {
+		w.configDir = os.UserConfigDir
+	}
 	w.dbPath = strings.TrimSpace(options.DBPath)
 	if w.dbPath == "" {
-		w.dbPath = study.DatabasePath("", w.baseGetenv)
+		path, err := study.DatabasePath("", w.configDir, w.baseGetenv)
+		if err != nil {
+			return nil, &studio.Error{Code: "config_dir_unavailable",
+				Message: study.ConfigDirUnavailableMessage(err)}
+		}
+		w.dbPath = path
 	}
 	w.opt = windowOptions{Now: options.Now, Getenv: w.getenv}
 	if w.opt.Now == nil {

@@ -34,7 +34,11 @@ func runNotePush(args []string, opt Options) int {
 	if err != nil {
 		return usageError(opt, *jsonFlag, "invalid_endpoint", err.Error())
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}

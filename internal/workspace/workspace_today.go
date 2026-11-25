@@ -112,7 +112,12 @@ func (w *Workspace) todayRecommendation(st *store.Store, today *studio.Today, no
 	}
 	rec := result.Adaptive.Recommendation
 	primary, followUp := recommend.Targets(result.Adaptive.Recommendation)
-	command, followUpCommand := cmdline.NextCommands(rec, cmdline.NextDatabaseArgument(w.dbPath, study.DefaultDatabasePath), cmdline.CommandQuoter{Shell: shell})
+	defaultDBPath, err := study.DefaultDatabasePath(w.configDir)
+	if err != nil {
+		// A generated command that repeats the selected path is always safe.
+		defaultDBPath = ""
+	}
+	command, followUpCommand := cmdline.NextCommands(rec, cmdline.NextDatabaseArgument(w.dbPath, defaultDBPath), cmdline.CommandQuoter{Shell: shell})
 	today.Recommendation = &studio.Recommendation{
 		Action:             string(rec.Action),
 		State:              string(rec.State),

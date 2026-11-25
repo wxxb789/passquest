@@ -129,7 +129,11 @@ func runSkillPractice(args []string, opt Options) int {
 			fmt.Sprintf("skill %q is not registered; available: %s", fs.Arg(0), strings.Join(skill.Registered(), ", ")))
 	}
 
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}

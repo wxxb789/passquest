@@ -59,7 +59,7 @@ func runImport(args []string, opt Options) int {
 	}
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	created, err := st.ImportSource(src)

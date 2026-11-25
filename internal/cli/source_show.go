@@ -20,7 +20,7 @@ func runSources(args []string, opt Options) int {
 	}
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	summaries, err := st.Sources()
@@ -62,7 +62,7 @@ func runShow(args []string, opt Options) int {
 	sourceID := fs.Arg(0)
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	src, questions, err := study.LoadSourceBundle(st, sourceID)
@@ -155,7 +155,7 @@ func runQuestions(args []string, opt Options) int {
 	}
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	src, questions, err := study.LoadSourceBundle(st, fs.Arg(0))

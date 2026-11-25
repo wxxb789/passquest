@@ -10,11 +10,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study/internal/kernel"
+	"github.com/wxxb789/passquest/internal/userdata"
 )
 
 // Service is one unit of work over one opened store (one CLI invocation, one
@@ -47,23 +47,36 @@ func Refuse(code, format string, args ...any) *Error {
 	return kernel.Refuse(code, format, args...)
 }
 
-// DefaultDatabasePath is the app-owned relative path resolved when neither
-// --db nor PASSQUEST_DB selects a database.
-var DefaultDatabasePath = filepath.Join(".passquest", "passquest.sqlite")
+// ConfigDirUnavailableMessage is the one refusal message both entry points
+// render when no per-user data directory can be resolved and no override
+// selects a database: it names the two overrides, never a fallback store.
+func ConfigDirUnavailableMessage(err error) string {
+	return fmt.Sprintf("cannot resolve the per-user data directory: %v; name the database with --db PATH or %s", err, userdata.DatabaseEnv)
+}
+
+// DefaultDatabasePath resolves the path a generated command relies on when it
+// does not repeat a database: passquest.sqlite in the app-owned per-user data
+// directory, with no environment override applied. A copied command with no
+// --db, no PASSQUEST_DB and no PASSQUEST_DESKTOP_DATA resolves it, so callers
+// omit --db from a generated command only when the path it selected equals this
+// one (cmdline.NextDatabaseArgument); a store selected through an override is
+// repeated instead, because a copy pasted into an environment with different
+// overrides would silently open another store.
+func DefaultDatabasePath(configDir func() (string, error)) (string, error) {
+	dir, err := userdata.Dir(configDir, func(string) string { return "" })
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, userdata.DatabaseFile), nil
+}
 
 // DatabasePath resolves the database a command opens: --db (or the window's
-// selected path), then PASSQUEST_DB, then the app-owned default. A flag value
+// selected path), then PASSQUEST_DB, then the per-user default. A flag value
 // that is only whitespace selects the next source; the selected value is
 // returned as given. Both composition roots use it, so the CLI's commands and
 // the window's generated commands name the same store.
-func DatabasePath(flagValue string, getenv func(string) string) string {
-	if strings.TrimSpace(flagValue) != "" {
-		return flagValue
-	}
-	if v := strings.TrimSpace(getenv("PASSQUEST_DB")); v != "" {
-		return v
-	}
-	return DefaultDatabasePath
+func DatabasePath(flagValue string, configDir func() (string, error), getenv func(string) string) (string, error) {
+	return userdata.DatabasePath(flagValue, configDir, getenv)
 }
 
 // NewSessionID is the default session identity both roots fill a nil

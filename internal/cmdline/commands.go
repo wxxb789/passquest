@@ -16,11 +16,13 @@ func NextCommands(rec *adaptive.Recommendation, dbArg string, quoter CommandQuot
 }
 
 // NextDatabaseArgument is the database selection repeated in generated commands
-// that open learner history: empty for the app-owned default path, which a
-// copied command resolves the same way, and non-empty for any other path chosen
-// with --db or PASSQUEST_DB so the command does not silently fall back to the
-// default store. The selected path and the default path are the caller's, so
-// the resolution rule has one definition (study.DatabasePath).
+// that open learner history: empty when the selected path is the app-owned
+// default, which a copied command with no overrides resolves the same way, and
+// non-empty for any other path, so a command pasted into an environment with
+// different overrides still opens the store it was generated for instead of
+// silently falling back to the default store. The caller passes the pristine
+// app-owned default (study.DefaultDatabasePath), never the session's own
+// env-aware resolution.
 func NextDatabaseArgument(selected, defaultPath string) string {
 	if selected == defaultPath {
 		return ""
