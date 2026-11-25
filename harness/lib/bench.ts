@@ -56,6 +56,7 @@ export interface BenchOptions {
   out: string;
   shots: string;
   label: string;
+  branch: string;
   samples: number;
   warmup: number;
   error: string;
@@ -65,7 +66,7 @@ export const USAGE = `Run the frontend bench on two built trees, or one tree's r
 
   bun harness/tools/frontend-bench.ts --self-check
   bun harness/tools/frontend-bench.ts --a-root <dir> --b-root <dir> --out <file> [--shots <dir>] \\
-      [--samples ${DEFAULT_SAMPLES}] [--warmup ${DEFAULT_WARMUP}] [--label <text>]
+      [--samples ${DEFAULT_SAMPLES}] [--warmup ${DEFAULT_WARMUP}] [--label <text>] [--branch <name>]
   bun harness/tools/frontend-bench.ts --root <dir> --smoke --out <file> [--shots <dir>]
 
   --a-root <dir>   the base tree (A), checked out beside the tree the tool runs from
@@ -76,6 +77,10 @@ export const USAGE = `Run the frontend bench on two built trees, or one tree's r
   --samples <n>    measured launches per build per metric (default ${DEFAULT_SAMPLES})
   --warmup <n>     discarded launches per build before the measured ones (default ${DEFAULT_WARMUP})
   --label <text>   what the record says this run was (the workflow passes its refs)
+  --branch <name>  the head branch this run's shots were made on (the workflow passes the pull
+                   request's ref; a dispatch passes none): an allowlist entry scoped to another
+                   branch, or to any branch when this is absent, neither allows a difference nor
+                   reads as stale
   --self-check     run the argument, spread, verdict, guard, launch and shot cases over fixtures
   --help           this text
 
@@ -113,6 +118,7 @@ export function parseBenchArgs(argv: readonly string[]): BenchOptions {
     out: "",
     shots: "",
     label: "",
+    branch: "",
     samples: DEFAULT_SAMPLES,
     warmup: DEFAULT_WARMUP,
     error: "",
@@ -131,7 +137,8 @@ export function parseBenchArgs(argv: readonly string[]): BenchOptions {
       case "--root":
       case "--out":
       case "--shots":
-      case "--label": {
+      case "--label":
+      case "--branch": {
         const raw = value();
         if (raw === null) return optionError(options, `${arg} needs a value`);
         if (arg === "--a-root") options = { ...options, aRoot: raw };
@@ -139,7 +146,8 @@ export function parseBenchArgs(argv: readonly string[]): BenchOptions {
         else if (arg === "--root") options = { ...options, root: raw };
         else if (arg === "--out") options = { ...options, out: raw };
         else if (arg === "--shots") options = { ...options, shots: raw };
-        else options = { ...options, label: raw };
+        else if (arg === "--label") options = { ...options, label: raw };
+        else options = { ...options, branch: raw };
         break;
       }
       case "--samples": {
@@ -735,6 +743,8 @@ export interface VisualAllowEntry {
   reason: string;
   /** Which OS's shots the entry belongs to (Q-0022-06); "any" unless the entry names one. */
   os: AllowOS;
+  /** The head branch whose run the entry belongs to (Q-0022-06); "" is every run. */
+  branch: string;
 }
 
 /** An allowlist entry's own scope; "any" applies wherever the comparison runs. */
@@ -770,15 +780,26 @@ export function readVisualAllowlist(text: string): { entries: VisualAllowEntry[]
     if (os !== "windows" && os !== "macos" && os !== "any") {
       return { error: `${VISUAL_ALLOWLIST}: entry ${index} names os ${JSON.stringify(os)}, want "windows", "macos" or "any"` };
     }
-    entries.push({ state, reason, os });
+    const rawBranch = field(entry, "branch");
+    const branch = stringField(entry, "branch")?.trim() ?? "";
+    if (rawBranch !== undefined && branch === "") {
+      return { error: `${VISUAL_ALLOWLIST}: entry ${index} names branch ${JSON.stringify(rawBranch)}, want a non-empty head branch or no branch field` };
+    }
+    entries.push({ state, reason, os, branch });
   }
   return { entries };
 }
 
-export function visualFindings(rows: readonly ShotRow[], entries: readonly VisualAllowEntry[], scope: RunOS): { findings: string[]; allowed: string[]; stale: string[] } {
-  // An entry scoped to another OS neither allows a difference here nor reads as stale:
-  // it belongs to that OS's own run (Q-0022-06).
-  const applies = (entry: VisualAllowEntry) => entry.os === "any" || entry.os === scope;
+export function visualFindings(
+  rows: readonly ShotRow[],
+  entries: readonly VisualAllowEntry[],
+  scope: RunOS,
+  branch: string,
+): { findings: string[]; allowed: string[]; stale: string[] } {
+  // An entry scoped to another OS or branch neither allows a difference here nor reads as stale:
+  // it belongs to that OS's or that branch's own run, and a run whose branch is unknown reads
+  // branch-scoped entries the same way (Q-0022-06).
+  const applies = (entry: VisualAllowEntry) => (entry.os === "any" || entry.os === scope) && (entry.branch === "" || entry.branch === branch);
   const listed = new Map(entries.filter(applies).map((entry) => [entry.state, entry.reason]));
   const findings: string[] = [];
   const allowed: string[] = [];
@@ -1092,7 +1113,7 @@ export function selfCheckCases(): SelfCheckCase[] {
       name: "args: compare defaults",
       check: () => {
         const parsed = options(["--a-root", "a", "--b-root", ".", "--out", "run/record.json"]);
-        const explicit = options(["--a-root", "a", "--b-root", ".", "--out", "run/record.json", "--shots", "pics"]);
+        const explicit = options(["--a-root", "a", "--b-root", ".", "--out", "run/record.json", "--shots", "pics", "--branch", "goal/0022-p3"]);
         return expect(
           parsed.mode === "compare" &&
             parsed.aRoot === "a" &&
@@ -1101,7 +1122,9 @@ export function selfCheckCases(): SelfCheckCase[] {
             parsed.warmup === DEFAULT_WARMUP &&
             parsed.out === path.resolve("run", "record.json") &&
             parsed.shots === path.resolve("run", "shots") &&
-            explicit.shots === path.resolve("pics"),
+            parsed.branch === "" &&
+            explicit.shots === path.resolve("pics") &&
+            explicit.branch === "goal/0022-p3",
           `parsed ${JSON.stringify(parsed)}, explicit ${JSON.stringify(explicit)}`,
         );
       },
@@ -1111,6 +1134,13 @@ export function selfCheckCases(): SelfCheckCase[] {
       check: () => {
         const parsed = options(["--a-root", "a", "--out", "record.json"]);
         return expect(parsed.mode === "error" && parsed.error.includes("--b-root"), `parsed ${JSON.stringify(parsed)}`);
+      },
+    },
+    {
+      name: "args must fail: --branch without a value",
+      check: () => {
+        const parsed = options(["--a-root", "a", "--b-root", ".", "--out", "r.json", "--branch"]);
+        return expect(parsed.mode === "error" && parsed.error.includes("--branch"), `parsed ${JSON.stringify(parsed)}`);
       },
     },
     {
@@ -1669,10 +1699,11 @@ export function selfCheckCases(): SelfCheckCase[] {
         const { findings, allowed, stale } = visualFindings(
           rows,
           [
-            { state: "today", reason: "the step changes it", os: "any" },
-            { state: "report", reason: "stale", os: "any" },
+            { state: "today", reason: "the step changes it", os: "any", branch: "" },
+            { state: "report", reason: "stale", os: "any", branch: "" },
           ],
           "windows",
+          "",
         );
         return expect(findings.length === 0 && allowed.length === 1 && stale.length === 1, `findings ${JSON.stringify(findings)}, allowed ${JSON.stringify(allowed)}, stale ${JSON.stringify(stale)}`);
       },
@@ -1681,7 +1712,7 @@ export function selfCheckCases(): SelfCheckCase[] {
       name: "allowlist must fail: a differing state nobody names",
       check: () => {
         const rows = [{ state: "today", a: null, b: null, identical: false }];
-        const { findings } = visualFindings(rows, [], "macos");
+        const { findings } = visualFindings(rows, [], "macos", "");
         return expect(findings.length === 1 && (findings[0] ?? "").includes("today"), `findings = ${JSON.stringify(findings)}`);
       },
     },
@@ -1690,10 +1721,10 @@ export function selfCheckCases(): SelfCheckCase[] {
       check: () => {
         const differing = [{ state: "today", a: null, b: null, identical: false }];
         const identical = [{ state: "today", a: null, b: null, identical: true }];
-        const entry: VisualAllowEntry = { state: "today", reason: "the Windows title area", os: "windows" };
-        const here = visualFindings(differing, [entry], "macos");
-        const there = visualFindings(identical, [entry], "macos");
-        const own = visualFindings(identical, [entry], "windows");
+        const entry: VisualAllowEntry = { state: "today", reason: "the Windows title area", os: "windows", branch: "" };
+        const here = visualFindings(differing, [entry], "macos", "");
+        const there = visualFindings(identical, [entry], "macos", "");
+        const own = visualFindings(identical, [entry], "windows", "");
         return expect(
           here.findings.length === 1 && here.stale.length === 0 && there.stale.length === 0 && own.stale.length === 1,
           `here ${JSON.stringify(here)}, there ${JSON.stringify(there)}, own ${JSON.stringify(own)}: an entry for this OS that matches nothing is stale, one for another OS is neither a finding nor stale`,
@@ -1701,19 +1732,77 @@ export function selfCheckCases(): SelfCheckCase[] {
       },
     },
     {
-      name: "allowlist: the os scope parses and an unknown one is refused",
+      name: "allowlist: another branch's entry neither allows a difference here nor reads as stale",
+      check: () => {
+        const differing = [{ state: "today", a: null, b: null, identical: false }];
+        const identical = [{ state: "today", a: null, b: null, identical: true }];
+        const entry: VisualAllowEntry = { state: "today", reason: "the macOS title area (0022 P3)", os: "macos", branch: "goal/0022-p3" };
+        const here = visualFindings(differing, [entry], "macos", "goal/0022-p4");
+        const there = visualFindings(identical, [entry], "macos", "goal/0022-p4");
+        const unknownDiffers = visualFindings(differing, [entry], "macos", "");
+        const unknownSame = visualFindings(identical, [entry], "macos", "");
+        return expect(
+          here.findings.length === 1 &&
+            here.stale.length === 0 &&
+            there.stale.length === 0 &&
+            unknownDiffers.findings.length === 1 &&
+            unknownSame.stale.length === 0,
+          `here ${JSON.stringify(here)}, there ${JSON.stringify(there)}, unknownDiffers ${JSON.stringify(unknownDiffers)}, unknownSame ${JSON.stringify(unknownSame)}: an entry scoped to another branch is neither a finding nor stale, and a run without a branch reads it the same way`,
+        );
+      },
+    },
+    {
+      name: "allowlist: the same branch's entry allows a difference and goes stale as before",
+      check: () => {
+        const differing = [{ state: "today", a: null, b: null, identical: false }];
+        const identical = [{ state: "today", a: null, b: null, identical: true }];
+        const entry: VisualAllowEntry = { state: "today", reason: "the step changes it", os: "any", branch: "goal/0022-p3" };
+        const allowed = visualFindings(differing, [entry], "macos", "goal/0022-p3");
+        const stale = visualFindings(identical, [entry], "macos", "goal/0022-p3");
+        return expect(
+          allowed.allowed.length === 1 && allowed.findings.length === 0 && allowed.stale.length === 0 && stale.stale.length === 1 && stale.findings.length === 0,
+          `allowed ${JSON.stringify(allowed)}, stale ${JSON.stringify(stale)}`,
+        );
+      },
+    },
+    {
+      name: "allowlist: an entry without a branch keeps today's meaning",
+      check: () => {
+        const differing = [{ state: "today", a: null, b: null, identical: false }];
+        const identical = [{ state: "today", a: null, b: null, identical: true }];
+        const entry: VisualAllowEntry = { state: "today", reason: "everywhere", os: "any", branch: "" };
+        const named = visualFindings(differing, [entry], "windows", "goal/0022-p3");
+        const stale = visualFindings(identical, [entry], "windows", "goal/0022-p3");
+        const dispatch = visualFindings(identical, [entry], "windows", "");
+        return expect(
+          named.allowed.length === 1 && stale.stale.length === 1 && dispatch.stale.length === 1,
+          `named ${JSON.stringify(named)}, stale ${JSON.stringify(stale)}, dispatch ${JSON.stringify(dispatch)}`,
+        );
+      },
+    },
+    {
+      name: "allowlist: the os and branch scopes parse and an unknown os or empty branch is refused",
       check: () => {
         const scoped = readVisualAllowlist(JSON.stringify({ version: 1, entries: [{ state: "today", reason: "a Windows-only difference", os: "windows" }] }));
         const defaulted = readVisualAllowlist(JSON.stringify({ version: 1, entries: [{ state: "today", reason: "everywhere" }] }));
+        const byBranch = readVisualAllowlist(JSON.stringify({ version: 1, entries: [{ state: "today", reason: "this branch", os: "macos", branch: "goal/0022-p3" }] }));
         const bad = readVisualAllowlist(JSON.stringify({ version: 1, entries: [{ state: "today", reason: "x", os: "linux" }] }));
+        const emptyBranch = readVisualAllowlist(JSON.stringify({ version: 1, entries: [{ state: "today", reason: "x", branch: "" }] }));
         return expect(
           "entries" in scoped &&
             scoped.entries[0]?.os === "windows" &&
+            scoped.entries[0]?.branch === "" &&
             "entries" in defaulted &&
             defaulted.entries[0]?.os === "any" &&
+            defaulted.entries[0]?.branch === "" &&
+            "entries" in byBranch &&
+            byBranch.entries[0]?.os === "macos" &&
+            byBranch.entries[0]?.branch === "goal/0022-p3" &&
             "error" in bad &&
-            bad.error.includes("linux"),
-          `scoped ${JSON.stringify(scoped)}, defaulted ${JSON.stringify(defaulted)}, bad ${JSON.stringify(bad)}`,
+            bad.error.includes("linux") &&
+            "error" in emptyBranch &&
+            emptyBranch.error.includes("non-empty head branch"),
+          `scoped ${JSON.stringify(scoped)}, defaulted ${JSON.stringify(defaulted)}, byBranch ${JSON.stringify(byBranch)}, bad ${JSON.stringify(bad)}, emptyBranch ${JSON.stringify(emptyBranch)}`,
         );
       },
     },

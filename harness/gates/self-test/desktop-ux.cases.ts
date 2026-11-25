@@ -107,10 +107,10 @@ async function dropSheetEntryAnimation(root: string): Promise<string | null> {
 }
 
 /**
- * The title-area furniture goal 0022's P2 adds to the product, faked in the
- * fixture: the room MyGo will report on `:root`, the page's `:root[data-titlebar]`
- * marker, the marker-scoped drag rule and the util group's clearance by
- * `margin` (Q-0022-01). Each must-fail case breaks exactly one piece.
+ * The title-area furniture goal 0022 adds to the product, faked in the fixture:
+ * the room the page is told on `:root`, the page's `:root[data-titlebar]` marker,
+ * the marker-scoped drag rule and the util group's clearance by `margin`
+ * (Q-0022-01). Each must-fail case breaks exactly one piece.
  */
 interface TitlebarFurniture {
   /** false leaves the drag rule out (the neutralised drag region). */
@@ -123,9 +123,15 @@ interface TitlebarFurniture {
 
 async function fakeTitlebarRoom(root: string, furniture: TitlebarFurniture): Promise<string | null> {
   if (copyProduct(root, DESKTOP_UX_SOURCES) === 0) return "no product source was copied into the fixture root";
-  // The product's own room-driven rules (P2) are cancelled first: the fixture states the furniture
+  // The product's own room-driven rules are cancelled first: the fixture states the furniture
   // itself, and its appended rules are unlayered, so they win over the product's cascade layers.
-  const rules = [":root { --mygo-titlebar-height: 40px; --mygo-titlebar-inset-right: 138px; }", "header#top { --app-region: none; }", "header#top .util { margin-right: 0; }"];
+  // The room is pinned with `!important`: MyGo injects its own --mygo-titlebar-* values through a
+  // later adopted stylesheet (mygo@v0.10.0/packages/bridge/src/bridge.ts setRootStyle).
+  const rules = [
+    ":root { --mygo-titlebar-height: 40px !important; --mygo-titlebar-inset-left: 0px !important; --mygo-titlebar-inset-right: 138px !important; --mygo-titlebar-controls-bottom: 40px !important; }",
+    "header#top { --app-region: none; }",
+    "header#top .util { margin-right: 0; }",
+  ];
   if (furniture.drag !== false) rules.push(":root[data-titlebar] header#top { --app-region: drag; }");
   if (furniture.clearance === "padding") rules.push("header#top .util { padding-right: var(--mygo-titlebar-inset-right); }");
   else if (furniture.clearance !== "none") rules.push("header#top .util { margin-right: var(--mygo-titlebar-inset-right); }");

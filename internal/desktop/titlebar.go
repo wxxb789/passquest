@@ -6,13 +6,17 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// applyTitleBar replaces the system title bar with the page's own title area
-// on the OSes whose step has landed (goal 0022): Windows. The height 40 is the
-// util group's measured height and a Windows 11 sized caption strip
-// (Q-0022-01); macOS (P3) and Linux (P4) keep the system's.
+// The page draws the title area itself (goal 0022) on the OSes this switch
+// covers, so the window hides its system title bar there; Linux (P4) keeps the
+// system's for now. The height 40 is the util group's measured height and a
+// Windows 11 sized caption strip (Q-0022-01); macOS reads AppKit's own band and
+// ignores TitleBarHeight (Q-0022-03).
 func applyTitleBar(o *mygo.WindowOptions) {
-	if runtime.GOOS == "windows" {
+	switch runtime.GOOS {
+	case "windows":
 		o.TitleBarStyle = mygo.TitleBarHidden
 		o.TitleBarHeight = 40
+	case "darwin":
+		o.TitleBarStyle = mygo.TitleBarHidden
 	}
 }

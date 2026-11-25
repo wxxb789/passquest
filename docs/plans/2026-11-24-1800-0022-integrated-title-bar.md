@@ -409,7 +409,13 @@ per-OS screenshots and a recorded manual pass for what no gate can see.
    reason); that branch is never merged. **Its cost, disclosed:** from P2's merge until P3 removes the
    entries, another pull request that triggers `frontend-bench` reads those Windows entries in *its
    own* head, matches no difference and fails as stale — the coordinator serialises the steps so no
-   other branch's bench run starts inside that window.
+   other branch's bench run starts inside that window. **Amended 2026-11-25 in the P3 round 3:** an
+   entry also gains an optional `branch` — the pull request's own head branch, which the workflow
+   passes as `github.head_ref`; a dispatch passes nothing — and an entry scoped to another branch, or
+   to any branch in a run that has none, neither allows a difference nor reads as stale, while an
+   entry without one keeps this bullet's meaning. P3's seven macOS entries carry
+   `branch: "goal/0022-p3"`, so the serialisation the disclosed cost above asked for is no longer
+   needed: those entries are inert in any other branch's run, whether or not P4 has removed them yet.
 7. **Q-0022-07 — The 0012 contact sheets.** They are regenerated for the final head with the method
    their own record documents (MyGo's automation build on Windows, the four appearances, 2x2 of
    1280x800 page areas), and the evidence record lists per sheet what changed — the title area, and

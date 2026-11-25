@@ -716,7 +716,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
         const allow = readVisualAllowlist(readFileSync(file, "utf8"));
         if ("error" in allow) fail(run, allow.error);
         else {
-          const findings = visualFindings(comparison.rows, allow.entries, SHOT_SCOPE);
+          const findings = visualFindings(comparison.rows, allow.entries, SHOT_SCOPE, options.branch);
           for (const line of findings.findings) fail(run, line);
           for (const line of findings.stale) fail(run, line);
           allowed = findings.allowed;
@@ -752,6 +752,9 @@ async function runCompare(options: BenchOptions): Promise<number> {
           b: shotState.b,
           allowlist: VISUAL_ALLOWLIST,
           scope: SHOT_SCOPE,
+          branch: options.branch,
+          branchHow:
+            "an allowlist entry scoped to another branch, or to any branch when this run has none, neither allows a difference nor reads as stale (Q-0022-06)",
         },
       },
       template: { seededBy: seed.key, preparedBy: seed.key, trees: 1, reason: template.reason },
@@ -809,6 +812,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
         );
       }
     }
+    say(`allowlist scope: ${SHOT_SCOPE}${options.branch === "" ? ", no branch passed: branch-scoped entries are inert" : ` on ${options.branch}`}`);
     if (shotsMeasured) say(`shots: ${identical}/${comparison.rows.length} state(s) byte-identical between A and B`);
     else say(`shots: not compared (A ${shotState.a}, B ${shotState.b})`);
     if (!run.sameBuild) {

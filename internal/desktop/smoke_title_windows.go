@@ -30,8 +30,10 @@ func windowTitle(win *mygo.Window) (string, error) {
 	return readWindowText(hwnd)
 }
 
-// readWindowText is GetWindowTextLengthW to size the buffer, then
-// GetWindowTextW; same-process calls run the window's own proc directly.
+// readWindowText is GetWindowTextLengthW to size the buffer, then GetWindowTextW. Both send a
+// message (WM_GETTEXTLENGTH, WM_GETTEXT) to the window's own thread when the caller is another
+// one, so that thread must pump: the app's runs MyGo's message loop on the thread that created
+// the window (mygo@v0.10.0/internal/windows/app.go:181).
 func readWindowText(hwnd uintptr) (string, error) {
 	length, _, callErr := procGetWindowTextLengthW.Call(hwnd)
 	if err := callErrno(callErr); err != nil {

@@ -121,9 +121,11 @@ that hides a real surface is a harness defect.
   Done-when 1), then `sheet-open`, `practice-independent`, `feedback-coach`, `settings-row` and
   `report`; every shot launch's row carries the room `--mygo-titlebar-*` reported and the page's
   `:root[data-titlebar]` marker, and each compared state's row carries the OS scope the shots were
-  read under, which decides which `harness/frontend-visual-allow.json` entries apply (an entry's
-  optional `os` is `windows`, `macos` or `any`; another OS's entry neither allows a difference nor
-  reads as stale, Q-0022-06).
+  read under, which with the run's head branch decides which `harness/frontend-visual-allow.json`
+  entries apply (an entry's optional `os` is `windows`, `macos` or `any`, and its optional `branch`
+  is the pull request's own head branch, which the workflow passes — a dispatch passes none; an
+  entry scoped to another OS or branch, or to any branch in a run that has none, neither allows a
+  difference nor reads as stale, Q-0022-06).
   `--smoke` renders the seven shot states in a visible WebKitGTK window on the Linux job, second-tier
   and comparing nothing: its record carries each state's `readyMs` but compares nothing; the tool's
   `--self-check` runs before the builds, so a broken parser fails in seconds
