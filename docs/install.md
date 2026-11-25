@@ -181,6 +181,32 @@ directory and `PASSQUEST_DB` the database file. The directory is deliberately ke
 location: an upgrade replaces the install and an uninstall removes it, and your study evidence must
 survive both. (A lone binary in your home directory is not an install and is not refused.)
 
+**The command line reads the same database.** The `passquest` command line resolves the same per-user
+directory, so the database the window writes is the one a command reads and writes by default:
+`--db <file>` and `PASSQUEST_DB` still override the file exactly as before, and
+`PASSQUEST_DESKTOP_DATA` moves both entry points together. The installed app's own executable is that
+command line when you start it with arguments: Windows
+`"%LOCALAPPDATA%\Programs\Pass Quest\Pass Quest.exe"`, macOS
+`"/Applications/Pass Quest.app/Contents/MacOS/Pass Quest"`, Linux the AppImage file itself. Started
+that way it runs the package's own Node runtime and `agent/` host scripts — no Node installation
+needed and no `PASSQUEST_*` variable required; `PASSQUEST_NODE` and the `PASSQUEST_*_HOST` overrides
+still win when you set them. On Windows the executable is a windowed program: PowerShell returns
+before it finishes, so its `>` or `2>` redirection leaves empty files and no exit code, and a pipe
+decodes the program's output with `[Console]::OutputEncoding` (not UTF-8 on a default machine) and
+re-encodes it on the way to the file, so the file is not the program's own bytes — non-ASCII titles
+and notes come out mangled. Redirect through `cmd /c` instead:
+`cmd /c --% ""%LOCALAPPDATA%\Programs\Pass Quest\Pass Quest.exe" report --json > out.json"`
+(`--%` hands the rest of the line to `cmd` unchanged). It waits for the program, writes its own
+bytes and leaves the exit code in `$LASTEXITCODE`.
+
+If a database from the command line's old default is still at `./.passquest/passquest.sqlite` in the
+directory you run a command from, and you pass no `--db` and set no `PASSQUEST_DB`, the command prints
+one warning on stderr naming both paths. Nothing is moved, copied or merged for you: when the
+per-user database does not exist yet and your shell family can be detected, the warning prints a
+ready-to-paste move command quoted for that shell — except for `cmd.exe` when either path contains a
+`%`, which `cmd.exe` expands even inside quotes, so the warning names both paths without a command;
+when both files exist it says so and tells you to merge instead of overwriting.
+
 **Uninstalling keeps the data.** On Windows the uninstaller removes the install directory, its
 shortcuts and its registry entry, and leaves `%APPDATA%\Pass Quest` in place; on macOS move the app
 to the Trash; on Linux delete the AppImage. To remove the data, delete the directory above yourself. The system
@@ -240,12 +266,12 @@ mounted and the `.app` copied out with `ditto`, the AppImage run in place), laun
 with `go`, `bun` and `node` absent from `PATH` (asserted), and drives the study loop, the agent
 features — including a study brief the installed app completes on its own bundled runtime and hosts —
 Anki, the forward upgrade, the credential case and the broken-runtime case through it (the
-`package smoke` gate, cases `contents, layout, study, agents, brief, anki, upgrade, credential,
-broken`). The macOS job also checks the built `.app`'s `Info.plist` minimum: the package declares
-macOS 26. Each run keeps its package as the `package-windows-latest`, `package-macos-latest` or
-`package-ubuntu-latest` artifact for 7 days. A run on a version tag hands these same artifacts to the
-release workflow, which publishes them only after the owner reviews the draft
-([Releasing](release.md)).
+`package smoke` gate, cases `contents, layout, study, cli-runtime, agents, brief, brief-responses,
+anki, upgrade, credential, broken`). The macOS job also checks the built `.app`'s `Info.plist` minimum:
+the package declares macOS 26. Each run keeps its package as the `package-windows-latest`,
+`package-macos-latest` or `package-ubuntu-latest` artifact for 7 days. A run on a version tag hands
+these same artifacts to the release workflow, which publishes them only after the owner reviews the
+draft ([Releasing](release.md)).
 
 The Homebrew path has its own workflow ([`.github/workflows/cask.yml`](../.github/workflows/cask.yml)):
 on a macOS runner it installs the published release **from the tap** (`brew install --cask
@@ -287,9 +313,9 @@ Untested, and therefore not claimed:
   endpoint runs and reported absent otherwise; study works without it.
 - **Search with the bundled runtime.** The package carries the search host and the same resolver
   finds it, but no package case exercises it: the `package smoke` cases are `contents, layout, study,
-  agents, brief, anki, upgrade, credential, broken`, and the search host's success path is covered by
-  the source-tree `find smoke` only. The durable host's success path is tested in the installed app
-  instead (the `brief` case above).
+  cli-runtime, agents, brief, brief-responses, anki, upgrade, credential, broken`, and the search
+  host's success path is covered by the source-tree `find smoke` only. The durable host's success path
+  is tested in the installed app instead (the `brief` case above).
 - **Updates.** The package smoke does not drive the update check or its browser hand-off; those
   are covered by `desktop smoke`'s `update` scenario in a source checkout, not by the installed
   package.

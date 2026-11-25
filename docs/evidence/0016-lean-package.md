@@ -212,6 +212,12 @@ those files is not a case) — gives 83 over the 24 case files without running t
   resources directory — the rule the package smoke's own row states for the
   `upgrade` case's CLI half (`docs/harness.md` row 24) — so an unpinned CLI half would fail for a
   reason that is not the package's.
+  (Removed 2026-11-25, goal 0020 P3: the installed binary now passes its own resources directory —
+  `internal/desktop`'s `ResourceDir()` — into the CLI composition root, so the `brief` case's CLI
+  half and the `upgrade` case's revision run dropped their `PASSQUEST_NODE`/`PASSQUEST_*_HOST` pins
+  and the package smoke's `cli-runtime` case proves the pin-free resolution per OS; the goal-0020
+  evidence record's Done-when 4 carries the readings of runs 45589197958 and 45610985768. The
+  paragraph above names `docs/harness.md` row 24 for the package smoke; it is row 26.)
 - **Local window gates are unhealthy under load.** This machine ran at 100% CPU during this step (and
   during P1–P4), where the desktop and window parts of the package smoke fail with
   `child process(es) outlived the app: …msedgewebview2.exe` or timeouts; CI on three OSes is the
