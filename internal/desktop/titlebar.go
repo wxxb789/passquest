@@ -6,8 +6,9 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// The page draws the title area itself (goal 0022), so the window hides its
-// system title bar. The height 40 is the util group's measured height and a
+// The page draws the title area itself (goal 0022) on the OSes this switch
+// covers, so the window hides its system title bar there; Linux (P4) keeps the
+// system's for now. The height 40 is the util group's measured height and a
 // Windows 11 sized caption strip (Q-0022-01); macOS reads AppKit's own band and
 // ignores TitleBarHeight (Q-0022-03).
 func applyTitleBar(o *mygo.WindowOptions) {

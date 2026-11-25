@@ -195,12 +195,19 @@ jobs:
 
       - name: Run the bench
         shell: bash
+        env:
+          # A pull request's own branch is what its allowlist entries are scoped to (Q-0022-06);
+          # a dispatch passes none, so branch-scoped entries are inert there.
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           set -o pipefail
+          branch=()
+          if [ -n "$HEAD_REF" ]; then branch=(--branch "$HEAD_REF"); fi
           bun harness/tools/frontend-bench.ts --a-root a --b-root . \
             --out "$RUNNER_TEMP/frontend-bench-record.json" \
             --shots "$RUNNER_TEMP/frontend-bench-shots" \
             --label "${{ matrix.os }} a=${{ steps.refs.outputs.a }} b=${{ steps.refs.outputs.b }}" \
+            "${branch[@]}" \
             2>&1 | tee "$RUNNER_TEMP/frontend-bench.log"
 
       - name: Upload the record, the log and the shots
