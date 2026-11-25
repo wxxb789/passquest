@@ -311,5 +311,64 @@ func main() {
           ? null
           : `desktop-smoke: did not report the window state written into the data directory: ${failures.slice(0, 3).join("; ")}`,
     },
+    {
+      // The titlebar scenario's own assertion path: its 880x600 walk reported a room
+      // and a control under it, so the gate must fail naming that finding.
+      gate: makeDesktopSmokeGate(["titlebar"]),
+      label: "desktop window whose 880x600 walk reports a control under the caption buttons",
+      files: {
+        "go.mod": GO_MOD,
+        "cmd/passquest-desktop/main.go": `package main
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+)
+
+func write(value any) {
+	document, _ := json.Marshal(map[string]any{"ok": true, "value": value})
+	_ = os.WriteFile(os.Getenv("PASSQUEST_DESKTOP_RESULT"), document, 0o600)
+}
+
+func stops() []any {
+	out := []any{}
+	for _, route := range []string{"today", "practice", "feedback", "assess", "report", "anki", "settings"} {
+		for _, want := range []string{"light", "dark"} {
+			issues := []any{}
+			if route == "today" && want == "light" {
+				issues = append(issues, map[string]any{"check": "titlebar-room-covered", "el": "header#top > div.util > button[data-act=theme]", "room": "top-right", "box": []any{1182, 13, 1214, 45}})
+			}
+			out = append(out, map[string]any{
+				"route": route, "want": want, "shown": want,
+				"room": map[string]any{"height": 40, "left": 0, "right": 138, "bottom": 40},
+				"marker": true, "why": "", "counted": 70, "probe": []any{8, 20},
+				"rects":  []any{map[string]any{"name": "top-right", "box": []any{1142, 0, 1280, 40}}},
+				"paint":  []any{}, "skipped": map[string]any{},
+				"issues": issues,
+			})
+		}
+	}
+	return out
+}
+
+func main() {
+	script, _ := os.ReadFile(os.Getenv("PASSQUEST_DESKTOP_SCRIPT"))
+	switch {
+	case strings.Contains(string(script), "desktop-smoke: boot/"):
+		write(map[string]any{"textLength": 900, "stageChildren": 3, "stageTextLength": 800, "errorBars": 0, "ready": true, "probe": "clear", "opaqueErrors": 0})
+	case strings.Contains(string(script), "desktop-smoke: titlebar/"):
+		write(map[string]any{"size": map[string]any{"width": 880, "height": 600}, "stops": stops()})
+	}
+}
+`,
+        "cmd/passquest/main.go": 'package main\n\nfunc main() {}\n',
+        "desktop/web/src/main.ts": 'document.title = "selftest";\n',
+      },
+      postFail: (failures) =>
+        failures.some((line) => line.startsWith("titlebar: ") && line.includes("titlebar-room-covered"))
+          ? null
+          : `desktop-smoke: did not report the control under the caption buttons: ${failures.slice(0, 3).join("; ")}`,
+    },
   ];
 }

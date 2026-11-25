@@ -5,6 +5,7 @@ import { release as osRelease, tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  allowScope,
   BUNDLE_METRICS,
   CONTENT_SIZE,
   compareShots,
@@ -49,6 +50,7 @@ import type {
   ShotRecord,
   ShotRow,
   Spread,
+  TitlebarReading,
   ViewportReading,
 } from "../lib/bench.ts";
 import { buildDesktop, FRONTEND_DIST, removeTree } from "../lib/desktop.ts";
@@ -68,6 +70,8 @@ const ORPHAN_GRACE_MS = 30_000;
 /** Nothing listens on port 1: the app's Anki probe reports "not running" at once instead of waiting on a socket. */
 const UNREACHABLE_ANKI = "http://127.0.0.1:1";
 const COACH_REPLY = "Check the notice: which option states the Saturday closing time?";
+/** The OS this run's shots and allowlist scope belong to (Q-0022-06). */
+const SHOT_SCOPE = allowScope(process.platform);
 /** Where every interaction metric ends (the page scripts' mutation-driven waiter): the mutation that made the condition true, not the shared poll's next tick. */
 const INTERACTION_END = "ending at the mutation that made it true, not on a poll tick";
 /** What each metric row measures; the record carries this so a number is never read without it. */
@@ -128,6 +132,8 @@ interface LaunchRow {
   /** The launch's graded timing metrics where its reading parsed; a launch the viewport check rejects still carries them, so a display that cannot grade the sample still leaves its numbers in the record. */
   metrics: Record<string, number> | null;
   shots: string;
+  /** The room this launch's window read (a shot launch only): what the hidden desktop-smoke launch is compared against. */
+  titlebar: TitlebarReading | null;
   error: string;
   result: "ok" | "guard-failed" | "failed" | "no result";
 }
@@ -214,7 +220,7 @@ async function launch(run: Run, tree: Tree, spec: LaunchSpec): Promise<Started |
   const dir = path.join(run.temp, "launches", spec.label);
   mkdirSync(dir, { recursive: true });
   run.launches++;
-  const row: LaunchRow = { label: spec.label, tree: tree.key, kind: spec.kind, hidden: spec.hidden !== false, engine: "", guards: null, guardsWhy: spec.kind === "prepare" ? PREPARE_GUARDS_WHY : "", loaf: null, metrics: null, shots: "", error: "", result: "no result" };
+  const row: LaunchRow = { label: spec.label, tree: tree.key, kind: spec.kind, hidden: spec.hidden !== false, engine: "", guards: null, guardsWhy: spec.kind === "prepare" ? PREPARE_GUARDS_WHY : "", loaf: null, metrics: null, shots: "", titlebar: null, error: "", result: "no result" };
   run.rows.push(row);
   const env: Record<string, string> = {
     PASSQUEST_DESKTOP_DATA: spec.data,
@@ -319,6 +325,7 @@ function gradedShot(run: Run, started: Started, strict: boolean): { viewport: Vi
   started.row.shots = reading.shots;
   started.row.error = reading.error ?? "";
   started.row.loaf = loafTotals(reading.loaf);
+  started.row.titlebar = reading.titlebar;
   const guardMessages = countGuard(run, label, reading.guards, strict);
   if (reading.guardsFailed) {
     started.row.result = "guard-failed";
@@ -709,7 +716,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
         const allow = readVisualAllowlist(readFileSync(file, "utf8"));
         if ("error" in allow) fail(run, allow.error);
         else {
-          const findings = visualFindings(comparison.rows, allow.entries);
+          const findings = visualFindings(comparison.rows, allow.entries, SHOT_SCOPE);
           for (const line of findings.findings) fail(run, line);
           for (const line of findings.stale) fail(run, line);
           allowed = findings.allowed;
@@ -744,6 +751,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
           a: shotState.a,
           b: shotState.b,
           allowlist: VISUAL_ALLOWLIST,
+          scope: SHOT_SCOPE,
         },
       },
       template: { seededBy: seed.key, preparedBy: seed.key, trees: 1, reason: template.reason },
@@ -768,6 +776,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
           b: row.b,
           identical: row.identical,
           allowed: allowed.some((line) => line.includes(` ${row.state} `)),
+          os: SHOT_SCOPE,
         })),
         identical: shotsMeasured ? identical : null,
         why: shotsMeasured ? null : `shots not compared: A ${shotState.a}, B ${shotState.b}`,
@@ -886,7 +895,7 @@ async function runSmoke(options: BenchOptions): Promise<number> {
       launches: { ...plan, total: run.launches, rows: run.rows },
       guards,
       readyMs: ready,
-      shots: { dir: options.shots, rows: SHOT_STATES.map((state) => ({ state, b: shots[state] ?? null, identical: false })) },
+      shots: { dir: options.shots, rows: SHOT_STATES.map((state) => ({ state, b: shots[state] ?? null, identical: false, os: SHOT_SCOPE })) },
       notes: run.notes,
       failures: run.failures,
       ok: run.failures.length === 0,

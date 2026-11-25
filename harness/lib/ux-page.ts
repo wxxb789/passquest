@@ -1,4 +1,238 @@
 /**
+ * The page-side helpers `TITLEBAR` and `UX` both splice into their own IIFE,
+ * so either library can run alone yet both name elements and read colours
+ * identically — a finding of one must be quotable in the same form as the
+ * other's. `String.raw`, like the libraries themselves.
+ */
+const DOM_HELPERS = String.raw`
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 1;
+  const cx = canvas.getContext("2d", { willReadFrequently: true });
+  const cache = new Map();
+  // Any CSS colour (rgb, oklch, color(), ...) -> [r, g, b, a]: sRGB 0..255, alpha 0..1. The canvas converts.
+  function rgba(str) {
+    if (cache.has(str)) return cache.get(str);
+    let out;
+    const m = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/.exec(str);
+    if (m) {
+      const a = m[4] === undefined ? 1 : m[4].endsWith("%") ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
+      out = [+m[1], +m[2], +m[3], a];
+    } else {
+      cx.clearRect(0, 0, 1, 1);
+      cx.fillStyle = "rgba(0,0,0,0)";
+      cx.fillStyle = str;
+      cx.fillRect(0, 0, 1, 1);
+      const d = cx.getImageData(0, 0, 1, 1).data;
+      // The canvas stores 8-bit alpha; the string's own alpha is exact.
+      let a = d[3] / 255;
+      const am = /\/\s*([\d.]+%?)\s*\)$/.exec(str);
+      if (am) a = am[1].endsWith("%") ? parseFloat(am[1]) / 100 : parseFloat(am[1]);
+      if (str === "transparent") a = 0;
+      out = [d[0], d[1], d[2], a];
+    }
+    cache.set(str, out);
+    return out;
+  }
+  const COLOR_TOKEN = /(rgba?\([^()]*\)|oklch\([^()]*\)|oklab\([^()]*\)|lab\([^()]*\)|lch\([^()]*\)|color\([^()]*\)|#[0-9a-fA-F]{3,8}\b|transparent)/g;
+  const desc = (el) => {
+    if (!el || el.nodeType !== 1) return String(el);
+    let s = el.tagName.toLowerCase();
+    if (el.id) s += "#" + el.id;
+    // An id names the element; its classes (some transient, such as enter-layer) would only split groups.
+    const cls = el.id ? [] : Array.from(el.classList).filter((c) => !/^qa-/.test(c)).slice(0, 2);
+    if (cls.length) s += "." + cls.join(".");
+    for (const a of ["data-act", "data-v", "data-testid"]) if (el.hasAttribute(a)) s += "[" + a + "=" + el.getAttribute(a) + "]";
+    return s;
+  };
+  const path = (el) => {
+    const parts = [];
+    for (let e = el, i = 0; e && e !== document.body && i < 4; e = e.parentElement, i++) parts.unshift(desc(e));
+    return parts.join(" > ");
+  };
+  const visible = (el) => {
+    if (!el.isConnected || el.closest("[inert]")) return false;
+    if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "TEMPLATE", "svg", "path", "g", "use", "circle", "line", "rect", "polyline", "polygon", "defs", "SVG", "PATH"]);
+`;
+
+/**
+ * The page-side title-area checker (goal 0022): page JavaScript that defines
+ * `TITLEBAR` in a smoke-hook script, reading MyGo's `--mygo-titlebar-*` room
+ * from `:root` and the page's own `:root[data-titlebar]` marker. The ux gate's
+ * driver runs `check()` in every audit; the desktop-smoke titlebar scenario
+ * walks the minimum window with it; the frontend bench's shot script reads
+ * `read()` so every shown launch's row carries the room it saw.
+ *
+ * `check()` runs whenever any of the four room values is above zero (the
+ * marker's own condition) and reads no finding where the geometry it needs is
+ * absent, the record's `why` naming the reason. Findings:
+ * - titlebar-room-covered: a visible interactive control of the header — the
+ *   bridge's own click list plus the app's `[data-act]`/`[tabindex]`/
+ *   `[role=button]` markers — whose box intersects a platform rectangle, by
+ *   path
+ * - titlebar-room-paint: a visible header descendant whose painted box (a
+ *   background with alpha, a border, or an outer box-shadow with its offset,
+ *   spread and blur) intersects a rectangle, by path
+ * - titlebar-drag-region: a counted strip sample (y = height/2, stepping
+ *   across the window inside the platform's outer bands and outside the
+ *   rectangles) whose hit is not inside the bridge's exclusion list but whose
+ *   computed `--app-region` is not `drag`; at least one counted point must
+ *   exist whenever the strip is reachable (a non-zero height, no modal layer)
+ * - titlebar-strip-clip: a visible header control whose box is not wholly
+ *   inside the window
+ *
+ * The record carries the room, the marker, the rectangles, the painted boxes,
+ * the probe point (the first counted point clear of a control: what goal
+ * 0022's synthetic-pointer assertions press at), each skipped sample's reason
+ * by count (`modal-layer`, `no-hit`, `outside-header`), and `why`.
+ */
+export const TITLEBAR_LIBRARY = String.raw`
+const TITLEBAR = (() => {
+${DOM_HELPERS}
+  // MyGo's room as CSS variables on :root, in CSS pixels (mygo docs/frontend.md).
+  const VARS = { height: "--mygo-titlebar-height", left: "--mygo-titlebar-inset-left", right: "--mygo-titlebar-inset-right", bottom: "--mygo-titlebar-controls-bottom" };
+  // The outer band the page gets no input in: Windows' top edge is SM_CYFRAME + SM_CXPADDEDBORDER,
+  // 8 DIP where the system reports none (internal/windows/topedge.go), and Linux's page edge is 5 px
+  // (Q-0022-04); macOS's band is read with its room in P3. Samples stay this far inside the window, so
+  // a point the platform takes is never asked to drag.
+  const BAND = 8;
+  const STEP = 16;
+  // The bridge's own exclusion list (mygo@v0.10.0/packages/bridge/src/bridge.ts:14): inside
+  // --app-region: drag these keep their press; every other point becomes a window drag.
+  const BRIDGE_INTERACTIVE = "input,textarea,select,button,a[href],summary,label,[contenteditable]:not([contenteditable=\"false\"]),video[controls],audio[controls]";
+  // A point that means to be clickable, for the room-coverage check: a false
+  // alarm here is not a false report, a miss is.
+  const INTENT_INTERACTIVE = "[data-act],[tabindex],[role=button]";
+  const COVERED_INTERACTIVE = BRIDGE_INTERACTIVE + "," + INTENT_INTERACTIVE;
+
+  const px = (name) => {
+    const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  };
+  const room = () => ({ height: px(VARS.height), left: px(VARS.left), right: px(VARS.right), bottom: px(VARS.bottom) });
+  const marker = () => document.documentElement.hasAttribute("data-titlebar");
+  const read = () => ({ room: room(), marker: marker() });
+
+  // The platform's own rectangles, from the room's numbers: the top-right one is the
+  // button area, the top-left one as tall as the controls' bottom (the macOS lights).
+  const rects = (r, vw) => {
+    const out = [];
+    if (r.left > 0 && r.bottom > 0) out.push({ name: "top-left", box: [0, 0, r.left, r.bottom] });
+    if (r.right > 0 && r.height > 0) out.push({ name: "top-right", box: [vw - r.right, 0, vw, r.height] });
+    return out;
+  };
+  const overlap = (box, rect) => box[0] < rect[2] && box[2] > rect[0] && box[1] < rect[3] && box[3] > rect[1];
+  const round = (box) => box.map((value) => Math.round(value));
+
+  // The box an element paints: its border box when it has a background or a border,
+  // grown by every outer box-shadow's offset, spread and blur; null when it paints nothing.
+  const paintedBox = (el) => {
+    const cs = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    let box = null;
+    const grow = (l, t, ri, b) => {
+      box = box ? [Math.min(box[0], l), Math.min(box[1], t), Math.max(box[2], ri), Math.max(box[3], b)] : [l, t, ri, b];
+    };
+    const border = ["Top", "Right", "Bottom", "Left"].some((side) => parseFloat(cs["border" + side + "Width"]) > 0);
+    if (rgba(cs.backgroundColor)[3] > 0 || cs.backgroundImage !== "none" || border) grow(r.left, r.top, r.right, r.bottom);
+    if (cs.boxShadow !== "none") {
+      for (const part of cs.boxShadow.replace(COLOR_TOKEN, "c").split(",")) {
+        if (/inset/.test(part)) continue;
+        const lengths = (part.match(/-?[\d.]+px/g) || []).map(parseFloat);
+        const dx = lengths[0] || 0;
+        const dy = lengths[1] || 0;
+        const blur = lengths[2] || 0;
+        const spread = lengths[3] || 0;
+        grow(r.left + dx - spread - blur, r.top + dy - spread - blur, r.right + dx + spread + blur, r.bottom + dy + spread + blur);
+      }
+    }
+    return box;
+  };
+
+  function check() {
+    const out = { room: room(), marker: marker(), rects: [], probe: null, counted: 0, skipped: {}, paint: [], issues: [], why: "" };
+    const add = (check, el, extra) => out.issues.push(Object.assign({ check: check, el: path(el) }, extra || {}));
+    const r = out.room;
+    if (!(r.height > 0 || r.left > 0 || r.right > 0 || r.bottom > 0)) {
+      out.why = "no title bar: every --mygo-titlebar-* variable is 0px or unset";
+      return out;
+    }
+    const header = document.querySelector("header#top");
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+    if (!header) {
+      out.why = "no header#top carries the title area";
+      return out;
+    }
+    const boxes = rects(r, vw);
+    out.rects = boxes.map((entry) => ({ name: entry.name, box: round(entry.box) }));
+
+    const controls = Array.from(header.querySelectorAll(COVERED_INTERACTIVE)).filter(visible);
+    for (const el of controls) {
+      const b = el.getBoundingClientRect();
+      const box = [b.left, b.top, b.right, b.bottom];
+      const hit = boxes.find((entry) => overlap(box, entry.box));
+      if (hit) add("titlebar-room-covered", el, { room: hit.name, box: round(box) });
+    }
+
+    for (const el of Array.from(header.querySelectorAll("*"))) {
+      if (SKIP_TAGS.has(el.tagName) || !visible(el)) continue;
+      const box = paintedBox(el);
+      if (!box) continue;
+      const hit = boxes.find((entry) => overlap(box, entry.box));
+      if (!hit) continue;
+      out.paint.push({ el: path(el), room: hit.name, box: round(box) });
+      add("titlebar-room-paint", el, { room: hit.name, box: round(box) });
+    }
+
+    for (const el of controls) {
+      const b = el.getBoundingClientRect();
+      if (b.left < -1 || b.top < -1 || b.right > vw + 1 || b.bottom > vh + 1) {
+        add("titlebar-strip-clip", el, { box: round([b.left, b.top, b.right, b.bottom]), window: [vw, vh] });
+      }
+    }
+
+    const modal = document.querySelector('#layer dialog[aria-modal="true"][open]');
+    const y = r.height / 2;
+    const from = Math.max(BAND, r.left);
+    const to = vw - Math.max(BAND, r.right);
+    const skip = (reason) => {
+      out.skipped[reason] = (out.skipped[reason] || 0) + 1;
+    };
+    if (!(r.height > 0)) {
+      out.why = "the room's height is 0px: no drag sample";
+    } else if (to <= from) {
+      out.why = "the room's insets leave no strip between them to sample";
+    } else {
+      for (let x = from; x <= to; x += STEP) {
+        const hit = document.elementFromPoint(x, y);
+        if (!hit) skip("no-hit");
+        else if (hit.closest('dialog[aria-modal="true"]')) skip("modal-layer");
+        else if (!header.contains(hit)) skip("outside-header");
+        else {
+          out.counted++;
+          if (hit.closest(BRIDGE_INTERACTIVE)) continue;
+          if (!out.probe) out.probe = [x, y];
+          const region = getComputedStyle(hit).getPropertyValue("--app-region").trim();
+          if (region !== "drag") add("titlebar-drag-region", hit, { x: x, y: y, region: region || "(unset)" });
+        }
+      }
+      if (out.counted === 0) {
+        if (modal) out.why = "the top layer takes every strip sample while a modal is up: the strip is not observable in-page here";
+        else add("titlebar-drag-region", header, { counted: 0, from: from, to: to });
+      }
+    }
+    return out;
+  }
+
+  return { read: read, check: check, room: room, marker: marker };
+})();
+`;
+
+/**
  * The in-page audit library of the desktop-ux gate: page JavaScript that
  * defines `UX` in a smoke-hook script. It measures the rendered window only
  * through the DOM and computed style; it uses no app internal beyond the public
@@ -40,34 +274,7 @@
  */
 export const UX_LIBRARY = String.raw`
 const UX = (() => {
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = 1;
-  const cx = canvas.getContext("2d", { willReadFrequently: true });
-  const cache = new Map();
-  // Any CSS colour (rgb, oklch, color(), ...) -> [r, g, b, a]: sRGB 0..255, alpha 0..1. The canvas converts.
-  function rgba(str) {
-    if (cache.has(str)) return cache.get(str);
-    let out;
-    const m = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/.exec(str);
-    if (m) {
-      const a = m[4] === undefined ? 1 : m[4].endsWith("%") ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
-      out = [+m[1], +m[2], +m[3], a];
-    } else {
-      cx.clearRect(0, 0, 1, 1);
-      cx.fillStyle = "rgba(0,0,0,0)";
-      cx.fillStyle = str;
-      cx.fillRect(0, 0, 1, 1);
-      const d = cx.getImageData(0, 0, 1, 1).data;
-      // The canvas stores 8-bit alpha; the string's own alpha is exact.
-      let a = d[3] / 255;
-      const am = /\/\s*([\d.]+%?)\s*\)$/.exec(str);
-      if (am) a = am[1].endsWith("%") ? parseFloat(am[1]) / 100 : parseFloat(am[1]);
-      if (str === "transparent") a = 0;
-      out = [d[0], d[1], d[2], a];
-    }
-    cache.set(str, out);
-    return out;
-  }
+${DOM_HELPERS}
   const over = (top, bottom) => {
     const a = top[3] + bottom[3] * (1 - top[3]);
     if (a === 0) return [0, 0, 0, 0];
@@ -85,23 +292,6 @@ const UX = (() => {
     const y = Math.min(lum(a), lum(b));
     return (x + 0.05) / (y + 0.05);
   };
-  const COLOR_TOKEN = /(rgba?\([^()]*\)|oklch\([^()]*\)|oklab\([^()]*\)|lab\([^()]*\)|lch\([^()]*\)|color\([^()]*\)|#[0-9a-fA-F]{3,8}\b|transparent)/g;
-
-  const desc = (el) => {
-    if (!el || el.nodeType !== 1) return String(el);
-    let s = el.tagName.toLowerCase();
-    if (el.id) s += "#" + el.id;
-    // An id names the element; its classes (some transient, such as enter-layer) would only split groups.
-    const cls = el.id ? [] : Array.from(el.classList).filter((c) => !/^qa-/.test(c)).slice(0, 2);
-    if (cls.length) s += "." + cls.join(".");
-    for (const a of ["data-act", "data-v", "data-testid"]) if (el.hasAttribute(a)) s += "[" + a + "=" + el.getAttribute(a) + "]";
-    return s;
-  };
-  const path = (el) => {
-    const parts = [];
-    for (let e = el, i = 0; e && e !== document.body && i < 4; e = e.parentElement, i++) parts.unshift(desc(e));
-    return parts.join(" > ");
-  };
   const ownText = (el) =>
     Array.from(el.childNodes)
       .filter((n) => n.nodeType === 3)
@@ -109,12 +299,6 @@ const UX = (() => {
       .join("")
       .replace(/\s+/g, " ")
       .trim();
-  const visible = (el) => {
-    if (!el.isConnected || el.closest("[inert]")) return false;
-    if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })) return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
-  };
   const effOpacity = (el) => {
     let o = 1;
     for (let e = el; e; e = e.parentElement) o *= parseFloat(getComputedStyle(e).opacity);
@@ -147,7 +331,6 @@ const UX = (() => {
   const CONTROLS = "[data-act],button,a[href],input:not([type=hidden]),select,textarea,[role=button]";
   const focusable = (el) => el.tabIndex >= 0 && !el.disabled && !el.closest("[inert]");
   const REPLACED = "iframe,img,video,canvas,embed,object";
-  const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "TEMPLATE", "svg", "path", "g", "use", "circle", "line", "rect", "polyline", "polygon", "defs", "SVG", "PATH"]);
 
   // The open modal layer is the audited root; otherwise the whole page.
   function root() {

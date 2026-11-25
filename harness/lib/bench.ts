@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { pageScript, SKILL, STUB_PROVIDER } from "./desktop-page.ts";
 import { field, numberField, stringField } from "./json.ts";
+import { TITLEBAR_LIBRARY } from "./ux-page.ts";
 
 /** The first audited layout (Q-0012-05); the desktop-ux gate audits this width too. */
 export const CONTENT_SIZE = "1280x800";
@@ -29,7 +30,7 @@ export const GUARD_RULE = `document.visibilityState === "visible" and ${RAF_TICK
 export const PREPARE_GUARDS_WHY =
   "the prepare launch is not measured and its window is hidden; a hidden window's page draws no frames on macOS and Linux (mygo@v0.10.0 page.go, ThrottlingOff), so its script waits on no animation frame";
 export const VISUAL_ALLOWLIST = "harness/frontend-visual-allow.json";
-export const SHOT_STATES = ["today", "sheet-open", "practice-independent", "feedback-coach", "settings-row", "report"] as const;
+export const SHOT_STATES = ["today", "today-dark", "sheet-open", "practice-independent", "feedback-coach", "settings-row", "report"] as const;
 export type ShotState = (typeof SHOT_STATES)[number];
 
 export const PAGE_METRICS = [
@@ -598,6 +599,33 @@ export interface ShotGeometry {
   pxHeight: number;
 }
 
+/** MyGo's room in CSS pixels, and whether the page set its own :root[data-titlebar] marker. */
+export interface TitlebarReading {
+  room: { height: number; left: number; right: number; bottom: number };
+  marker: boolean;
+}
+
+export function readTitlebar(value: unknown): { reading: TitlebarReading | null; problems: string[] } {
+  const entry = field(value, "titlebar");
+  if (entry === undefined) {
+    return { reading: null, problems: ["the page returned no titlebar reading (want {titlebar:{room:{height,left,right,bottom},marker}}): every shot launch's row carries the room a shown window reads"] };
+  }
+  const room = field(entry, "room");
+  const height = numberField(room, "height");
+  const left = numberField(room, "left");
+  const right = numberField(room, "right");
+  const bottom = numberField(room, "bottom");
+  const marker = field(entry, "marker");
+  const problems: string[] = [];
+  const sizes = { height, left, right, bottom };
+  for (const [name, size] of Object.entries(sizes)) {
+    if (size === undefined || !Number.isFinite(size) || size < 0) problems.push(`the titlebar room's ${name} is ${JSON.stringify(size)}: want a number of CSS pixels, 0 when the platform reports none`);
+  }
+  if (typeof marker !== "boolean") problems.push(`the titlebar reading's marker is ${JSON.stringify(marker)}: want a boolean`);
+  if (problems.length > 0) return { reading: null, problems };
+  return { reading: { room: sizes as TitlebarReading["room"], marker: marker as boolean }, problems: [] };
+}
+
 export interface BuiltFile {
   file: string;
   bytes: number;
@@ -625,6 +653,8 @@ export interface ShotLaunchReading {
   file: string | null;
   error: string | null;
   loaf: LoafReading | null;
+  /** The room the shown window read and the page's marker; null for a launch whose guards failed before the reading. */
+  titlebar: TitlebarReading | null;
 }
 
 export function readShotLaunch(value: unknown): { reading: ShotLaunchReading | null; problems: string[] } {
@@ -639,6 +669,8 @@ export function readShotLaunch(value: unknown): { reading: ShotLaunchReading | n
   const failed = guardProblems(guards);
   const shots = stringField(value, "shots");
   if (failed.length === 0 && shots === undefined) problems.push("the page returned no shots field");
+  const titlebar = readTitlebar(value);
+  if (failed.length === 0 && titlebar.reading === null) problems.push(...titlebar.problems);
   if (problems.length > 0) return { reading: null, problems };
   return {
     reading: {
@@ -651,6 +683,7 @@ export function readShotLaunch(value: unknown): { reading: ShotLaunchReading | n
       file: stringField(value, "file") ?? null,
       error: stringField(value, "error") ?? null,
       loaf: readLoaf(field(value, "loaf")),
+      titlebar: titlebar.reading,
     },
     problems: [],
   };
@@ -700,6 +733,19 @@ export function shotStateOf(tally: ShotTally, states: number): "captured" | "unb
 export interface VisualAllowEntry {
   state: string;
   reason: string;
+  /** Which OS's shots the entry belongs to (Q-0022-06); "any" unless the entry names one. */
+  os: AllowOS;
+}
+
+/** An allowlist entry's own scope; "any" applies wherever the comparison runs. */
+export type AllowOS = "windows" | "macos" | "any";
+/** The OS a comparison run is reading shots under; "other" is any platform the matrices do not use. */
+export type RunOS = "windows" | "macos" | "other";
+
+export function allowScope(platform: string): RunOS {
+  if (platform === "win32") return "windows";
+  if (platform === "darwin") return "macos";
+  return "other";
 }
 
 export function readVisualAllowlist(text: string): { entries: VisualAllowEntry[] } | { error: string } {
@@ -720,13 +766,20 @@ export function readVisualAllowlist(text: string): { entries: VisualAllowEntry[]
     if (!(SHOT_STATES as readonly string[]).includes(state)) {
       return { error: `${VISUAL_ALLOWLIST}: entry ${index} names ${state}, which is not a captured state` };
     }
-    entries.push({ state, reason });
+    const os = stringField(entry, "os") ?? "any";
+    if (os !== "windows" && os !== "macos" && os !== "any") {
+      return { error: `${VISUAL_ALLOWLIST}: entry ${index} names os ${JSON.stringify(os)}, want "windows", "macos" or "any"` };
+    }
+    entries.push({ state, reason, os });
   }
   return { entries };
 }
 
-export function visualFindings(rows: readonly ShotRow[], entries: readonly VisualAllowEntry[]): { findings: string[]; allowed: string[]; stale: string[] } {
-  const listed = new Map(entries.map((entry) => [entry.state, entry.reason]));
+export function visualFindings(rows: readonly ShotRow[], entries: readonly VisualAllowEntry[], scope: RunOS): { findings: string[]; allowed: string[]; stale: string[] } {
+  // An entry scoped to another OS neither allows a difference here nor reads as stale:
+  // it belongs to that OS's own run (Q-0022-06).
+  const applies = (entry: VisualAllowEntry) => entry.os === "any" || entry.os === scope;
+  const listed = new Map(entries.filter(applies).map((entry) => [entry.state, entry.reason]));
   const findings: string[] = [];
   const allowed: string[] = [];
   const stale: string[] = [];
@@ -841,6 +894,14 @@ const benchRafGuard = async () => {
 /** The same script body drives a shot state in the bench and in the Linux render smoke. */
 const DRIVERS: Record<ShotState, string> = {
   today: `await today();`,
+  "today-dark": `await today();
+const benchTheme = () => document.documentElement.dataset.theme;
+if (benchTheme() !== "dark") {
+  q('[data-act="theme"]').click();
+  await until("the dark theme", () => benchTheme() === "dark");
+}
+document.activeElement?.blur();
+await sleep(250);`,
   "sheet-open": `await today();
 await click('[data-act="sheet"][data-v="pick"]');
 await until("the practice sheet", () => q('#layer [aria-modal="true"]'));`,
@@ -916,13 +977,16 @@ return { prepared: true, granted: !!grant, engine: { userAgent: navigator.userAg
 
 export function shotScript(state: ShotState): string {
   return pageScript(`
-${HELPERS}${GUARD_HELPERS}
+${HELPERS}${GUARD_HELPERS}${TITLEBAR_LIBRARY}
 const engine = { userAgent: navigator.userAgent };
 const readyAt = performance.timeOrigin + performance.now();
 const viewport = benchViewport();
+// The room the shown window reports and the page's own :root[data-titlebar]
+// marker: what the hidden desktop-smoke launch's reading is compared against.
+const titlebar = TITLEBAR.read();
 const guards = await benchRafGuard();
-if (guards.visibility !== "visible" || guards.ticks < ${RAF_TICKS}) return { engine, readyAt, viewport, guards, loaf: benchLoaf };
-if (!(window.mygo && typeof window.mygo.call === "function")) return { engine, readyAt, viewport, guards, shots: "no smoke runtime", loaf: benchLoaf };
+if (guards.visibility !== "visible" || guards.ticks < ${RAF_TICKS}) return { engine, readyAt, viewport, guards, titlebar, loaf: benchLoaf };
+if (!(window.mygo && typeof window.mygo.call === "function")) return { engine, readyAt, viewport, guards, titlebar, shots: "no smoke runtime", loaf: benchLoaf };
 benchInertPointer();
 ${DRIVERS[state]}
 let file = "";
@@ -930,9 +994,9 @@ try {
   file = await benchCapture("${state}");
 } catch (error) {
   const message = String((error && error.message) || error);
-  return { engine, readyAt, viewport, guards, shots: message.includes("not bound") ? "unbound" : "failed", error: message, loaf: benchLoaf };
+  return { engine, readyAt, viewport, guards, titlebar, shots: message.includes("not bound") ? "unbound" : "failed", error: message, loaf: benchLoaf };
 }
-return { engine, readyAt, viewport, guards, shots: "captured", file, loaf: benchLoaf };
+return { engine, readyAt, viewport, guards, titlebar, shots: "captured", file, loaf: benchLoaf };
 `);
 }
 
@@ -1313,6 +1377,7 @@ export function selfCheckCases(): SelfCheckCase[] {
           guards: { visibility: "visible", ticks: 31, elapsedMs: 480 },
           shots: "captured",
           file: "today.png",
+          titlebar: { room: { height: 40, left: 0, right: 138, bottom: 40 }, marker: true },
           loaf: { supported: true, entries: 2, totalMs: 40, maxMs: 25 },
         });
         return expect(
@@ -1321,7 +1386,41 @@ export function selfCheckCases(): SelfCheckCase[] {
             reading.file === "today.png" &&
             reading.viewport?.width === CONTENT_WIDTH &&
             reading.loaf?.entries === 2 &&
-            !reading.guardsFailed,
+            !reading.guardsFailed &&
+            reading.titlebar?.room.right === 138 &&
+            reading.titlebar.marker === true,
+          `reading ${JSON.stringify(reading)}, problems ${JSON.stringify(problems)}`,
+        );
+      },
+    },
+    {
+      name: "shot launch must fail: a capture without a titlebar reading",
+      check: () => {
+        const { reading, problems } = readShotLaunch({
+          engine: { userAgent: "ua" },
+          readyAt: 2,
+          viewport: auditedViewport,
+          guards: { visibility: "visible", ticks: 31, elapsedMs: 480 },
+          shots: "captured",
+          file: "today.png",
+        });
+        return expect(reading === null && problems.some((problem) => problem.includes("titlebar")), `reading ${JSON.stringify(reading)}, problems ${JSON.stringify(problems)}`);
+      },
+    },
+    {
+      name: "shot launch must fail: a titlebar reading with a missing room value",
+      check: () => {
+        const { reading, problems } = readShotLaunch({
+          engine: { userAgent: "ua" },
+          readyAt: 2,
+          viewport: auditedViewport,
+          guards: { visibility: "visible", ticks: 31, elapsedMs: 480 },
+          shots: "captured",
+          file: "today.png",
+          titlebar: { room: { height: 40, left: 0, bottom: 40 }, marker: true },
+        });
+        return expect(
+          reading === null && problems.some((problem) => problem.includes("right")),
           `reading ${JSON.stringify(reading)}, problems ${JSON.stringify(problems)}`,
         );
       },
@@ -1509,6 +1608,20 @@ export function selfCheckCases(): SelfCheckCase[] {
       },
     },
     {
+      name: "shot: the today-dark driver blurs the theme toggle and lets the theme settle before the capture",
+      check: () => {
+        const script = shotScript("today-dark");
+        const clickedAt = script.indexOf(`q('[data-act="theme"]').click();`);
+        const captureAt = script.indexOf(`await benchCapture("today-dark")`);
+        const driver = clickedAt === -1 || captureAt === -1 ? "" : script.slice(clickedAt, captureAt);
+        const missing = ["blur()", "await sleep("].filter((token) => !driver.includes(token));
+        return expect(
+          clickedAt !== -1 && captureAt !== -1 && missing.length === 0,
+          `the theme click at ${clickedAt}, the capture at ${captureAt}, missing ${JSON.stringify(missing)}: the theme action focuses the toggle and WebKit's :focus-visible ring after the driver's synthetic click is per-launch luck, so a capture that does not blur it and settle differs from the base by itself`,
+        );
+      },
+    },
+    {
       name: "timing: a measured interaction ends on the mutation that made it true, never on the 50 ms until poll",
       check: () => {
         const script = timingScript();
@@ -1528,7 +1641,7 @@ export function selfCheckCases(): SelfCheckCase[] {
         const smoke = smokeLaunchPlan();
         const sums = [separate, together, smoke].map((plan) => plan.prepare + plan.warmup + plan.measured + plan.control + plan.shots + plan.controlShots);
         return expect(
-          separate.total === 39 && together.total === 21 && smoke.total === 7 && sums.every((sum, index) => sum === [separate, together, smoke][index]?.total),
+          separate.total === 43 && together.total === 23 && smoke.total === 8 && sums.every((sum, index) => sum === [separate, together, smoke][index]?.total),
           `separate ${JSON.stringify(separate)}, together ${JSON.stringify(together)}, smoke ${JSON.stringify(smoke)}`,
         );
       },
@@ -1536,15 +1649,15 @@ export function selfCheckCases(): SelfCheckCase[] {
     {
       name: "shot tally: every state captured, or the hook absent, or a failure",
       check: () => {
-        const captured = shotStateOf({ captured: 6, unbound: 0, failed: 0 }, 6);
-        const unbound = shotStateOf({ captured: 0, unbound: 6, failed: 0 }, 6);
-        const failed = shotStateOf({ captured: 5, unbound: 0, failed: 1 }, 6);
+        const captured = shotStateOf({ captured: 7, unbound: 0, failed: 0 }, 7);
+        const unbound = shotStateOf({ captured: 0, unbound: 7, failed: 0 }, 7);
+        const failed = shotStateOf({ captured: 6, unbound: 0, failed: 1 }, 7);
         return expect(captured === "captured" && unbound === "unbound" && failed === "failed", `captured ${captured}, unbound ${unbound}, failed ${failed}`);
       },
     },
     {
-      name: "shot tally must fail: one unbound launch beside five captures is a failure",
-      check: () => expect(shotStateOf({ captured: 5, unbound: 1, failed: 0 }, 6) === "failed", `state = ${shotStateOf({ captured: 5, unbound: 1, failed: 0 }, 6)}`),
+      name: "shot tally must fail: one unbound launch beside six captures is a failure",
+      check: () => expect(shotStateOf({ captured: 6, unbound: 1, failed: 0 }, 7) === "failed", `state = ${shotStateOf({ captured: 6, unbound: 1, failed: 0 }, 7)}`),
     },
     {
       name: "allowlist: a differing state is allowed, an identical one is stale",
@@ -1553,7 +1666,14 @@ export function selfCheckCases(): SelfCheckCase[] {
           { state: "today", a: null, b: null, identical: false },
           { state: "report", a: null, b: null, identical: true },
         ];
-        const { findings, allowed, stale } = visualFindings(rows, [{ state: "today", reason: "the step changes it" }, { state: "report", reason: "stale" }]);
+        const { findings, allowed, stale } = visualFindings(
+          rows,
+          [
+            { state: "today", reason: "the step changes it", os: "any" },
+            { state: "report", reason: "stale", os: "any" },
+          ],
+          "windows",
+        );
         return expect(findings.length === 0 && allowed.length === 1 && stale.length === 1, `findings ${JSON.stringify(findings)}, allowed ${JSON.stringify(allowed)}, stale ${JSON.stringify(stale)}`);
       },
     },
@@ -1561,8 +1681,40 @@ export function selfCheckCases(): SelfCheckCase[] {
       name: "allowlist must fail: a differing state nobody names",
       check: () => {
         const rows = [{ state: "today", a: null, b: null, identical: false }];
-        const { findings } = visualFindings(rows, []);
+        const { findings } = visualFindings(rows, [], "macos");
         return expect(findings.length === 1 && (findings[0] ?? "").includes("today"), `findings = ${JSON.stringify(findings)}`);
+      },
+    },
+    {
+      name: "allowlist: another OS's entry neither allows a difference here nor reads as stale",
+      check: () => {
+        const differing = [{ state: "today", a: null, b: null, identical: false }];
+        const identical = [{ state: "today", a: null, b: null, identical: true }];
+        const entry: VisualAllowEntry = { state: "today", reason: "the Windows title area", os: "windows" };
+        const here = visualFindings(differing, [entry], "macos");
+        const there = visualFindings(identical, [entry], "macos");
+        const own = visualFindings(identical, [entry], "windows");
+        return expect(
+          here.findings.length === 1 && here.stale.length === 0 && there.stale.length === 0 && own.stale.length === 1,
+          `here ${JSON.stringify(here)}, there ${JSON.stringify(there)}, own ${JSON.stringify(own)}: an entry for this OS that matches nothing is stale, one for another OS is neither a finding nor stale`,
+        );
+      },
+    },
+    {
+      name: "allowlist: the os scope parses and an unknown one is refused",
+      check: () => {
+        const scoped = readVisualAllowlist(JSON.stringify({ version: 1, entries: [{ state: "today", reason: "a Windows-only difference", os: "windows" }] }));
+        const defaulted = readVisualAllowlist(JSON.stringify({ version: 1, entries: [{ state: "today", reason: "everywhere" }] }));
+        const bad = readVisualAllowlist(JSON.stringify({ version: 1, entries: [{ state: "today", reason: "x", os: "linux" }] }));
+        return expect(
+          "entries" in scoped &&
+            scoped.entries[0]?.os === "windows" &&
+            "entries" in defaulted &&
+            defaulted.entries[0]?.os === "any" &&
+            "error" in bad &&
+            bad.error.includes("linux"),
+          `scoped ${JSON.stringify(scoped)}, defaulted ${JSON.stringify(defaulted)}, bad ${JSON.stringify(bad)}`,
+        );
       },
     },
     {

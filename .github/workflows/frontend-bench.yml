@@ -39,8 +39,8 @@ jobs:
   bench:
     name: frontend bench (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Two builds, one seeded template and 65 launches -- the hidden prepare launch (no frame guard) plus
-    # 64 shown -- fit well inside an hour; the ceiling is there for a hung webview, not for the work.
+    # Two builds, one seeded template and 69 launches -- the hidden prepare launch (no frame guard) plus
+    # 68 shown -- fit well inside an hour; the ceiling is there for a hung webview, not for the work.
     timeout-minutes: 60
     strategy:
       fail-fast: false

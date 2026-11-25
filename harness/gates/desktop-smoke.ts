@@ -31,10 +31,11 @@ import { practice } from "./desktop-smoke/practice.ts";
 import { resume } from "./desktop-smoke/resume.ts";
 import type { Scenario, Shared } from "./desktop-smoke/scenario.ts";
 import { settings } from "./desktop-smoke/settings.ts";
+import { titlebar } from "./desktop-smoke/titlebar.ts";
 import { update } from "./desktop-smoke/update.ts";
 
 /** client-fresh and boot run first; the rest need a window that boots. */
-const SCENARIOS: Scenario[] = [clientFresh, boot, lifecycle, practice, hint, feedback, coach, manual, assess, anki, settings, update, resume];
+const SCENARIOS: Scenario[] = [clientFresh, boot, lifecycle, practice, hint, feedback, coach, manual, assess, anki, settings, update, resume, titlebar];
 
 /**
  * The desktop smoke over every scenario, or, for a self-test case whose failure is decided by one
@@ -58,6 +59,7 @@ async function runDesktopSmoke(ctx: GateContext, scenarios: readonly Scenario[])
 
   const temp = mkdtempSync(path.join(tmpdir(), "passquest-desktop-smoke-"));
   const checks: string[] = [];
+  const details: string[] = [];
   let assertions = 0;
   const check: Check = (condition, message) => {
     assertions++;
@@ -86,6 +88,7 @@ async function runDesktopSmoke(ctx: GateContext, scenarios: readonly Scenario[])
         database: path.join(dataDir, "passquest.sqlite"),
         service: `passquest-smoke-${process.pid}-${Date.now()}-${scenario.id}`,
         check,
+        detail: (line) => details.push(line),
       });
       ran++;
       if (scenario !== boot) continue;
@@ -101,7 +104,7 @@ async function runDesktopSmoke(ctx: GateContext, scenarios: readonly Scenario[])
       if (node.code !== 0) return fail([...checks, `node is required for the desktop smoke gate: ${node.stderr || node.stdout}`]);
     }
     if (checks.length > 0) return fail(checks);
-    return pass(`${assertions} assertions over ${scenarios.length} scenarios`);
+    return pass([`${assertions} assertions over ${scenarios.length} scenarios`, ...details].join("; "));
   } finally {
     provider.stop();
     await removeTree(temp);
