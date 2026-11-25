@@ -49,7 +49,9 @@ package, and the CLI's dependency tree must not contain it (the local-only gate'
 ## Truth and state
 
 - **Data.** The window uses its per-user data directory (`passquest.sqlite` inside it); `PASSQUEST_DB`
-  overrides (Q-0011-04). The CLI default is unchanged.
+  overrides (Q-0011-04). The command line resolves the same directory by default since goal 0020
+  (`internal/userdata`); `--db` and `PASSQUEST_DB` still decide first, and an old
+  `./.passquest/passquest.sqlite` is only reported, never moved (Q-0020-01, Q-0020-02).
 - **Presentations.** Displaying an item records a presentation, as `show` does (Q-0011-08); it is the start of
   the attempt's elapsed time and the resume point after an interruption. Answering twice with the same token
   returns the stored feedback and writes no second attempt.

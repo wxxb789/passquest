@@ -12,7 +12,8 @@ passquest find history
 passquest find show 1
 ```
 
-`find` opens the same database as practice (`--db`, `PASSQUEST_DB` or `.passquest/passquest.sqlite`).
+`find` opens the same database as practice (`--db`, `PASSQUEST_DB`, or `passquest.sqlite` in the
+per-user data directory; see [install.md](install.md)).
 `find history` and `find show QUERY` are read-only and never contact a provider.
 
 ## The one evidence rule

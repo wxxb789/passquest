@@ -40,7 +40,11 @@ func runAssess(args []string, opt Options) int {
 // and reconciles expired runs. Every assess subcommand gets one write path for
 // that reconcile.
 func openAssessmentService(dbFlag *string, opt Options, jsonMode bool) (*study.Service, int) {
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return nil, fail(opt, jsonMode, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return nil, internalError(opt, jsonMode, err)
 	}
@@ -356,7 +360,11 @@ func assessmentInterrupted(opt Options, run assess.Run, jsonMode bool) int {
 func guardAssessmentCommand(args []string, opt Options, command string) int {
 	jsonMode := jsonFlagRequested(args)
 	dbFlag := flagValue(args, "db")
-	if err := study.GuardPath(opt.ports(dbFlag), command); err != nil {
+	ports, err := opt.ports(dbFlag)
+	if err != nil {
+		return fail(opt, jsonMode, err)
+	}
+	if err := study.GuardPath(ports, command); err != nil {
 		return fail(opt, jsonMode, err)
 	}
 	return 0

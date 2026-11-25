@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/wxxb789/passquest/internal/cmdline"
 )
 
@@ -30,4 +32,18 @@ func shellViewOf(choice cmdline.ShellChoice) *shellView {
 		Detail:       choice.Detail,
 		Override:     cmdline.ShellOverrideHint,
 	}
+}
+
+// shellSourceDetail states what decided a family, as next's disclosure and the
+// old-default notice print it.
+func shellSourceDetail(source, detail string) string {
+	switch source {
+	case cmdline.ShellOverrideEnv:
+		return "from " + cmdline.ShellOverrideEnv
+	case "PSModulePath":
+		return "from PSModulePath"
+	case "SHELL", "ComSpec":
+		return fmt.Sprintf("from %s=%s", source, detail)
+	}
+	return "no shell detected, defaulted"
 }

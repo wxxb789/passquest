@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -624,29 +626,38 @@ func TestReportShowsMixedContentsTruthfully(t *testing.T) {
 }
 
 func TestDefaultDatabaseDirectoryIsTightened(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	if err := os.MkdirAll(".passquest", 0o755); err != nil {
+	work := t.TempDir()
+	t.Chdir(work)
+	config := t.TempDir()
+	dataDir := filepath.Join(config, "Pass Quest")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(".passquest", 0o755); err != nil {
+	if err := os.Chmod(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"sources", "--json"}, Options{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Now:    (&stepClock{base: goldenBase}).Now,
-		Getenv: func(string) string { return "" },
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		Now:       (&stepClock{base: goldenBase}).Now,
+		Getenv:    func(string) string { return "" },
+		ConfigDir: func() (string, error) { return config, nil },
 	})
 	if code != 0 {
 		t.Fatalf("sources = %d, stderr %s", code, stderr.String())
 	}
+	if _, err := os.Stat(filepath.Join(dataDir, "passquest.sqlite")); err != nil {
+		t.Fatalf("per-user database: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(work, ".passquest")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("working directory holds a .passquest entry: %v", err)
+	}
 	if runtime.GOOS == "windows" {
 		return
 	}
-	info, err := os.Stat(".passquest")
+	info, err := os.Stat(dataDir)
 	if err != nil {
 		t.Fatalf("stat default directory: %v", err)
 	}

@@ -152,7 +152,11 @@ func runTacticPractice(args []string, opt Options) int {
 			fmt.Sprintf("tactic %q is not registered; available: %s", tacticID, strings.Join(tactic.Registered(), ", ")))
 	}
 
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}

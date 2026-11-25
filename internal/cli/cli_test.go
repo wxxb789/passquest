@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wxxb789/passquest/internal/study"
 )
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite golden files")
@@ -119,23 +121,88 @@ func collectKeys(v any, out map[string]bool) {
 
 func TestDatabasePath(t *testing.T) {
 	t.Parallel()
+	root := t.TempDir()
 	tests := []struct {
-		name string
-		flag string
-		env  string
-		want string
+		name        string
+		flag        string
+		env         map[string]string
+		want        string
+		wantPrivate bool
 	}{
-		{"flag wins", "/tmp/flag.sqlite", "/tmp/env.sqlite", "/tmp/flag.sqlite"}, // portable-paths: allow compared as strings; databasePath never resolves it
-		{"env when flag blank", "  ", "/tmp/env.sqlite", "/tmp/env.sqlite"},      // portable-paths: allow compared as strings; databasePath never resolves it
-		{"default when both blank", "", " ", filepath.Join(".passquest", "passquest.sqlite")},
+		{"flag wins", "/tmp/flag.sqlite", map[string]string{"PASSQUEST_DB": "/tmp/env.sqlite"}, "/tmp/flag.sqlite", false}, // portable-paths: allow compared as strings; the resolution never touches it
+		{"env when flag blank", "  ", map[string]string{"PASSQUEST_DB": "/tmp/env.sqlite"}, "/tmp/env.sqlite", false},      // portable-paths: allow compared as strings; the resolution never touches it
+		{"per-user default when both blank", "", map[string]string{"PASSQUEST_DB": " ", "PASSQUEST_DESKTOP_DATA": " "}, filepath.Join(root, "Pass Quest", "passquest.sqlite"), true},
+		{"data directory override", "", map[string]string{"PASSQUEST_DESKTOP_DATA": filepath.Join(root, "elsewhere")}, filepath.Join(root, "elsewhere", "passquest.sqlite"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := databasePath(tt.flag, func(string) string { return tt.env })
-			if got != tt.want {
-				t.Fatalf("databasePath(%q, env %q) = %q, want %q", tt.flag, tt.env, got, tt.want)
+			var stderr bytes.Buffer
+			opt := Options{
+				Stderr:    &stderr,
+				Getenv:    func(name string) string { return tt.env[name] },
+				ConfigDir: func() (string, error) { return root, nil },
+			}
+			got, err := opt.resolveDatabase(tt.flag)
+			if err != nil {
+				t.Fatalf("resolveDatabase(%q) = %v", tt.flag, err)
+			}
+			if got.Path != tt.want || got.Private != tt.wantPrivate {
+				t.Fatalf("resolveDatabase(%q) = %+v, want path %q private %v", tt.flag, got, tt.want, tt.wantPrivate)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want no notice in the package directory", stderr.String())
 			}
 		})
+	}
+}
+
+func TestUnresolvablePerUserDirectoryRefuses(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"sources", "--json"}, Options{
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		Getenv:    func(string) string { return "" },
+		ConfigDir: func() (string, error) { return "", errors.New("no config directory") },
+	})
+	if code != 2 {
+		t.Fatalf("sources exit = %d, stderr %s", code, stderr.String())
+	}
+	var doc errorDoc
+	if err := json.Unmarshal(stderr.Bytes(), &doc); err != nil {
+		t.Fatalf("decode error doc: %v\n%s", err, stderr.String())
+	}
+	if doc.Error.Code != "config_dir_unavailable" {
+		t.Fatalf("error code = %q, message %q", doc.Error.Code, doc.Error.Message)
+	}
+	for _, want := range []string{"--db", "PASSQUEST_DB", "no config directory"} {
+		if !strings.Contains(doc.Error.Message, want) {
+			t.Fatalf("message %q lacks %q", doc.Error.Message, want)
+		}
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want nothing", stdout.String())
+	}
+}
+
+func TestDatabasePathUnresolvableIsRefusal(t *testing.T) {
+	t.Parallel()
+	var stderr bytes.Buffer
+	opt := Options{
+		Stderr:    &stderr,
+		Getenv:    func(string) string { return "" },
+		ConfigDir: func() (string, error) { return "", errors.New("no config directory") },
+	}
+	_, err := opt.resolveDatabase("")
+	if err == nil {
+		t.Fatal("an unresolvable per-user directory was accepted")
+	}
+	var refusal *study.Error
+	if !errors.As(err, &refusal) || refusal.Code != "config_dir_unavailable" {
+		t.Fatalf("error = %v (%T), want a config_dir_unavailable refusal", err, err)
+	}
+	if !strings.Contains(refusal.Message, "PASSQUEST_DB") || !strings.Contains(refusal.Message, "--db") {
+		t.Fatalf("refusal message = %q", refusal.Message)
 	}
 }
 

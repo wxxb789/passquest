@@ -17,6 +17,7 @@ import (
 	"github.com/wxxb789/passquest/internal/store"
 	"github.com/wxxb789/passquest/internal/study"
 	"github.com/wxxb789/passquest/internal/tutor"
+	"github.com/wxxb789/passquest/internal/userdata"
 )
 
 // ProtocolVersion is the JSON protocol emitted by --json.
@@ -31,6 +32,10 @@ type Options struct {
 	Now        func() time.Time
 	NewSession func() string
 	Getenv     func(string) string
+	// ConfigDir resolves the per-user configuration root the default data
+	// directory lives under. Tests inject a temp root; production uses
+	// os.UserConfigDir, the same read the window's own resolution makes.
+	ConfigDir func() (string, error)
 	// TutorTransport isolates the CLI from the Node host. Tests inject a fake;
 	// production defaults to the stdin/stdout host process.
 	TutorTransport tutor.Transport
@@ -56,6 +61,9 @@ type Options struct {
 	// heartbeat to go stale before reporting cancellation unconfirmed. It is
 	// unexported so only package tests can shorten it.
 	agentKillGrace time.Duration
+	// notice is the run's once-per-run state for the old-default notice. It is
+	// unexported so a caller never supplies it.
+	notice *noticeState
 }
 
 func (o Options) withDefaults() Options {
@@ -76,6 +84,12 @@ func (o Options) withDefaults() Options {
 	}
 	if o.Getenv == nil {
 		o.Getenv = os.Getenv
+	}
+	if o.ConfigDir == nil {
+		o.ConfigDir = os.UserConfigDir
+	}
+	if o.notice == nil {
+		o.notice = &noticeState{}
 	}
 	if o.TutorTransport == nil {
 		o.TutorTransport = tutor.HostTransport{Getenv: o.Getenv, Environ: os.Environ}
@@ -104,13 +118,48 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
+// database is the database one command opens, resolved by resolveDatabase.
+type database struct {
+	Path    string
+	Private bool
+}
+
+// resolveDatabase resolves the database a command opens through
+// internal/userdata: --db, then PASSQUEST_DB, then passquest.sqlite in the
+// per-user data directory. Private is true only for the app-owned per-user
+// default: a path chosen with --db or PASSQUEST_DB, or a directory chosen with
+// PASSQUEST_DESKTOP_DATA, is the learner's and is not tightened. An
+// unresolvable per-user directory is a refusal naming the overrides, never a
+// fallback. A run that resolves the default warns about an old working
+// directory database once per run, before the command's own work.
+func (o Options) resolveDatabase(dbFlag string) (database, error) {
+	path, err := study.DatabasePath(dbFlag, o.ConfigDir, o.Getenv)
+	if err != nil {
+		return database{}, study.Refuse("config_dir_unavailable", "%s", study.ConfigDirUnavailableMessage(err))
+	}
+	if strings.TrimSpace(dbFlag) == "" && strings.TrimSpace(o.Getenv(userdata.DatabaseEnv)) == "" {
+		o.noticeOldDefault(path)
+	}
+	return database{Path: path, Private: privateDefault(dbFlag, o.Getenv)}, nil
+}
+
 // ports is the composition root's port set for one command in the database
 // dbFlag selects: the process seams withDefaults filled, plus the
-// private-directory decision openDatabase makes.
-func (o Options) ports(dbFlag string) study.Ports {
+// private-directory decision resolveDatabase makes.
+func (o Options) ports(dbFlag string) (study.Ports, error) {
+	db, err := o.resolveDatabase(dbFlag)
+	if err != nil {
+		return study.Ports{}, err
+	}
+	return o.portsOf(db), nil
+}
+
+// portsOf is ports for an already resolved database, so a caller that also
+// needs the path (next's database comparison) resolves once.
+func (o Options) portsOf(db database) study.Ports {
 	p := study.Ports{
-		DBPath:          databasePath(dbFlag, o.Getenv),
-		PrivateDir:      privateDefault(dbFlag, o.Getenv),
+		DBPath:          db.Path,
+		PrivateDir:      db.Private,
 		Now:             o.Now,
 		PresentationNow: o.PresentationNow,
 		NewSession:      o.NewSession,
@@ -260,30 +309,32 @@ shown. Presenting any question spends its whole content unit. During an active
 run, tutor, skill and find are refused; no glossary, reasoning, evidence or
 correctness feedback is shown. The real pass threshold, item count and time
 limit are unknown, so no pass probability is produced.
-Default database: $PASSQUEST_DB or ./.passquest/passquest.sqlite
+Default database: $PASSQUEST_DB or passquest.sqlite in the per-user data directory (docs/install.md)
 `
 
-// databasePath resolves the database a command opens. The rule is the study
-// façade's (study.DefaultDatabasePath), so the CLI and the window cannot drift.
-func databasePath(flagValue string, getenv func(string) string) string {
-	return study.DatabasePath(flagValue, getenv)
-}
-
-// privateDefault reports whether the app-owned default state directory is in
-// use: neither --db nor PASSQUEST_DB selects a database.
+// privateDefault reports whether only the app-owned per-user directory is in
+// use: neither --db nor PASSQUEST_DB selects a database, and no
+// PASSQUEST_DESKTOP_DATA selects a directory. That directory is the app's own
+// and is tightened to 0700; an overridden one is the learner's explicit choice,
+// taken as given exactly as the window takes it.
 func privateDefault(flagValue string, getenv func(string) string) bool {
-	return strings.TrimSpace(flagValue) == "" && strings.TrimSpace(getenv("PASSQUEST_DB")) == ""
+	return strings.TrimSpace(flagValue) == "" &&
+		strings.TrimSpace(getenv(userdata.DatabaseEnv)) == "" &&
+		strings.TrimSpace(getenv(userdata.DataEnv)) == ""
 }
 
-// openDatabase opens the resolved database path. The app-owned default state
-// directory is tightened to 0700; a directory chosen with --db or PASSQUEST_DB
-// is left to the user.
+// openDatabase opens the resolved database path. The app-owned default
+// directory is tightened to 0700; a directory the learner selected is left to
+// them.
 func openDatabase(flagValue string, opt Options) (*store.Store, error) {
-	path := databasePath(flagValue, opt.Getenv)
-	if privateDefault(flagValue, opt.Getenv) {
-		return store.OpenPrivate(path)
+	db, err := opt.resolveDatabase(flagValue)
+	if err != nil {
+		return nil, err
 	}
-	return store.Open(path)
+	if db.Private {
+		return store.OpenPrivate(db.Path)
+	}
+	return store.Open(db.Path)
 }
 
 // jsonFlagRequested reports whether args ask for JSON before flag.Parse runs, so

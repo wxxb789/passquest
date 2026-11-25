@@ -45,7 +45,11 @@ func runPractice(args []string, opt Options) int {
 	if *sourceFlag != "" {
 		request = practice.Request{Kind: practice.KindSource, SourceID: *sourceFlag, Page: *pageFlag, QuestionID: *questionFlag}
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *jsonFlag, err)
 	}

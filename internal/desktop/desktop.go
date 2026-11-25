@@ -17,6 +17,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/wxxb789/passquest/internal/hostproc"
 	"github.com/wxxb789/passquest/internal/update"
+	"github.com/wxxb789/passquest/internal/userdata"
 	"github.com/wxxb789/passquest/internal/workspace"
 )
 
@@ -224,7 +225,7 @@ func refuseNoWebView(deps appDeps, smoke *smokeHook) int {
 // by the service and shown by the window as an error state.
 func openStudy(study *Study, getenv func(string) string) {
 	where, err := resolveStorage(getenv,
-		func() (string, error) { return mygo.App.Path(mygo.PathUserData) },
+		func() (string, error) { return userdata.Dir(os.UserConfigDir, getenv) },
 		installDirs{
 			Executable: os.Executable,
 			Resources:  func() (string, error) { return mygo.App.Path(mygo.PathResources) },

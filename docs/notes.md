@@ -35,7 +35,8 @@ passquest note push --endpoint http://127.0.0.1:8765 --force
 ```
 
 Commands that open the database (`propose`, `preview`, `accept`, `skip`, `show`, `export` and `push`)
-accept `--db PATH`; the default is `$PASSQUEST_DB` or `./.passquest/passquest.sqlite`.
+accept `--db PATH`; the default is `$PASSQUEST_DB` or `passquest.sqlite` in the per-user data
+directory, the same database the window opens ([install.md](install.md)).
 `note model` does not open a database and takes no `--db`; it prints the deck, model and its
 version, CSS, card template and a rendered sample.
 

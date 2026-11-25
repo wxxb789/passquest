@@ -101,7 +101,11 @@ func runAgentStart(args []string, opt Options) int {
 		return usageError(opt, *flags.json, "invalid_input",
 			fmt.Sprintf("--timeout-seconds %d is outside %d..%d", *timeoutFlag, agent.MinTimeoutSeconds, agent.MaxTimeoutSeconds))
 	}
-	svc, err := study.Open(opt.ports(*flags.db))
+	ports, err := opt.ports(*flags.db)
+	if err != nil {
+		return fail(opt, *flags.json, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
@@ -127,7 +131,11 @@ func runAgentResume(args []string, opt Options) int {
 		return usageError(opt, *flags.json, "invalid_input",
 			fmt.Sprintf("--timeout-seconds %d is outside %d..%d", *timeoutFlag, agent.MinTimeoutSeconds, agent.MaxTimeoutSeconds))
 	}
-	svc, err := study.Open(opt.ports(*flags.db))
+	ports, err := opt.ports(*flags.db)
+	if err != nil {
+		return fail(opt, *flags.json, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
@@ -148,7 +156,11 @@ func runAgentStatus(args []string, opt Options) int {
 	if code := parseAgentPositionals(flags.fs, args, opt, wantJSON, 0, 1, "agent status [RUN]"); code != 0 {
 		return code
 	}
-	svc, err := study.Open(opt.ports(*flags.db))
+	ports, err := opt.ports(*flags.db)
+	if err != nil {
+		return fail(opt, *flags.json, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
@@ -195,7 +207,11 @@ func runAgentCancel(args []string, opt Options) int {
 		return usageError(opt, *flags.json, "invalid_input",
 			fmt.Sprintf("--wait-seconds %d is outside %d..%d", *waitFlag, agent.MinCancelWaitSeconds, agent.MaxCancelWaitSeconds))
 	}
-	svc, err := study.Open(opt.ports(*flags.db))
+	ports, err := opt.ports(*flags.db)
+	if err != nil {
+		return fail(opt, *flags.json, err)
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return internalError(opt, *flags.json, err)
 	}
@@ -279,7 +295,7 @@ func runAgentRuns(args []string, opt Options) int {
 	}
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	summaries, err := st.AgentRuns()
@@ -305,7 +321,7 @@ func runAgentShow(args []string, opt Options) int {
 	}
 	st, err := openDatabase(*dbFlag, opt)
 	if err != nil {
-		return internalError(opt, *jsonFlag, err)
+		return fail(opt, *jsonFlag, err)
 	}
 	defer st.Close()
 	run, latest, err := brief.Resolve(st, fs.Arg(0), false)
@@ -364,8 +380,11 @@ func runAgentTranscript(args []string, opt Options) int {
 	if *limitFlag < 1 || *limitFlag > 200 {
 		return usageError(opt, *jsonFlag, "invalid_input", "--limit must be 1-200")
 	}
-	dbPath := databasePath(*dbFlag, opt.Getenv)
-	storePath, err := agent.StorePath(*storeFlag, dbPath, opt.Getenv)
+	resolved, err := opt.resolveDatabase(*dbFlag)
+	if err != nil {
+		return fail(opt, *jsonFlag, err)
+	}
+	storePath, err := agent.StorePath(*storeFlag, resolved.Path, opt.Getenv)
 	if err != nil {
 		return usageError(opt, *jsonFlag, "invalid_input", err.Error())
 	}
@@ -437,7 +456,11 @@ func runAgentRecordStep(args []string, opt Options) int {
 	if err := json.Unmarshal(raw, &request); err != nil {
 		return agentRecordStepError(opt, *jsonFlag, "invalid_step", fmt.Sprintf("step is not JSON: %v", err))
 	}
-	svc, err := study.Open(opt.ports(*dbFlag))
+	ports, err := opt.ports(*dbFlag)
+	if err != nil {
+		return agentRecordStepError(opt, *jsonFlag, "config_dir_unavailable", err.Error())
+	}
+	svc, err := study.Open(ports)
 	if err != nil {
 		return agentRecordStepError(opt, *jsonFlag, "internal_error", err.Error())
 	}
