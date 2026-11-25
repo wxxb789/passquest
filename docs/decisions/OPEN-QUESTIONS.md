@@ -1544,6 +1544,19 @@ Entry format:
   on download, and a target with no pin fails instead of falling back. `PASSQUEST_NODE` still
   overrides the bundled runtime. Reverse by changing `NODE_PINS` (or dropping `node/` from
   `mygo.json`'s resources) and re-running the package gate.
+- Revisited (2026-11-25, goal 0020 P4): the pin is now **Node 26.13.1**, the newest 26 LTS when the
+  step landed (`https://nodejs.org/dist/index.json` lists v26.13.1 as 2026-11-10, `"lts":
+  "Lithium"`, `"security": true`), with its `SHASUMS256.txt` SHA-256s:
+  `e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f1f7` (win-x64.zip),
+  `aec2514ea1ceb2ba52455e9ec65986f6749a06dd759e5db2a72e6889668c9735` (darwin-arm64.tar.gz),
+  `82bb96078a24ca50b9c9a38f2379e6be6d87171fcd400fc14c8934b3bce96e2f` (darwin-x64.tar.gz),
+  `5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864` (linux-x64.tar.xz); each was
+  recomputed from the downloaded archive before the pin was written, and the archive, member and
+  staged-path names follow the same shape as the 22 pins. `mise.toml`, `gate.yml` and the two
+  guides' pinned-runtime sentence carry the same patch, and the package gate's start check reads all
+  of them (goal 0020 P4). The four targets, the reversal and `PASSQUEST_NODE`'s precedence are
+  unchanged; the move is the owner's 2026-11-22 decision in goal 0020's contract, not a fired
+  "Revisit when" clause — Node 22 is still in maintenance until 2027-04-30.
 - Revisit when: Node 22 leaves support, another target's pin is added, or the owner decides a system
   Node is required.
 
@@ -2869,6 +2882,16 @@ Entry format:
   the agreement check reads; the archive and member names, the download URL's `v<NODE_VERSION>` prefix
   and the staged `node --version` comparison all carry the version too, so a half-done bump fails the
   download, the agreement check or a `node --version` comparison rather than shipping.
+- Outcome (2026-11-25, P4): **26.13.1** landed, as planned. The implementation-time re-read found no
+  newer 26 LTS (`index.json` still listed v26.13.1 as the newest 26 release, 2026-11-10,
+  `Lithium`), so the planned version and the four SHA-256s above were kept — each recomputed from
+  the downloaded archive and equal to `SHASUMS256.txt`. The version lives in `NODE_VERSION`,
+  `NODE_PINS`, `mise.toml` (`node = "26.13.1"`), `gate.yml` (`node-version: "26.13.1"`) and the two
+  guides' pinned-runtime sentence plus this module's own header sentence; `NODE_PIN_SOURCES` /
+  `nodePinProblems` in `harness/lib/package.ts` compare all five, the package gate runs the check
+  before its first case (over the repository's own files, never `ctx.root`), and the self-test's
+  "package whose pinned Node runtime disagrees with two sources that carry it" fails by source name
+  while the accepted twin passes. Nothing else about staging changed.
 - Revisit when: Node 26 leaves maintenance, a new target OS appears, or the packages' own engine
   requirement rises above 26.
 

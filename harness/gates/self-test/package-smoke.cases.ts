@@ -61,6 +61,7 @@ import {
   lockedVersions,
   lockProblems,
   NOTICES_FILE,
+  NODE_VERSION,
   noticeSource,
   runtimeResolutionUses,
   stageAgent,
@@ -1100,8 +1101,45 @@ function twinNotices(): { required: StagedNotices; whole: string; oneBodyShort: 
 /** The twin-body notices fixture the contents-check unit and the gate fixture case share. */
 const TWIN_NOTICES = twinNotices();
 
+/** The pin source texts a case hands the gate, in the shapes the repository's own files carry them. */
+function pinSourceTexts(version: string): Record<string, string> {
+  return {
+    "mise.toml": `[tools]\nnode = "${version}"\n`,
+    ".github/workflows/gate.yml": `- uses: actions/setup-node@v4\n  with:\n    node-version: "${version}"\n`,
+    "docs/install.md": `notices the inlined code requires and a pinned Node ${version} runtime, so the agent features run on the\n`,
+    "docs/install.zh-CN.md": `AppImage。每个包都自带桌面应用、四个 agent host 脚本、内联代码所需的第三方声明，以及固定版本的\nNode ${version} 运行时，所以 agent 功能用包内自带的 Node 运行\n`,
+    "harness/lib/package.ts": ` * agent hosts, the pinned Node ${version} LTS runtime and the app icon. A host that\n`,
+  };
+}
+
 export function packageSmokeCases(): BrokenCase[] {
   return [
+    {
+      gate: makePackageSmokeGate({
+        installedTree: "build/fixture",
+        only: ["contents"],
+        nodePinSources: {
+          ...pinSourceTexts(NODE_VERSION),
+          "mise.toml": `[tools]\nnode = "22"\n`,
+          "docs/install.md": "notices the inlined code requires and a pinned Node 22.23.5 runtime, so the agent features run on the\n",
+        },
+      }),
+      label: "package whose pinned Node runtime disagrees with two sources that carry it",
+      files: { ...FIXTURE_FILES },
+      postFail: (failures) => {
+        const expected = [
+          `mise.toml: pinned Node reads 22, want ${NODE_VERSION}`,
+          `docs/install.md: pinned Node reads 22.23.5, want ${NODE_VERSION}`,
+        ];
+        const missing = expected.filter((line) => !failures.includes(line));
+        if (missing.length > 0) {
+          return `package-smoke: the pin check did not name ${missing.join("; ")} (${failures.slice(0, 3).join("; ")})`;
+        }
+        const extra = failures.filter((line) => !expected.includes(line));
+        if (extra.length > 0) return `package-smoke: the pin check reported a source that agrees (${extra.slice(0, 3).join("; ")})`;
+        return null;
+      },
+    },
     {
       gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["study"] }),
       label: "installed app whose data lands inside the install directory",
@@ -1591,6 +1629,15 @@ export function packageSmokePassCases(): PassCase[] {
         detail.includes("Contents/Info.plist declares LSMinimumSystemVersion 26.0")
           ? null
           : `package-smoke: the content scan did not report the checked plist minimum (${detail})`,
+    },
+    {
+      gate: makePackageSmokeGate({ installedTree: "build/fixture", only: ["contents"], nodePinSources: pinSourceTexts(NODE_VERSION) }),
+      label: "package whose pinned Node runtime agrees with every source that carries it",
+      files: { ...FIXTURE_FILES },
+      postPass: (detail) =>
+        detail.includes("node pin:") && detail.includes(`agree on Node ${NODE_VERSION}`)
+          ? null
+          : `package-smoke: the pass line does not report the pin check (${detail})`,
     },
   ];
 }

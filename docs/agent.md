@@ -99,9 +99,12 @@ environment. See [providers.md](providers.md#credentials).
   written in the same commit that creates the conversation. The task is admitted with
   `requestId = run_id`, so a retry after a crash finds the existing submission.
 
-Agent commands need Node ≥ 22.19. `practice`, `report`, `next`, `tutor`, `show`, `runs` and every
-local practice path keep working with Go alone. `status` without Node reports the application event
-trail and marks `durable.available: false`; `transcript` needs the host because it reads the Pi store.
+Agent commands need Node ≥ 22.19, the `@earendil-works` packages' own `engines` requirement. A
+package bundles Node 26.13.1 for the hosts it carries, and the development toolchain (`mise.toml`)
+and CI run that same patch, so a source checkout and a package cannot drift by a patch release.
+`practice`, `report`, `next`, `tutor`, `show`, `runs` and every local practice path keep working
+with Go alone. `status` without Node reports the application event trail and marks
+`durable.available: false`; `transcript` needs the host because it reads the Pi store.
 
 ## Status
 
