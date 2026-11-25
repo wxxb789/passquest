@@ -2797,6 +2797,16 @@ Entry format:
   point, so a busy error from the open *or* from a later write reads the same. No WAL, no lock file, no
   retry loop, no process-level lock: each would be a piece of state this goal does not need. Reverse:
   drop `IsBusy` and let the driver's text through again.
+- Outcome (2026-11-25, P2): as planned. `store.IsBusy` matches the driver's typed result code
+  (`errors.As` to `*sqlite.Error`, primary code `SQLITE_BUSY`/`SQLITE_LOCKED`); `internalError`
+  renders a busy error as exit 2, code `database_busy`, message `database is busy: the Pass Quest
+  window (or another command) has it open; close the window or retry`. The cases live in
+  `internal/store/busy_test.go` (typed code vs. lookalike text; two interleaved handles; a hold the
+  writer waits out under its 5000 ms wait; one past the timeout with the wait shortened to 300 ms
+  in the DSN) and `TestBusyDatabaseRefusal` (`internal/cli/busy_test.go`): the lock held past the
+  CLI's own 5000 ms wait ended in the refusal after 5.10 s, and with the mapping removed the same
+  command read `internal_error: store: begin append: database is locked (5) (SQLITE_BUSY)` at
+  exit 1.
 - Revisit when: a busy refusal is seen in the owner's own use, or the store grows a second writer.
 
 ### Q-0020-04 — How the package is recognised when a binary runs as the CLI
