@@ -2683,6 +2683,16 @@ Entry format:
   (`SendInput` returns 0 with `ERROR_ACCESS_DENIED` and no `mousedown` reaches the page; the record
   carries the evidence) — the Snap hover, the real double-click/drag/top-edge resize,
   minimize/restore, the inactive look and the right-click are owner actions, listed there.
+  Second sitting (2026-11-26): the session's pointer input works (`SendInput` returns 1,
+  `SetCursorPos`/`GetCursorPos` agree, screen captures hold real pixels) and the manual pass drove
+  every Windows item — the hover (both appearances), the double-click maximize/restore, the drag by
+  (200,100), the top-edge and both-side resizes, minimize/restore, close, the right-click and the
+  inactive look — with the rects and captures in the evidence record. Two gaps are recorded there,
+  not closed: the Snap layouts flyout did not appear on hover in either appearance (a standard
+  window's own maximize button showed none as a control either), and the caption-button clicks were
+  delivered in four of eight attempts. The desktop click the owner list names has no bare-desktop
+  point on this machine (the empty taskbar strip was used instead). macOS and Linux items remain
+  owner actions.
 - Revisit when: a gate can capture the frame or drive a real pointer.
 
 ### Q-0022-06 — How are per-OS visual differences allowlisted?
@@ -2770,6 +2780,15 @@ Entry format:
   glyphs, the restore glyph maximized, the caption strip's `inset-right` 138 px); the Snap flyout
   hover itself could not be driven on this machine (no input desktop) and is an owner action — the
   assumption stays unverified until the owner hovers the button.
+  Second sitting (2026-11-26): the hover was driven with the real pointer in both appearances — 1.5 s
+  and 3 s over the maximize button produce **no** Snap layouts flyout and no new top-level window,
+  and a control hover over a standard Win32 window's maximize button (whose own `WM_NCHITTEST`
+  answers 9) shows none either, so the negative is not the app's alone on this machine. The probe
+  reads MyGo's own answers: the `MyGoCaption` child returns `HTMINBUTTON 8`/`HTMAXBUTTON 9`/
+  `HTCLOSE 20` and the top-edge strip `HTTOP 12`, while the top-level window returns `HTCLIENT 1` at
+  all of them — that top-level answer is the fact a later check has to weigh. The buttons themselves
+  were driven live: close worked, minimize worked in two launches of four, the maximize button in
+  one of three; the rest of that sitting's numbers are in the evidence record.
 - Revisit when: MyGo draws the caption differently, or Windows 11's Snap rules change.
 
 ### Q-0020-01 — One resolution, shared by both entry points
