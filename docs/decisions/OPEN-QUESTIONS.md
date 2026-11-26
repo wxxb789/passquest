@@ -3254,6 +3254,8 @@ Entry format:
   the feed still served 1.5.2 on 2026-11-26; the owner declined vendoring a hand-built 1.6.x
   (option C) and deferred P5, so goal 0021 stays open with items 1-4 and 6 merged and item 5
   waiting for the feed. Other work proceeds.
+  Amended (owner, 2026-11-26): item 5 leaves goal 0021 and becomes item 2 of goal 0023, which
+  upgrades every dependency; 0021 closes on items 1-4 and 6.
 - Revisit when: the feed serves >= 1.6.0 for all six entries, or the feed owner reports it will
   not.
 
