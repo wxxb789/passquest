@@ -14,7 +14,10 @@ import {
   guardProblems,
   launchPlan,
   loafTotals,
-  metricRows,
+  MAX_MEASURE_ATTEMPTS,
+  attemptsRecord,
+  measureAction,
+  measureAttempt,
   parseBenchArgs,
   PREPARE_GUARDS_WHY,
   prepareScript,
@@ -46,6 +49,7 @@ import type {
   LaunchPlan,
   LaunchReading,
   LoafTotals,
+  MeasureAttempt,
   MetricSamples,
   ShotRecord,
   ShotRow,
@@ -541,8 +545,10 @@ async function runCompare(options: BenchOptions): Promise<number> {
   const run = newRun(options);
   const started = new Date();
   const engines: Record<string, string> = {};
-  const samples: Record<"a" | "b" | "controlA" | "controlB", MetricSamples> = { a: {}, b: {}, controlA: {}, controlB: {} };
-  const pooled: Record<"a" | "b" | "controlA" | "controlB", number[]> = { a: [], b: [], controlA: [], controlB: [] };
+  const attempts: MeasureAttempt[] = [];
+  let verdictAttempt = 0;
+  let verdictPooled: Record<"a" | "b" | "controlA" | "controlB", number[]> = { a: [], b: [], controlA: [], controlB: [] };
+  let verdictFailures: string[] = [];
   const shots: Record<"a" | "b" | "controlA" | "controlB", Record<string, ShotRecord>> = { a: {}, b: {}, controlA: {}, controlB: {} };
   const shotTally: Record<"a" | "b", { captured: number; unbound: number; failed: number }> = {
     a: { captured: 0, unbound: 0, failed: 0 },
@@ -572,47 +578,81 @@ async function runCompare(options: BenchOptions): Promise<number> {
       run.a.bundles = run.b.bundles;
       note(run, `a and b are the same build (${run.a.commit || run.b.workdir}): one build, one template, and the comparison is itself the same-build control pair`);
     }
-    const plan = launchPlan({ samples: options.samples, warmup: options.warmup, sameBuild: run.sameBuild });
     const template = templatePlan(run.sameBuild);
     const seed = template.seedKey === "a" ? run.a : run.b;
     if (!(await seedTree(run, seed))) throw new Error("the template was not seeded");
     if (!(await prepareTree(run, seed))) throw new Error("the template was not prepared");
     for (const tree of [run.a, run.b]) tree.template = seed.template;
     say(`template: one, seeded and prepared by tree ${seed.key}, copied for every launch of both trees (${template.reason})`);
-    for (const key of ["a", "b"] as const) {
-      for (const bundle of run[key].bundles) samples[key][bundle.file.endsWith("main.js") ? BUNDLE_METRICS[0] : BUNDLE_METRICS[1]] = [bundle.bytes];
-    }
-
-    for (let index = 0; index < options.warmup; index++) {
-      for (const tree of [run.a, run.b]) {
-        const label = `warmup-${tree.key}-${index}`;
-        const launched = await launch(run, tree, { label, kind: "warmup", script: timingScript(), data: freshData(run, tree, `warmup-${index}`), shots: false, hidden: false });
-        if (!launched) throw new Error(`the warm-up launch ${label} wrote no result`);
-        graded(run, launched, false);
+    for (let attemptIndex = 0; attemptIndex < MAX_MEASURE_ATTEMPTS; attemptIndex++) {
+      const retry = attemptIndex === 0 ? "" : `-r${attemptIndex + 1}`;
+      const samples: Record<"a" | "b" | "controlA" | "controlB", MetricSamples> = { a: {}, b: {}, controlA: {}, controlB: {} };
+      const pooled: Record<"a" | "b" | "controlA" | "controlB", number[]> = { a: [], b: [], controlA: [], controlB: [] };
+      say(`measurement attempt ${attemptIndex + 1}/${MAX_MEASURE_ATTEMPTS}`);
+      for (const key of ["a", "b"] as const) {
+        for (const bundle of run[key].bundles) samples[key][bundle.file.endsWith("main.js") ? BUNDLE_METRICS[0] : BUNDLE_METRICS[1]] = [bundle.bytes];
       }
-    }
-    for (let index = 0; index < options.samples; index++) {
-      for (const tree of [run.a, run.b]) {
-        const label = `sample-${tree.key}-${index}`;
-        const launched = await launch(run, tree, { label, kind: "sample", script: timingScript(), data: freshData(run, tree, `sample-${index}`), shots: false, hidden: false });
-        if (!launched) throw new Error(`the measured launch ${label} wrote no result`);
-        const sample = graded(run, launched, true);
-        if (!sample) continue;
-        engines[tree.key] = sample.reading.engine;
-        addSample(samples[tree.key], pooled[tree.key], sample);
-      }
-    }
-    if (!run.sameBuild) {
-      for (let index = 0; index < options.samples; index++) {
-        for (const key of ["controlA", "controlB"] as const) {
-          const label = `${key === "controlA" ? "control-a" : "control-b"}-${index}`;
-          const launched = await launch(run, run.b, { label, kind: "control", script: timingScript(), data: freshData(run, run.b, label), shots: false, hidden: false });
-          if (!launched) throw new Error(`the control launch ${label} wrote no result`);
-          const sample = graded(run, launched, true);
-          if (!sample) continue;
-          addSample(samples[key], pooled[key], sample);
+      for (let index = 0; index < options.warmup; index++) {
+        for (const tree of [run.a, run.b]) {
+          const label = `warmup-${tree.key}-${index}${retry}`;
+          const launched = await launch(run, tree, { label, kind: "warmup", script: timingScript(), data: freshData(run, tree, `warmup-${index}${retry}`), shots: false, hidden: false });
+          if (!launched) throw new Error(`the warm-up launch ${label} wrote no result`);
+          graded(run, launched, false);
         }
       }
+      for (let index = 0; index < options.samples; index++) {
+        for (const tree of [run.a, run.b]) {
+          const label = `sample-${tree.key}-${index}${retry}`;
+          const launched = await launch(run, tree, { label, kind: "sample", script: timingScript(), data: freshData(run, tree, `sample-${index}${retry}`), shots: false, hidden: false });
+          if (!launched) throw new Error(`the measured launch ${label} wrote no result`);
+          const sample = graded(run, launched, true);
+          if (!sample) continue;
+          engines[tree.key] = sample.reading.engine;
+          addSample(samples[tree.key], pooled[tree.key], sample);
+        }
+      }
+      if (!run.sameBuild) {
+        for (let index = 0; index < options.samples; index++) {
+          for (const key of ["controlA", "controlB"] as const) {
+            const label = `${key === "controlA" ? "control-a" : "control-b"}-${index}${retry}`;
+            const launched = await launch(run, run.b, { label, kind: "control", script: timingScript(), data: freshData(run, run.b, label), shots: false, hidden: false });
+            if (!launched) throw new Error(`the control launch ${label} wrote no result`);
+            const sample = graded(run, launched, true);
+            if (!sample) continue;
+            addSample(samples[key], pooled[key], sample);
+          }
+        }
+      }
+
+      const attempt = measureAttempt(run.sameBuild, samples);
+      attempts.push(attempt);
+      for (const row of attempt.rows) {
+        say(
+          `${row.name}: A ${spreadLine(row.a)} | B ${spreadLine(row.b)} | ${floorText(row.verdict)} | verdict ${row.verdict.worse ? "WORSE" : "ok"} (${row.verdict.detail})`,
+        );
+        if (!run.sameBuild) {
+          say(
+            `${row.name}: control ${spreadLine(row.controlA)} | ${spreadLine(row.controlB)} | ${floorText(row.controlVerdict)} | ${
+              row.controlVerdict.worse ? "WORSE" : "ok"
+            } (${row.controlVerdict.detail})`,
+          );
+        }
+      }
+      const action = measureAction(run.sameBuild, attempts, MAX_MEASURE_ATTEMPTS);
+      if (action.action === "remeasure") {
+        note(run, `measurement attempt ${attemptIndex + 1}/${MAX_MEASURE_ATTEMPTS}: ${action.why.join("; ")}; discarded, measuring again`);
+        continue;
+      }
+      verdictAttempt = action.attempt;
+      verdictPooled = pooled;
+      verdictFailures = action.failures;
+      const pair = run.sameBuild ? "same-build pair" : "same-build control pair";
+      say(
+        `measurement attempt ${attemptIndex + 1}/${MAX_MEASURE_ATTEMPTS}: the verdict is taken from this attempt (${
+          attempt.unreadable.length === 0 ? `its ${pair} reads ok` : `every attempt's ${pair} read worse`
+        })`,
+      );
+      break;
     }
 
     for (const state of SHOT_STATES) {
@@ -680,20 +720,8 @@ async function runCompare(options: BenchOptions): Promise<number> {
       else fail(run, `tree ${key} (${run[key].display}) carries the capture hook but a shot launch reported it unbound`);
     }
 
-    const metrics = metricRows(samples);
-    for (const row of metrics) {
-      if (row.verdict.worse) {
-        fail(
-          run,
-          run.sameBuild
-            ? `the same-build pair of ${row.name} reports a worse head (${floorText(row.verdict)}; ${row.verdict.detail}): one build measured twice moved beyond the noise, so this run's numbers are not readable`
-            : `metric ${row.name} is worse beyond noise: ${floorText(row.verdict)}; ${row.verdict.detail}`,
-        );
-      }
-      if (!run.sameBuild && row.controlVerdict.worse) {
-        fail(run, `the same-build control pair of ${row.name} reports a worse head (${floorText(row.controlVerdict)}; ${row.controlVerdict.detail}): this run's comparison is not readable`);
-      }
-    }
+    const metrics = attempts[verdictAttempt]?.rows ?? [];
+    for (const message of verdictFailures) fail(run, message);
 
     const shotsMeasured = shotState.a === "captured" && shotState.b === "captured";
     const comparison = shotsMeasured ? compareShots(shots.a, shots.b) : { rows: [] as ShotRow[], problems: [] as string[] };
@@ -742,6 +770,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
         control: run.sameBuild
           ? "a and b are the same commit: the comparison above is the same-build pair"
           : `two interleaved sets of ${options.samples} launches of the B build, after the comparison phase`,
+        attempts: `up to ${MAX_MEASURE_ATTEMPTS} measurement attempts, fresh A, B and control launches per attempt, the same rules on every OS: an attempt whose same-build pair reads worse is discarded and measured again, the verdict is the first attempt whose pair reads ok, and a readable attempt's WORSE verdict is final (Q-0019-02, owner decision 2026-11-26)`,
         verdict: VERDICT_RULE,
         guards: `${GUARD_RULE}; a launch whose guard fails records no sample; ${PREPARE_GUARDS_WHY}`,
         metrics: METRIC_NOTES,
@@ -761,15 +790,26 @@ async function runCompare(options: BenchOptions): Promise<number> {
       control: run.sameBuild
         ? { samples: "none", why: "a and b are the same commit: the A/B columns above are two interleaved sets of one build and are themselves this run's same-build pair, so controlA/controlB carry no samples" }
         : { samples: `two interleaved sets of ${options.samples} launches of the B build`, why: null },
+      attempts: {
+        max: MAX_MEASURE_ATTEMPTS,
+        used: attempts.length,
+        verdict: verdictAttempt + 1,
+        why: "the verdict is taken from the first measurement attempt whose same-build pair reads ok; an attempt whose pair reads worse is discarded and measured again, up to the bound, every attempt's numbers stay below, and frames.pooled is the verdict attempt's own (Q-0019-02, owner decision 2026-11-26)",
+        rows: attemptsRecord(attempts),
+      },
       trees: {
         a: { root: run.a.root, commit: run.a.commit, binary: run.a.display, shotHook: run.a.hook, userAgent: engines.a ?? "", bundles: run.a.bundles },
         b: { root: run.b.root, commit: run.b.commit, binary: run.b.display, shotHook: run.b.hook, userAgent: engines.b ?? "", bundles: run.b.bundles },
       },
-      launches: { ...plan, total: run.launches, rows: run.rows },
+      launches: {
+        ...launchPlan({ samples: options.samples, warmup: options.warmup, sameBuild: run.sameBuild, attempts: Math.max(1, attempts.length) }),
+        total: run.launches,
+        rows: run.rows,
+      },
       guards,
       metrics,
       frames: {
-        pooled: Object.fromEntries(Object.entries(pooled).map(([key, values]) => [key, summariseFrames(values)])),
+        pooled: Object.fromEntries(Object.entries(verdictPooled).map(([key, values]) => [key, summariseFrames(values)])),
       },
       shots: {
         dir: options.shots,
@@ -800,18 +840,6 @@ async function runCompare(options: BenchOptions): Promise<number> {
     say(`engine ${engineLine(engines)}`);
     say(`launches ${run.launches}; guards checked ${guards.checked}, failed ${guards.failed}, not measured ${guards.notMeasured}; ${cadenceLine(run)}`);
     if (engines.a && engines.b && engines.a !== engines.b) say("the two trees report different engines: only a warning, the matrices do not pin one Chromium build");
-    for (const row of metrics) {
-      say(
-        `${row.name}: A ${spreadLine(row.a)} | B ${spreadLine(row.b)} | ${floorText(row.verdict)} | verdict ${row.verdict.worse ? "WORSE" : "ok"} (${row.verdict.detail})`,
-      );
-      if (!run.sameBuild) {
-        say(
-          `${row.name}: control ${spreadLine(row.controlA)} | ${spreadLine(row.controlB)} | ${floorText(row.controlVerdict)} | ${
-            row.controlVerdict.worse ? "WORSE" : "ok"
-          } (${row.controlVerdict.detail})`,
-        );
-      }
-    }
     say(`allowlist scope: ${SHOT_SCOPE}${options.branch === "" ? ", no branch passed: branch-scoped entries are inert" : ` on ${options.branch}`}`);
     if (shotsMeasured) say(`shots: ${identical}/${comparison.rows.length} state(s) byte-identical between A and B`);
     else say(`shots: not compared (A ${shotState.a}, B ${shotState.b})`);
@@ -827,7 +855,7 @@ async function runCompare(options: BenchOptions): Promise<number> {
   } catch (error) {
     fail(run, error instanceof Error ? error.message : String(error));
   } finally {
-    checkRunShape(run, launchPlan({ samples: options.samples, warmup: options.warmup, sameBuild: run.sameBuild }));
+    checkRunShape(run, launchPlan({ samples: options.samples, warmup: options.warmup, sameBuild: run.sameBuild, attempts: Math.max(1, attempts.length) }));
     Object.assign(record, { failures: run.failures, ok: run.failures.length === 0, seconds: Math.round((Date.now() - started.getTime()) / 1000) });
     writeRecord(run, record);
     if (run.failures.length === 0) say(`OK: ${run.launches} launch(es), ${run.guards.checked} guard check(s), 0 failures`);

@@ -208,6 +208,13 @@ that hides a real surface is a harness defect.
   5 ms)` where it did not (Q-0019-02); the goal-0019 evidence record quotes every number from a named
   run's `frontend-bench-<os>` artifact, and a same-build run (A = B) validates the method (its shots
   byte-identical, its A/B verdict judged by the fixed `max(5 %, 5 ms)` floor).
+  A run whose same-build pair reads worse discards that attempt and measures again inside the same
+  job — fresh A, B and control launches for every metric, at most two re-measures (three attempts, the
+  same rules on every OS, and the workflow's 60-minute timeout holds them) — and the verdict is the
+  first attempt whose pair reads ok: a readable attempt's `WORSE` verdict stays final and is never
+  re-measured away, the shot captures stay once-per-run and are not per-attempt, and every attempt's
+  numbers, with why a discarded one was discarded, stay in the log and the record's `attempts` block
+  (Q-0019-02, owner decision 2026-11-26).
   The shot states are seven — `today` and `today-dark` (both appearances of the today view, 0022's
   Done-when 1), then `sheet-open`, `practice-independent`, `feedback-coach`, `settings-row` and
   `report`; every shot launch's row carries the room `--mygo-titlebar-*` reported and the page's

@@ -2460,6 +2460,23 @@ Entry format:
 - Owner decision (2026-11-24): the owner accepted the final run's macOS `frames.longest` reading
   (attempt 1 WORSE, attempt 2 ok) as a disclosed observation, not to be investigated further; goal
   0019 closes on it.
+- Owner decision (2026-11-26, option A — re-measure inside the job): when an attempt's same-build
+  pair reads worse (a two-tree run's same-build control pair; the A/B pair itself when one build runs
+  twice) the job no longer fails with "this run's comparison is not readable"; the bench discards the
+  attempt and measures again inside the same job — fresh A, B and control launches for every metric
+  under the same launch protocol, up to three attempts (one measurement plus two re-measures), the
+  same rules on every OS. The workflow's 60-minute timeout holds three attempts: the archived
+  comparison records' own `seconds` read 378..533 for the 69-launch job (17 jobs, Windows and macOS),
+  and one extra attempt is 40 of those launches. The verdict is the first attempt whose pair reads
+  ok; a readable attempt's WORSE verdict is final and is never re-measured away; when no attempt's
+  pair reads ok the job fails exactly as before, with the exhausted attempt's `not readable` rows and
+  its A/B verdicts as the failure, in the base tool's own order (each row's A/B text before its
+  control-pair text). Every attempt's numbers, and why a discarded one was discarded, stay in the log
+  and in the record's `attempts` block; the shots are captured once, not per attempt. The failures
+  this replaces with an in-job re-measure are on record: run 45320531877's Windows job failed on its
+  same-build control pair of `frames.p95`, and run 45320505404's on the same-build control pairs of
+  `readyMs` and `frames.p95` (its A/B `frames.p95` row read worse too); both runs' macOS jobs read ok
+  (goal 0019's evidence record, the runs table).
 - Revisit when: the same-build control pair itself reads "worse", or a metric's spread swamps the
   difference the goal needs (the disclosed limit: a regression below the control pair's IQR cannot
   be detected).
