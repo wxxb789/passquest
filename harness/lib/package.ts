@@ -495,7 +495,7 @@ export function bundlePackages(metafile: string, cwd: string): BundlePackage[] {
   if (inputs === null || typeof inputs !== "object") throw new Error(`${metafile} names no inputs; bun writes one per module it inlined`);
   const packages = new Map<string, BundlePackage>();
   for (const key of Object.keys(inputs)) {
-    const file = path.resolve(cwd, key);
+    const file = metafileInputFile(cwd, key);
     const parts = file.split(path.sep);
     const at = parts.lastIndexOf("node_modules");
     if (at === -1) continue;
@@ -511,6 +511,17 @@ export function bundlePackages(metafile: string, cwd: string): BundlePackage[] {
     packages.set(`${manifest.name}@${manifest.version}`, { name: manifest.name, version: manifest.version, root });
   }
   return [...packages.values()].sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
+}
+
+// Bun writes a module reached through a junction onto another drive as `..\..\D:/path`;
+// path.resolve folds that into `C:\D:\...`, so the drive-qualified tail is the real file.
+function metafileInputFile(cwd: string, key: string): string {
+  const resolved = path.resolve(cwd, key);
+  if (existsSync(resolved)) return resolved;
+  const drive = /[A-Za-z]:[\\/]/.exec(key);
+  if (drive === null) return resolved;
+  const tail = path.resolve(key.slice(drive.index));
+  return existsSync(path.dirname(tail)) ? tail : resolved;
 }
 
 /**
