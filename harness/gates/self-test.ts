@@ -50,7 +50,7 @@ import {
 } from "./self-test/package-smoke.cases.ts";
 import { portablePathsCases } from "./self-test/portable-paths.cases.ts";
 import { providerSmokeCases } from "./self-test/provider-smoke.cases.ts";
-import { secretsCases } from "./self-test/secrets.cases.ts";
+import { secretsCases, secretsPassCases } from "./self-test/secrets.cases.ts";
 import { tacticSmokeCases } from "./self-test/tactic-smoke.cases.ts";
 import { tutorSmokeCases } from "./self-test/tutor-smoke.cases.ts";
 import { typecheckCases } from "./self-test/typecheck.cases.ts";
@@ -343,7 +343,7 @@ function brokenCases(): BrokenCase[] {
 
 /** Fixtures the gates must accept; a check that always fails is also a defect. */
 function passCases(): PassCase[] {
-  return [...goldenContractPassCases(), ...localOnlyPassCases(), ...packageSmokePassCases(), ...installGuidePassCases(), ...desktopUxPassCases()];
+  return [...goldenContractPassCases(), ...localOnlyPassCases(), ...packageSmokePassCases(), ...installGuidePassCases(), ...desktopUxPassCases(), ...secretsPassCases()];
 }
 
 let fixtures = 0;
