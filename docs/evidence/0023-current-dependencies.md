@@ -356,3 +356,112 @@ One pre-change attempt failed before the pass above: `source host, chat: resume 
   `core` job runs the default (unset) path and the three-OS `self-test` job runs the must-fail case.
 - The pass line's provider-request count moves with machine load; assertions, the pass labels and the
   bundle bytes are the stable fields.
+
+## P4 (2026-11-26) — The Pi packages: the feed check and the blocked branch (branch `goal/0023-p4`)
+
+Base: `main` at `7c36d43` (P1 #80, P2 #81, P3 #82 merged). Contract:
+[`../goals/0023-current-dependencies.md`](../goals/0023-current-dependencies.md); row P4 of
+[`../plans/2026-11-26-1400-0023-current-dependencies.md`](../plans/2026-11-26-1400-0023-current-dependencies.md);
+default Q-0023-03. Every command below ran on this machine (Windows 11, 2026-11-26) through the
+configured feed — `npm config get registry` reads `https://packagefeedproxy.microsoft.io/npm/`, and
+no other registry was contacted — and its output is quoted from the run.
+
+**What changed.** No package file: the feed still serves 1.5.2 as the newest release of every one of
+the six `@earendil-works` entries the lock holds, so Q-0023-03's blocked branch applies. This
+branch's diff is this section, its Q-0023-03 outcome line included; `agent/package.json` keeps its
+four exact pins and `bun.lock` is untouched.
+
+**The feed check, run before any file was touched.**
+
+```
+$ for p in chord pi-ai pi-durable pi-schema pi-telemetry pi-codemode; do printf '%s ' "@earendil-works/$p"; npm view "@earendil-works/$p" version; done
+@earendil-works/chord 1.5.2
+@earendil-works/pi-ai 1.5.2
+@earendil-works/pi-durable 1.5.2
+@earendil-works/pi-schema 1.5.2
+@earendil-works/pi-telemetry 1.5.2
+@earendil-works/pi-codemode 1.5.2
+```
+
+Two more readings agree per entry: `npm view <pkg> dist-tags --json` reads `"latest":"1.5.2"` for
+all six (`chord` also carries an `initial` tag and `pi-ai` a `legacy-node20` one — neither is
+newer), and each entry's `versions` list ends `["1.5.0","1.5.1","1.5.2"]`. The feed answers a 1.6.0
+request with its own 404:
+
+```
+$ npm view @earendil-works/pi-ai@1.6.0 version
+npm error code E404
+npm error 404 No match found for version 1.6.0
+npm error 404
+npm error 404  The requested resource '@earendil-works/pi-ai@1.6.0' could not be found or you do not have permission to access it.
+```
+
+Upstream released 1.6.0 on 2026-11-20 and 1.6.1 on 2026-11-25 (the goal's own text); the feed has
+picked up neither, so the six entries cannot move together and no mixed set is shipped.
+`npm view @earendil-works/pi-ai time --json` dates the feed's own publishes — its last version key
+is `1.5.2` → `2026-11-10T12:20:46Z`, sixteen days before this check. Hand-building or vendoring is
+declined (owner, 2026-11-26).
+
+**Proof no package file changed.** `git diff --stat` on this branch names one file (this record),
+and `agent/package.json`'s four pins read back exactly as before (`jq -r '.dependencies |
+to_entries[] | "\(.key) \(.value)"' agent/package.json` → `@earendil-works/chord 1.5.2`,
+`@earendil-works/pi-ai 1.5.2`, `@earendil-works/pi-durable 1.5.2`, `@earendil-works/pi-schema
+1.5.2`). `bun.lock`'s six entries (line numbers from the tree; `…` marks elision of the long
+`dependencies` objects):
+
+```
+$ grep -n "@earendil-works" bun.lock
+15:        "@earendil-works/chord": "1.5.2",
+16:        "@earendil-works/pi-ai": "1.5.2",
+17:        "@earendil-works/pi-durable": "1.5.2",
+18:        "@earendil-works/pi-schema": "1.5.2",
+65:    "@earendil-works/chord": ["@earendil-works/chord@1.5.2", "", { …
+67:    "@earendil-works/pi-ai": ["@earendil-works/pi-ai@1.5.2", "", { …
+69:    "@earendil-works/pi-codemode": ["@earendil-works/pi-codemode@1.5.2", "", { …
+71:    "@earendil-works/pi-durable": ["@earendil-works/pi-durable@1.5.2", "", { …
+73:    "@earendil-works/pi-schema": ["@earendil-works/pi-schema@1.5.2", "", {}, …
+75:    "@earendil-works/pi-telemetry": ["@earendil-works/pi-telemetry@1.5.2", "", {}, …
+```
+
+Lines 15–18 are `workspaces."agent"`'s pins (the root `package.json` lists `"agent"` as its one
+workspace); every package entry's registry-URL field is still `""`. `bun.lock` is not part of this
+branch's diff, so no version anywhere in it — and no registry URL — moved.
+
+**Q-0023-03 outcome (for the coordinator; `docs/decisions/OPEN-QUESTIONS.md` on this tree still has
+no Q-0023 entry to append to, as P1 flagged).** *Outcome (2026-11-26, P4): blocked by the feed.*
+All six entries were checked before any file change and every one serves 1.5.2 as its newest, with
+`@earendil-works/pi-ai@1.6.0` reading E404, so the four direct pins stay at 1.5.2 and no lock
+re-resolve ran. Owner action: ask the feed owner to publish 1.6.x for
+`@earendil-works/{chord,pi-ai,pi-durable,pi-schema,pi-telemetry,pi-codemode}`. Re-run: cut
+`goal/0023-p4` from `main` again and repeat the six `npm view <pkg> version` lines — only all six at
+≥ 1.6.0 opens the row's bump path.
+
+**Q-0023-04 outcome (for the coordinator).** *Outcome (2026-11-26, P4): not fired on the blocked
+path.* P3's opt-in recorder is landed (`PASSQUEST_AGENT_SMOKE_DUMP`, harness-only), so the
+comparison is ready, but there is no bumped tree to compare against and this branch takes no dump;
+when the feed opens the bump path, the row's step 3 takes the `before/` dump on the pre-bump tree
+and the `after/` dump on the bumped tree. Q-0006-02 and Q-0021-07 are untouched: no pin moved, and
+Q-0021-07's *Revisit when* (the feed serving ≥ 1.6.0 for all six) did not fire.
+
+**Fails when removed.** This section's six listings and 404 are the blocked path's artifact:
+without it the branch carries no evidence the feed was checked, and the re-run command above is
+what re-reads the same six lines. On this path there is no lock diff, no request-body dump and no
+staged-bundle read-back (no rebuild happened); no package byte changed on the branch, so P5's
+bundle numbers stay the ones P3 read at 1.5.2 (`1598993` bytes, 7 inlined packages) and the per-OS
+size pairs stay P1's.
+
+**For P5.** Feed state at this re-check: blocked, with the six listing lines and the 404 above. The
+inventory rows for the six `@earendil-works` entries therefore read *blocked by the feed*, sourced
+from this section; there is no lock diff and no after-dump to pair.
+
+**Local checks** (the brief's list for a documentation-only diff; this branch changes no Go file,
+no TypeScript file and no workflow, so the Go checks, the smokes and the package/self-test gates
+are not this step's to re-run — CI's three-OS matrix re-proves them on the branch's pull request):
+
+| Command (through `Q:/scratch/pq-harness-run/run-0020.ts`) | Result |
+|---|---|
+| `typecheck.ts typecheck` | `STATUS pass 0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
+| `secrets.ts secrets` | `STATUS pass 818 files, 0 findings` |
+| `docs-links.ts docsLinks` | `STATUS pass 397 checked, 0 broken` |
+
+The three ran after this section was written, so its two relative links are inside the 397 checked.
