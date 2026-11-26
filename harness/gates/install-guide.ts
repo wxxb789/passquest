@@ -183,6 +183,12 @@ const FACTS: readonly Fact[] = [
     english: ["**Updates**", "**Check for updates**"],
     chinese: ["**更新**（Updates）", "**检查更新**（Check for updates）"],
   },
+  {
+    section: "What CI proves, and what is untested",
+    what: "both endpoint formats work and the path selects the wire format",
+    english: ["both endpoint formats", "/chat/completions", "/responses"],
+    chinese: ["两种端点格式", "/chat/completions", "/responses"],
+  },
 ];
 
 /**

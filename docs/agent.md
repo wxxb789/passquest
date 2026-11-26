@@ -86,6 +86,9 @@ environment. See [providers.md](providers.md#credentials).
   learner's endpoint. The endpoint must end in `/chat/completions` or `/responses`; `https` is
   required except on loopback (`localhost`, `127.0.0.1` or `[::1]`, which the Go validator and the
   Node host both accept).
+  The path's last segment selects the wire format — chat completions or Responses — and nothing else
+  does; any other path is refused with a message naming both forms (the Go validator,
+  `agent/tutor-host.mjs` and `agent/durable-host.mjs` each enforce it).
 - `agent start` requires `text.chat = verified` for a registry-selected model (`passquest model test
   <provider>/<model>`); the legacy hand-configured path is unchanged. A run records the provider and
   the model. `resume` uses that recorded pair with the current timeout and credential; switching
@@ -105,6 +108,32 @@ and CI run that same patch, so a source checkout and a package cannot drift by a
 `practice`, `report`, `next`, `tutor`, `show`, `runs` and every local practice path keep working
 with Go alone. `status` without Node reports the application event trail and marks
 `durable.available: false`; `transcript` needs the host because it reads the Pi store.
+
+## The two wire formats
+
+The Go side builds exactly one wire document per request and serializes it once; `tutor preview`
+shows that document, the host re-derives the format from `request.endpoint`, validates the posted
+bytes against the same mapping (`canonicalResponses`, `sameBody`) and posts them unchanged, so a
+Go/host disagreement is a `config_error` before anything is posted. The durable host declares the
+model's pi-ai `api` from the endpoint's path (`agent/durable-host.mjs`'s `endpointFormat` and
+`buildModels`) and leaves the request shape to the library's own adapter (`openAIResponsesApi`).
+Q-0021-01…05 in [OPEN-QUESTIONS](decisions/OPEN-QUESTIONS.md) record the decisions.
+
+| What the app relies on | Chat completions | Responses | Code | Covered by |
+|---|---|---|---|---|
+| token limit | `max_tokens` | `max_output_tokens` | `internal/tutor`'s `ResponsesFor`; pi-ai's adapter | the tutor smoke's per-format body assertions; the agent smoke's responses passes |
+| system text | a `messages[]` entry, role `system` | `instructions` (tutor) or an `input` item, role `system` (durable) | `ResponsesFor`; the library's adapter | the same two |
+| user text | `messages[]`, role `user` | `input[]` items, each with an `input_text` part | the same | the same two |
+| reply text | `choices[0].message.content` | every `output[]` `message` item's `output_text` parts, in order | `responsesOutputText` | the tutor smoke's responses cases |
+| usage | `prompt_tokens`/`completion_tokens` | `input_tokens`/`output_tokens`, reported under the chat names | `agent/tutor-host.mjs` | the tutor smoke's usage case |
+| a cut-off reply | accepted while the content is non-empty | `status` other than `completed` is `invalid_response`, naming `incomplete_details.reason` | `responsesRefused` and the status check | the tutor smoke's incomplete case |
+| provider-side storage | no such field | `store: false` sent explicitly; the Responses default stores for ≥ 30 days | both hosts | the per-format body assertions |
+| error bodies | `error.message` | the same shape, so the status classes need no branch | unchanged | the tutor smoke's refusal cases |
+
+`store: false` is the app's decision, not the API's: Pass Quest has never opted into provider-side
+storage, so both hosts send it (Q-0021-02, Q-0021-03). The durable request otherwise differs from the
+tutor's only where the library owns it: the system text is an `input` item, the request streams, and
+the library's per-conversation `prompt_cache_key` rides along.
 
 ## Status
 
@@ -210,8 +239,16 @@ document carries the state.
 
 ## Limits
 
-- One provider shape and one task kind. Completion quality is model-dependent; the application can
-  verify mechanics and bounds, not pedagogical quality.
+- One endpoint (two wire formats selected by its path) and one task kind. Completion quality is
+  model-dependent; the application can verify mechanics and bounds, not pedagogical quality.
+- The Responses paths are proved against loopback fakes that reproduce the reference's request and
+  response shapes and its refusals. A real OpenAI or Azure Responses endpoint, and a gateway that
+  claims `/v1/responses` but rejects `store` or `instructions`, are not contacted: that probe needs
+  credentials and a budget, so it is an owner action and the field acceptance is untested until it
+  runs (Q-0021-08).
+- Streaming and tool calls are unchanged: the tutor's Responses request still carries `stream:
+  false`, and the durable path's streaming is pi-ai's own transport over the same recorded tool
+  calls, not a new feature surface.
 - One run at a time; a paused run must be resumed or cancelled before a new brief can start.
 - `resume` after a deleted Pi store re-executes the task; existing step indices dedupe, so a new step
   at an occupied index keeps the old text.

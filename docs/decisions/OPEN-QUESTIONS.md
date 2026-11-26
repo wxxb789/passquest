@@ -3028,7 +3028,6 @@ Entry format:
   notice only reads the filesystem, and P1's diff changes no window behaviour beyond the default seam's
   computation.
 - Revisit when: a later goal needs one of the excluded behaviours; it starts its own entry.
-||||||| parent of 5852feb (provider: accept OpenAI Responses endpoints beside chat completions (0021 P1))
 
 ### Q-0021-01 — Which endpoint paths select which wire format?
 - Status: decided(default taken)
@@ -3046,6 +3045,13 @@ Entry format:
   body). A path that is neither form is refused with a message naming both, in the Go validator,
   both host validators and the CLI flag help. Reversal: one line per site back to the single
   suffix. Disclosed: no separate setting exists to disagree with the path.
+- Outcome (2026-11-25, P1–P3): held, with the derivation's home moved. `internal/provider` already
+  imports `internal/tutor` (`provider.ClassifyResponse(tutor.HostResponse)`), so the one
+  implementation lives in the new leaf package `internal/wire` (`Format`, `FormatOf`,
+  `FormatOfPath`, `Shape`) and `internal/provider` re-exports every P1 name; the registry's
+  behaviour and tests are unchanged. Both Node hosts derive the value themselves, all three
+  validators tolerate a trailing slash and refuse a third form with a message naming both, and no
+  separate setting exists.
 - Revisit when: a provider needs a format the path cannot name, or a gateway's path stops matching
   the API it serves.
 
@@ -3069,6 +3075,13 @@ Entry format:
   its own messages, and the preview readers (`internal/study/notes/refine.go`,
   `internal/workspace/workspace_coach.go`) read the non-nil wire doc, so a responses learner sees
   the content the host validates.
+- Outcome (2026-11-25, P2): held. `HostRequestFor`/`ResponsesFor` build the document above and
+  `transport.validateRequest` checks the carried document against the endpoint's format and the
+  `Body` invariant; the recorded responses body from the capture is
+  `{"model":"capture-model","instructions":"You are a concise exam coach.","input":[…],"max_output_tokens":350,"temperature":0,"stream":false,"store":false}`
+  (251 bytes, SHA-256 `7fc9e43c046388c14353c66bdb14faccd1f3ef0f498ab2c8062b31a0e662d629`), posted
+  verbatim, and the tutor smoke's per-format body assertions plus the `note propose --refine` case
+  pin it end to end.
 - Revisit when: the API reference changes the field names or the `store` default, or a gateway the
   owner probes rejects one of these fields (Q-0021-08).
 
@@ -3088,6 +3101,13 @@ Entry format:
   (`clampOpenAIPromptCacheKey(undefined)` returns `undefined` and the encoder drops it). The
   recorded bodies are the authority for every field. Reversal: one `api:` line back to the single
   completions adapter.
+- Outcome (2026-11-25, P3): held, with one correction to the disclosure above. The recorded durable
+  responses bodies (8568/8922/9252 UTF-16 code units, 8570/8924/9254 bytes) carry `stream: true`,
+  `store: false`, the system text as an
+  `input` item, flat function tools, `max_output_tokens: 600` and — contrary to "no session id" —
+  `prompt_cache_key`, because pi-durable owns a per-conversation `ProviderDoc.sessionId` and the
+  adapter sends it (`openai-responses.js:263`); the record names it as the library's own field. The
+  chat bodies stayed byte-identical to the base capture after run-id normalisation.
 - Revisit when: the library changes the adapter's request shape, or a hosted gateway rejects the
   library's own fields.
 
@@ -3109,6 +3129,11 @@ Entry format:
   `/responses` endpoint outright. Reversal: accept both shapes without the agreement rule (a
   one-condition delete). The plan chooses agreement because the field is authored and a wrong value
   shows in `model list` and the settings JSON.
+- Outcome (2026-11-25, P1): held. `ShapeResponses = "openai-responses"` sits beside the existing
+  constant, the registry check requires agreement for an entry with a non-empty endpoint (message
+  naming both shapes) and exempts the embedded `custom` row, whose declared value the registry test
+  now pins; `internal/study/models/providers.go` reports the derived shape for the active custom and
+  legacy rows, so `model list` and the settings document follow the endpoint.
 - Revisit when: the registry gains a shape whose endpoint cannot derive it, or the field stops
   being authored.
 
@@ -3131,6 +3156,12 @@ Entry format:
   `completion_tokens`, reported only when both are integers >= 0. The 1 MiB body cap, credential
   redaction, `request_sent` and the HTTP-status classes are unchanged. Reversal: fall back to
   `invalid_response` for every responses reply, which loses text the API does return.
+- Outcome (2026-11-25, P2): held. The tutor host's responses branch reads the `output_text` parts
+  across message items, maps usage under the chat names only when both integers are ≥ 0, and refuses
+  a non-`completed` status, a `refusal` part and a 200 carrying `error`; the tutor smoke's
+  responses cases pin the text, the usage mapping and the `incomplete` refusal naming
+  `max_output_tokens` (the deliberate chat-vs-responses asymmetry is stated in the record's
+  difference table).
 - Revisit when: the reference changes the status vocabulary or usage fields, or the owner's probe
   shows a provider whose completed reply carries no `output_text` part.
 
@@ -3150,6 +3181,13 @@ Entry format:
   `docs/evidence/0012/settings.webp` is the commit-`354f08c` sheet its README names; regenerating
   it is a coordinator action ordered after 0022's own regeneration so one pass covers both goals'
   page changes. Reversal: delete the line; the CLI help and the docs still tell the truth.
+- Outcome (2026-11-25, P2–P3): held. The line sits in `desktop/web/src/views/settings.ts`
+  (`data-testid="endpoint-formats"`, both suffixes inside `<code translate="no">`); the settings
+  scenario reads it in the launched language and verifies a responses provider through the window,
+  the must-fail desktop case fails when the line is dropped, and the ux language audit stays at
+  `0 allowed`. P2's bench run allowlisted `settings-row` on `windows-latest` and `macos-26`
+  (the reason the entry names) and P3's run removed the entry and read all seven shots identical on
+  both. `docs/evidence/0012/settings.webp` is still the commit-`354f08c` render.
 - Revisit when: the settings page is redesigned, or a second page needs the same statement.
 
 ### Q-0021-07 — When do the Pi packages move, and what happens while the feed lags?
@@ -3187,5 +3225,10 @@ Entry format:
   claims `/v1/responses`, are **not** contacted: a credentials-and-budget probe against one is an
   owner action, first-party text only, and its result is recorded as the owner's evidence or as an
   untested limit. Reversal: none — contacting real providers from a gate is forbidden.
+- Outcome (2026-11-25, P1–P3): held for the fake half. The tutor and durable fakes validate each
+  format's strict key set and values, answer with the format's response shape (including the
+  Responses SSE event set) and reproduce 401/403, 429, 400-with-`error.message`, 200-with-no-text
+  and non-JSON; the owner's real-endpoint probe has not run, so `store`/`instructions` acceptance by
+  a real provider and by a gateway remains the untested limit the record states.
 - Revisit when: the owner's probe runs, or a fake's shape stops matching the reference.
 
