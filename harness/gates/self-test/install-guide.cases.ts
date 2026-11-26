@@ -375,6 +375,34 @@ export function installGuideCases(): BrokenCase[] {
         `${CHINESE_GUIDE}: the "macOS" section must carry the Keychain prompt one upgrade brings, the answer to it and why it appears: missing "没有 Apple 签发的签名标识"`,
       ],
     ),
+    guideCase(
+      "the What-CI-proves section dropping the two endpoint formats",
+      (root) => {
+        const edits: [string, string][] = [
+          [
+            ENGLISH_GUIDE,
+            "The model path is proved over both endpoint formats: an\nendpoint whose path ends in `/chat/completions` and one ending in `/responses` are both driven, and\nthe path alone selects the wire format (the tutor smoke, the provider smoke, the agent smoke's four\npasses and the package smoke's `brief-responses` case). ",
+          ],
+          [
+            CHINESE_GUIDE,
+            "模型路径在两种端点格式上都有验证：以 `/chat/completions` 结尾和以 `/responses` 结尾的端点都会被驱动，线格式只由路径决定（tutor smoke、provider smoke、agent smoke 的四轮通过和 package smoke 的 `brief-responses` 用例）。",
+          ],
+        ];
+        for (const [file, sentence] of edits) {
+          const problem = patchCopy(root, file, sentence, "");
+          if (problem) return problem;
+        }
+        return null;
+      },
+      [
+        `${ENGLISH_GUIDE}: the "What CI proves, and what is untested" section must carry both endpoint formats work and the path selects the wire format: missing "both endpoint formats"`,
+        `${ENGLISH_GUIDE}: the "What CI proves, and what is untested" section must carry both endpoint formats work and the path selects the wire format: missing "/chat/completions"`,
+        `${ENGLISH_GUIDE}: the "What CI proves, and what is untested" section must carry both endpoint formats work and the path selects the wire format: missing "/responses"`,
+        `${CHINESE_GUIDE}: the "What CI proves, and what is untested" section must carry both endpoint formats work and the path selects the wire format: missing "两种端点格式"`,
+        `${CHINESE_GUIDE}: the "What CI proves, and what is untested" section must carry both endpoint formats work and the path selects the wire format: missing "/chat/completions"`,
+        `${CHINESE_GUIDE}: the "What CI proves, and what is untested" section must carry both endpoint formats work and the path selects the wire format: missing "/responses"`,
+      ],
+    ),
     // The cask half: every check in `caskProblems`, `placeholderProblems` and
     // the pinned render have a case here. A template edit fails its semantic
     // check and the golden line together, so each case names the check it

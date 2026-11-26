@@ -22,12 +22,15 @@ passquest model use custom/MODEL --endpoint https://host/v1/responses   # Respon
 
 `model use` writes the `tutor_config` row (`provider`, `model`, `endpoint`). A hand-edited
 `tutor config --endpoint --model` clears the registry provider and stays the goal-0005 legacy path.
-`model use` does not verify, change an attempt or alter `report`/`next`.
+`model use` does not verify, change an attempt or alter `report`/`next`. The endpoint's path picks
+the wire format; a registry entry with a non-empty `endpoint` must declare the `endpoint_shape` that
+path derives (`openai-chat-completions` or `openai-responses`), a mismatch fails the registry load
+naming both shapes, and an entry without an endpoint keeps its declared value (Q-0021-04).
 
-`model test` sends one minimal non-streaming chat-completions request through the same Node host as
-`tutor ask` and appends a timestamped verification event. It spends one slot in that provider's daily
-budget because it is a real provider call. A missing credential is recorded as
-`failed:no_credential` without a call or a budget slot.
+`model test` sends one minimal non-streaming request in the format the endpoint's path selects
+through the same Node host as `tutor ask` and appends a timestamped verification event. It spends
+one slot in that provider's daily budget because it is a real provider call. A missing credential is
+recorded as `failed:no_credential` without a call or a budget slot.
 
 ## Four axes
 

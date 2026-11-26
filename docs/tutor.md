@@ -43,10 +43,17 @@ the same database the window opens ([install.md](install.md)).
   server may use `http`.
 - URLs with userinfo, a query string or a fragment are rejected, so a credential cannot be smuggled
   into stored configuration.
-- The request body is exactly `{model, messages, max_tokens, temperature: 0, stream: false}`.
-  `preview` shows it. The host checks the serialized body against that content and posts the bytes
-  unchanged, so the recorded SHA-256 and size identify what was sent. The host adds
-  `Authorization: Bearer <key>` and refuses redirects.
+- The request body is exactly `{model, messages, max_tokens, temperature: 0, stream: false}` for a
+  `chat/completions` endpoint, and `{model, instructions, input, max_output_tokens, temperature: 0,
+  stream: false, store: false}` for a `responses` one: the path's last segment picks the format, the
+  system messages join into `instructions` in order, separated by a blank line, and each other
+  message becomes an `input` item
+  (`{role, content: [{type: "input_text", text}]}`). `preview` shows the document that would be
+  sent. The host checks the serialized body against that mapping and posts the bytes unchanged, so
+  the recorded SHA-256 and size identify what was sent. The host adds `Authorization: Bearer <key>`
+  and refuses redirects. `store: false` keeps the reply out of the provider's own storage, where the
+  Responses default keeps it for at least 30 days
+  ([Q-0021-02](decisions/OPEN-QUESTIONS.md)).
 - No provider-specific capability, model or account claim is made by this legacy path. Goal 0010 adds
   a registry of providers, models and declared capabilities; see [providers.md](providers.md). A
   registry-selected model, its credential variable and its verification state are separate facts.
@@ -81,7 +88,7 @@ tactic exercise and the skill passages) are authored for this repository and nee
 | Imported source (`src-*-pNNN`) | Attempt facts (status, selected/correct labels, elapsed, assistance, attempt number, repeat, skill ids) and skill lessons only; question content is explicitly withheld | Passage excerpt and question fields are added |
 | Content changed or unavailable | Attempt facts, stored selected/correct option texts when allowed, lessons; current passage/evidence are not sent | same, with private stored text allowed by the grant |
 
-`tutor preview` prints the exact chat content and lists `withheld` and `truncated_fields`. Consent is an
+`tutor preview` prints the exact wire document and lists `withheld` and `truncated_fields`. Consent is an
 append-only event trail per source; `revoke` appends a new event and withholds the source again. An
 optional `--provider ID` scopes a decision to one registry provider; a provider-specific event
 overrides the global event for that provider, and a global event applies to every provider. Failover
@@ -137,7 +144,7 @@ verification and failover ledgers):
   learner evidence and carries only its creation time.
 
 Raw prompt text is not stored; the SHA-256 and byte size describe the exact serialized request body,
-which the host posts without re-encoding, and `tutor preview` shows the same chat content before
+which the host posts without re-encoding, and `tutor preview` shows the same wire document before
 sending. `tutor history` lists usage and failures without model text; `tutor show CALL` prints one
 stored advisory text. A call records `source_text_shared` only when the host actually posted a request
 that carried private source text; a failure before the request was sent records `false`. `report`,
@@ -186,8 +193,9 @@ before and after the failure. `practice` still records and grades locally.
 
 ## Limits
 
-- One endpoint shape, one attempt and no streaming. Broad provider choice and capabilities are
-  [providers.md](providers.md); durable multi-step work lives in the separate `agent` commands
+- One endpoint (two wire formats, selected by its path), one attempt and no streaming. Broad
+  provider choice and capabilities are [providers.md](providers.md); durable multi-step work lives
+  in the separate `agent` commands
   ([agent.md](agent.md)), not in `tutor ask`.
 - The registry path requires `model test` verification of `text.chat`; the legacy hand-configured path
   does not. Only `text.chat` is probed in this increment.

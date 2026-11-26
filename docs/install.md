@@ -267,11 +267,14 @@ with `go`, `bun` and `node` absent from `PATH` (asserted), and drives the study 
 features — including a study brief the installed app completes on its own bundled runtime and hosts —
 Anki, the forward upgrade, the credential case and the broken-runtime case through it (the
 `package smoke` gate, cases `contents, layout, study, cli-runtime, agents, brief, brief-responses,
-anki, upgrade, credential, broken`). The macOS job also checks the built `.app`'s `Info.plist` minimum:
-the package declares macOS 26. Each run keeps its package as the `package-windows-latest`,
-`package-macos-latest` or `package-ubuntu-latest` artifact for 7 days. A run on a version tag hands
-these same artifacts to the release workflow, which publishes them only after the owner reviews the
-draft ([Releasing](release.md)).
+anki, upgrade, credential, broken`). The model path is proved over both endpoint formats: an
+endpoint whose path ends in `/chat/completions` and one ending in `/responses` are both driven, and
+the path alone selects the wire format (the tutor smoke, the provider smoke, the agent smoke's four
+passes and the package smoke's `brief-responses` case). The macOS job also checks the built `.app`'s
+`Info.plist` minimum: the package declares macOS 26. Each run keeps its package as the
+`package-windows-latest`, `package-macos-latest` or `package-ubuntu-latest` artifact for 7 days. A
+run on a version tag hands these same artifacts to the release workflow, which publishes them only
+after the owner reviews the draft ([Releasing](release.md)).
 
 The Homebrew path has its own workflow ([`.github/workflows/cask.yml`](../.github/workflows/cask.yml)):
 on a macOS runner it installs the published release **from the tap** (`brew install --cask

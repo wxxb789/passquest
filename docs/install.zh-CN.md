@@ -160,7 +160,7 @@ CI 自己就是这样运行 AppImage 的，从不使用 FUSE 挂载。
 
 CI（[`.github/workflows/gate.yml`](../.github/workflows/gate.yml)）每个操作系统跑一次 `package` 任务：
 `gate (windows-latest, package)`、`gate (macos-latest, package)` 和 `gate (ubuntu-latest, package)`。
-每个任务从仓库构建该操作系统的安装包，安装或挂载它（Windows 用 NSIS `/S`，macOS 挂载 `.dmg` 并用 `ditto` 把 `.app` 拷出来，Linux 就地运行 AppImage），然后在 `PATH` 中没有 `go`、`bun` 和 `node`（已断言）的情况下启动已安装的应用，并驱动学习闭环、agent 功能——包括一个由已安装应用在自带的运行时和 host 上独立完成的学习简报——Anki、前向升级、密钥用例和运行时损坏用例（`package smoke` 门禁，用例为 `contents, layout, study, cli-runtime, agents, brief, brief-responses, anki, upgrade, credential, broken`）。macOS 任务还会检查所构建 `.app` 的 `Info.plist` 最低版本：安装包声明 macOS 26。每次运行都把安装包保留为 `package-windows-latest`、`package-macos-latest` 或 `package-ubuntu-latest` 工件，保存 7 天。在版本 tag 上的运行会把这些工件交给发布流程，只有负责人审阅草稿后才会发布（[发布流程](release.md)）。
+每个任务从仓库构建该操作系统的安装包，安装或挂载它（Windows 用 NSIS `/S`，macOS 挂载 `.dmg` 并用 `ditto` 把 `.app` 拷出来，Linux 就地运行 AppImage），然后在 `PATH` 中没有 `go`、`bun` 和 `node`（已断言）的情况下启动已安装的应用，并驱动学习闭环、agent 功能——包括一个由已安装应用在自带的运行时和 host 上独立完成的学习简报——Anki、前向升级、密钥用例和运行时损坏用例（`package smoke` 门禁，用例为 `contents, layout, study, cli-runtime, agents, brief, brief-responses, anki, upgrade, credential, broken`）。模型路径在两种端点格式上都有验证：以 `/chat/completions` 结尾和以 `/responses` 结尾的端点都会被驱动，线格式只由路径决定（tutor smoke、provider smoke、agent smoke 的四轮通过和 package smoke 的 `brief-responses` 用例）。macOS 任务还会检查所构建 `.app` 的 `Info.plist` 最低版本：安装包声明 macOS 26。每次运行都把安装包保留为 `package-windows-latest`、`package-macos-latest` 或 `package-ubuntu-latest` 工件，保存 7 天。在版本 tag 上的运行会把这些工件交给发布流程，只有负责人审阅草稿后才会发布（[发布流程](release.md)）。
 
 Homebrew 路径有自己的工作流（[`.github/workflows/cask.yml`](../.github/workflows/cask.yml)）：
 在 macOS 运行器上它从 tap 安装已发布的版本（`brew install --cask wxxb789/tap/pass-quest`），
