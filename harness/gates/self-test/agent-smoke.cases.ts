@@ -20,6 +20,13 @@ async function streamEveryEndpointThroughTheChatAdapter(root: string): Promise<s
   );
 }
 
+async function requestDumpUnderAFile(root: string): Promise<string | null> {
+  if (copyProduct(root, [...NOTE_SMOKE_SOURCES, "bun.lock"]) === 0) return "no product source was copied into the fixture root";
+  linkStore(root);
+  process.env.PASSQUEST_AGENT_SMOKE_DUMP = path.join(root, "dump-blocker", "dump");
+  return null;
+}
+
 export function agentSmokeCases(): BrokenCase[] {
   return [
     {
@@ -49,6 +56,16 @@ export function agentSmokeCases(): BrokenCase[] {
         failures.some((line) => /^(source host|staged bundle), responses: /.test(line))
           ? null
           : `agent-smoke: did not report the responses pass: ${failures.slice(0, 3).join("; ")}`,
+    },
+    {
+      gate: agentSmoke,
+      label: "agent smoke whose request dump directory cannot exist",
+      files: { "dump-blocker": "a regular file, not a directory\n" },
+      prepare: requestDumpUnderAFile,
+      postFail: (failures) =>
+        failures.some((line) => line.includes("PASSQUEST_AGENT_SMOKE_DUMP"))
+          ? null
+          : `agent-smoke: did not name the dump failure: ${failures.slice(0, 3).join("; ")}`,
     },
   ];
 }
