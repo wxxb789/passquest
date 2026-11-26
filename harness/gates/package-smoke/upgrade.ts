@@ -87,7 +87,7 @@ import type { ScenarioRun } from "../desktop-smoke/scenario.ts";
  * `git fetch --depth=1 origin <id>` fetches by full id only. After each
  * release, move it to the new tag's commit (docs/release.md).
  */
-export const PREVIOUS_RELEASE_COMMIT = "43a09b175a0a8eb954a6210a4cfbf734ac7e1047";
+export const PREVIOUS_RELEASE_COMMIT = "e0a3cd4f47d214faa1ee10d516746dabbeef8b94";
 
 /** One launch site of the installed app: the smoke-hook run and the per-user data root it resolves. */
 export interface UpgradeSite {
