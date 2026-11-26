@@ -30,6 +30,23 @@ function parse(raw: string): unknown {
   }
 }
 
+/**
+ * The opt-in request-body dump directory (`PASSQUEST_AGENT_SMOKE_DUMP`): it must already exist and
+ * accept a file, so a typo fails the gate with the variable and the path named before any pass runs.
+ */
+function dumpDirectoryProblem(dir: string): string | null {
+  const named = `PASSQUEST_AGENT_SMOKE_DUMP=${JSON.stringify(dir)}`;
+  const probe = path.join(dir, `.agent-smoke-write-probe-${process.pid}`);
+  try {
+    if (existsSync(dir) && !statSync(dir).isDirectory()) return `${named} names a file, not a directory`;
+    writeFileSync(probe, "");
+    rmSync(probe, { force: true });
+  } catch (error) {
+    return `${named} is not a writable directory: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  return null;
+}
+
 /** One host the durable matrix drives, and how to reach it. */
 interface DurableMatrixOptions {
   /** Names the host and its endpoint form in every failure line and in the gate's summary, e.g. `source host, responses`. */
@@ -40,6 +57,8 @@ interface DurableMatrixOptions {
   node: string;
   /** The endpoint form the pass configures and the stub answers. */
   format: "chat" | "responses";
+  /** When set, each completed pass writes its stub-recorded provider request bodies to `<dir>/<label slug>.json` (`PASSQUEST_AGENT_SMOKE_DUMP`). */
+  dump?: string;
   /** Extra environment for every CLI call; the bundle pass pins PASSQUEST_NODE here. */
   env?: Record<string, string>;
 }
@@ -622,6 +641,14 @@ export async function durableMatrix(
     }
 
     check(!seenOutputs.join("\n").includes(KEY), "agent output contains the provider credential");
+    if (options.dump) {
+      const file = path.join(options.dump, `${slug}.json`);
+      try {
+        writeFileSync(file, `${JSON.stringify({ label: options.label, format: options.format, requests: received }, null, 2)}\n`);
+      } catch (error) {
+        check(false, `cannot write the request-body dump ${file} (PASSQUEST_AGENT_SMOKE_DUMP): ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     return { label: options.label, assertions, requests: received.length, failures: checks, permissionChecks, permissionsSkipped };
   } finally {
     server.stop(true);
@@ -645,6 +672,11 @@ export const agentSmoke: Gate = {
    * same runtime as the direct probe.
    */
   async run(ctx: GateContext) {
+    const dump = process.env.PASSQUEST_AGENT_SMOKE_DUMP || undefined;
+    if (dump) {
+      const problem = dumpDirectoryProblem(dump);
+      if (problem) return fail([problem]);
+    }
     const node = executable("node");
     const nodeCheck = await run(node, ["--version"], { cwd: ctx.root });
     if (nodeCheck.code !== 0) {
@@ -663,6 +695,7 @@ export const agentSmoke: Gate = {
             host: path.join(ctx.root, "agent", DURABLE_HOST),
             node,
             format,
+            dump,
           }),
         );
       }
@@ -678,6 +711,7 @@ export const agentSmoke: Gate = {
             host: bundle.file,
             node,
             format,
+            dump,
             env: { PASSQUEST_NODE: node },
           }),
         );

@@ -285,3 +285,74 @@ gate.yml workflowGroups: ["core","desktop","package","self-test"]
 - Bench (`frontend-bench.yml` is in its own `paths:` filter, so this change triggers it): the
   `bench` matrix `[windows-latest, macos-26]` reports its seven shots byte-identical, and
   `linux-smoke` on `ubuntu-latest` stays green.
+
+## P3 — The request-body recorder (2026-11-26, branch `goal/0023-p3`)
+
+Done-when 2's instrument: the durable host's provider request bodies become recordable, opt-in
+through `PASSQUEST_AGENT_SMOKE_DUMP`, so P4 can diff a pre-bump and a post-bump run. Windows 11
+Enterprise (10.0.26300), tree `Q:/repos/passquest-tmp`; every run below went through
+`mise exec -- bun Q:/scratch/pq-harness-run/run-tmp.ts <gate> <export>`.
+
+### Interface
+
+- `PASSQUEST_AGENT_SMOKE_DUMP=<dir>` is harness-only and unset by default. When set, the gate checks
+  `<dir>` once before the four passes — it must exist and accept a probe file, else the gate fails
+  naming the variable and the path — and each completed pass writes `<dir>/<label slug>.json`, the
+  pass label with non-alphanumerics folded to `-` (the same slug the pass's temp directory uses), as
+  `{ label, format, requests }` where `requests` is the stub's own `received` array of
+  `{ path, body }`. A write that fails at pass time is a named failure. Unset, nothing is written,
+  no check runs, and assertions, failure messages and the pass line are unchanged.
+- Files this run wrote (`Q:/scratch/omp/g23/P3/dump`, created before the run):
+  `source-host-chat.json`, `source-host-responses.json`, `staged-bundle-chat.json`,
+  `staged-bundle-responses.json`.
+- Files changed: `harness/gates/agent-smoke.ts` (the check, the option, the per-pass write),
+  `harness/gates/self-test/agent-smoke.cases.ts` (the must-fail case),
+  `harness/gates/self-test.ts` (`runCase` saves and restores the variable), `docs/harness.md` row 17
+  (one sentence). No product file changed.
+
+### Runs
+
+| Run | Result |
+|---|---|
+| pre-change tree (`01c333c`, no P3 code), `PASSQUEST_AGENT_SMOKE_DUMP=Q:/scratch/omp/g23/P3/blocker/dump` — a path under the regular file `blocker` | PASS — the variable is ignored today: `488 assertions, 11 scenarios x 4 passes (source host, chat, source host, responses, staged bundle, chat, staged bundle, responses), 99 provider requests, permissions skipped on Windows, bundle 1598993 bytes with 7 inlined packages`; nothing written (`blocker` stayed a 32-byte file, no `blocker/dump`). This is the removal side: without the feature the must-fail case's gate run does not fail, so the case reddens. |
+| final tree, same impossible path | FAIL in 0 s: `PASSQUEST_AGENT_SMOKE_DUMP="Q:/scratch/omp/g23/P3/blocker/dump" is not a writable directory: ENOENT: no such file or directory, open 'Q:\scratch\omp\g23\P3\blocker\dump\.agent-smoke-write-probe-11364'` |
+| final tree, `PASSQUEST_AGENT_SMOKE_DUMP=Q:/scratch/omp/g23/P3/dump` | PASS — `488 assertions … 98 provider requests, permissions skipped on Windows, bundle 1598993 bytes with 7 inlined packages`; the four files above parse with `jq`; labels and formats match their pass; 24 / 24 / 25 / 25 requests, all on `/v1/chat/completions` (chat) and `/v1/responses` (responses); 24 / 25 `role: "system"` messages in the two chat files; 84 / 86 `input` items in the two responses files (untyped message items plus `function_call` and `function_call_output`), and no request body carries `instructions`. |
+| final tree, no variable | PASS — same `488 assertions …` line as the pre-change run (the provider-request count is the only field that moves: 99 → 98); the `dump/` listing is byte-identical before and after and no other file appeared in `Q:/scratch/omp/g23/P3`. The unset path enters none of the changed lines: the once-check and the per-pass write both sit behind `if (dump)`. |
+| `self-test` gate (this tree, one local run, 1506 s, load 32 % → 69 %) | FAIL on exactly one unrelated window case: `desktop-ux: the non-modal layer broke an earlier stage: desktop-ux prepare: script failed: mygo: javascript error: timed out waiting for a practice item [route #/today] on a layer shown with dialog.show() while the page behind it stays tabbable`. That is the load-caused window flake this machine is known for (the briefing names this exact error), it is in a gate this step does not touch, and only that one problem line was reported, so every other case — the new one included — was green. The three-OS `self-test` job is CI's authority, and P5 re-quotes the case count from its own run. |
+
+Targeted runs of the new case, through its own `files`/`prepare` data and the real gate module with
+`runCase`'s logic (`Q:/scratch/omp/g23/P3/case-run.ts`): with the variable set by the prepare, the
+gate fails naming the dump failure and the case is green in 1.1 s; with `PASSQUEST_AGENT_SMOKE_DUMP`
+unset — what a tree without the feature does to the same invocation — the gate passes and the case
+reports `would redden: agent-smoke: status pass on agent smoke whose request dump directory cannot
+exist, want fail` (`Q:/scratch/omp/g23/P3/case-removed.log`). With the pre-change-tree run above,
+the case reddens exactly when the feature is removed.
+
+The guard move: `dumpDirectoryProblem`'s `existsSync`/`statSync` read now sits inside the same `try`
+as the probe write, so a path that disappears between the two calls is a named failure, not a throw.
+After that edit, `typecheck` PASS, the impossible-path run and the targeted case fail with the same
+message, and the dump-set run was repeated to `Q:/scratch/omp/g23/P3/dump-final`: PASS — `488
+assertions, 11 scenarios x 4 passes (source host, chat, source host, responses, staged bundle, chat,
+staged bundle, responses), 100 provider requests, permissions skipped on Windows, bundle 1598993
+bytes with 7 inlined packages` — with the same four file names, whose `.label`/`.format` read back
+`source host, chat chat`, `source host, responses responses`, `staged bundle, chat chat` and
+`staged bundle, responses responses`.
+
+One pre-change attempt failed before the pass above: `source host, chat: resume exit 3: … "code": "interrupted", "message": "The host stopped while the model was answering, on attempt 1"` plus its three follow-on lines, under load 73–93 % from the parallel P1/P2/P4 worktrees. The tree carried no P3 code and the identical command passed on the immediate rerun, so the change did not cause it (`Q:/scratch/omp/g23/P3/baseline-dumpvar.log` first attempt, `baseline-dumpvar2.log` pass).
+
+### Sample entries (the facts P4/P5 read from here)
+
+- chat — `source-host-chat.json`, `requests[0].body.messages[0]`:
+  `{"role":"system","content":"<passquest-agent-rules>\nYou are the Pass Quest durable study-brief agent. …"}`
+- responses — `source-host-responses.json`, `requests[0].body.input[0]`: a message item with no
+  `type`, `role: "system"`, `content: "<passquest-agent-rules>\n…"` (the bodies carry no
+  `instructions`).
+- No dump file contains the stub key `test-key-not-real` or the strings `baselines` /
+  `data/private` (`grep -l` over the four files: no match).
+
+### Limits
+
+- Local Windows evidence only. macOS and Linux agent-smoke and self-test runs are CI's: the three-OS
+  `core` job runs the default (unset) path and the three-OS `self-test` job runs the must-fail case.
+- The pass line's provider-request count moves with machine load; assertions, the pass labels and the
+  bundle bytes are the stable fields.

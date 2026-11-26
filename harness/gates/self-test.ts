@@ -387,6 +387,7 @@ async function runPassCase(testCase: PassCase): Promise<string | null> {
 
 async function runCase(testCase: BrokenCase): Promise<string | null> {
   const root = fixtureRoot();
+  const dump = process.env.PASSQUEST_AGENT_SMOKE_DUMP;
   try {
     const preparation = await prepareFixture(root, testCase);
     if (preparation) return `${testCase.gate.id}: fixture on ${testCase.label}: ${preparation}`;
@@ -401,6 +402,8 @@ async function runCase(testCase: BrokenCase): Promise<string | null> {
   } catch (error) {
     return `${testCase.gate.id}: threw on ${testCase.label}: ${error instanceof Error ? error.message : String(error)}`;
   } finally {
+    if (dump === undefined) delete process.env.PASSQUEST_AGENT_SMOKE_DUMP;
+    else process.env.PASSQUEST_AGENT_SMOKE_DUMP = dump;
     rmSync(root, { recursive: true, force: true });
   }
 }
