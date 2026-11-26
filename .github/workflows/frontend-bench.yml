@@ -77,19 +77,19 @@ jobs:
           echo "b=$b" >> "$GITHUB_OUTPUT"
 
       - name: Checkout B
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.refs.outputs.b }}
           fetch-depth: 1
 
       - name: Checkout A
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.refs.outputs.a }}
           path: a
           fetch-depth: 1
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -215,7 +215,7 @@ jobs:
 
       - name: Upload the record, the log and the shots
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-bench-${{ matrix.os }}
           path: |
@@ -232,11 +232,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -275,7 +275,7 @@ jobs:
 
       - name: Upload the smoke record, the log and the shots
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-bench-ubuntu-smoke
           path: |
