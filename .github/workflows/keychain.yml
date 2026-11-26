@@ -69,19 +69,19 @@ jobs:
           echo "b=$b" >> "$GITHUB_OUTPUT"
 
       - name: Checkout B
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.refs.outputs.b }}
           fetch-depth: 2
 
       - name: Checkout A
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.refs.outputs.a }}
           path: a
           fetch-depth: 2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -212,7 +212,7 @@ jobs:
 
       - name: Upload the record and the log
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: keychain-record-${{ matrix.arm }}-${{ matrix.keychain }}
           path: |

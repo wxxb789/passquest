@@ -139,3 +139,149 @@ release (`sqlite` 1.62.0 → 1.63.0, `libc` 1.82.0 → 1.82.13, `compress` 1.20.
 `ccgo/v4` followed through `libc`'s requirement), the store's pinned facts and goal 0020 P1's tests
 stayed green without adaptation, and the ten `[newer]` rows with no require line are recorded as
 graph-only above. MyGo, `purego` and `x/sys` are already newest.
+
+## P2 — GitHub Actions to their newest majors
+
+Branch `goal/0023-p2`, stacked on the plan branch's tip `01c333c`. Plan:
+[`../plans/2026-11-26-1400-0023-current-dependencies.md`](../plans/2026-11-26-1400-0023-current-dependencies.md)
+(row P2); decision Q-0023-02. Every command below ran on this machine (Windows 11, 2026-11-26) and
+its output is quoted from the run.
+
+### What changed
+
+21 `uses:` lines in five workflows (`git diff --stat`: 5 files, 21 insertions, 21 deletions;
+`git diff --check` clean):
+
+| File | Sites | Old → new |
+|---|---|---|
+| `.github/workflows/cask.yml` | 77, 145 | `actions/checkout@v4` → `@v7` |
+| `.github/workflows/frontend-bench.yml` | 80, 86, 235 | `actions/checkout@v4` → `@v7` |
+| | 92, 239 | `actions/setup-go@v5` → `@v7` |
+| | 218, 278 | `actions/upload-artifact@v4` → `@v7` |
+| `.github/workflows/gate.yml` | 38 | `actions/checkout@v4` → `@v7` |
+| | 42 | `actions/setup-go@v5` → `@v7` |
+| | 52 | `actions/setup-node@v4` → `@v7` |
+| | 111, 126 | `actions/upload-artifact@v4` → `@v7` |
+| `.github/workflows/keychain.yml` | 72, 78 | `actions/checkout@v4` → `@v7` |
+| | 84 | `actions/setup-go@v5` → `@v7` |
+| | 215 | `actions/upload-artifact@v4` → `@v7` |
+| `.github/workflows/release.yml` | 26, 47 | `actions/checkout@v4` → `@v7` |
+| | 48 | `actions/download-artifact@v4` → `@v8` |
+
+`oven-sh/setup-bun@v2` is untouched (6 sites; read 2026-11-26:
+`gh api repos/oven-sh/setup-bun/releases/latest` = v2.2.0 (2026-03-14), and
+`action.yml?ref=v2` reads `using: "node24"` — already the newest major and runtime); the
+local reuse `uses: ./.github/workflows/gate.yml` (`release.yml:38`) is untouched. After the edit the
+whole inventory reads: `checkout` 10, `setup-go` 4, `setup-node` 1, `upload-artifact` 5,
+`download-artifact` 1, `setup-bun` 6, local reuse 1.
+
+### Proof 1 — no old major left, and the check fails when the change is removed
+
+Before the edit (base `01c333c`'s workflow files; `git diff 943de9d 01c333c -- .github/workflows`
+is empty, so they are the files `main`'s gate run 45784987207 — 12 deprecation lines, quoted under
+CI items — ran), the mechanical check read the 21 old lines:
+
+```
+$ grep -rnE "uses: +actions/[a-z-]+@v[4-6]" .github/workflows/ | wc -l
+21
+$ for f in cask frontend-bench gate keychain release; do n=$(git show 01c333c:.github/workflows/$f.yml | grep -cE "uses: +actions/[a-z-]+@v[4-6]"); echo "$f.yml $n"; done
+cask.yml 2
+frontend-bench.yml 7
+gate.yml 5
+keychain.yml 4
+release.yml 3
+```
+
+After the edit:
+
+```
+$ grep -rnE "uses: +actions/[a-z-]+@v[4-6]" .github/workflows/ | wc -l
+0
+$ grep -rnE "uses: +actions/[a-z-]+@v(7|8)" .github/workflows/ | wc -l
+21
+```
+
+Re-reading base `01c333c`'s own files restores exactly those 21 lines, so this grep is the
+fail-when-removed check: a tree that still pins an old major reads 21 again (it is also the
+reviewer's one-liner on the diff).
+
+The only old-major string left outside `.github/workflows/` in source files is fixture text handed
+directly to `nodePinProblems` (`harness/gates/self-test/package-smoke.cases.ts:1122`,
+`- uses: actions/setup-node@v4`); it is not a read of the real workflow — the real read is
+`NODE_PIN_SOURCES`' `/^\s*node-version:\s*"([^"]+)"/m` on `gate.yml`, whose line 54 is the
+unchanged `node-version: "26.13.1"`. Docs that quote the old majors are the goal contract's problem
+statement, the plan, and goal 0005's evidence row
+(`docs/evidence/0005-bring-your-own-text-tutor.md:396`) — all left untouched.
+
+### Proof 2 — the pinned tags run `node24`, and the newest release each serves
+
+Read 2026-11-26 with `gh api .../releases/latest --jq .tag_name` and
+`gh api -H "Accept: application/vnd.github.raw" repos/actions/<action>/contents/action.yml?ref=<major>`,
+quoted from the run:
+
+| Pinned | Newest release (date) | `action.yml` at the pinned major |
+|---|---|---|
+| `actions/checkout@v7` | v7.0.1 (2026-07-20) | `115:runs:` / `116:  using: node24` |
+| `actions/setup-go@v7` | v7.1.0 (2026-11-17) | `47:runs:` / `48:  using: 'node24'` |
+| `actions/setup-node@v7` | v7.1.0 (2026-10-08) | `43:runs:` / `44:  using: 'node24'` |
+| `actions/upload-artifact@v7` | v7.0.2 (2026-10-07) | `73:runs:` / `74:  using: 'node24'` |
+| `actions/download-artifact@v8` | v8.0.2 (2026-10-07) | `51:runs:` / `52:  using: 'node24'` |
+
+### Proof 3 — the breaking notes at the new majors, and why each is inert here
+
+Quoted from each action's README at the pinned tag (`gh api .../contents/README.md?ref=<major>`):
+
+- `checkout` v7: "checkout now refuses to check out fork pull request code by default when the
+  workflow is triggered by `pull_request_target` or `workflow_run`" (opt-in input
+  `allow-unsafe-pr-checkout`), and "This requires a minimum Actions Runner version of v2.327.1".
+  The repository's own triggers (`on:` blocks of all five files): `pull_request`, `push` on `main`
+  and on `v*` tags, `release: types: [published]`, `workflow_dispatch`, `workflow_call` — no
+  `pull_request_target` or `workflow_run` anywhere, so the fork block cannot fire.
+- `setup-go` v7 README, "Breaking changes in V6": "Upgraded Node.js runtime from node20 to node24 —
+  Make sure your runner is on version v2.327.1 or later"; `setup-node` v7 README, "Breaking changes
+  in V5": "Upgraded action from node20 to node24" with the same runner floor. Both workflows run on
+  GitHub-hosted runners, past that floor.
+- `upload-artifact` / `download-artifact` READMEs at the pinned tags carry no breaking-changes
+  section (grep for `breaking` finds only the security-support sentence); their one compatibility
+  caveat is GitHub Enterprise Server ("not currently supported on GHES") — not this setup.
+- `download-artifact` v8's `action.yml` inputs read back include the three release.yml passes:
+  `pattern: "A glob pattern matching the artifacts that should be downloaded."`,
+  `path: "Destination path. ... Defaults to $GITHUB_WORKSPACE"`,
+  `merge-multiple: "... the downloaded artifacts will be in the same directory specified by path."`;
+  and `digest-mismatch:` with `default: 'error'` ("will fail the action") — release.yml downloads
+  this repository's own gate artifacts, so the strict default is kept.
+
+### Proof 4 — the workflows still parse and the CI group matrix still reads
+
+`mise exec -- bun Q:/scratch/omp/g23/P2/check-workflows.ts` (parses each file with the same
+`Bun.YAML` engine `harness/lib/gate-groups.ts` uses, then runs the repo's own `workflowGroups` on
+the real `gate.yml`):
+
+```
+cask.yml: parsed; jobs = update, install
+frontend-bench.yml: parsed; jobs = bench, linux-smoke
+gate.yml: parsed; jobs = gate
+keychain.yml: parsed; jobs = experiment
+release.yml: parsed; jobs = version, gate, release
+gate.yml workflowGroups: ["core","desktop","package","self-test"]
+```
+
+`package-smoke.cases.ts`'s fixture and the self-test's `gateGroupProblem` both read the real
+`gate.yml`; the parse and the matrix above are the mechanical part of that read.
+
+### CI items (three-OS run is the authority; to be read from this branch's pull request run)
+
+- Gate run: all four groups (`core`, `desktop`, `package`, `self-test`) green on `ubuntu-latest`,
+  `macos-latest` and `windows-latest`; the `package` group still builds and installs under the new
+  actions.
+- `gh run view <PR run id> --log | grep -c "Node.js 20 is deprecated"` = 0. Measured baseline on
+  this machine: main's gate run 45784987207 (headSha `943de9d`, push, conclusion success) reads
+  `12`, every line the runner's own `##[warning]Node.js 20 is deprecated. The following actions
+  target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4,
+  actions/setup-go@v5, actions/setup-node@v4.` (log saved at
+  `Q:/scratch/omp/g23/P2/main-run-45784987207.log`, 837,528 bytes; 12 of 12 lines carry that
+  action list). With the new majors pinned, no job in this run can emit that warning for these
+  actions.
+- Bench (`frontend-bench.yml` is in its own `paths:` filter, so this change triggers it): the
+  `bench` matrix `[windows-latest, macos-26]` reports its seven shots byte-identical, and
+  `linux-smoke` on `ubuntu-latest` stays green.

@@ -35,11 +35,11 @@ jobs:
     steps:
       # Depth 2 keeps the clone shallow while leaving the pull request's base
       # commit reachable as HEAD^1, which the golden-contract gate diffs against.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         if: ${{ hashFiles('go.mod') != '' }}
         with:
           go-version-file: go.mod
@@ -49,7 +49,7 @@ jobs:
         with:
           bun-version: 1.4.5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "26.13.1"
 
@@ -108,7 +108,7 @@ jobs:
       # A failed job keeps its full gate output, readable without a re-run.
       - name: Upload gate output
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gate-output-${{ matrix.os }}-${{ matrix.group }}
           path: ${{ runner.temp }}/gate-output.log
@@ -123,7 +123,7 @@ jobs:
       # package fails this step rather than passing silently.
       - name: Upload package
         if: ${{ !cancelled() && matrix.group == 'package' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package-${{ matrix.os }}
           path: |
