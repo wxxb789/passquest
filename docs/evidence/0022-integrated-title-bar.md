@@ -126,47 +126,90 @@ marker 0/14`, which is the checks' green-on-today form the step required.
 - On this machine the OS-level captures of the real shown window (below) read dark glyphs on the
   light page and light glyphs on the dark page, with the restore glyph after a maximize — MyGo's
   caption window following the app's theme.
-- The active/inactive glyph palette and the Snap flyout cannot be produced on this machine (no input
-  desktop); they are owner actions, recorded in the manual pass.
+- The 2026-11-26 sitting below captured the hover backplate on the maximize button in both
+  appearances (2 856 and 2 852 differing pixels, the button's own box only) and the inactive
+  drawing's presence in the dark appearance; the Snap layouts flyout did **not** appear on hover in
+  either appearance, and a standard Win32 window's own maximize button, hovered as a control,
+  showed no flyout either (the hit-test codes and the control are in the manual pass below).
 
 ### The manual pass (Q-0022-05)
 
-Machine: Windows 11 `10.0.26300`, `SM_CXSCREEN` 2048x1152 (the session reports a 2560x1440 virtual
-screen), page `dpr 1.25` read by the launch. App: `bun run desktop:build` from this branch's tree,
-shown at a 1280x800 page area (`PASSQUEST_DESKTOP_CONTENT_SIZE`), a fresh data directory and the
-loopback stub registry per launch. Captures: `PrintWindow` (`PW_RENDERFULLCONTENT`) of the real
-window — the OS's own composition of the window, its frame area and MyGo's caption child — saved
-under `Q:/scratch/omp/g22/P5/manual/`, with each launch's script result beside them.
+Machine: Windows 11 `10.0.26300`, one 2560x1440 desktop at 125% — each launch of this sitting reads
+`SM_CXSCREEN` 2560x1440, screen 2560x1440 and work area `60,0`…`2560,1440`, and the P5 sitting's
+`2048x1152` is 2560 ÷ 1.25 (inference from the ratio: the same screen read DPI-virtualized) — page
+`dpr 1.25`. Second sitting, 2026-11-26, in the owner's RDP session, **whose pointer input works**; the
+2026-11-25 sitting's no-input evidence is kept at the end of this section. App: the published
+v0.15.2 package, already installed on this machine — the uninstall entry
+`com.github.wxxb789.passquest` reads `DisplayVersion 0.15.2`, the install directory is
+`%LOCALAPPDATA%\Programs\Pass Quest` with NSIS's own `Uninstall.exe` (its `QuietUninstallString`
+carries `/S`) and the package's `agent/`/`node/` trees, and the release asset
+`pass-quest-setup-0.15.2-amd64.exe` (sha256
+`ab7c7bde1256f64aaa537ca72e07dcb4e1e09d54069ba1667b8b99f6f8e7fa`, equal to the release's
+`SHA256SUMS.txt`) sits under `Q:/scratch/omp/g22/close/install/`; `docs/install.md` documents the
+installer as interactive only, so no silent install is claimed. Every launch below is that
+executable with `PASSQUEST_DESKTOP_CONTENT_SIZE=1280x800`, a fresh data directory, the loopback stub
+registry and the smoke hook's script; the window reads outer `501,215 1618x1010`, client
+`1600x1000` at scale 1.25 — the 1280x800 page area — and the page's own log reads `marker=true`,
+`room 40px///`, `theme=light` at boot.
 
-Driven, with what was seen (capture file names are inside that directory):
+**Real input this sitting.** `SendInput` returns 1 and the cursor lands on the intended point
+(`cap.ps1`; every drive JSON's `pointer` rows read `sendInput: 1`, `atTarget: true`), `SetCursorPos`
+and `GetCursorPos` agree, screen `BitBlt` captures hold real pixels (the light and dark pages read
+`241,244,248` and `9,15,30` at the same point), and `GetForegroundWindow` follows the driven
+clicks.
 
-| State | What was seen |
-|---|---|
-| Light, shown at 1280x800 (`m01-light-window.png`, 1618x1010 = the page area at dpr 1.25 plus the invisible borders) | the page's own title area at the top; three caption glyphs at the top-right, dark and legible on the light page; a single-square maximize glyph; the util group to their left with clear space (no control under the buttons) |
-| Page theme switched through the app's own control (the same `[data-act="theme"]` click the ux gate's `applyMode` uses) | the launch's result reads `theme dark`; the caption glyphs repaint light (`m10-dark-window.png`), legible on the dark page; the util group stays clear |
-| Maximized through `window.mygo.window.toggleMaximize()` | rect `501,215 1618x1010` → `51,-9 2518x1458`; `m11-maximized.png` shows the two-square restore glyph and the wider layout clear of the buttons; the script reads `isMaximized true` |
-| Full screen through `toggleFullScreen()` | rect `0,0 2560x1440`; the script reads `--mygo-titlebar-height 0px` and marker false; `m12-fullscreen.png` shows the page filling the screen with no caption glyphs |
-| Leaving full screen | rect back to `501,215 1618x1010`; the script reads `--mygo-titlebar-height 40px` and marker true again (`m13-restored.png`) |
+Captures are under `Q:/scratch/omp/g22/close/manual/` with one JSON per launch beside them
+(`run-light.json`, `run-light2.json`, `run-light3.json`, `run-tap.json`, `run-last.json`,
+`run-dark.json`, `run-dark2.json`, `run-dark3.json`, `run-dark4.json`, `run-control.json`,
+`run-c.json`; the page's own log in the matching `*.result.json`). Driven, with what was seen:
 
-Not drivable on this machine, with the evidence: the session delivers no pointer input —
-`SendInput` returns 0 with `GetLastError` 5 (`ERROR_ACCESS_DENIED`), `SetCursorPos` leaves
-`GetCursorPos` at `0,0`, a launch whose page listened for `mousemove`/`mousedown` recorded none
-(`listen.result.json` `"seen":[]`) although the same launch renders, `GetForegroundWindow` is 0 and
-`SetForegroundWindow` returns false, and desktop captures are black while the per-window
-`PrintWindow` renders. The double-click attempt left the window rect unchanged
-(`m03-dblclick-max.png` / `m04-dblclick-restore.png`), which is this fact, not a window defect.
-Re-checked in P5's fix round (2026-11-25): unchanged — `SendInput returned 0 (last error 5); cursor
-now 0,0` and `GetForegroundWindow` 0.
+| Item | Appearance | What was seen |
+|---|---|---|
+| Hover the maximize button for 1.5 s and 3 s — does Windows 11's Snap layouts flyout appear? | light | the pointer to screen `2024,241` (css `1211,20`; the maximize button — MyGo's three 58 px buttons fill css 1140.8–1280 of the strip): `topLevelBefore` = `topLevelAt1500ms` = `topLevelAt3000ms`, so no flyout window, menu or XAML island appears, and the at-rest/hover capture pair differs in the maximize button's own box only (2 856 px there; the full-window diff's whole extent is `1496,4`–`1548,48`, the button — `z01-light-at-rest-window.png` / `z02-light-hover-1500ms-window.png`); the light launch's screens `l02-hover-max-1500ms-light-screen.png`, `l03-hover-max-3000ms-light-screen.png` and `l04-hover-left-light-screen.png` show the button's backplate and nothing else |
+| Hover the maximize button (same) | dark | the same: no new top-level window at 1.5 s or 3 s (`run-last.json`, `run-dark4.json`), the pair differs in the same box (2 852 px in that region; the full-window diff adds 79 px on the theme control, the earlier click's hot state — `z03-dark-at-rest-window.png` / `z04-dark-hover-1500ms-window.png`), screens `z04-dark-hover-1500ms-screen.png`, `d03-hover-max-1500ms-dark-screen.png`, `d04-hover-max-3000ms-dark-screen.png`, `d05-hover-left-dark-screen.png` |
+| Double-click the drawn title area (css `400,29` → screen `1010,252`), then again | light | first: `IsZoomed` false → true, rect `501,215 1618x1010` → `51,-9 2518x1458` (`l05-dblclick-max.png`, `l05-dblclick-max-screen.png`); second: true → false, rect back to `501,215 1618x1010` (`l06-dblclick-restore.png`); the page's own log reads `max=false` → `true` → `false` with `innerWidth` 1280 → 2000 (`tap.result.json`) |
+| Drag the title area by (200,100) | light | rect `501,215` → `701,315`, delta exactly `{x:200, y:100}` (`l07-drag-after.png`) |
+| Resize from the top edge (css `400,3`, the strip the window answers `HTTOP` for) | light | rect `701,315 1618x1010` → `701,455 1618x870` (top +140, height −140) (`l08-resize-top-after.png`) |
+| Resize from the left side (rect.left+4) and from the right side (rect.right−5) | light | left: `701,455 1618x870` → `821,455 1498x870` (left +120, width −120, `l09-resize-left-after.png`); right: → `821,455 1378x870` (width −120, `l10-resize-right-after.png`) |
+| Minimize with the button, then restore from the taskbar | light | css `1165,20` → screen `1966,241`: `IsIconic` true (`l21-minimized-light-screen.png`); the taskbar's own element `Pass Quest - 1 running window` at `30,1024` clicked: `IsIconic` true → false, rect back to `501,215 1618x1010` (`l22-restored-window.png`, `l22-restored-screen.png`) |
+| Close with the button | light | css `1257,20` → screen `2081,241`: the process is gone 500 ms later, `IsWindow` false, `processGone: true` (`c01-before-close.png`, `c02-after-close-screen.png`) |
+| Right-click the drawn title area — does the system window menu appear? | light | the click lands (`foregroundAtMenu: true`), **no menu and no new top-level window appears**, and the window's own capture changes by 79 pixels, all inside the theme control's 36x36 box (its focus state) (`l31-rightclick-light-screen.png`, `l31-rightclick-light-window.png`; `l11-rightclick-light-*` with the window then at `821,455 1378x870`) |
+| Right-click the drawn title area (same) | dark | the same outcome: no menu, 79 pixels changed, all in the theme control's box (`z05-rightclick-dark-window.png`, `z05-rightclick-dark-screen.png`, `run-last.json`) |
+| The inactive look — click away so the app loses the foreground | light | this desktop has **no bare-desktop point**: the app is surrounded by the owner's Edge, Explorer and MarkTurbo windows and a scan of the work area outside the app's rect finds no `Progman`/`WorkerW`/`SysListView32` point (`probe.json` `freeDesktop: null`), so the click that takes the foreground went to the empty part of the 60 px taskbar strip (`30,60`, class `Shell_TrayWnd`); after it `GetForegroundWindow` is not the app (`appActive: false`) and the app's window is **pixel-identical** to its active look (0 differing pixels over the whole window rect in the screen pair `l31` → `l32-inactive-light-screen.png` and in the window pair `l30-fresh-window.png` → `l32-inactive-light-window.png`); a click back on the drawn title area activates it again (`l33-reactivated-light-window.png`, `foreground: true`) |
+| The inactive look (same) | dark | the same taskbar click deactivates it (`appActive: false`, `run-dark.json`); the inactive window capture `d07-inactive-dark-window.png` differs from the active dark one (`z03-dark-at-rest-window.png`) by 490 pixels along the title strip's top line and over the caption buttons — MyGo's `!active` glyph palette (`foreground.a` 0x72) reads in the dark appearance and not in the light one above |
+| The page's own appearance control, clicked for real (needed for the dark rows) | both | a real click at css `1060,29` → screen `1835,252` switched the page: `tap.result.json`'s log reads `theme=light` → `dark` +0.53 s and back +0.37 s after that launch's two clicks; the same click worked in `run-dark` (dark by +2.6 s), `run-dark4` (log `theme=dark` through its end) and `run-last` (page pixels `9,15,30` in `z03-dark-at-rest-window.png`). In one launch (`run-dark2`) the same single click produced no switch at all in the following 35 s (`dark2.result.json`: `theme=light` from start to end) — recorded as seen |
 
-Owner actions this machine cannot do (each a few seconds on a machine with input):
+**The Snap flyout (Q-0022-09's assumption) did not appear.** Beyond the hover rows above, the
+OS-level facts: the app's own `WM_NCHITTEST` answers, sent by the probe exactly as the system sends
+them (`run-light2.json` `hit-tests`), are `HTCLIENT 1` from the top-level window at the maximize,
+minimize and close buttons, `HTMINBUTTON 8` / `HTMAXBUTTON 9` / `HTCLOSE 20` from the `MyGoCaption`
+child each point falls in, `HTTOP 12` from the top-edge strip at css `400,3`, and `HTCLIENT 1` from
+the page at the drawn title area. A control hover over a standard Win32 window's own maximize
+button — a scratch `System.Windows.Forms` window at `760,380`, whose `WM_NCHITTEST` answers 9 from
+the window itself at `1582,392` — produced **no flyout** in 1.8 s and no new top-level window
+either (`run-control.json`, `c-control-before.png` / `c-control-hover.png`). On this machine the
+flyout appeared for neither window; the app's top-level `HTCLIENT` answer over its caption buttons
+is the difference a later check has to weigh.
 
-- **Windows:** hover the maximize button — does Windows 11's Snap layouts flyout appear (Q-0022-09's
-  assumption)? Double-click the title area (maximize, then restore); drag it (the window moves);
-  resize from the top edge (the top 8 DIP band) and from both sides; minimize,
-  maximize and close with the caption buttons and restore from the taskbar; right-click the title
-  area (does the system window menu appear? if not, that limit stands); click the desktop for the
-  inactive look in both appearances (the caption glyphs grey; the drawn strip does not react — the
-  plan's recorded limit).
+**The caption-button clicks were not all delivered.** The close button closed the app on its first
+click; the minimize button minimized the window in two launches of four (`run-light2.json`,
+`run-dark4.json`) and did nothing in two (`run-light3.json`; `run-tap.json` sent it twice —
+`iconic: false`, the rect and the captures unchanged); the maximize button maximized the window on
+its first click and did nothing on the following restore click (`run-tap.json`
+`maximize-button-2` `zoomed: true`). Each of those clicks reported `sendInput: 1` with the cursor on
+the button and the guard's `atTarget.ours true`, so delivery, not aiming, is the observation. The
+page's own controls answered every real click in this sitting (the theme control in four launches,
+the title-area clicks and the drag above), and the taskbar button answered twice.
+
+Two right-click attempts could not be driven, with the exact observation: in `run-dark.json` and
+`run-dark4.json` the guard refused because the point was covered by another application's window —
+`the window at the target is not the app's (root class 'NshWindow', pid 15988)`, the owner's
+MarkTurbo window — and those two launches' later items (inactive, reactivate) ran with the app
+already covered or minimized. The driven right-clicks are the light one and `run-last.json`'s dark
+one above.
+
+Not driven on this machine — owner actions where a machine of that OS is available:
+
 - **macOS (a Mac with macOS 26/27):** the traffic lights stay at the top left over the page and no
   header control sits under them (the owner decision of 2026-11-25, Q-0022-03); the lights in both
   app appearances and inactive; drag and double-click the drawn title area (zoom per the user's
@@ -177,6 +220,15 @@ Owner actions this machine cannot do (each a few seconds on a machine with input
   and close; resize from the top edge and from both sides.
   On a compositor that enforces server-side decorations (KWin, Sway, Hyprland): the disclosed
   Q-0022-04 limit — the compositor keeps its own bar and the page reserves nothing.
+
+The 2026-11-25 sitting, kept as history: `SendInput` returned 0 with `GetLastError` 5
+(`ERROR_ACCESS_DENIED`), `SetCursorPos` left `GetCursorPos` at `0,0`, a launch whose page listened
+for `mousemove`/`mousedown` recorded none (`listen.result.json` `"seen":[]`) although the same
+launch renders, `GetForegroundWindow` was 0 and desktop captures were black while the per-window
+`PrintWindow` renders; its captures are `PrintWindow` of the real window only
+(`Q:/scratch/omp/g22/P5/manual/`, the light/dark/maximized/full-screen/restored states) and every
+pointer item was an owner action. Its rects stand (`501,215 1618x1010` → `51,-9 2518x1458`
+maximized, full screen `0,0 2560x1440`).
 
 ## Done when 2 — window behaviour is intact
 
@@ -191,8 +243,11 @@ Owner actions this machine cannot do (each a few seconds on a machine with input
   on Linux the takeover is asserted with the maximize reading *recorded*: `titlebar: maximize reading
   recorded, not asserted (no window manager under CI's Xvfb, Q-0022-04): false -> true -> false`. The
   ux jobs' `probe` column above is the same derived probe point (Windows/Linux 8,20; macOS 69,16).
-- The manual-pass limits above are the honest remainder: the real pointer, the top-edge resize, the
-  Snap flyout and the inactive look are owner actions.
+- The manual pass above is the remainder: the real pointer drove the drag, the double-click and the
+  three resizes on 2026-11-26; the Snap flyout did not appear (with the standard-window control
+  showing none either), the inactive cue reads only in the dark appearance, the caption-button
+  clicks were delivered in four of eight attempts, and the owner list's macOS and Linux items stay
+  owner actions.
 
 ## Done when 3 — keyboard, assistive use and the window title
 
@@ -257,17 +312,21 @@ title-area module and the client entry — and stays flat in P3/P4.
 - CI's Ubuntu runner has no window manager: `gtk_window_maximize` is the WM's business, so the
   maximize reading is recorded, not asserted (Q-0022-04), and the reading itself was
   `false -> true -> false` in run 45599616722.
-- The right-click window menu: nothing in the app draws one; whether the shell shows one is checked
-  only by the owner action above (Q-0022-05, Q-0022-09).
+- The right-click window menu: nothing in the app draws one, and the driven right-clicks of
+  2026-11-26 (both appearances) showed no menu and no new top-level window appear; the app keeps
+  the foreground.
 - On macOS and Linux the title read-back returns MyGo's cached title, not `[NSWindow title]` or
   `gtk_window_get_title` ([`../harness.md`](../harness.md) row 24); the three-stop assertion is the
   evidence either way.
 - macOS 27 is not a runner; the macOS cells are macOS 26 (`macos26@20261117.0516.1`, Safari 26.x).
 - No CI job captures the frame or the native buttons at the OS level (`CapturePage` shows the page
   only); that half is the manual pass above (Q-0022-05).
-- The manual pass on this machine could not drive the real pointer (evidence above); the Snap
-  flyout, the real drag/double-click/top-edge resize, the minimize/restore and the inactive look
-  remain owner actions.
+- The manual pass on this machine could not drive the real pointer on 2026-11-25 (evidence above);
+  on 2026-11-26 it did — the drag, the double-click, the top-edge and both-side resizes, the
+  minimize/restore and the close are recorded there. The Snap layouts flyout did not appear on hover
+  in either appearance (a standard window's own maximize button showed none as a control either),
+  and two of four minimize clicks and two of three maximize-button clicks were not delivered — the
+  counts and the captures are in the manual-pass table.
 - The macOS and Linux manual items are owner actions where a machine of that OS is available; the
   record says which cells they cover.
 - The goal-level bench's allowlist entries live only in the throwaway dispatch branch
@@ -345,3 +404,12 @@ line.
 | `bun Q:/scratch/pq-harness-run/run.ts install-guide.ts installGuide` | `PASS 7 sections, 4 code blocks and 7 screenshot places agree; 6 links and 5 URLs agree; 6 quoted app strings match their sources; the release notes name the tap command and both guides; the cask template renders v0.15.0 with the release's SHA-256, and a synthetic pair, into Casks/pass-quest.rb; floor 26.0 from mygo.json` |
 | `bun Q:/scratch/pq-harness-run/run.ts typecheck.ts typecheck` | `PASS 0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
 | `bun Q:/scratch/pq-harness-run/run.ts frontend-baseline.ts frontendBaseline` | `PASS ES2024 target/lib pinned, README carries both, all 4 allowlist entries fire on their own side; 6 vendor token(s) in the source, 6 in the bundle` |
+
+## The 2026-11-26 sitting's local checks
+
+Run on this tree after the manual-pass update; each line is the gate's own pass line.
+
+| Check | Result |
+|---|---|
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts docs-links.ts docsLinks` | `STATUS pass 381 checked, 0 broken` |
+| `mise exec -- bun Q:/scratch/pq-harness-run/run.ts secrets.ts secrets` | `STATUS pass 815 files, 0 findings` |
