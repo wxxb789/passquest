@@ -1,6 +1,6 @@
 # 0021 — Model features work with an OpenAI Responses endpoint: evidence
 
-Contract: [`../goals/0021-responses-api.md`](../goals/0021-responses-api.md).
+Contract: [`../goals/archive/0021-responses-api.md`](../goals/archive/0021-responses-api.md).
 Plan: [`../plans/2026-11-25-0900-0021-responses-api.md`](../plans/2026-11-25-0900-0021-responses-api.md).
 Decisions: Q-0021-01…08 in [`../decisions/OPEN-QUESTIONS.md`](../decisions/OPEN-QUESTIONS.md).
 
@@ -589,3 +589,11 @@ and is a coordinator action (Q-0021-06). P3's pull request was merged at 14:52Z 
 45636038934 was still in flight; that run ended `completed / failure` (the windows-latest self-test
 above), its queued macOS self-test job was cancelled, and its macOS core, desktop, package and
 ubuntu self-test jobs were read from the run's per-job logs. Item 5 is pending P5's feed check.
+
+## Close (2026-11-26)
+
+The owner moved item 5 (the Pi packages) out of this goal on 2026-11-26: it is item 2 of goal
+[0023](../goals/0023-current-dependencies.md), which upgrades every dependency. The corporate feed still
+served `@earendil-works/pi-ai` up to 1.5.2 that day (`npm view @earendil-works/pi-ai versions`). Items
+1–4 and 6 are merged (P1 #58, P2 #62, P3 #65, P4 #70), and the Responses support they add shipped in
+v0.15.2 (tag commit `e0a3cd4`). The goal closes on them and moves to the archive.

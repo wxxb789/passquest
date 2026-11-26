@@ -1,6 +1,6 @@
 # 0021 — Model features work with an OpenAI Responses endpoint, on current Pi packages
 
-**State:** Ready (defined 2026-11-22)
+**State:** Done (defined 2026-11-22; closed 2026-11-26 with item 5 moved to 0023)
 **Prerequisite:** None. It can run before or after 0020. Do not run it at the same time as 0020 on one tree; both change the package's dependencies.
 
 ## Larger purpose
@@ -24,6 +24,7 @@ Each item below is shown during the run with the evidence named. All of it must 
 3. **Format differences are handled, not hidden.** The run establishes, from the official API reference, how the Responses format differs in what the app relies on: the token limit field, temperature, the system or instruction text, response text extraction, usage counts and error bodies. Each difference is handled in code. Any behaviour that cannot match chat completions is disclosed in `docs/agent.md` and in a Q-0021-NN entry. Evidence: a table in the evidence record from each difference to the code and the test that covers it.
 4. **Chat completions are unchanged.** For a chat-completions endpoint, the requests the hosts send are the same as before this goal, apart from changes the Pi bump makes, which are listed. Evidence: the existing provider, tutor and agent smokes pass unchanged, and a recorded request-body comparison before and after.
 5. **The Pi packages are current.** All four direct `@earendil-works` dependencies move together to the newest version the corporate feed serves, at least 1.6.0, with the lockfile resolved from that feed. The run checks what 1.6.0's system-role change does to the durable host's requests and shows the result. Evidence: the lockfile diff, the feed's version listing, and the agent and package smokes on all three OSes.
+   **Moved (owner, 2026-11-26):** this item left 0021 and is item 2 of [0023](../0023-current-dependencies.md), which upgrades every dependency; 0021 closed on items 1–4 and 6.
 6. **The learner is told the truth.** `docs/agent.md`, `docs/install.md`, `docs/install.zh-CN.md` and the settings text say that both formats work and how the app picks one. Evidence: `docs-links`, `install-guide`, and the owner's review.
 
 Constraints:
