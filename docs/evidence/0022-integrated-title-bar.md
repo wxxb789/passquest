@@ -1,6 +1,6 @@
 # 0022 — The window's title bar belongs to the Pass Quest interface: evidence
 
-Contract: [`../goals/0022-integrated-title-bar.md`](../goals/0022-integrated-title-bar.md). Plan:
+Contract: [`../goals/archive/0022-integrated-title-bar.md`](../goals/archive/0022-integrated-title-bar.md). Plan:
 [`../plans/2026-11-24-1800-0022-integrated-title-bar.md`](../plans/2026-11-24-1800-0022-integrated-title-bar.md).
 Decisions: Q-0022-01…09 in [`../decisions/OPEN-QUESTIONS.md`](../decisions/OPEN-QUESTIONS.md).
 
@@ -201,6 +201,12 @@ the button and the guard's `atTarget.ours true`, so delivery, not aiming, is the
 page's own controls answered every real click in this sitting (the theme control in four launches,
 the title-area clicks and the drag above), and the taskbar button answered twice.
 
+**The owner's hand check (2026-11-26).** On this machine's own console (not the RDP session the
+probe ran in), the owner hovered the maximize button of the installed v0.15.2 and the Snap layouts
+flyout appeared, and the minimize, maximize and close buttons each worked when clicked by hand. The
+two observations above are therefore of the remote session and the synthetic input, not of the app:
+a standard window showed no flyout there either, and every hand click landed.
+
 Two right-click attempts could not be driven, with the exact observation: in `run-dark.json` and
 `run-dark4.json` the guard refused because the point was covered by another application's window —
 `the window at the target is not the app's (root class 'NshWindow', pid 15988)`, the owner's
@@ -209,6 +215,9 @@ already covered or minimized. The driven right-clicks are the light one and `run
 one above.
 
 Not driven on this machine — owner actions where a machine of that OS is available:
+
+_Deferred by the owner on 2026-11-26 (Q-0022-05): the goal closes without them; they stay here for
+when a Mac or Linux machine is at hand._
 
 - **macOS (a Mac with macOS 26/27):** the traffic lights stay at the top left over the page and no
   header control sits under them (the owner decision of 2026-11-25, Q-0022-03); the lights in both
@@ -244,10 +253,11 @@ maximized, full screen `0,0 2560x1440`).
   recorded, not asserted (no window manager under CI's Xvfb, Q-0022-04): false -> true -> false`. The
   ux jobs' `probe` column above is the same derived probe point (Windows/Linux 8,20; macOS 69,16).
 - The manual pass above is the remainder: the real pointer drove the drag, the double-click and the
-  three resizes on 2026-11-26; the Snap flyout did not appear (with the standard-window control
-  showing none either), the inactive cue reads only in the dark appearance, the caption-button
-  clicks were delivered in four of eight attempts, and the owner list's macOS and Linux items stay
-  owner actions.
+  three resizes on 2026-11-26; the Snap flyout did not appear in that RDP session (a standard window
+  showed none either) and the caption-button clicks were delivered in four of eight synthetic
+  attempts; the owner's hand check on the console the same day saw the flyout and every button
+  click work. The inactive cue reads only in the dark appearance, and the owner list's macOS and
+  Linux items stay owner actions.
 
 ## Done when 3 — keyboard, assistive use and the window title
 
@@ -326,7 +336,9 @@ title-area module and the client entry — and stays flat in P3/P4.
   minimize/restore and the close are recorded there. The Snap layouts flyout did not appear on hover
   in either appearance (a standard window's own maximize button showed none as a control either),
   and two of four minimize clicks and two of three maximize-button clicks were not delivered — the
-  counts and the captures are in the manual-pass table.
+  counts and the captures are in the manual-pass table. The owner's hand check on the console
+  (2026-11-26) saw the Snap flyout and every caption button work, so both readings belong to the
+  remote session and the synthetic input.
 - The macOS and Linux manual items are owner actions where a machine of that OS is available; the
   record says which cells they cover.
 - The goal-level bench's allowlist entries live only in the throwaway dispatch branch
