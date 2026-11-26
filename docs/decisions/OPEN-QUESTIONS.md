@@ -3207,6 +3207,10 @@ Entry format:
   package file changes, the feed's version listing and the 404 recorded as the blocked evidence,
   the owner action named (ask the feed owner to publish 1.6.0), and the check left re-runnable.
   Reversal: none needed — the check is a command.
+- Resolution: (owner, 2026-11-26) defer the bump. Upstream published 1.6.1 on 2026-11-25 while
+  the feed still served 1.5.2 on 2026-11-26; the owner declined vendoring a hand-built 1.6.x
+  (option C) and deferred P5, so goal 0021 stays open with items 1-4 and 6 merged and item 5
+  waiting for the feed. Other work proceeds.
 - Revisit when: the feed serves >= 1.6.0 for all six entries, or the feed owner reports it will
   not.
 
