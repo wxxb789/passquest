@@ -11,6 +11,8 @@ export const CONTENT_WIDTH = Number(contentWidth);
 export const CONTENT_HEIGHT = Number(contentHeight);
 export const DEFAULT_SAMPLES = 9;
 export const DEFAULT_WARMUP = 2;
+/** One measurement plus two re-measures, the most a job re-measures inside itself: the archived comparison records' own `seconds` read 378..533 for the 69-launch job (17 jobs, Windows and macOS), one extra attempt is 40 of those launches, and the workflow's 60-minute timeout holds three attempts. */
+export const MAX_MEASURE_ATTEMPTS = 3;
 /** A shorter frame sample than this means the sampler never ran. */
 export const MIN_FRAME_DURATIONS = 20;
 export const RAF_TICKS = 30;
@@ -88,6 +90,12 @@ The same-build control pair is measured on the B tree after the comparison: two 
 --samples launches of one build, the noise floor every verdict is read against (${VERDICT_RULE}).
 When A and B are the same commit the A/B columns are themselves two interleaved sets of one build,
 and the record says so instead of launching a third pair.
+A measurement attempt whose same-build pair reads worse is discarded, not failed: the tool measures
+again inside the same job — fresh A, B and control launches for every metric under the same protocol,
+up to ${MAX_MEASURE_ATTEMPTS - 1} extra attempts, the same rules on every OS — and the verdict is the
+first attempt whose pair reads ok. A readable attempt's WORSE verdict is final and is never
+re-measured away; when every attempt's pair reads worse the run fails as before. Every attempt's
+numbers and why a discarded one was discarded are in the log and the record's attempts block.
 Exit codes: 0 every build, launch, guard and verdict passed, 1 a failure (the record lists it), 2
 usage.`;
 
@@ -224,12 +232,13 @@ export interface LaunchPlan {
   total: number;
 }
 
-/** What a comparison run launches per phase, so the record's total is checkable against its parts. */
-export function launchPlan(options: { samples: number; warmup: number; sameBuild: boolean }): LaunchPlan {
+/** What a comparison run launches per phase, so the record's total is checkable against its parts. `attempts` multiplies the measurement protocol only: the shots are captured once, from one attempt. */
+export function launchPlan(options: { samples: number; warmup: number; sameBuild: boolean; attempts?: number }): LaunchPlan {
+  const attempts = options.attempts ?? 1;
   const prepare = 1;
-  const warmup = options.warmup * 2;
-  const measured = options.samples * 2;
-  const control = options.sameBuild ? 0 : options.samples * 2;
+  const warmup = options.warmup * 2 * attempts;
+  const measured = options.samples * 2 * attempts;
+  const control = options.sameBuild ? 0 : options.samples * 2 * attempts;
   const shots = SHOT_STATES.length * 2;
   const controlShots = options.sameBuild ? 0 : SHOT_STATES.length * 2;
   return { prepare, warmup, measured, control, shots, controlShots, total: prepare + warmup + measured + control + shots + controlShots };
@@ -367,6 +376,14 @@ export interface MetricSamples {
   [name: string]: number[];
 }
 
+/** The four sample sets one measurement attempt reads: A's, B's and the two sides of the same-build pair. */
+export interface MeasureSamples {
+  a: MetricSamples;
+  b: MetricSamples;
+  controlA: MetricSamples;
+  controlB: MetricSamples;
+}
+
 export interface MetricRowResult {
   name: string;
   a: Spread | null;
@@ -377,12 +394,7 @@ export interface MetricRowResult {
   controlVerdict: Verdict;
 }
 
-export function metricRows(samples: {
-  a: MetricSamples;
-  b: MetricSamples;
-  controlA: MetricSamples;
-  controlB: MetricSamples;
-}): MetricRowResult[] {
+export function metricRows(samples: MeasureSamples): MetricRowResult[] {
   const names = new Set<string>();
   for (const side of [samples.a, samples.b, samples.controlA, samples.controlB]) {
     for (const name of Object.keys(side)) names.add(name);
@@ -408,6 +420,57 @@ export function metricRows(samples: {
         controlVerdict: worseBeyondNoise(controlA, controlB),
       };
     });
+}
+
+/** One measurement attempt: its metric rows, and why its same-build pair is not readable (empty when it is). */
+export interface MeasureAttempt {
+  rows: MetricRowResult[];
+  unreadable: string[];
+}
+
+const sameBuildProblem = (name: string, verdict: Verdict): string =>
+  `the same-build pair of ${name} reports a worse head (${floorText(verdict)}; ${verdict.detail}): one build measured twice moved beyond the noise, so this run's numbers are not readable`;
+const controlProblem = (name: string, verdict: Verdict): string =>
+  `the same-build control pair of ${name} reports a worse head (${floorText(verdict)}; ${verdict.detail}): this run's comparison is not readable`;
+const beyondNoiseProblem = (name: string, verdict: Verdict): string => `metric ${name} is worse beyond noise: ${floorText(verdict)}; ${verdict.detail}`;
+
+/** Today's failure text for rows whose same-build pair reads worse: the control pair of a two-tree run, the A/B pair itself when one build runs twice. */
+export function sameBuildPairProblems(sameBuild: boolean, rows: readonly MetricRowResult[]): string[] {
+  return rows.flatMap((row) => {
+    if (sameBuild) return row.verdict.worse ? [sameBuildProblem(row.name, row.verdict)] : [];
+    return row.controlVerdict.worse ? [controlProblem(row.name, row.controlVerdict)] : [];
+  });
+}
+
+/** Every verdict failure of one attempt, in the base tool's own order: each row's A/B text before its control-pair text; empty when one build runs twice, whose reading is the same-build pair's own. */
+export function metricProblems(sameBuild: boolean, rows: readonly MetricRowResult[]): string[] {
+  return rows.flatMap((row) => [
+    ...(row.verdict.worse ? [sameBuild ? sameBuildProblem(row.name, row.verdict) : beyondNoiseProblem(row.name, row.verdict)] : []),
+    ...(!sameBuild && row.controlVerdict.worse ? [controlProblem(row.name, row.controlVerdict)] : []),
+  ]);
+}
+
+export function measureAttempt(sameBuild: boolean, samples: MeasureSamples): MeasureAttempt {
+  const rows = metricRows(samples);
+  return { rows, unreadable: sameBuildPairProblems(sameBuild, rows) };
+}
+
+/** The record's attempts block: every attempt the job made, discarded ones included, each with its rows and why it is not readable. */
+export function attemptsRecord(attempts: readonly MeasureAttempt[]): Array<{ attempt: number; readable: boolean; why: string[]; metrics: MetricRowResult[] }> {
+  return attempts.map((attempt, index) => ({ attempt: index + 1, readable: attempt.unreadable.length === 0, why: attempt.unreadable, metrics: attempt.rows }));
+}
+
+export type MeasureAction =
+  | { action: "remeasure"; attempt: number; why: string[] }
+  | { action: "verdict"; attempt: number; failures: string[] };
+
+/** Re-measure while the latest attempt's same-build pair is unreadable and attempts remain; otherwise the verdict from the latest attempt, with the failures the base tool recorded and in its own order (Q-0019-02, owner decision 2026-11-26). */
+export function measureAction(sameBuild: boolean, attempts: readonly MeasureAttempt[], max: number): MeasureAction {
+  const last = attempts.length - 1;
+  const attempt = attempts[last];
+  if (attempt === undefined) throw new Error("measureAction needs at least one attempt");
+  if (attempt.unreadable.length === 0 || attempts.length >= max) return { action: "verdict", attempt: last, failures: metricProblems(sameBuild, attempt.rows) };
+  return { action: "remeasure", attempt: last, why: attempt.unreadable };
 }
 
 export interface GuardReading {
@@ -1108,6 +1171,13 @@ export function selfCheckCases(): SelfCheckCase[] {
     sha256,
     geometry: { cssWidth: CONTENT_WIDTH, cssHeight: CONTENT_HEIGHT, dpr, pxWidth: CONTENT_WIDTH * dpr, pxHeight: CONTENT_HEIGHT * dpr },
   });
+  const attemptSamples = (a: number[], b: number[], controlA: number[], controlB: number[]): MeasureSamples => ({
+    a: { m: a },
+    b: { m: b },
+    controlA: { m: controlA },
+    controlB: { m: controlB },
+  });
+  const flat = (value: number): number[] => Array.from({ length: 9 }, () => value);
   return [
     {
       name: "args: compare defaults",
@@ -1298,6 +1368,127 @@ export function selfCheckCases(): SelfCheckCase[] {
             row.controlVerdict.floor === 5 &&
             row.controlVerdict.floorSource === "5ms",
           `rows = ${JSON.stringify(rows)}`,
+        );
+      },
+    },
+    {
+      name: "measure: an unreadable pair then a readable attempt passes on attempt 2",
+      check: () => {
+        const first = measureAttempt(false, attemptSamples(flat(100), flat(100), flat(100), flat(140)));
+        const second = measureAttempt(false, attemptSamples(flat(100), flat(100), flat(100), flat(100)));
+        const one = measureAction(false, [first], MAX_MEASURE_ATTEMPTS);
+        const two = measureAction(false, [first, second], MAX_MEASURE_ATTEMPTS);
+        return expect(
+          first.unreadable.length === 1 &&
+            first.unreadable[0]?.includes("control pair of m") === true &&
+            one.action === "remeasure" &&
+            two.action === "verdict" &&
+            two.attempt === 1 &&
+            two.failures.length === 0,
+          `first ${JSON.stringify(first.unreadable)}, one ${JSON.stringify(one)}, two ${JSON.stringify(two)}`,
+        );
+      },
+    },
+    {
+      name: "measure must fail: an unreadable pair then a readable attempt whose A/B verdict is worse",
+      check: () => {
+        const first = measureAttempt(false, attemptSamples(flat(100), flat(100), flat(100), flat(140)));
+        const second = measureAttempt(false, attemptSamples(flat(100), flat(140), flat(100), flat(100)));
+        const two = measureAction(false, [first, second], MAX_MEASURE_ATTEMPTS);
+        return expect(
+          two.action === "verdict" && two.attempt === 1 && two.failures.length === 1 && (two.failures[0] ?? "").includes("metric m is worse beyond noise"),
+          `two ${JSON.stringify(two)}`,
+        );
+      },
+    },
+    {
+      name: "measure must fail: every attempt's pair unreadable keeps today's not-readable failure",
+      check: () => {
+        const unreadable = () => measureAttempt(false, attemptSamples(flat(100), flat(100), flat(100), flat(140)));
+        const two = measureAction(false, [unreadable(), unreadable()], MAX_MEASURE_ATTEMPTS);
+        const three = measureAction(false, [unreadable(), unreadable(), unreadable()], MAX_MEASURE_ATTEMPTS);
+        return expect(
+          two.action === "remeasure" &&
+            three.action === "verdict" &&
+            three.attempt === 2 &&
+            three.failures.length === 1 &&
+            (three.failures[0] ?? "").includes("the same-build control pair of m reports a worse head") &&
+            (three.failures[0] ?? "").includes("this run's comparison is not readable"),
+          `two ${JSON.stringify(two)}, three ${JSON.stringify(three)}`,
+        );
+      },
+    },
+    {
+      name: "measure must fail: the attempt bound stops the re-measures",
+      check: () => {
+        const unreadable = () => measureAttempt(false, attemptSamples(flat(100), flat(100), flat(100), flat(140)));
+        const bounded = measureAction(false, [unreadable(), unreadable()], MAX_MEASURE_ATTEMPTS - 1);
+        return expect(bounded.action === "verdict" && bounded.attempt === 1 && bounded.failures.length === 1, `bounded ${JSON.stringify(bounded)}`);
+      },
+    },
+    {
+      name: "measure must fail: a readable worse first attempt is never re-measured away",
+      check: () => {
+        const worse = measureAttempt(false, attemptSamples(flat(100), flat(140), flat(100), flat(100)));
+        const action = measureAction(false, [worse], MAX_MEASURE_ATTEMPTS);
+        return expect(
+          action.action === "verdict" && action.attempt === 0 && action.failures.length === 1 && (action.failures[0] ?? "").includes("metric m is worse beyond noise"),
+          `action ${JSON.stringify(action)}`,
+        );
+      },
+    },
+    {
+      name: "measure: a same-commit run's own pair re-measures and keeps its own failure text",
+      check: () => {
+        const unreadable = () => measureAttempt(true, attemptSamples(flat(100), flat(140), [], []));
+        const ok = measureAttempt(true, attemptSamples(flat(100), flat(100), [], []));
+        const one = measureAction(true, [unreadable()], MAX_MEASURE_ATTEMPTS);
+        const two = measureAction(true, [unreadable(), ok], MAX_MEASURE_ATTEMPTS);
+        const none = measureAction(true, [unreadable(), unreadable(), unreadable()], MAX_MEASURE_ATTEMPTS);
+        return expect(
+          one.action === "remeasure" &&
+            two.action === "verdict" &&
+            two.attempt === 1 &&
+            two.failures.length === 0 &&
+            none.action === "verdict" &&
+            none.failures.length === 1 &&
+            (none.failures[0] ?? "").includes("the same-build pair of m reports a worse head") &&
+            (none.failures[0] ?? "").includes("this run's numbers are not readable"),
+          `one ${JSON.stringify(one)}, two ${JSON.stringify(two)}, none ${JSON.stringify(none)}`,
+        );
+      },
+    },
+    {
+      name: "measure: the record's attempts block keeps every attempt, discarded ones included",
+      check: () => {
+        const unreadable = measureAttempt(false, attemptSamples(flat(100), flat(100), flat(100), flat(140)));
+        const ok = measureAttempt(false, attemptSamples(flat(100), flat(100), flat(100), flat(100)));
+        const rows = attemptsRecord([unreadable, ok]);
+        return expect(
+          rows.length === 2 &&
+            rows[0]?.attempt === 1 &&
+            rows[0]?.readable === false &&
+            rows[0]?.why.length === 1 &&
+            rows[0].metrics.length === 1 &&
+            rows[1]?.attempt === 2 &&
+            rows[1]?.readable === true &&
+            rows[1]?.why.length === 0,
+          `rows = ${JSON.stringify(rows)}`,
+        );
+      },
+    },
+    {
+      name: "measure must fail: the exhausted attempt's failures keep the base tool's order, each row's A/B text before its control pair",
+      check: () => {
+        const attempt = measureAttempt(false, attemptSamples(flat(100), flat(140), flat(100), flat(140)));
+        const action = measureAction(false, [attempt], 1);
+        return expect(
+          action.action === "verdict" &&
+            action.attempt === 0 &&
+            action.failures.length === 2 &&
+            (action.failures[0] ?? "").includes("metric m is worse beyond noise") &&
+            (action.failures[1] ?? "").includes("the same-build control pair of m reports a worse head"),
+          `action ${JSON.stringify(action)}`,
         );
       },
     },
@@ -1673,6 +1864,26 @@ export function selfCheckCases(): SelfCheckCase[] {
         return expect(
           separate.total === 43 && together.total === 23 && smoke.total === 8 && sums.every((sum, index) => sum === [separate, together, smoke][index]?.total),
           `separate ${JSON.stringify(separate)}, together ${JSON.stringify(together)}, smoke ${JSON.stringify(smoke)}`,
+        );
+      },
+    },
+    {
+      name: "launches: attempts multiply the measurement phases and never the shots",
+      check: () => {
+        const plan = launchPlan({ samples: 3, warmup: 1, sameBuild: false, attempts: 3 });
+        const together = launchPlan({ samples: 3, warmup: 1, sameBuild: true, attempts: 3 });
+        const one = launchPlan({ samples: 3, warmup: 1, sameBuild: false });
+        return expect(
+          plan.prepare === 1 &&
+            plan.warmup === 6 &&
+            plan.measured === 18 &&
+            plan.control === 18 &&
+            plan.shots === 14 &&
+            plan.controlShots === 14 &&
+            plan.total === 71 &&
+            together.total === 39 &&
+            one.total === 43,
+          `plan ${JSON.stringify(plan)}, together ${JSON.stringify(together)}, one ${JSON.stringify(one)}`,
         );
       },
     },

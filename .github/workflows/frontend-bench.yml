@@ -39,8 +39,11 @@ jobs:
   bench:
     name: frontend bench (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Two builds, one seeded template and 69 launches -- the hidden prepare launch (no frame guard) plus
-    # 68 shown -- fit well inside an hour; the ceiling is there for a hung webview, not for the work.
+    # One seeded template and the hidden prepare launch: a job makes 69 launches (68 shown), and a job
+    # whose same-build pair reads worse makes up to 149 (the first measurement attempt plus two
+    # re-measures at 40 launches each, the shots captured once) -- the archived comparison records'
+    # own `seconds` read 378..533 for the 69-launch job (17 jobs, Windows and macOS), so three
+    # attempts stay well inside the hour; the ceiling is there for a hung webview, not for the work.
     timeout-minutes: 60
     strategy:
       fail-fast: false
