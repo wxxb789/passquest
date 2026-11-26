@@ -510,6 +510,9 @@ Entry format:
   is staged as a self-contained bundle whose seven inlined packages travel with their notices, and
   the other three hosts are byte-identical copies (Q-0016-01, Q-0016-05). The store location and the
   reversal are unchanged.
+- Revisited (2026-11-26): goal 0023 re-checked the feed — the four direct `@earendil-works` pins'
+  newest served release is still 1.5.2, so no pin moved and the 2026-11-18 *Updated* line still
+  reads; the store location and the reversal are unchanged.
 
 ### Q-0006-03 — How is one run paused, resumed and cancelled across processes?
 - Status: decided(default taken)
@@ -3258,6 +3261,10 @@ Entry format:
   upgrades every dependency; 0021 closes on items 1-4 and 6.
 - Revisit when: the feed serves >= 1.6.0 for all six entries, or the feed owner reports it will
   not.
+- Revisited (2026-11-26): goal 0023 P4 re-ran the six-entry check and P5 re-read it; the feed still
+  serves 1.5.2 for all six and `@earendil-works/pi-ai@1.6.0` still answers E404 (the six listing
+  lines and the 404 are in goal 0023's evidence record). Item 2 of goal 0023 stays open with the
+  re-run recipe, and this entry's revisit trigger did not fire.
 
 ### Q-0021-08 — What do the fakes prove, and what only the owner can?
 - Status: decided(default taken)
@@ -3280,4 +3287,128 @@ Entry format:
   and non-JSON; the owner's real-endpoint probe has not run, so `store`/`instructions` acceptance by
   a real provider and by a gateway remains the untested limit the record states.
 - Revisit when: the owner's probe runs, or a fake's shape stops matching the reference.
+
+### Q-0023-01 — How a Go module bump lands, and when one is held back?
+- Status: decided(default taken)
+- Context: `go.mod` pins the pure-Go SQLite driver, MyGo, `golang.org/x/*` and their indirect
+  modules; the configured proxy (`GOPROXY=https://proxy.golang.org,direct`) serves newer releases
+  for some of them, and a driver bump can change behaviour the store's pinned facts depend on (the
+  5000 ms busy timeout, `_txlock=immediate`, one connection per handle, `IsBusy`'s error-code
+  mapping).
+- Options considered: (A) each module-moving step re-reads the proxy at implementation time and
+  takes every newer release its `require` lines name with `go get -u all` + `go mod tidy`;
+  (B) hand-edit the `require` lines the listing marks; (C) hold every bump until one final step.
+- Default taken: (A). `go get -u all` is the recipe because the bare `./...` pattern misses a
+  requirement the main module's packages do not import (on the scout tree `klauspost/compress`).
+  A `[newer]` row no `require` line names is **graph-only**: the module graph selects its version
+  and `go get -u all` leaves it as probed, so it is recorded per Q-0023-05, never moved by hand.
+  A module whose new release cannot keep the store's pinned facts green is held at its current
+  version with the failing check named in this entry's outcome line — adapt-with-tests first, the
+  hold-back is the disclosed fallback. Reversal: revert `go.mod`/`go.sum` to the previous versions.
+- Outcome (2026-11-26, P1): held on this tree. `go get -u all` + `go mod tidy` moved exactly the
+  three `require`s with a newer served release — `modernc.org/sqlite` 1.62.0 → 1.63.0 (direct),
+  `modernc.org/libc` 1.82.0 → 1.82.13 and `github.com/klauspost/compress` 1.20.4 → 1.20.5 — while
+  `modernc.org/cc/v4` (4.34.1 → 4.35.0) and `modernc.org/ccgo/v4` (4.39.2 → 4.39.3) followed
+  `libc`'s own requirement. The store's pinned facts and goal 0020 P1's tests stayed green without
+  adaptation, so nothing was held back; MyGo, `purego` and `x/sys` were already newest, and the ten
+  `[newer]` rows without a `require` line were recorded as graph-only (P1's evidence section).
+  Re-read (2026-11-26, P5): the proxy's listing carries one more `require` row with a newer
+  release — `modernc.org/memory` v1.13.0 → v1.13.1 (the version is dated 2026-11-15T20:32:12Z
+  upstream) — not taken on the docs-only record step; a scratch copy of the tree ran the recipe and
+  moved exactly that row (`go.mod` line 28 and two `go.sum` lines), leaving the ten graph-only rows.
+  It stays open for the goal's next module step (the goal-0023 record's open rows).
+- Revisit when: a bump changes a behaviour the app relies on, or the module graph changes shape.
+
+### Q-0023-02 — How are the actions pinned?
+- Status: decided(default taken)
+- Context: every recent run warned that `actions/checkout@v4`, `actions/setup-go@v5`,
+  `actions/setup-node@v4`, `actions/upload-artifact@v4` and `actions/download-artifact@v4` target
+  the deprecated Node.js 20 and are forced onto Node 24.
+- Options considered: (A) the newest **major** tag of every action (the existing style: `@v7`,
+  `@v8`), so a patch is picked up without a repo change; (B) exact patch pins; (C) leave them and
+  accept the warning.
+- Default taken: (A): `@v7` for `checkout`, `setup-go`, `setup-node` and `upload-artifact`, `@v8`
+  for `download-artifact`; `@v2` for `setup-bun` stays and already resolves to the newest release.
+  Proven by the three-OS gate run itself: every job green and zero `Node.js 20 is deprecated` lines
+  in its logs. Reversal: restore the old major tags.
+- Outcome (2026-11-26, P2): done. 21 `uses:` lines in five workflows moved (`checkout` v4 → v7,
+  10 sites; `setup-go` v5 → v7, 4; `setup-node` v4 → v7, 1; `upload-artifact` v4 → v7, 5;
+  `download-artifact` v4 → v8, 1), each pinned tag's `action.yml` reads `using: node24`, and
+  `grep -rnE "uses: +actions/[a-z-]+@v[4-6]" .github/workflows` reads 0 where the pre-step `main`
+  read 21. `gh run view <id> --log | grep -c "Node.js 20 is deprecated"` reads 0 for the step's run
+  45814888392 and for `main`'s run 45825120752, where the pre-step run 45784987207 reads 12. The
+  new majors' breaking notes are inert here: no `pull_request_target`/`workflow_run` trigger, a
+  runner floor of v2.327.1 that GitHub-hosted runners pass, and `download-artifact` v8's
+  digest-mismatch default `error` kept (`release.yml` downloads this repository's own artifacts,
+  and its `pattern`/`path`/`merge-multiple` inputs were confirmed against the v8 `action.yml`).
+- Revisit when: an action major changes behaviour a workflow relies on, or `release.yml` next runs.
+
+### Q-0023-03 — Do the Pi packages move now, and what happens while the feed lags?
+- Status: decided(default taken)
+- Context: upstream released 1.6.0 on 2026-11-20 and 1.6.1 on 2026-11-25 (an `undici` update for six
+  security advisories, and a system-role change for OpenAI-compatible non-OpenAI providers), while
+  the corporate feed's newest for the entries `bun.lock` holds was 1.5.2.
+- Options considered: (A) check all six `@earendil-works` entries before any file change and move
+  the four direct pins together only if every one serves >= 1.6.0, otherwise report the item blocked
+  and change no package file; (B) ship whatever set the feed serves; (C) hand-build or vendor 1.6.x
+  (declined by the owner, 2026-11-26).
+- Default taken: (A). While the feed serves < 1.6.0 for any entry, the step's diff is the blocked
+  section of [`../evidence/0023-current-dependencies.md`](../evidence/0023-current-dependencies.md)
+  — the six listing lines and the 404 — plus this entry's outcome line (*blocked by the feed*); the
+  check stays re-runnable and the owner action (ask the feed owner to publish 1.6.x) stands.
+  Reversal: revert `agent/package.json` and `bun.lock`.
+- Outcome (2026-11-26, P4): blocked by the feed. All six `npm view <pkg> version` lines read 1.5.2,
+  each entry's `versions` list ends `1.5.2`, and `npm view @earendil-works/pi-ai@1.6.0 version`
+  answers the feed's E404, so the four exact pins and the lock are untouched; the six lines and the
+  404 are in the P4 evidence section. Re-read at P5 the same day: still 1.5.2 for all six. Goal
+  0023's item 2 therefore stays open; re-run by cutting the Pi branch from `main` again and
+  repeating the six lines — only all six at >= 1.6.0 opens the bump path (four pins together, the
+  lock re-resolved from the feed, the before/after request-body dumps).
+- Revisit when: the feed serves >= 1.6.0 for all six entries, or the feed owner reports it will not.
+
+### Q-0023-04 — How is the system-role change shown?
+- Status: decided(default taken)
+- Context: the Pi 1.6.0 change alters how system-role messages are sent to non-OpenAI providers on
+  the OpenAI-compatible format, and the durable host speaks that format over both endpoint forms;
+  the goal requires a recorded request-body comparison before and after, for both.
+- Options considered: (A) record the durable host's provider request bodies with the harness-only
+  opt-in `PASSQUEST_AGENT_SMOKE_DUMP=<dir>`, before and after the bump, and put the two dumps and
+  their per-format diff in the evidence record; (B) assert the bodies are unchanged; (C) rely on
+  upstream's release notes.
+- Default taken: (A) — a recorded comparison, not an assertion about upstream: unchanged bodies are
+  recorded as unchanged, and a move is quoted in the diff, with any adaptation landing with the step
+  and a test that fails when the adaptation is reverted. The switch is harness-only (`agent-smoke`):
+  unset, every assertion count, failure message and the pass line are unchanged, and a directory the
+  gate cannot write fails the run with the variable and the path named (one must-fail self-test
+  case). Reversal: remove the env-gated dump.
+- Outcome (2026-11-26, P4): not fired on the blocked path. The recorder is landed (P3) with its
+  sample entries in the P3 evidence section (the chat pass's `messages[0]` and the responses pass's
+  `input[0]` carry the `role: "system"` rules message; the bodies carry no `instructions`), but
+  there is no bumped tree to compare against and this step takes no dump. When the feed opens the
+  bump path, that step takes the `before/` dump on the pre-bump tree and the `after/` dump on the
+  bumped tree.
+- Revisit when: the feed opens the bump path, or a host's request shape changes.
+
+### Q-0023-05 — What does a dependency left in place have to carry?
+- Status: decided(default taken)
+- Context: Done-when 1 requires an inventory of every direct dependency with old version, new
+  version and where the new version was read from, plus a reason for rows that stay; "left where it
+  is" must not collapse into "already newest".
+- Options considered: (A) each row left in place carries its listing (command and output, dated) and
+  exactly one reason — *already newest*, *held back* with the failing check, or *graph-only*;
+  (B) only moved rows are listed; (C) hand-add the graph-only rows so the listing reads clean.
+- Default taken: (A). A *graph-only* row is a `[newer]` row no `require` line names; it carries its
+  `go list -m -u all` line and its `go mod why -m <m>` output (a chain, or `(main module does not
+  need module <m>)`), and never the words "already newest" (Q-0023-01). The *already newest* set
+  read at the scout: the Go toolchain (1.27.4), Bun (1.4.5), Node (26.13.1), `@types/bun` (1.4.4),
+  `typescript` (7.0.2), MyGo (v0.10.0), `purego` and `x/sys` (the proxy serves nothing newer), and
+  `setup-bun@v2` (v2.2.0, node24). Reversal: none needed — this entry fixes the form of the
+  evidence.
+- Outcome (2026-11-26, P5): applied in goal 0023's inventory. Every row carries its source listing
+  and date; the ten graph-only rows carry their `go mod why` reasons (P1's section); the six Pi
+  entries read *blocked by the feed* with the P4 section as their listing; the toolchains and
+  `setup-bun` read *already newest*; and the one row the inventory found after P1 —
+  `modernc.org/memory`, a `require` with a newer served release — reads *served, not taken* with the
+  recipe probe, as an open row rather than a silent omission.
+- Revisit when: the inventory is re-read at the goal's close.
 

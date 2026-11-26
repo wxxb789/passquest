@@ -465,3 +465,198 @@ are not this step's to re-run — CI's three-OS matrix re-proves them on the bra
 | `docs-links.ts docsLinks` | `STATUS pass 397 checked, 0 broken` |
 
 The three ran after this section was written, so its two relative links are inside the 397 checked.
+
+## P5 (2026-11-26) — The inventory, the decisions and the open rows (branch `goal/0023-p5`)
+
+Contract: [`../goals/0023-current-dependencies.md`](../goals/0023-current-dependencies.md).
+Plan: [`../plans/2026-11-26-1400-0023-current-dependencies.md`](../plans/2026-11-26-1400-0023-current-dependencies.md).
+Defaults Q-0023-01…05 in [`../decisions/OPEN-QUESTIONS.md`](../decisions/OPEN-QUESTIONS.md).
+This branch is stacked on `goal/0023-p4` (PR #83); `main` is `7c36d436` (P1 #80, P2 #81 and P3 #82
+merged). Every command below ran on this machine (Windows 11) on 2026-11-26, and every CI number is
+read from the run named beside it.
+
+**State at this read: item 1 is shown by the inventory below; item 2 is open, blocked by the feed;
+item 3 is shown for the four sets with one open Go row (`modernc.org/memory`, see *Open rows*);
+item 4 is shown with the one bench reading recorded red rather than cleared (*The bench records*);
+item 5 is shown by the package jobs' pin line. The goal is not closed and no close is claimed.**
+
+### The inventory (Done-when 1)
+
+One table; the `Set` column names the four dependency sets. "Read from" is where the new (or
+current) version was read, dated 2026-11-26; a row left in place carries its reason.
+
+| Set | Dependency (how it is pinned) | Old | New | Read from | Notes / reason left in place |
+|---|---|---|---|---|---|
+| Go modules | `modernc.org/sqlite` (direct) | v1.62.0 | v1.63.0 | the proxy's listing, `go list -m -u all` | the pure-Go SQLite driver; P1 took it and re-proved the store's pinned facts |
+| Go modules | `modernc.org/libc` (`require`, indirect) | v1.82.0 | v1.82.13 | same listing | `modernc.org/cc/v4` v4.34.1 → v4.35.0 and `modernc.org/ccgo/v4` v4.39.2 → v4.39.3 followed its requirement; no `require` line names them |
+| Go modules | `github.com/klauspost/compress` (`require`, indirect) | v1.20.4 | v1.20.5 | same listing | only `go get -u all` reaches a requirement the main module's packages do not import (Q-0023-01) |
+| Go modules | `github.com/ebitengine/purego` (direct) | v0.11.3 | v0.11.3 | same listing (no `[newer]` marker) | already newest |
+| Go modules | `github.com/egoist/mygo` (direct; `tool`) | v0.10.0 | v0.10.0 | the proxy's version list ends `v0.10.0`; `releases/latest` is `v0.10.0` (2026-11-17) | already newest; the release notes name no hidden-title-bar change, so goal 0022's precondition does not fire |
+| Go modules | `golang.org/x/sys` (direct) | v0.50.0 | v0.50.0 | the proxy's listing | already newest |
+| Go modules | `modernc.org/memory` (`require`, indirect) | v1.13.0 | **v1.13.1 served, not taken** | the proxy's listing at this read; the version is dated 2026-11-15T20:32:12Z | **open row**: a `require` with a newer served release; a scratch copy ran `go get -u all` + `go mod tidy` and moved exactly this row (`go.mod` line 28, two `go.sum` lines), leaving the ten graph-only rows; not taken on this docs-only step |
+| Go modules | the ten graph-only rows (`google/pprof`, `jfreymuth/oggvorbis`, `mewkiz/pkg`, `stretchr/testify`, `tphakala/go-aac`, `tphakala/simd`, `x/image`, `x/mod`, `x/tools`, `gc/v3`) | versions quoted in P1's section | same | the proxy's listing keeps their `[newer]` markers | graph-only per Q-0023-05: no `require` line names them; each row's `go mod why -m` output (a chain, or `(main module does not need module …)`) is in P1's section |
+| Go modules | the remaining indirect rows | as the graph selects | unchanged | the proxy's listing (53 rows: 11 marked, 42 unmarked) | no `[newer]` marker; the five moved rows and MyGo/`purego`/`x/sys` are inside the unmarked 42 |
+| npm packages | `@types/bun` (`^1.4.4`, lock 1.4.4) | 1.4.4 | 1.4.4 | the feed's `dist-tags`: `latest` 1.4.4 | already newest; `npm outdated --json` at the root reads `{}` |
+| npm packages | `typescript` (`^7.0.2`, lock 7.0.2) | 7.0.2 | 7.0.2 | the feed's `dist-tags`: `latest` 7.0.2 (`beta` 7.1.0-beta) | already newest stable; a beta is not taken |
+| npm packages | `@earendil-works/chord`, `pi-ai`, `pi-durable`, `pi-schema` (exact pins) + `pi-codemode`, `pi-telemetry` (transitive) | 1.5.2 | 1.5.2; the target is ≥ 1.6.0 | the feed's `npm view <pkg> version` lines read 1.5.2, and `@earendil-works/pi-ai@1.6.0` answers the feed's E404 (P4's section; re-read here, unchanged) | **blocked by the feed** (Q-0023-03) — item 2 open; no package file changed |
+| Toolchains | Go | 1.27.4 | 1.27.4 | `mise ls-remote go` tail `1.27.2 1.27.3 1.27.4` | already newest; pinned in `mise.toml`, `go.mod` and the workflows' `go-version-file` |
+| Toolchains | Bun | 1.4.5 | 1.4.5 | `mise ls-remote bun` tail `1.4.3 1.4.4 1.4.5` | already newest; `mise.toml` plus six `bun-version: 1.4.5` sites in four workflows |
+| Toolchains | Node | 26.13.1 | 26.13.1 | `mise ls-remote node` 26-line tail `26.12.1 26.13.0 26.13.1` | already newest 26 LTS patch (Q-0013-03); pinned in `mise.toml`, `gate.yml:54`, `harness/lib/package.ts:66` and both install guides; the pin-agreement check is green on every run (Done-when 5) |
+| GitHub Actions | `actions/checkout` (10 sites) | v4 | v7 | `releases/latest` v7.0.1 (2026-07-20); `action.yml@v7` reads `using: node24` | v5+'s fork-PR checkout block is inert here — no `pull_request_target`/`workflow_run` trigger exists |
+| GitHub Actions | `actions/setup-go` (4 sites) | v5 | v7 | `releases/latest` v7.1.0 (2026-11-17); `node24` | the runner floor v2.327.1 is long passed on GitHub-hosted runners |
+| GitHub Actions | `actions/setup-node` (1 site) | v4 | v7 | `releases/latest` v7.1.0 (2026-10-08); `node24` | same floor; the workflow's `node-version: "26.13.1"` (a pin-agreement source) is unchanged |
+| GitHub Actions | `actions/upload-artifact` (5 sites) | v4 | v7 | `releases/latest` v7.0.2 (2026-10-07); `node24` | same floor; `archive: false` is unused |
+| GitHub Actions | `actions/download-artifact` (1 site) | v4 | v8 | `releases/latest` v8.0.2 (2026-10-07); `node24` | its digest-mismatch default `error` is kept; `release.yml`'s `pattern`/`path`/`merge-multiple` are confirmed against the v8 `action.yml` |
+| GitHub Actions | `oven-sh/setup-bun` (6 sites) | v2 | v2 | `releases/latest` v2.2.0 (2026-03-14); `node24` | already the newest major and runtime; floats to its newest release |
+
+The moved rows' old → new numbers and the proxy/feed/grep readings are P1's and P2's sections' own
+output; this table re-reads them at the versions the merged tree carries
+(`mise exec -- go list -m -f '{{.Path}} {{.Version}}' modernc.org/sqlite modernc.org/libc
+github.com/klauspost/compress` reads `v1.63.0`, `v1.82.13`, `v1.20.5`).
+
+### The action-log greps (Done-when 3)
+
+```
+$ grep -rnE "uses: +actions/[a-z-]+@v[4-6]" .github/workflows | wc -l
+0
+$ grep -rnE "uses: +actions/[a-z-]+@v(7|8)" .github/workflows | wc -l
+21
+$ grep -rn "uses: " .github/workflows/ | grep -c "setup-bun@v2"
+6
+```
+
+Before P2 the same first grep read 21 (P2's section quotes the per-file split). The runner's own
+warning: `gh run view <id> --log | grep -c "Node.js 20 is deprecated"` reads **12** for run
+45784987207 (`main` at `943de9d`, the pre-step baseline; its lines name `actions/checkout@v4,
+actions/setup-go@v5, actions/setup-node@v4`) and **0** for run 45814888392 (P2's pull request, head
+`9978096a`) and run 45825120752 (`main` at `7c36d436`, P1–P3 merged).
+
+### The three-OS gate runs behind every row
+
+| Step | PR | Head | Gate run | Result |
+|---|---|---|---|---|
+| P1 | #80 | `392e55c8` | 45808814811 | success, all 12 jobs |
+| P2 | #81 | `9978096a` | 45814888392 | success, all 12 jobs |
+| P3 | #82 | `88f31295` | 45819708765 | success, all 12 jobs |
+| P1–P3 merged | — | `main` `7c36d436` | 45825120752 | success, all 12 jobs |
+| P4 | #83 | `51de3996` | 45830132616 | in progress at this writing: 10 of 12 jobs green, both `self-test` jobs still running |
+
+The workflows P2's diff self-triggers also ran on its branch and succeeded: `cask` run 45814888515
+and `keychain` run 45814888441 (both on a macOS runner, so they exercise the bumped `checkout@v7`
+before the next release).
+
+### Rows 17 and 27 of `docs/harness.md`, from the runs
+
+Run 45825120752 (`main` at `7c36d436`) — P3's pull-request run 45819708765 reads the same lines:
+
+- Row 17 (core jobs): `PASS  agent smoke (488 assertions, 11 scenarios x 4 passes (source host,
+  chat, source host, responses, staged bundle, chat, staged bundle, responses), 100 provider
+  requests, permissions skipped on Windows, bundle 1599023 bytes with 7 inlined packages)` on
+  Windows; 496 assertions with `8 permission checks` and `bundle 1599045` / `bundle 1598993` bytes
+  on macOS and Ubuntu. The `PASSQUEST_AGENT_SMOKE_DUMP=<dir>` sentence in its body is P3's.
+- Row 27 (self-test jobs): `PASS  harness self-test (187 cases (18 must pass), 26/26 gates)` on all
+  three OSes — P3's one must-fail dump case took the conflict-marker step's 186 (18) to 187 (18).
+- Rows 24 and 25 are unmoved by this goal, and the same run reads them: `PASS  desktop smoke (584
+  assertions over 15 scenarios)` on Windows, `583` on macOS, `581` on Ubuntu; `PASS  desktop ux
+  (192 audits over 24 states × 4 modes × 2 sizes, 19 probes, 84 focus checks, 0 allowed …)`.
+- Row 26: `PASS  package smoke (624 assertions over contents, layout, study, cli-runtime, agents,
+  brief, brief-responses, anki, upgrade, credential, broken …)` on Windows, 623 on macOS and
+  Ubuntu; every line ends `node pin: 5 sources agree on Node 26.13.1` (Done-when 5).
+
+### The staged bundle and the request bodies (item 2's instrument, blocked)
+
+- The staged bundle: the agent-smoke pass lines above read **7 inlined packages** and the bundle
+  bytes on all three OSes, and the package gate proves every inlined package is one `bun.lock` pins
+  (`bundlePackages`/`lockProblems`, `harness/lib/package.ts`). P4 changed no package file, so the
+  staged bundle is the one P3 measured at Pi 1.5.2.
+- The request-body dumps: **absent on this path, by design.** There is no bumped tree, so there is
+  no `before/` dump, no `after/` dump and no diff to quote. The instrument is landed (P3,
+  `PASSQUEST_AGENT_SMOKE_DUMP=<dir>`), and its sample entries are P3's own — the chat pass's
+  `messages[0]` and the responses pass's `input[0]` carry the `role: "system"` rules message, and
+  no body carries `instructions`. When the feed opens the bump path, the step takes the `before/`
+  dump on the pre-bump tree and the `after/` dump on the bumped tree (Q-0023-04).
+
+### The package sizes, per OS (recorded, not judged)
+
+Read with `stat` from each run's `package-<os>` artifacts (`gh run download <id> -n package-<os>`,
+downloaded here into `Q:/scratch/omp/g23/P5/artifacts/`):
+
+| Installer | Before — run 45784987207 (`main` `943de9d`) | After P1 — run 45808814811 | After P1–P3 — run 45825120752 |
+|---|---|---|---|
+| `pass-quest-setup-0.15.2-amd64.exe` | 32,767,774 B | 32,777,018 B | 32,772,700 B |
+| `pass-quest-0.15.2-arm64.dmg` | 37,250,560 B | 37,269,504 B | 37,268,992 B |
+| `Pass_Quest-0.15.2-x86_64.AppImage` | 53,647,864 B | 53,643,768 B | 53,643,768 B |
+
+P1's run's package jobs pass the same eleven cases as the merged tree's (624 Windows / 623 macOS
+and Ubuntu) and drive the installed tree (`cli-runtime: … opened by the installed binary with no
+node on PATH`), so the bumped driver's package builds, installs and runs on all three OSes. The
+numbers are recorded, not judged: the exe and dmg move by a few KB between builds and the AppImage
+is byte-stable here.
+
+### The bench records
+
+| Run | A / B | Result |
+|---|---|---|
+| 45808814809 (P1, #80; attempt 1, not rerun) | A `34c884cc` (the plan commit) / B `392e55c8` (P1) | windows-latest **failure**: measurement attempt 1's same-build control pair read ok, so its verdict was taken, and `roomSwitch.anki` read `WORSE` — A n=9 med 32.1 → B n=9 med 46.4, floor 10.7 (control IQR), `q1 43.1 vs base q3 41.6 (above)`; every other metric read ok; `shots: 7/7 state(s) byte-identical between A and B`; `bundle.mainJs` A=B=187714 and `bundle.mainCss` A=B=79885. macOS: every metric ok, shots 7/7 identical. Ubuntu render smoke: green. |
+| 45814888421 (P2, #81; attempt 2) | A `04d8380d` (`main` after P1) / B `9978096a` (P2) | windows-latest and macos-26: no `WORSE` line on either job; `shots: 7/7 … byte-identical` on both; Ubuntu render smoke green. Attempt 1's macOS job had failed in the bench's launch guard (`warmup-a-0: the page returned 19 frame duration(s), want at least 20` — the findings log records the same run), and the coordinator reran the failed job. |
+
+P3 and P4 change no bench path, so neither has a bench run.
+
+Attribution for the one red reading, with its evidence: P1's diff is three `go.mod`/`go.sum` lines;
+in the recorded pair the frontend bundle bytes are equal on both sides and all seven shots are
+byte-identical, and the metric that read `WORSE` is a Windows route-switch timing. The bench's own
+rule keeps a readable attempt's verdict, which is why the job is red; the class has the findings
+log's precedent (2026-11-24, PR #53: a same-content A/B false positive on the Windows runner,
+reran). This record keeps the numbers as measured and does not call them noise: a bench re-run on
+the merged tree (`workflow_dispatch` with the full A/B SHAs, goal 0022's precedent) is the one
+action that would replace the reading, and it is the coordinator's call.
+
+### Open rows
+
+1. **Item 2 — the Pi packages stay blocked by the feed.** The six entries were re-checked here and
+   all read 1.5.2 (P4's section carries the six listing lines and the
+   `@earendil-works/pi-ai@1.6.0` 404). Re-run: cut the Pi branch from `main` again and repeat
+   `npm view @earendil-works/<chord|pi-ai|pi-durable|pi-schema|pi-telemetry|pi-codemode> version`;
+   only all six at ≥ 1.6.0 opens the bump path — the four pins together, `bun install` re-resolving
+   the lock from the feed, the `before/`+`after/` dumps and their diff, and the three-OS agent and
+   package smokes (Q-0023-03, Q-0023-04). Owner action: ask the feed owner to publish 1.6.x.
+2. **`modernc.org/memory` v1.13.0 → v1.13.1.** Served by the proxy, required by `go.mod`
+   (line 28, `// indirect`), not taken on this docs-only step. The recipe probe moved exactly this
+   row; taking it is one `go.mod` line and two `go.sum` lines and is Done-when 3's remaining item.
+   It belongs to the goal's next module-moving step (the re-cut bump step above is the natural
+   carrier), never to a silent docs edit.
+
+### Known limits
+
+- macOS and Linux window, package and bench evidence is CI-only: this machine ran none of those
+  gates. The named runs are the authority.
+- `release.yml` runs only on a tag push, so its action inputs are proven by reading the pinned v8
+  `action.yml` (P2's section), not by an executed run.
+- Item 2's request-body comparison is absent by the block (above); nothing stands in for it.
+- The one bench reading of P1's pair (above) is recorded red; the merged tree has not re-measured
+  it.
+- P4's own gate run (45830132616) was still in flight at this writing; its result belongs to PR
+  #83.
+
+### Fails when removed
+
+Deleting this section leaves Done-when 1's table and the run ids unreadable — the named runs and
+listings are the only place the numbers exist; a drifted link reddens `docs-links`, and a drifted
+pinned sentence reddens `install-guide`. The cross-check is mechanical: every row names the command
+output or run id it was read from, all re-read in this step's own run rather than remembered.
+
+### Local checks on this branch (this step's own run)
+
+The four gates this step's row names, through `mise exec -- bun
+Q:/scratch/pq-harness-run/run-0020.ts <gate> <export>` on the edited tree (Windows 11,
+2026-11-26):
+
+| Gate | Result |
+|---|---|
+| `docs-links.ts docsLinks` | `STATUS pass 401 checked, 0 broken` |
+| `install-guide.ts installGuide` | `STATUS pass 7 sections, 4 code blocks and 7 screenshot places agree; 6 links and 5 URLs agree; 6 quoted app strings match their sources; the release notes name the tap command and both guides; the cask template renders v0.15.0 with the release's SHA-256, and a synthetic pair, into Casks/pass-quest.rb; floor 26.0 from mygo.json` |
+| `secrets.ts secrets` | `STATUS pass 818 files, 0 findings` |
+| `typecheck.ts typecheck` | `STATUS pass 0 type errors in tsconfig.json, desktop/web/tsconfig.json` |
+
+No Go, TypeScript, workflow or host file changed on this branch, so this step runs no Go check, no
+smoke and no package gate; the three-OS runs named above are the authority for those.
