@@ -1,6 +1,6 @@
 # 0022 — The window's title bar belongs to the Pass Quest interface: increment plan
 
-Contract: [`../goals/0022-integrated-title-bar.md`](../goals/0022-integrated-title-bar.md).
+Contract: [`../goals/archive/0022-integrated-title-bar.md`](../goals/archive/0022-integrated-title-bar.md).
 Conventions: [`../conventions.md`](../conventions.md). Harness: [`../harness.md`](../harness.md).
 Cross-platform rules: [`../cross-platform.md`](../cross-platform.md).
 Base: `main` at `771a277` (0019 P9 merged, 2026-11-24). Scouted 2026-11-24; every number below is

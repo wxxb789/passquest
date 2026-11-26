@@ -2710,6 +2710,9 @@ Entry format:
   delivered in four of eight attempts. The desktop click the owner list names has no bare-desktop
   point on this machine (the empty taskbar strip was used instead). macOS and Linux items remain
   owner actions.
+- Owner decision (2026-11-26): the macOS and Linux manual items are deferred. Goal 0022 closes on
+  the CI checks for those two systems and the Windows manual pass; the deferred items stay listed
+  in the evidence record as owner actions for when a Mac or Linux machine is at hand.
 - Revisit when: a gate can capture the frame or drive a real pointer.
 
 ### Q-0022-06 — How are per-OS visual differences allowlisted?
@@ -2806,6 +2809,10 @@ Entry format:
   all of them — that top-level answer is the fact a later check has to weigh. The buttons themselves
   were driven live: close worked, minimize worked in two launches of four, the maximize button in
   one of three; the rest of that sitting's numbers are in the evidence record.
+  Owner check (2026-11-26): on the machine's own console the owner saw the Snap layouts flyout on
+  hover over the installed v0.15.2's maximize button, and minimize, maximize and close each worked by
+  hand. The assumption holds; the second sitting's negatives were the RDP session's and the
+  synthetic input's.
 - Revisit when: MyGo draws the caption differently, or Windows 11's Snap rules change.
 
 ### Q-0020-01 — One resolution, shared by both entry points
