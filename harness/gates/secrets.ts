@@ -23,6 +23,10 @@ const SOURCE_EXTENSIONS: Record<string, true> = {
   ".toml": true,
 };
 
+const CONFLICT_OPEN = /^<{7} /;
+const CONFLICT_BASE = /^\|{7} /;
+const CONFLICT_CLOSE = /^>{7} /;
+
 function forbiddenPath(file: string): string | null {
   const normalized = file.replace(/\\/g, "/");
   if (/\.(pdf|sqlite|sqlite-wal|sqlite-shm|db)$/i.test(normalized)) return "private or binary state";
@@ -40,6 +44,25 @@ function envFile(file: string): boolean {
 
 function isText(bytes: Buffer): boolean {
   return !bytes.includes(0);
+}
+
+function conflictMarkerProblems(file: string, bytes: Buffer | null): string[] {
+  if (bytes === null || !isText(bytes)) return [];
+  const problems: string[] = [];
+  const lines = bytes.toString("utf8").split(/\r?\n/);
+  let open = false;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const opens = CONFLICT_OPEN.test(line);
+    const closes = CONFLICT_CLOSE.test(line);
+    if (opens || closes || CONFLICT_BASE.test(line)) {
+      problems.push(`${file}:${index + 1}: merge-conflict marker`);
+    }
+    if (opens) open = true;
+    else if (closes) open = false;
+    else if (open && line === "=======") problems.push(`${file}:${index + 1}: merge-conflict marker`);
+  }
+  return problems;
 }
 
 function scanFile(file: string, bytes: Buffer | null): string[] {
@@ -76,7 +99,11 @@ export const secrets: Gate = {
   title: "secrets/sources",
   async run(ctx: GateContext) {
     const files = await ctx.workingTreeFiles();
-    const problems = await scanFiles(ctx.root, files);
+    const contents = await readEach(ctx.root, files);
+    const problems = files.flatMap((file, index) => [
+      ...scanFile(file, contents[index]),
+      ...conflictMarkerProblems(file, contents[index]),
+    ]);
     if (problems.length > 0) return fail(problems);
     return pass(`${files.length} files, 0 findings`);
   },
