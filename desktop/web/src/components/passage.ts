@@ -204,10 +204,6 @@ export function hideMarkPop(): void {
   pendingRange = null;
 }
 
-export function hasPendingMark(): boolean {
-  return pendingRange !== null;
-}
-
 /** showModal() light-dismisses the auto popover; a re-show while the mark still stands restores its state. */
 export function resumeMarkPop(): void {
   if (!pendingRange) return;
