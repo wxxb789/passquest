@@ -182,6 +182,22 @@ the new count. The step adds five self-test cases — four must-fail (the three 
 full conflict block) and one must-pass (a Markdown setext underline) — so the per-gate arrays the row
 names compose 186 cases (18 must pass), counted from those arrays on this branch.
 
+P5's re-quote (2026-11-26, goal 0023): rows 17 and 27 carry run 45825120752's own lines (`main` at
+`7c36d436`, P1–P3 merged; P3's pull-request run 45819708765 reads the same). Row 17: `PASS  agent
+smoke (488 assertions, 11 scenarios x 4 passes (source host, chat, source host, responses, staged
+bundle, chat, staged bundle, responses), 100 provider requests, permissions skipped on Windows,
+bundle 1599023 bytes with 7 inlined packages)` on Windows, 496 assertions with `8 permission
+checks` and `bundle 1599045` / `bundle 1598993` bytes on macOS and Ubuntu; the
+`PASSQUEST_AGENT_SMOKE_DUMP=<dir>` sentence in its body is P3's. Row 27: `PASS  harness self-test
+(187 cases (18 must pass), 26/26 gates)` on all three OSes — P3's one must-fail dump case took the
+conflict-marker step's 186 (18) to 187 (18), and the goal's remaining step (the feed-gated Pi bump)
+adds no case. Rows 24, 25 and 26 are unmoved by this goal, and the same run reads them: `PASS
+desktop smoke (584 assertions over 15 scenarios)` on Windows, `583` on macOS, `581` on Ubuntu;
+`PASS  desktop ux (192 audits over 24 states × 4 modes × 2 sizes, 19 probes, 84 focus checks, 0
+allowed …)`; and `PASS  package smoke (624 assertions over contents, layout, study, cli-runtime,
+agents, brief, brief-responses, anki, upgrade, credential, broken …)` on Windows with 623 on macOS
+and Ubuntu, every package line ending `node pin: 5 sources agree on Node 26.13.1`.
+
 The package group's build (row 26) is `bun run package`'s own sequence, staging included, and staging
 enforces its own checks before an installer or a launch runs: the staged `agent/` tree is lean
 (`assertLeanAgentTree`, `harness/lib/package.ts`), and — when the target is the host's own platform,
